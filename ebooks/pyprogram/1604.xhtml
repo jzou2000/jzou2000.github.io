@@ -1,0 +1,709 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Reading POP Email</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Reading POP Email"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="reading_pop_email"></a>Reading POP Email</h1>
+</div>
+</div>
+</div>
+<p>So far, we’ve stepped <a id="pop16.5"></a>through the path the system follows to
+        <span class="epub__emphasis"><em>send</em></span> new mail. Let’s now see what happens when we
+        try to <span class="epub__emphasis"><em>view</em></span> incoming POP mail.</p>
+<div class="epub__sect2" title="The POP Password Page"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_pop_password_page"></a>The POP Password Page</h2>
+</div>
+</div>
+</div>
+<p>If you flip back <a id="I_indexterm5_d1e70931"></a><a id="I_indexterm5_d1e70938"></a>to the main page in Figure 16-2, you’ll see a View link; pressing
+          it triggers the script in Example 16-6 to run on the
+          server.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id102"></a>
+<p class="epub__title">Example 16-6. PP4E\Internet\Web\PyMailCgi\cgi-bin\onRootViewLink.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/bin/python
+"""
+################################################################################
+On view link click on main/root HTML page: make POP password input page;
+
+this could almost be an HTML file because there are likely no input params yet,
+but I wanted to use standard header/footer functions and display the site/user
+names which must be fetched;  on submission, does not send the user along with
+password here, and only ever sends both as URL params or hidden fields after the
+password has been encrypted by a user-uploadable encryption module;
+################################################################################
+"""
+
+# page template
+pswdhtml = """
+&lt;form method=post action=%sonViewPswdSubmit.py&gt;
+&lt;p&gt;
+Please enter POP account password below, for user "%s" and site "%s".
+&lt;p&gt;&lt;input name=pswd type=password&gt;
+&lt;input type=submit value="Submit"&gt;&lt;/form&gt;&lt;/p&gt;
+
+&lt;hr&gt;&lt;p&gt;&lt;i&gt;Security note&lt;/i&gt;: The password you enter above will be transmitted
+over the Internet to the server machine, but is not displayed, is never
+transmitted in combination with a username unless it is encrypted or obfuscated,
+and is never stored anywhere: not on the server (it is only passed along as hidden
+fields in subsequent pages), and not on the client (no cookies are generated).
+This is still not guaranteed to be totally safe; use your browser's back button
+to back out of PyMailCgi at any time.&lt;/p&gt;
+"""
+
+# generate the password input page
+import commonhtml                                         # usual parms case:
+user, pswd, site = commonhtml.getstandardpopfields({})    # from module here,
+commonhtml.pageheader(kind='POP password input')          # from html|url later
+print(pswdhtml % (commonhtml.urlroot, user, site))
+commonhtml.pagefooter()</pre>
+</div>
+</div>
+<p>This script is almost all embedded HTML: the triple-quoted
+          <code class="epub__literal">pswdhtml</code> string is printed, with
+          string formatting to insert values, in a single step. But because we
+          need to fetch the username and server name to display on the
+          generated page, this is coded as an executable script, not as a
+          static HTML file. The module <code class="epub__literal">commonhtml</code> either loads usernames and
+          server names from script inputs (e.g., appended as query parameters
+          to the script’s URL) or imports them from the <code class="epub__literal">mailconfig</code> file; either way, we don’t want
+          to hardcode them into this script or its HTML, so a simple HTML file
+          won’t do. Again, in the CGI world, we embed HTML code in Python code
+          and fill in its values this way (in server-side templating tools
+          such as PSP the effect is similar, but Python code is embedded in
+          HTML code instead and run to produce values).</p>
+<p>Since this is a script, we can also use the <code class="epub__literal">commonhtml</code> page header and footer routines
+          to render the generated reply page with a common look-and-feel, as
+          shown in Figure 16-7.</p><div class="epub__figure-float"><div class="epub__figure"><a id="pymailcgi_view_password_login_page"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e70974"></a><img alt="PyMailCGI view password login page" src="Images/getfile_005-19.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-7. PyMailCGI view password login page</p>
+</div>
+</div>
+<p>At this page, the user is expected to enter the password for
+          the POP email account of the user and server displayed. Notice that
+          the actual password isn’t displayed; the input field’s HTML
+          specifies <code class="epub__literal">type=password</code>, which
+          works just like a normal text field, but shows typed input as stars.
+          (See also the pymail program in Chapter 13 for doing this at a console and
+          PyMailGUI in Chapter 14 for doing this
+          in a tkinter GUI.)</p>
+</div>
+<div class="epub__sect2" title="The Mail Selection List Page"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_mail_selection_list_page"></a>The Mail Selection List Page</h2>
+</div>
+</div>
+</div>
+<p>After you fill out the <a id="py16.5.2"></a>last page’s password field and press its Submit
+          button, the password is shipped off to the script shown in Example 16-7.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id103"></a>
+<p class="epub__title">Example 16-7. PP4E\Internet\Web\PyMailCgi\cgi-bin\onViewPswdSubmit.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/bin/python
+"""
+################################################################################
+On submit in POP password input window: make mail list view page;
+
+in 2.0+ we only fetch mail headers here, and fetch 1 full message later upon
+request; we still fetch all headers each time the index page is made: caching
+Messages would require a server-side(?) database and session key, or other;
+3.0: decode headers for list display, though printer and browser must handle;
+################################################################################
+"""
+
+import cgi
+import loadmail, commonhtml
+from   externs import mailtools
+from   secret  import encode       # user-defined encoder module
+MaxHdr = 35                        # max length of email hdrs in list
+
+# only pswd comes from page here, rest usually in module
+formdata = cgi.FieldStorage()
+mailuser, mailpswd, mailsite = commonhtml.getstandardpopfields(formdata)
+parser = mailtools.MailParser()
+
+try:
+    newmails = loadmail.loadmailhdrs(mailsite, mailuser, mailpswd)
+    mailnum  = 1
+    maillist = []                                           # or use enumerate()
+    for mail in newmails:                                   # list of hdr text
+        msginfo = []
+        hdrs = parser.parseHeaders(mail)                    # email.message.Message
+        addrhdrs = ('From', 'To', 'Cc', 'Bcc')              # decode names only
+        for key in ('Subject', 'From', 'Date'):
+            rawhdr = hdrs.get(key, '?')
+            if key not in addrhdrs:
+                dechdr = parser.decodeHeader(rawhdr)        # 3.0: decode for display
+            else:                                           # encoded on sends
+                dechdr = parser.decodeAddrHeader(rawhdr)    # email names only
+            msginfo.append(dechdr[:MaxHdr])
+        msginfo = ' | '.join(msginfo)
+        maillist.append((msginfo, commonhtml.urlroot + 'onViewListLink.py',
+                                      {'mnum': mailnum,
+                                       'user': mailuser,          # data params
+                                       'pswd': encode(mailpswd),  # pass in URL
+                                       'site': mailsite}))        # not inputs
+        mailnum += 1
+    commonhtml.listpage(maillist, 'mail selection list')
+except:
+    commonhtml.errorpage('Error loading mail index')</pre>
+</div>
+</div>
+<p>This script’s main purpose is to generate a selection list
+          page for the user’s email account, using the password typed into the
+          prior page (or passed in a URL). As usual with encapsulation, most
+          of the details are hidden in other files:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">loadmail.loadmailhdrs</code></span></dt><dd>
+<p>Reuses the<a id="I_indexterm5_d1e71018"></a> <code class="epub__literal">mailtools</code>
+                module package from Chapter 13
+                to fetch email with the POP protocol; we need a message count
+                and mail headers here to display an index list. In this
+                version, the software fetches only mail header text to save
+                time, not full mail messages (provided your server supports
+                the <code class="epub__literal">TOP</code> command of the POP
+                interface, and most do—if not, see <code class="epub__literal">mailconfig</code> to disable this).</p></dd><dt><span class="epub__term"><code class="epub__literal">commonhtml.listpage</code></span></dt><dd>
+<p>Generates HTML to display a passed-in list of tuples
+                <code class="epub__literal">(text</code>, <code class="epub__literal">URL</code>, <code class="epub__literal">parameter</code><code class="epub__literal">-</code><code class="epub__literal">dictionary</code>) as a list of
+                hyperlinks in the reply page; parameter values show up as
+                query parameters at the end of URLs in the response.</p></dd></dl>
+</div>
+<p>The <code class="epub__literal">maillist</code> list built
+          here is used to create the body of the next page—a clickable email
+          message selection list. Each generated hyperlink in the list page
+          references a constructed URL that contains enough information for
+          the next script to fetch and display a particular email message. As
+          we learned in the preceding chapter, this is a simple kind of state
+          retention between pages and scripts.</p>
+<p>If all goes well, the mail selection list page HTML generated
+          by this script is rendered as in Figure 16-8. If your inbox
+          is as large as some of mine, you’ll probably need to scroll down to
+          see the end of this page. This page follows the common look-and-feel
+          for all PyMailCGI pages, thanks to <code class="epub__literal">commonhtml</code>.</p><div class="epub__figure-float"><div class="epub__figure"><a id="pymailcgi_view_selection_list_page_comma"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e71070"></a><img alt="PyMailCGI view selection list page, top" src="Images/getfile_002-40.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-8. PyMailCGI view selection list page, top</p>
+</div>
+</div>
+<p>If the script can’t access your email account (e.g., because
+          you typed the wrong password), its <code class="epub__literal">try</code> statement handler instead produces a
+          commonly formatted error page. Figure 16-9 shows one that gives the
+          Python exception and details as part of the reply after a
+          Python-raised exception is caught; as usual, the exception details
+          are fetched from <code class="epub__literal">sys.exc_info</code>,
+          and Python’s <code class="epub__literal">traceback</code>
+          module<a id="I_indexterm5_d1e71088"></a> is used to generate a <a id="I_indexterm5_d1e71095"></a>stack trace.</p><div class="epub__figure"><a id="pymailcgi_login_error_page"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e71101"></a><img alt="PyMailCGI login error page" src="Images/getfile-51.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-9. PyMailCGI login error page</p>
+</div>
+</div>
+<div class="epub__sect2" title="Passing State Information in URL Link Parameters"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="passing_state_information_in_url_link_pa"></a>Passing State Information in URL Link Parameters</h2>
+</div>
+</div>
+</div>
+<p>The central <a id="py16.5.3"></a><a id="state16.5.3"></a><a id="par16.5.3"></a><a id="url16.5.3"></a><a id="user16.5.3a"></a>mechanism at work in Example 16-7 is the generation
+          of URLs that embed message numbers and mail account information.
+          Clicking on any of the View links in the selection list triggers
+          another script, which uses information in the link’s URL parameters
+          to fetch and display the selected email. As mentioned in Chapter 15, because the list’s links are
+          programmed to “know” how to load a particular message, they
+          effectively remember what to do next. Figure 16-10 shows part of
+          the HTML generated by this script (use your web browser View Source
+          option to see this for yourself—I did a Save As and then opened the
+          result which invoked Internet Explorer’s source viewer on my
+          laptop).</p><div class="epub__figure"><a id="pymailcgi_view_list_comma_generated_html"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e71149"></a><img alt="PyMailCGI view list, generated HTML" src="Images/getfile_003-32.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-10. PyMailCGI view list, generated HTML</p>
+</div>
+<p>Did you get all the details in Figure 16-10? You may not
+          be able to read generated HTML like this, but your browser can. For
+          the sake of readers afflicted with human-parsing limitations, here
+          is what one of those link lines looks like, reformatted with line
+          breaks and spaces to make it easier to understand:</p><a id="I_programlisting5_d1e71158"></a>
+<pre class="epub__programlisting">&lt;tr&gt;&lt;th&gt;&lt;a href="onViewListLink.py?
+                    pswd=wtGmpsjeb7359&amp;
+                    mnum=5&amp;
+                    user=PP4E%40learning-python.com&amp;
+                    site=pop.secureserver.net"&gt;View&lt;/a&gt;
+&lt;td&gt;Among our weapons are these | Cardinal@hotmail.com | Fri, 07 May 2010 20:32...</pre>
+<p>PyMailCGI generates relative minimal URLs (server and pathname
+          values come from the prior page, unless set in <code class="epub__literal">commonhtml</code>). Clicking on the word
+          <span class="epub__emphasis"><em>View</em></span> in the hyperlink rendered from this HTML
+          code triggers the <code class="epub__literal">onViewListLink</code>
+          script as usual, passing it all the parameters embedded at the end
+          of the URL: the POP username, the POP message number of the message
+          associated with this link, and the POP password and site
+          information. These values will be available in the object returned
+          by <code class="epub__literal">cgi</code><code class="epub__literal">.</code><code class="epub__literal">Field</code><code class="epub__literal">Storage</code> in <a id="I_indexterm5_d1e71181"></a><a id="I_indexterm5_d1e71186"></a>the next script run. Note that the <code class="epub__literal">mnum</code> POP message number parameter differs
+          in each link because each opens a different message when clicked and
+          that the text after <code class="epub__literal">&lt;td&gt;</code>
+          comes from message headers extracted by the <code class="epub__literal">mailtools</code> package, using the <code class="epub__literal">email</code> package.</p>
+<p>The <code class="epub__literal">commonhtml</code> module
+          escapes all of the link parameters with the <code class="epub__literal">urllib.parse</code> module, not <code class="epub__literal">cgi.escape</code>, because they are part of a
+          URL. This can matter in the <code class="epub__literal">pswd</code>
+          password parameter—its value might be encrypted and arbitrary bytes,
+          but <code class="epub__literal">urllib.parse</code> <a id="I_indexterm5_d1e71220"></a>additionally escapes nonsafe characters in the
+          encrypted string per URL convention (it translates to <code class="epub__literal">%xx</code> character sequences). It’s OK if the
+          encryptor yields odd—even nonprintable—characters because URL
+          encoding makes them legible for transmission. When the password
+          reaches the next script, <code class="epub__literal">cgi.FieldStorage</code> undoes URL escape
+          sequences, leaving the encrypted password string without <code class="epub__literal">%</code> escapes.</p>
+<p>It’s instructive to see how <code class="epub__literal">commonhtml</code> builds up the stateful link
+          parameters. Earlier, we learned how to use <a id="I_indexterm5_d1e71240"></a>the <code class="epub__literal">urllib.parse.quote_plus</code> call to escape a
+          string for inclusion in URLs:</p><a id="I_programlisting5_d1e71249"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>import urllib.parse</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>urllib.parse.quote_plus("There's bugger all down here on Earth")</code></strong>
+'There%27s+bugger+all+down+here+on+Earth'</pre>
+<p>The module <code class="epub__literal">commonhtml</code>,
+          though, calls the higher-level <code class="epub__literal">urllib.parse.urlencode</code> function,
+          <a id="I_indexterm5_d1e71265"></a>which translates a dictionary of
+          <em class="epub__replaceable"><code>name:value</code></em> pairs into a complete URL
+          query parameter string, ready to add after a <code class="epub__literal">?</code> marker in a URL. For instance, here is
+          <code class="epub__literal">url</code><code class="epub__literal">encode</code> in action at
+          the interactive prompt:</p><a id="I_programlisting5_d1e71283"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>parmdict = {'user': 'Brian',</code></strong>
+...             <strong class="epub__userinput"><code>'pswd': '#!/spam',</code></strong>
+...             <strong class="epub__userinput"><code>'text': 'Say no more, squire!'}</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>urllib.parse.urlencode(parmdict)</code></strong>
+'text=Say+no+more%2C+squire%21&amp;pswd=%23%21%2Fspam&amp;user=Brian'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>"%s?%s" % ("http://scriptname.py", urllib.parse.urlencode(parmdict))</code></strong>
+'http://scriptname.py?text=Say+no+more%2C+squire%21&amp;pswd=%23%21%2Fspam&amp;user=Brian'</pre>
+<p>Internally, <code class="epub__literal">urlencode</code>
+          passes each name and value in the dictionary to the built-in
+          <code class="epub__literal">str</code> function (to make sure they
+          are strings), and then runs each one through <code class="epub__literal">urllib.parse.quote_plus</code> as they are added
+          to the result. The CGI script builds up a list of similar
+          dictionaries and passes it to <code class="epub__literal">commonhtml</code> to be formatted into a
+          selection <a id="I_indexterm5_d1e71315"></a>list page.<sup>[67]</sup></p>
+<p>In broader terms, generating URLs with parameters like this is
+          one way to pass state information to the next script (along with
+          cookies, hidden form input fields, and server databases, discussed
+          in Chapter 15). Without such state
+          information, users would have to reenter the username, password, and
+          site name on every page they visit along the way.</p>
+<p>Incidentally, the list generated by this script is not
+          radically different in functionality from what we built in the
+          PyMailGUI program in Chapter 14, though
+          the two differ cosmetically. Figure 16-11 shows this
+          strictly client-side GUI’s view on the same email list displayed in
+          Figure 16-8.</p><div class="epub__figure"><a id="pymailgui_displaying_the_same_view_list"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e71351"></a><img alt="PyMailGUI displaying the same view list" src="Images/getfile_007-10.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-11. PyMailGUI displaying the same view list</p>
+</div>
+<p>It’s important to keep in mind that PyMailGUI uses the tkinter
+          GUI library to build up a user interface instead of sending HTML to
+          a browser. It also runs entirely on the client and talks directly to
+          email servers, downloading mail from the POP server to the client
+          machine over sockets on demand. Because it retains memory for the
+          duration of the session, PyMailGUI can easily minimize mail server
+          access. After the initial header load, it needs to load only newly
+          arrived email headers on subsequent load requests. Moreover, it can
+          update its email index in-memory on deletions instead of reloading
+          anew from the server, and it has enough state to perform safe
+          deletions of messages that check for server inbox matches. PyMailGUI
+          also remembers emails you’ve already viewed—they need not be
+          reloaded again while the program runs.</p>
+<p>In contrast, PyMailCGI runs on the web server machine and
+          simply displays mail text on the client’s browser—mail is downloaded
+          from the POP server machine to the web server, where CGI scripts are
+          run. Due to the autonomous nature of CGI scripts, <span>PyMailCGI</span> by itself has no automatic
+          memory that spans pages and may need to reload headers and already
+          viewed messages during a single session. These architecture
+          differences have some important ramifications, which we’ll discuss
+          later in this <a id="I_indexterm5_d1e71363"></a><a id="I_indexterm5_d1e71365"></a><a id="I_indexterm5_d1e71367"></a><a id="I_indexterm5_d1e71369"></a><a id="I_indexterm5_d1e71371"></a>chapter.</p>
+</div>
+<div class="epub__sect2" title="Security Protocols"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="security_protocols"></a>Security Protocols</h2>
+</div>
+</div>
+</div>
+<p>In <code class="epub__literal">onViewPswdSubmit</code>’s
+          <a id="I_indexterm5_d1e71382"></a><a id="I_indexterm5_d1e71389"></a>source code (Example 16-7), notice that
+          password inputs are passed to an <code class="epub__literal">encode</code> function as they are added to the
+          parameters dictionary; this causes them to show up encrypted or
+          otherwise obfuscated in hyperlinked URLs. They are also URL encoded
+          for transmission (with <code class="epub__literal">%</code> escapes
+          if needed) and are later decoded and decrypted within other scripts
+          as needed to access the POP account. The password encryption step,
+          <code class="epub__literal">encode</code>, is at the heart of
+          PyMailCGI’s security policy.</p>
+<p>In Python today, the standard library’s <code class="epub__literal">ssl</code> module <a id="I_indexterm5_d1e71412"></a>supports Secure Sockets Layer (SSL)<a id="I_indexterm5_d1e71416"></a><a id="I_indexterm5_d1e71419"></a> with its socket wrapper call, if the required library
+          is built into your Python. SSL automatically encrypts transmitted
+          data to make it safe to pass over the Net. Unfortunately, for
+          reasons we’ll discuss when we reach the <code class="epub__literal">secret.py</code> module later in this chapter
+          (see Example 16-13), this
+          wasn’t a universal solution for PyMailCGI’s password data. In short,
+          the Python-coded web server we’re using doesn’t directly support its
+          end of a secure HTTP encrypted dialog, HTTPS. Because of that, an
+          alternative scheme was devised to minimize the chance that email
+          account information could be stolen off the Net in transit.</p>
+<p>Here’s how it works. When this script is invoked by the
+          password input page’s form, it gets only one input parameter: the
+          password typed into the form. The username is imported from a
+          <code class="epub__literal">mailconfig</code> module installed on
+          the server; it is not transmitted together with the unencrypted
+          password because such a combination could be harmful if
+          intercepted.</p>
+<p>To pass the POP username and password to the next page as
+          state information, this script adds them to the end of the mail
+          selection list URLs, but only after the password has been encrypted
+          or obfuscated by <code class="epub__literal">secret.encode</code>—a
+          function in a module that lives on the server and may vary in every
+          location that PyMailCGI is installed. In fact, <span>PyMailCGI</span> was written to not have to
+          know about the password encryptor at all; because the encoder is a
+          separate module, you can provide any flavor you like. Unless you
+          also publish your encoder module, the encoded password shipped with
+          the username won’t mean much if seen.</p>
+<p>The upshot is that normally PyMailCGI never sends or receives
+          both username and password values together in a single transaction,
+          unless the password is encrypted or obfuscated with an encryptor of
+          your choice. This limits its utility somewhat (since only a single
+          account username can be installed on the server), but the
+          alternative of popping up two pages—one for password entry and one
+          for username—seems even less friendly. In general, if you want to
+          read your mail with the system as coded, you have to install its
+          files on your server, edit its <em class="epub__filename">mailconfig.py</em> to reflect your account
+          details, and change its <em class="epub__filename">secret.py</em> encoder and decoder as
+          desired.</p>
+<div class="epub__sect3" title="Reading mail with direct URLs"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="reading_mail_with_direct_urls"></a>Reading mail with direct URLs</h3>
+</div>
+</div>
+</div>
+<p>One exception: since <a id="I_indexterm5_d1e71454"></a><a id="I_indexterm5_d1e71459"></a>any CGI script can be invoked with parameters in an
+            explicit URL instead of form field values, and since <code class="epub__literal">commonhtml</code> tries to fetch inputs from
+            the form object before importing them from <code class="epub__literal">mailconfig</code>, it is possible for any
+            person to use this script if installed at an accessible address to
+            check his or her mail without installing and configuring a copy of
+            PyMailCGI of their own. For example, a URL such as the following
+            typed into your browser’s address field or submitted with tools
+            such as <code class="epub__literal">urllib.request</code> (but
+            without the line break used to make it fit here):</p><a id="I_programlisting5_d1e71474"></a>
+<pre class="epub__programlisting">http://localhost:8000/cgi-bin/
+  onViewPswdSubmit.py?user=lutz&amp;pswd=guess&amp;site=pop.earthlink.net</pre>
+<p>will actually load email into a selection list page such as
+            that in Figure 16-8, using
+            whatever user, password, and mail site names are appended to the
+            URL. From the selection list, you may then view, reply, forward,
+            and delete email.</p>
+<p>Notice that at this point in the interaction, the password
+            you send in a URL of this form is <span class="epub__emphasis"><em>not</em></span>
+            encrypted. Later scripts expect that the password inputs will be
+            sent encrypted, though, which makes it more difficult to use them
+            with explicit URLs (you would need to match the encrypted or
+            obfuscated form produced by the <code class="epub__literal">secret</code> module on the server). Passwords
+            are encoded as they are added to links in the reply page’s
+            selection list, and they remain encoded in URLs and hidden form
+            fields thereafter.</p><div class="epub__warning" title="Warning"><h3 class="epub__title">Warning</h3>
+<p>But you shouldn’t use a URL like this, unless you don’t
+              care about exposing your email password. Sending your
+              unencrypted mail user ID and password strings across the Net in
+              a URL such as this is unsafe and open to interception. In fact,
+              it’s like giving away your email—anyone who intercepts this URL
+              or views it in a server logfile will have complete access to
+              your email account. It is made even more treacherous by the fact
+              that this URL format appears in a book that will be distributed
+              all around the world.</p>
+<p>If you care about security and want to use PyMailCGI on a
+              remote server, install it on your server and configure <code class="epub__literal">mailconfig</code> and <code class="epub__literal">secret</code>. That should at least guarantee
+              that both your user and password information will never be
+              transmitted unencrypted in a single transaction. This scheme
+              still may not be foolproof, so be careful out there. Without
+              secure HTTP and sockets, the Internet is a “use at your own
+              risk” medium.</p>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="The Message View Page"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_message_view_page"></a>The Message View Page</h2>
+</div>
+</div>
+</div>
+<p>Back to our <a id="py16.5.5"></a>page flow; at this point, we are still viewing the
+          message selection list in Figure 16-8. When we click
+          on one of its generated hyperlinks, the stateful URL invokes the
+          script in Example 16-8 on
+          the server, sending the selected message number and mail account
+          information (user, password, and site) as parameters on the end of
+          the script’s URL.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id104"></a>
+<p class="epub__title">Example 16-8. PP4E\Internet\Web\PyMailCgi\cgi-bin\onViewListLink.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/bin/python
+"""
+################################################################################
+On user click of message link in main selection list: make mail view page;
+
+cgi.FieldStorage undoes any urllib.parse escapes in link's input parameters
+(%xx and '+' for spaces already undone);  in 2.0+ we only fetch 1 mail here, not
+the entire list again;  in 2.0+ we also find mail's main text part intelligently
+instead of blindly displaying full text (with any attachments), and we generate
+links to attachment files saved on the server;  saved attachment files only work
+for 1 user and 1 message;  most 2.0 enhancements inherited from mailtools pkg;
+
+3.0: mailtools decodes the message's full-text bytes prior to email parsing;
+3.0: for display, mailtools decodes main text, commonhtml decodes message hdrs;
+################################################################################
+"""
+
+import cgi
+import commonhtml, secret
+from externs import mailtools
+#commonhtml.dumpstatepage(0)
+
+def saveAttachments(message, parser, savedir='partsdownload'):
+    """
+    save fetched email's parts to files on
+    server to be viewed in user's web browser
+    """
+    import os
+    if not os.path.exists(savedir):            # in CGI script's cwd on server
+        os.mkdir(savedir)                      # will open per your browser
+    for filename in os.listdir(savedir):       # clean up last message: temp!
+        dirpath = os.path.join(savedir, filename)
+        os.remove(dirpath)
+    typesAndNames = parser.saveParts(savedir, message)
+    filenames = [fname for (ctype, fname) in typesAndNames]
+    for filename in filenames:
+        os.chmod(filename, 0o666)              # some srvrs may need read/write
+    return filenames
+
+form = cgi.FieldStorage()
+user, pswd, site = commonhtml.getstandardpopfields(form)
+pswd = secret.decode(pswd)
+
+try:
+    msgnum   = form['mnum'].value                               # from URL link
+    parser   = mailtools.MailParser()
+    fetcher  = mailtools.SilentMailFetcher(site, user, pswd)
+    fulltext = fetcher.downloadMessage(int(msgnum))             # don't eval!
+    message  = parser.parseMessage(fulltext)                    # email pkg Message
+    parts    = saveAttachments(message, parser)                 # for URL links
+    mtype, content = parser.findMainText(message)               # first txt part
+    commonhtml.viewpage(msgnum, message, content, form, parts)  # encoded pswd
+except:
+    commonhtml.errorpage('Error loading message')</pre>
+</div>
+</div>
+<p>Again, much of the work here happens in the <code class="epub__literal">commonhtml</code> module, listed later in this
+          section (see Example 16-14). This script adds
+          logic to decode the input password (using the configurable <code class="epub__literal">secret</code> encryption module) and extract the
+          selected mail’s headers and text using the<a id="I_indexterm5_d1e71531"></a> <code class="epub__literal">mailtools</code> module
+          package from Chapter 13 again. The
+          full text of the selected message is ultimately fetched, parsed, and
+          decoded by <code class="epub__literal">mailtools</code>, using the
+          standard library’s<a id="I_indexterm5_d1e71546"></a><a id="I_indexterm5_d1e71551"></a> <code class="epub__literal">poplib</code> module and
+          <code class="epub__literal">email</code> package. Although we’ll
+          have to refetch this message if viewed again, version 2.0 and later
+          do not grab all mails to get just the one selected.<sup>[68]</sup></p>
+<p>Also new in version 2.0, the <code class="epub__literal">saveAttachments</code> function in this script
+          splits off the parts of a fetched message and stores them in a
+          directory on the web server machine. This was discussed earlier in
+          this chapter—the view page is then augmented with URL links that
+          point at the saved part files. Your web browser will open them
+          according to their filenames and content. All the work of part
+          extraction, decoding, and naming is <span>inherited</span> from <code class="epub__literal">mailtools</code>. Part files are kept
+          temporarily; they are deleted when the next message is fetched. They
+          are also currently stored in a single directory and so apply to only
+          a single user.</p>
+<p>If the message can be loaded and parsed successfully, the
+          result page, shown in Figure 16-12, allows
+          us to view, but not edit, the mail’s text. The function <code class="epub__literal">commonhtml.viewpage</code> generates a
+          “read-only” HTML option for all the text widgets in this page. If
+          you look closely, you’ll notice that this is the mail we sent to
+          ourselves in Figure 16-3 and which
+          showed up at the end of the list in Figure 16-8.</p><div class="epub__figure-float"><div class="epub__figure"><a id="pymailcgi_view_page"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e71595"></a><img alt="PyMailCGI view page" src="Images/getfile_009-9.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-12. PyMailCGI view page</p>
+</div>
+</div>
+<p>View pages like this have a pull-down action selection list
+          near the bottom; if you want to do more, use this list to pick an
+          action (Reply, Forward, or Delete) and click on the Next button to
+          proceed to the next screen. If you’re just in a browsing frame of
+          mind, click the “Back to root page” link at the bottom to return to
+          the main page, or use your browser’s Back button to return to the
+          selection list page.</p>
+<p>As mentioned, Figure 16-12 displays
+          the mail we sent earlier in this chapter, being viewed after being
+          fetched. Notice its “Parts:” links—when clicked, they trigger URLs
+          that open the temporary part files on the server, according to your
+          browser’s rules for the file type. For instance, clicking on the
+          “.txt” file will likely open it in either the browser or a text
+          editor. In other mails, clicking on “.jpg” files may open an image
+          viewer, “.pdf” may open Adobe Reader, and so on. Figure 16-13 shows the result of
+          clicking the “.py” attachment part of Figure 16-12’s <a id="I_indexterm5_d1e71610"></a>message in Chrome.</p><div class="epub__figure"><a id="attached_part_file_link_display"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e71616"></a><img alt="Attached part file link display" src="Images/getfile_006-16.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-13. Attached part file link display</p>
+</div>
+</div>
+<div class="epub__sect2" title="Passing State Information in HTML Hidden Input Fields"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="passing_state_information_in_html_hidden"></a>Passing State Information in HTML Hidden Input Fields</h2>
+</div>
+</div>
+</div>
+<p>What you don’t see on <a id="I_indexterm5_d1e71626"></a><a id="I_indexterm5_d1e71633"></a><a id="I_indexterm5_d1e71638"></a><a id="I_indexterm5_d1e71643"></a>the view page in Figure 16-12 is just as important as what you do
+          see. We need to defer to Example 16-14 for coding details,
+          but something new is going on here. The original message number, as
+          well as the POP user and (still encoded) password information sent
+          to this script as part of the stateful link’s URL, wind up being
+          copied into the HTML used to create this view page, as the values of
+          hidden input fields in the form. The hidden field generation code in
+          <code class="epub__literal">commonhtml</code> looks like
+          this:</p><a id="I_programlisting5_d1e71656"></a>
+<pre class="epub__programlisting">    print('&lt;form method=post action="%s/onViewPageAction.py"&gt;' % urlroot)
+    print('&lt;input type=hidden name=mnum value="%s"&gt;' % msgnum)
+    print('&lt;input type=hidden name=user value="%s"&gt;' % user)    # from page|url
+    print('&lt;input type=hidden name=site value="%s"&gt;' % site)    # for deletes
+    print('&lt;input type=hidden name=pswd value="%s"&gt;' % pswd)    # pswd encoded</pre>
+<p>As we’ve learned, much like parameters in generated hyperlink
+          URLs, hidden fields in a page’s HTML allow us to embed state
+          information inside this web page itself. Unless you view that page’s
+          source, you can’t see this state information because hidden fields
+          are never displayed. But when this form’s Submit button is clicked,
+          hidden field values are automatically transmitted to the next script
+          along with the visible fields on the form.</p>
+<p>Figure 16-14
+          shows part of the source code generated for another message’s view
+          page; the hidden input fields used to pass selected mail state
+          information are embedded near the top.</p><div class="epub__figure"><a id="pymailcgi_view_page_comma_generated_html"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e71666"></a><img alt="PyMailCGI view page, generated HTML" src="Images/getfile_004-25.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-14. PyMailCGI view page, generated HTML</p>
+</div>
+<p>The net effect is that hidden input fields in HTML, just like
+          parameters at the end of generated URLs, act like temporary storage
+          areas and retain state between pages and user interaction steps.
+          Both are the Web’s simplest equivalent to programming <span>language</span> variables. They come in handy
+          anytime your application needs to remember something between
+          pages.</p>
+<p>Hidden fields are especially useful if you cannot invoke the
+          next script from a generated URL hyperlink with parameters. For
+          instance, the next action in our script is a form submit button
+          (Next), not a hyperlink, so hidden fields are used to pass state. As
+          before, without these hidden fields, users would need to reenter POP
+          account details somewhere on the view page if they were needed by
+          the next script (in our example, they are required if the next
+          action is Delete).</p>
+</div>
+<div class="epub__sect2" title="Escaping Mail Text and Passwords in HTML"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="escaping_mail_text_and_passwords_in_html"></a>Escaping Mail Text and Passwords in HTML</h2>
+</div>
+</div>
+</div>
+<p>Notice that <a id="py16.5.7"></a><a id="html16.5.7"></a><a id="pass16.5.7"></a>everything you see on the message view page’s HTML in
+          Figure 16-14 is
+          escaped with <code class="epub__literal">cgi.escape</code>. Header
+          fields and the text of the mail itself might contain characters that
+          are special to HTML and must be translated as usual. For instance,
+          because some mailers allow you to send messages in HTML format, it’s
+          possible that an email’s text could contain a <code class="epub__literal">&lt;/textarea&gt;</code> tag, which might throw
+          the reply page hopelessly out of sync if not escaped.</p>
+<p>One subtlety here: HTML escapes are important only when text
+          is sent to the browser initially by the CGI script. If that text is
+          later sent out again to another script (e.g., by sending a reply
+          mail), the text will be back in its original, nonescaped format when
+          received again on the server. The browser parses out escape codes
+          and does not put them back again when uploading form data, so we
+          don’t need to undo escapes later. For example, here is part of the
+          escaped text area sent to a browser during a Reply transaction (use
+          your browser’s View Source option to see this live):</p><a id="I_programlisting5_d1e71711"></a>
+<pre class="epub__programlisting">&lt;tr&gt;&lt;th align=right&gt;Text:
+&lt;td&gt;&lt;textarea name=text cols=80 rows=10 readonly&gt;
+more stuff
+
+--Mark Lutz  (http://rmi.net/~lutz)  [PyMailCgi 2.0]
+
+
+&gt; -----Original Message-----
+&gt; From: lutz@rmi.net
+&gt; To: lutz@rmi.net
+&gt; Date: Tue May  2 18:28:41 2000
+&gt;
+&gt; &lt;table&gt;&lt;textarea&gt;
+&gt; &lt;/textarea&gt;&lt;/table&gt;
+&gt; --Mark Lutz  (http://rmi.net/~lutz)  [PyMailCgi 2.0]
+&gt;
+&gt;
+&gt; &gt; -----Original Message-----</pre>
+<p>After this reply is delivered, its text looks as it did before
+          escapes (and exactly as it appeared to the user in the message edit
+          web page):</p><a id="I_programlisting5_d1e71715"></a>
+<pre class="epub__programlisting">more stuff
+
+--Mark Lutz  (http://rmi.net/~lutz)  [PyMailCgi 2.0]
+
+
+&gt; -----Original Message-----
+&gt; From: lutz@rmi.net
+&gt; To: lutz@rmi.net
+&gt; Date: Tue May  2 18:28:41 2000
+&gt;
+&gt; &lt;table&gt;&lt;textarea&gt;
+&gt; &lt;/textarea&gt;&lt;/table&gt;
+&gt; --Mark Lutz  (http://rmi.net/~lutz)  [PyMailCgi 2.0]
+&gt;
+&gt;
+&gt; &gt; -----Original Message-----</pre>
+<p>Beyond the normal text, the password gets special HTML escapes
+          treatment as well. Though not shown in our examples, the hidden
+          password field of the generated HTML screenshot (Figure 16-14) can look
+          downright bizarre when encryption is applied. It turns out that the
+          POP password is still encrypted when placed in hidden fields of the
+          HTML. For security, they have to be. Values of a page’s hidden
+          fields can be seen with a browser’s View Source option, and it’s not
+          impossible that the text of this page could be saved to a file or
+          intercepted off the Net.</p>
+<p>The password is no longer URL encoded when put in the hidden
+          field, however, even though it was when it appeared as a query
+          parameter at the end of a stateful URL in the mail list page.
+          Depending on your encryption module, the password might now contain
+          nonprintable characters when generated as a hidden field value here;
+          the browser doesn’t care, as long as the field is run
+          through<a id="I_indexterm5_d1e71723"></a> <code class="epub__literal">cgi.escape</code> like
+          everything else added to the HTML reply stream. The <code class="epub__literal">commonhtml</code> module is careful to route all
+          text and headers through <code class="epub__literal">cgi.escape</code> as the view page is
+          constructed.</p>
+<p>As a comparison, Figure 16-15 shows what the
+          mail message captured in Figure 16-12
+          looks like when viewed in PyMailGUI, the client-side “desktop”
+          tkinter-based email tool from Chapter 14. In that program, message parts
+          are listed with the Parts button and are extracted, saved, and
+          opened with the Split button; we also get quick-access buttons to
+          parts and attachments just below the message headers. The net effect
+          is similar from an end user’s perspective.</p><div class="epub__figure-float"><div class="epub__figure"><a id="pymailgui_viewer_comma_same_message_as_f"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e71750"></a><img alt="PyMailGUI viewer, same message as" src="Images/getfile_008-9.png" width="486"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-15. PyMailGUI viewer, same message as Figure 16-12</p>
+</div>
+</div>
+<p>In terms of implementation, though, the model is very
+          different. PyMailGUI doesn’t need to care about things such as
+          passing state in URLs or hidden fields (it saves state in Python
+          in-process variables and memory), and there’s no notion of escaping
+          HTML and URL strings (there are no browsers, and no network
+          transmission steps once mail is downloaded). It also doesn’t have to
+          rely on temporary server file links to give access to message
+          parts—the message is retained in memory attached to a window object
+          and lives on between interactions. On the other hand, PyMailGUI does
+          require Python to be installed on the client, but we’ll return to
+          that in a few <a id="I_indexterm5_d1e71757"></a><a id="I_indexterm5_d1e71759"></a><a id="I_indexterm5_d1e71761"></a><a id="I_indexterm5_d1e71763"></a>pages.</p>
+</div><div class="epub__footnotes"><br/><hr/><div class="epub__footnote">
+<p><sup>[67] </sup>Technically, again, you should generally escape <code class="epub__literal">&amp;</code> separators in generated URL
+              links by running the URL through <code class="epub__literal">cgi.escape</code>, if any parameter’s name
+              could be the same as that of an HTML character escape code
+              (e.g., <code class="epub__literal">&amp;amp=high</code>). See
+              Chapter 15 for more details; they
+              aren’t escaped here because there are no clashes between URL and
+              HTML.</p>
+</div><div class="epub__footnote">
+<p><sup>[68] </sup>Notice that the message number arrives as a string and
+              must be converted to an integer in order to be used to fetch the
+              message. But we’re careful not to convert with <code class="epub__literal">eval</code> here, since this is a string
+              passed over the Net and could have arrived embedded at the end
+              of an arbitrary URL (remember that earlier warning?).</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

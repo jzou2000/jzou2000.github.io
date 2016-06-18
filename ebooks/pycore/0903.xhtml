@@ -1,0 +1,714 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>9.3. Web Clients</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">9.3. Web Clients</h3>
+<p class="docText">Web browsers are basic Web
+ clients. They are used primarily for searching and downloading 
+documents from the Web. You can also create Web clients that do more 
+than that, though. We’ll take a look at several in this section.</p>
+
+<h4 class="docSection2Title" id="title-ID0EYVCI">9.3.1. A Simple Web Crawler/Spider/Bot</h4>
+<p class="docText">One example of a slightly more complex Web client is a <span class="docEmphasis">crawler</span> (a.k.a. <span class="docEmphasis">spider</span>, <span class="docEmphasis">[ro]bot</span>). These are programs that explore and download pages from the Internet for a variety of reasons, some of which include:</p>
+<ul><li><p class="docList">Indexing into a large search engine such as Google or Yahoo!</p></li><li><p class="docList">Offline
+ browsing—downloading documents onto a local hard disk and rearranging 
+hyperlinks to create almost a mirror image for local browsing</p></li><li><p class="docList">Downloading and storing for historical or archival purposes, or</p></li><li><p class="docList">Web page caching to save superfluous downloading time on Web site revisits.</p></li></ul>
+<p class="docText">The crawler in Example 9-3, <tt>crawl.py</tt>,
+ takes a starting Web address (URL), downloads that page and all other 
+pages whose links appear in succeeding pages, but only those that are in
+ the same domain as the starting page. Without such limitations, you 
+will run out of disk space.</p>
+<h5 class="docExampleTitle" id="title-ID0EPXCI">Example 9-3. Web Crawler (<tt>crawl.py</tt>)</h5><p></p><div class="box">
+<p class="docText">The crawler consists of two classes: one to manage the entire crawling process (<tt>Crawler</tt>), and one to retrieve and parse each downloaded Web page (<tt>Retriever</tt>). (Refactored from earlier editions of this book.)</p>
+<pre class="preFixedHeight">1    #!/usr/bin/env python
+2
+3    <span class="docEmphStrong">import</span> cStringIO
+4    <span class="docEmphStrong">import</span> formatter
+5    <span class="docEmphStrong">from</span> htmllib <span class="docEmphStrong">import</span> HTMLParser
+6    <span class="docEmphStrong">import</span> httplib
+7    <span class="docEmphStrong">import</span> os
+8    <span class="docEmphStrong">import</span> sys
+9    <span class="docEmphStrong">import</span> urllib
+10   <span class="docEmphStrong">import</span> urlparse
+11
+12   <span class="docEmphStrong">class</span> Retriever(object):
+13       __slots__ = ('url', 'file')
+14       <span class="docEmphStrong">def</span> __init__(self, url):
+15           self.url, self.file = self.get_file(url)
+16
+17       <span class="docEmphStrong">def</span> get_file(self, url, default='index.html'):
+18           'Create usable local filename from URL'
+19           parsed = urlparse.urlparse(url)
+20           host = parsed.netloc.split('@')[-1].split(':')[0]
+21           filepath = '%s%s' % (host, parsed.path)
+22           <span class="docEmphStrong">if not</span> os.path.splitext(parsed.path)[1]:
+23               filepath = os.path.join(filepath, default)
+24           linkdir = os.path.dirname(filepath)
+25           <span class="docEmphStrong">if not</span> os.path.isdir(linkdir):
+26               <span class="docEmphStrong">if</span> os.path.exists(linkdir):
+27                   os.unlink(linkdir)
+28               os.makedirs(linkdir)
+29           <span class="docEmphStrong">return</span> url, filepath
+30
+31       <span class="docEmphStrong">def</span> download(self):
+32           'Download URL to specific named file'
+33           <span class="docEmphStrong">try</span>:
+34               retval = urllib.urlretrieve(self.url, self.file)
+35           <span class="docEmphStrong">except</span> (IOError, httplib.InvalidURL) <span class="docEmphStrong">as</span> e:
+36               retval = (('*** ERROR: bad URL "%s": %s' % (
+37                   self.url, e)),)
+38           <span class="docEmphStrong">return</span> retval
+39
+40       <span class="docEmphStrong">def</span> parse_links(self):
+41           'Parse out the links found in downloaded HTML file'
+42           f = open(self.file, 'r')
+43           data = f.read()
+44           f.close()
+45           parser = HTMLParser(formatter.AbstractFormatter(
+46               formatter.DumbWriter(cStringIO.StringIO())))
+47           parser.feed(data)
+48           parser.close()
+49           <span class="docEmphStrong">return</span> parser.anchorlist
+50
+51   <span class="docEmphStrong">class</span> Crawler(object):
+52       count = 0
+53
+54       <span class="docEmphStrong">def</span> __init__(self, url):
+55           self.q = [url]
+56           self.seen = set()
+57           parsed = urlparse.urlparse(url)
+58           host = parsed.netloc.split('@')[-1].split(':')[0]
+59           self.dom = '.'.join(host.split('.')[-2:])
+60
+61       <span class="docEmphStrong">def</span> get_page(self, url, media=False):
+62           'Download page &amp; parse links, add to queue if nec'
+63           r = Retriever(url)
+64           fname = r.download()[0]
+65           <span class="docEmphStrong">if</span> fname[0] == '*':
+66               <span class="docEmphStrong">print</span> fname, '... skipping parse'
+67               <span class="docEmphStrong">return</span>
+68           Crawler.count += 1
+69           <span class="docEmphStrong">print</span> '\n(', Crawler.count, ')'
+70           <span class="docEmphStrong">print</span> 'URL:', url
+71           <span class="docEmphStrong">print</span> 'FILE:', fname
+72           self.seen.add(url)
+73           ftype = os.path.splitext(fname)[1]
+74           <span class="docEmphStrong">if</span> ftype <span class="docEmphStrong">not in</span> ('.htm', '.html'):
+75               <span class="docEmphStrong">return</span>
+76
+77           <span class="docEmphStrong">for</span> link <span class="docEmphStrong">in</span> r.parse_links():
+78               <span class="docEmphStrong">if</span> link.startswith('mailto:'):
+79                   <span class="docEmphStrong">print</span> '... discarded, mailto link'
+80                   <span class="docEmphStrong">continue</span>
+81               <span class="docEmphStrong">if not</span> media:
+82                   ftype = os.path.splitext(link)[1]
+83                   <span class="docEmphStrong">if</span> ftype <span class="docEmphStrong">in</span> ('.mp3', '.mp4', '.m4v', '.wav'):
+84                       <span class="docEmphStrong">print</span> '... discarded, media file'
+85                       <span class="docEmphStrong">continue</span>
+86               <span class="docEmphStrong">if not</span> link.startswith('http://'):
+87                   link = urlparse.urljoin(url, link)
+88               <span class="docEmphStrong">print</span> '*', link,
+89               <span class="docEmphStrong">if</span> link <span class="docEmphStrong">not in</span> self.seen:
+90                   <span class="docEmphStrong">if</span> self.dom <span class="docEmphStrong">not in</span> link:
+91                       <span class="docEmphStrong">print</span> '... discarded, not in domain'
+92                   <span class="docEmphStrong">else</span>:
+93                       <span class="docEmphStrong">if</span> link <span class="docEmphStrong">not in</span> self.q:
+94                           self.q.append(link)
+95                           <span class="docEmphStrong">print</span> '... new, added to Q'
+96                       <span class="docEmphStrong">else</span>:
+97                           <span class="docEmphStrong">print</span> '... discarded, already in Q'
+98               <span class="docEmphStrong">else</span>:
+99                       <span class="docEmphStrong">print</span> '... discarded, already processed'
+100
+101      <span class="docEmphStrong">def</span> go(self, media=False):
+102          'Process next page in queue (if any)'
+103          <span class="docEmphStrong">while</span> self.q:
+104              url = self.q.pop()
+105              self.get_page(url, media)
+106
+107  <span class="docEmphStrong">def</span> main():
+108      <span class="docEmphStrong">if</span> len(sys.argv) &gt; 1:
+109          url = sys.argv[1]
+110      <span class="docEmphStrong">else</span>:
+111          <span class="docEmphStrong">try</span>:
+112              url = raw_input('Enter starting URL: ')
+113          <span class="docEmphStrong">except</span> (KeyboardInterrupt, EOFError):
+114              url = ''
+115      <span class="docEmphStrong">if not</span> url:
+116          <span class="docEmphStrong">return</span>
+117      <span class="docEmphStrong">if not</span> url.startswith('http://') <span class="docEmphStrong">and</span> \
+118          <span class="docEmphStrong">not</span> url.startswith('ftp://'):
+119              url = 'http://%s/' % url
+120     robot = Crawler(url)
+121     robot.go()
+122
+123  <span class="docEmphStrong">if</span> __name__ == '__main__':
+124     main()
+
+					  </pre><br/>
+</div><p></p>
+
+<h5 class="docSection3Title" id="title-ID0EC6CI">Line-by-Line (Class-by-Class) Explanation</h5>
+
+<h5 class="docSection4Title" id="title-ID0EK6CI">Lines 1–10</h5>
+<p class="docText">The
+ top part of the script consists of the standard Python Unix startup 
+line and the import of the modules/packages to be used. Here are some 
+brief explanations:</p>
+<ul><li><p class="docList"><tt>cStringIO</tt>, <tt>formatter</tt>, <tt>htmllib</tt> We use various classes in these modules for parsing HTML.</p></li><li><p class="docList"><tt>httplib</tt> We only need an exception from this module.</p></li><li><p class="docList"><tt>os</tt> This provides various file system functions.</p></li><li><p class="docList"><tt>sys</tt> We are just using <tt>argv</tt> for command-line arguments.</p></li><li><p class="docList"><tt>urllib</tt> We only need the <tt>urlretrieve()</tt> function for downloading Web pages.</p></li><li><p class="docList"><tt>urlparse</tt> We use the u<tt>rlparse()</tt> and <tt>urljoin()</tt> functions for URL manipulation.</p></li></ul>
+
+<h5 class="docSection4Title" id="title-ID0E1EDI">Lines 12–29</h5>
+<p class="docText">The <tt>Retriever</tt> class 
+has the responsibility of downloading pages from the Web and parsing the
+ links located within each document, adding them to the “to-do” queue, 
+if necessary. A <tt>Retriever</tt> instance object is created for each page that is downloaded from the Internet. <tt>Retriever</tt> consists of several methods to aid in its functionality: a constructor (<tt>__init__()</tt>), <tt>get_file()</tt>, <tt>download()</tt>, and <tt>parse_links()</tt>.</p>
+<p class="docText">Skipping ahead momentarily, the <tt>get_file()</tt>
+ method takes the given URL and comes up with a safe and sane 
+corresponding filename to store the file locally—we are downloading this
+ file from the Web. Basically, it works by removing the <tt>http://</tt>
+ prefix from the URL, getting rid of any extras such as username, 
+password, and port number in order to arrive at the hostname (line 20).</p>
+<p class="docText">URLs without trailing file extensions will be given the default filename <tt>index.html</tt> and can be overridden by the caller. You can see how this works as well as the final <tt>filepath</tt> created on lines 21–23.</p>
+<p class="docText">We then pull out the final 
+destination directory (line 24) and check if it is already a 
+directory—if so, we leave it alone and return the URL-filepath pair. If 
+we enter this <span class="docEmphStrong"><tt>if</tt></span>
+ clause, this means the directory either doesn’t exist or is a plain 
+file. In the case it is the latter, so it will be erased. Finally, the 
+target directory and any parents are created by using <tt>os.makedirs()</tt> in line 28.</p>
+<p class="docText">Now let’s go back up to the initializer <tt>__init__()</tt>. A <tt>Retriever</tt> object is created and stores both the URL (<tt>str</tt>) and the corresponding filename returned by <tt>get_file()</tt>
+ as (instance) attributes. In our current design, instances are created 
+for every file downloaded. In the case of a Web site with many, many 
+files, a small instance like this can cause additional memory usage. To 
+help minimize consumed resources, we create a <tt>__slots__</tt> variable, indicating that the only attributes that instances can have are <tt>self.url</tt> and <tt>self.file</tt>.</p>
+
+<h5 class="docSection4Title" id="title-ID0E3GDI">Lines 31–49</h5>
+<p class="docText">We’ll see the crawler momentarily, but this is a heads-up that it creates <tt>Retriever</tt> objects for each downloaded file. The <tt>download()</tt> method, as you can imagine, actually goes out to the Internet to download the page with the given link (line 34). It calls <tt>urllib.</tt><tt>urlretrieve()</tt> with the URL and saves it to the filename (the one returned by <tt>get_file()</tt>).</p>
+<p class="docText">If the download was successful, the filename is returned (line 34), but if there’s an error, an error string prefixed with <span class="docEmphStrong">***</span> is returned instead (lines 35–36). The crawler checks this return value and calls <tt>parse_links()</tt> to parse links out of the just-downloaded page only if all went well.</p>
+<p class="docText">The more serious method in this part of our application is the <tt>parse_links()</tt> method. Yes, the job of a crawler is to download Web pages, but a <span class="docEmphasis">recursive</span>
+ crawler (like ours) looks for additional links in each downloaded page 
+and processes them, too. It first opens up the downloaded Web page and 
+extracts the entire HTML content as a single string (lines 42–44).</p>
+<p class="docText">The magic you see in lines 45–49 is a well-known recipe that uses the <tt>htmllib.</tt><tt>HTMLParser</tt>
+ class. We would like to say something to the effect that this is a 
+recipe that’s been passed down by Python programmers from generation to 
+generation, but we would just be lying to you. Anyway, we digress.</p>
+<p class="docText">The main point of how it works is that the parser class doesn’t do I/O, so it takes a <tt>formatter</tt> object to handle that. Formatter objects—Python only has one real formatter: <tt>formatter.</tt><tt>AbstractFormatter</tt>—parse the data and use a writer object to dispatch its output. Similarly, Python only has one useful writer object: <tt>formatter.DumbWriter</tt>.
+ It optionally takes a file object to which to write the output. If you 
+omit it, it writes to standard output, which is probably undesirable. To
+ that effect, we instantiate a <tt>cStringIO. StringIO</tt> object to absorb this output (think <tt>/dev/null</tt>,
+ if you know what that is.) You can search online for any of the class 
+names and find similar code snippets in many places along with 
+additional commentary.</p>
+<p class="docText">Because <tt>htmllib.HTMLParser</tt>
+ is fairly long in the tooth and deprecated starting in version 2.6, a 
+smaller example demonstrating some of the more contemporary tools comes 
+in the next subsection. We leave it in this example because it is/was 
+such a common recipe and still can be the right tool for this job.</p>
+<p class="docText">Anyway, all the 
+complexity in creating the parser is entirely contained in a single call
+ (lines 45–46). The rest of this block consists of passing in the HTML, 
+closing the parser, and then returning a list of parsed links/anchors.</p>
+
+<h5 class="docSection4Title" id="title-ID0ERKDI">Lines 51–59</h5>
+<p class="docText">The <tt>Crawler</tt>
+ class is the star of the show, managing the entire crawling process for
+ one Web site. If we added threading to our application, we would create
+ separate instances for each site crawled. The <tt>Crawler</tt> consists of three items stored by the constructor during the instantiation phase, the first of which is <tt>self.q</tt>,
+ a queue of links to download. Such a list will fluctuate during 
+execution, shrinking as each page is processed and expanding as new 
+links are discovered within each downloaded page.</p>
+<p class="docText">The other two data values for the <tt>Crawler</tt> include <tt>self.seen</tt>,
+ a set containing all the links that we have seen (downloaded) already. 
+And finally, we store the domain name for the main link, <tt>self.dom</tt>,
+ and use that value to determine whether any succeeding links are part 
+of the same domain. All three values are created in the initializer 
+method <tt>__init__()</tt> in lines 54–59.</p>
+<p class="docText">Note that we parse the domain by using <tt>urlparse.urlparse()</tt> (line 58) in the same way that we grab the hostname out of the URL in the <tt>Retriever</tt>.
+ The domain name comes by just taking the final two parts of the 
+hostname. Note that because we don’t use the host for anything else, you
+ can make your code harder to read by combining lines 58 and 59 like 
+this:</p>
+<div class="docText"><pre>self.dom = '.'.join(urlparse.urlparse(
+    url).netloc.split('@')[-1].split(':')[0].split('.')[-2:])</pre></div><br/>
+<p class="docText">Right above <tt>__init__()</tt>, the <tt>Crawler</tt> also has a static data item named <tt>count</tt>.
+ The purpose of this counter is just to keep track of the number of 
+objects we have downloaded from the Internet. It is incremented for 
+every successfully downloaded page.</p>
+
+<h5 class="docSection4Title" id="title-ID0EANDI">Lines 61-105</h5>
+<p class="docText"><tt>Crawler</tt> has a pair of other methods in addition to its constructor: <tt>get_page()</tt> and <tt>go()</tt>. <tt>go()</tt> is simply the method that is used to start the <tt>Crawler</tt>. It is called from the main body of code. <tt>go()</tt>
+ consists of a loop that will continue to execute as long as there are 
+new links in the queue that need to be downloaded. The workhorse of this
+ class, though, is the <tt>get_page()</tt> method.</p>
+<p class="docText"><tt>get_page()</tt> instantiates a <tt>Retriever</tt>
+ object with the first link and lets it go off to the races. If the page
+ was downloaded successfully, the counter is incremented (otherwise, 
+links that error-out are skipped [lines 65–67]) and the link added to 
+the “already seen” set (line 72). We use a set because order doesn’t 
+matter and its lookup is much faster than using a list.</p>
+<p class="docText"><tt>get_page()</tt> looks at 
+all the links featured inside each downloaded page (skipping all non-Web
+ pages [lines 73–75]) and determines whether any more links should be added to the queue (lines 77–99). The main loop in <tt>go()</tt> will continue to process links until the queue is empty, at which time victory is declared (lines 103–105).</p>
+<p class="docText">Links that are a part of another 
+domain (lines 90–91), or have already been downloaded (lines 98–99), are
+ already in the queue waiting to be processed (lines 96–97), or are <tt>mailto</tt>: links are ignored and not added to the queue (lines 78–80). The same applies for media files (lines 81–85).</p>
+
+<h5 class="docSection4Title" id="title-ID0EXODI">Lines 107–124</h5>
+<p class="docText"><tt>main()</tt> needs a URL 
+to begin processing. If one is entered on the command line (for example,
+ when this script is invoked directly; lines 108–109), it will just go 
+with the one given. Otherwise, the script enters interactive mode, 
+prompting the user for a starting URL (line 112). With a starting link 
+in hand, the <tt>Crawler</tt> is instantiated, and away we go (lines 120–121).</p>
+<p class="docText">One sample invocation of <tt>crawl.py</tt> might look like this:</p>
+<div class="docText"><pre class="preFixedHeight">$ crawl.py
+Enter starting URL: http://www.null.com/home/index.html
+
+( 1 )
+URL: http://www.null.com/home/index.html
+FILE: www.null.com/home/index.html
+* http://www.null.com/home/overview.html ... new, added to Q
+* http://www.null.com/home/synopsis.html ... new, added to Q
+* http://www.null.com/home/order.html ... new, added to Q
+* mailto:postmaster@null.com ... discarded, mailto link
+* http://www.null.com/home/overview.html ... discarded, already in Q
+* http://www.null.com/home/synopsis.html ... discarded, already in Q
+* http://www.null.com/home/order.html ... discarded, already in Q
+* mailto:postmaster@null.com ... discarded, mailto link
+* http://bogus.com/index.html ... discarded, not in domain
+
+( 2 )
+URL: http://www.null.com/home/order.html
+FILE: www.null.com/home/order.html
+* mailto:postmaster@null.com ... discarded, mailto link
+* http://www.null.com/home/index.html ... discarded, already processed
+* http://www.null.com/home/synopsis.html ... discarded, already in Q
+* http://www.null.com/home/overview.html ... discarded, already in Q
+
+( 3 )
+URL: http://www.null.com/home/synopsis.html
+FILE: www.null.com/home/synopsis.html
+* http://www.null.com/home/index.html ... discarded, already processed
+* http://www.null.com/home/order.html ... discarded, already processed
+* http://www.null.com/home/overview.html ... discarded, already in Q
+
+( 4 )
+URL: http://www.null.com/home/overview.html
+FILE: www.null.com/home/overview.html
+* http://www.null.com/home/synopsis.html ... discarded, already
+processed
+* http://www.null.com/home/index.html ... discarded, already processed
+* http://www.null.com/home/synopsis.html ... discarded, already
+processed
+* http://www.null.com/home/order.html ... discarded, already processed
+
+					  </pre></div><br/>
+<p class="docText">After execution, a www.null.com directory would be created in the local file system, with a <tt>home</tt> subdirectory. You will find all the processed files within <tt>home</tt>.</p>
+<p class="docText">If after reviewing the 
+code you’re still wondering where writing a crawler in Python can get 
+you, you might be surprised to learn that the original Google Web 
+crawlers were written in Python. For more information, see http://infolab.stanford.edu/~backrub/google.html.</p>
+
+<h4 class="docSection2Title" id="title-ID0EWSDI">9.3.2. Parsing Web Content</h4>
+<p class="docText">In the previous subsection, we took a look at a crawler Web client. Part of the spidering process involved parsing of links, or <span class="docEmphasis">anchors</span> as they’re officially called. For a long while, the well-known recipe <tt>htmllib.HTMLParser</tt>
+ was employed for parsing Web pages; however, newer and improved modules
+ and packages have come along. We’ll be demonstrating some of these in 
+this subsection.</p>
+<p class="docText">In Example 9-4, we explore one standard library tool, the <tt>HTMLParser</tt> class in the <tt>HTMLParser</tt> module (added in version 2.2). <tt>HTMLParser.HTMLParser</tt> was supposed to replace <tt>htmllib.HTMLParser</tt>
+ because it was simpler, provided a lower-level view of the content, and
+ handled XHTML, whereas the latter was older and more complex because it
+ was based on the <tt>sgmllib</tt> module 
+(meaning it had to understand the intricacies of Standard Generalized 
+Markup Language [SGML]). The official documentation is fairly sparse 
+when describing how to use <tt>HTMLParser.HTMLParser</tt>, so hopefully we’ll give a more useful example here.</p>
+<p class="docText">We’ll also demonstrate the use of two of the other three most popular Web parsers, <tt>BeautifulSoup</tt> and <tt>html5lib</tt>,
+ which are available as separate downloads outside of the standard 
+library. You can access them both at the Cheeseshop, or from http://pypi.python.org. For a less stressful installation, you can also use the <tt>easy_install</tt> or <tt>pip</tt> tools to get either one.</p>
+<p class="docText">The one we skipped was <tt>lxml</tt>;
+ we’ll leave that as an exercise for you to undertake. You’ll find more 
+exercises at the end of the chapter that will help you learn these more 
+thoroughly by substituting them for <tt>htmllib. HTMLParser</tt> in the crawler.</p>
+<p class="docText">The <tt>parse_links.py</tt> script in Example 9-4
+ only consists of parsing anchors out of any input data. Given a URL, it
+ will extract all links, attempt to make any necessary adjustments to 
+make them full URLs, sort, and display them to the user. It runs each 
+URL through all three parsers. For <tt>BeautifulSoup</tt>
+ in particular, we provide two different solutions: the first one is 
+simpler, parsing all tags then looking for all the anchor tags; the 
+second requires the use of the <tt>SoupStrainer</tt> class, which specifically targets anchor tags and only parses those.</p>
+<h5 class="docExampleTitle" id="title-ID0EPVDI">Example 9-4. Link Parser (<tt>parse_links.py</tt>)</h5><p></p><div class="box">
+<p class="docText">This script uses three different parsers to extract links from HTML anchor tags. It features the <tt>HTMLParser</tt> standard library module as well as the third-party <tt>BeautifulSoup</tt> and <tt>html5lib</tt> packages.</p>
+<pre class="preFixedHeight">1    #!/usr/bin/env python
+2
+3    <span class="docEmphStrong">from</span> HTMLParser <span class="docEmphStrong">import</span> HTMLParser
+4    <span class="docEmphStrong">from</span> cStringIO <span class="docEmphStrong">import</span> StringIO
+5    <span class="docEmphStrong">from</span> urllib2 <span class="docEmphStrong">import</span> urlopen
+6    <span class="docEmphStrong">from</span> urlparse <span class="docEmphStrong">import</span> urljoin
+7
+8    <span class="docEmphStrong">from</span> BeautifulSoup <span class="docEmphStrong">import</span> BeautifulSoup, SoupStrainer
+9    <span class="docEmphStrong">from</span> html5lib <span class="docEmphStrong">import</span> parse, treebuilders
+10
+11   URLs = (
+12       'http://python.org',
+13       'http://google.com',
+14   )
+15
+16   <span class="docEmphStrong">def</span> output(x):
+17       <span class="docEmphStrong">print</span> '\n'.join(sorted(set(x)))
+18
+19   <span class="docEmphStrong">def</span> simpleBS(url, f):
+20       'simpleBS() - use BeautifulSoup to parse all tags to get anchors'
+21       output(urljoin(url, x['href']) <span class="docEmphStrong">for</span> x <span class="docEmphStrong">in</span> BeautifulSoup(
+22           f).findAll('a'))
+23
+24   <span class="docEmphStrong">def</span> fasterBS(url, f):
+25       'fasterBS() - use BeautifulSoup to parse only anchor tags'
+26       output(urljoin(url, x['href']) <span class="docEmphStrong">for</span> x <span class="docEmphStrong">in</span> BeautifulSoup(
+27           f, parseOnlyThese=SoupStrainer('a')))
+28
+29   <span class="docEmphStrong">def</span> htmlparser(url, f):
+30       'htmlparser() - use HTMLParser to parse anchor tags'
+31       <span class="docEmphStrong">class</span> AnchorParser(HTMLParser):
+32           <span class="docEmphStrong">def</span> handle_starttag(self, tag, attrs):
+33               <span class="docEmphStrong">if</span> tag != 'a':
+34                   <span class="docEmphStrong">return</span>
+35               <span class="docEmphStrong">if not</span> hasattr(self, 'data'):
+36                   self.data = []
+37               <span class="docEmphStrong">for</span> attr <span class="docEmphStrong">in</span> attrs:
+38                   <span class="docEmphStrong">if</span> attr[0] == 'href':
+39                       self.data.append(attr[1])
+40       parser = AnchorParser()
+41       parser.feed(f.read())
+42       output(urljoin(url, x) <span class="docEmphStrong">for</span> x <span class="docEmphStrong">in</span> parser.data)
+43
+44   <span class="docEmphStrong">def</span> html5libparse(url, f):
+45       'html5libparse() - use html5lib to parse anchor tags'
+46       output(urljoin(url, x.attributes['href']) \
+47           <span class="docEmphStrong">for</span> x <span class="docEmphStrong">in</span> parse(f) <span class="docEmphStrong">if</span> isinstance(x,
+48           treebuilders.simpletree.Element) <span class="docEmphStrong">and</span> \
+49           x.name == 'a')
+50
+51   <span class="docEmphStrong">def</span> process(url, data):
+52       <span class="docEmphStrong">print</span> '\n*** simple BS'
+53       simpleBS(url, data)
+54       data.seek(0)
+55       <span class="docEmphStrong">print</span> '\n*** faster BS'
+56       fasterBS(url, data)
+57       data.seek(0)
+58       <span class="docEmphStrong">print</span> '\n*** HTMLParser'
+59       htmlparser(url, data)
+60       data.seek(0)
+61       <span class="docEmphStrong">print</span> '\n*** HTML5lib'
+62       html5libparse(url, data)
+63
+64   <span class="docEmphStrong">def</span> main():
+65       <span class="docEmphStrong">for</span> url <span class="docEmphStrong">in</span> URLs:
+66           f = urlopen(url)
+67           data = StringIO(f.read())
+68           f.close()
+69           process(url, data)
+70
+71    <span class="docEmphStrong">if</span> __name__ == '__main__':
+72       main()
+
+					  </pre><br/>
+</div><p></p>
+
+<h5 class="docSection3Title" id="title-ID0EQ1DI">Line-by-Line Explanation</h5>
+
+<h5 class="docSection4Title" id="title-ID0EY1DI">Lines 1–9</h5>
+<p class="docText">In this script, we use four modules from the standard library. <tt>HTMLParser</tt>
+ is one of the parsers; the other three are for general use throughout. 
+The second group of imports are of third-party (non-standard library) 
+modules/packages. This ordering is the generally accepted standard for 
+imports: standard library modules/packages first, followed by 
+third-party installations, and finally, any modules/packages local to 
+the application.</p>
+
+<h5 class="docSection4Title" id="title-ID0EL4DI">Lines 11–17</h5>
+<p class="docText">The <tt>URLs</tt> variable contains the Web pages to parse; feel free to add, change, or remove URLs here. The <tt>output()</tt>
+ function takes an iterable of links, removes duplicates by putting them
+ all into a set, sorts them in lexicographic order, and then merges them
+ into a NEWLINE-delimited string that is displayed to the user.</p>
+
+<h5 class="docSection4Title" id="title-ID0E24DI">Lines 19–27</h5>
+<p class="docText">We highlight the use of <tt>BeautifulSoup</tt> in the <tt>simpleBS()</tt> and <tt>fasterBS()</tt> functions. In <tt>simpleBS()</tt>, the parsing happens when you instantiate <tt>BeautifulSoup</tt>
+ with the file handle. In the following short snippet, we do exactly 
+that, using an already downloaded page from the PyCon Web site as <tt>pycon.html</tt>.</p>
+<div class="docText"><pre>&gt;&gt;&gt; <span class="docEmphStrong">from</span> BeautifulSoup <span class="docEmphStrong">import</span> BeautifulSoup <span class="docEmphStrong">as</span> BS
+&gt;&gt;&gt; f = open('pycon.html')
+&gt;&gt;&gt; bs = BS(f)</pre></div><br/>
+<p class="docText">When you get the instance and call its <tt>findAll()</tt> method requesting anchor (‘a’) tags, it returns a list of tags, as shown here:</p>
+<div class="docText"><pre>&gt;&gt;&gt; type(bs)
+&lt;class 'BeautifulSoup.BeautifulSoup'&gt;
+&gt;&gt;&gt; tags = bs.findAll('a')
+&gt;&gt;&gt; type(tags)
+&lt;type 'list'&gt;
+&gt;&gt;&gt; len(tags)
+19
+&gt;&gt;&gt; tag = tags[0]
+&gt;&gt;&gt; tag
+&lt;a href="/2011/"&gt;PyCon 2011 Atlanta&lt;/a&gt;
+&gt;&gt;&gt; type(tag)
+&lt;class 'BeautifulSoup.Tag'&gt;
+&gt;&gt;&gt; tag['href']
+u'/2011/'</pre></div><br/>
+<p class="docText">Because the <tt>Tag</tt> object is an anchor, it should have an <tt>'href'</tt> tag, so we ask for it. We then call <tt>urlparse.</tt><tt>urljoin()</tt> and pass along the head URL along with the link to get the full URL. Here’s our continuing example (assuming the PyCon URL):</p>
+<div class="docText"><pre>&gt;&gt;&gt; <span class="docEmphStrong">from</span> urlparse <span class="docEmphStrong">import</span> urljoin
+&gt;&gt;&gt; url = 'http://us.pycon.org'
+&gt;&gt;&gt; urljoin(url, tag['href'])
+u'http://us.pycon.org/2011/'</pre></div><br/>
+<p class="docText">The generator expression iterates over all the final links created by <tt>urlparse.urljoin()</tt> from all of the anchor tags and sends them to <tt>output()</tt>,
+ which processes them as just described. If the code is slightly more 
+difficult to understand because of the use of the generator expression, 
+we can expand out the code to the equivalent:</p>
+<div class="docText"><pre><span class="docEmphStrong">def</span> simpleBS(url, f):
+    parsed = BeautifulSoup(f)
+    tags = parsed.findAll('a')
+    links = [urljoin(url, tag['href']) <span class="docEmphStrong">for</span> tag <span class="docEmphStrong">in</span> tags]
+    output(links)</pre></div><br/>
+<p class="docText">For readability purposes, 
+this wins over our single line version, and we would recommend that when
+ developing open-source, work, or group collaborative projects, you 
+always consider this over a more cryptic one-liner.</p>
+<p class="docText">Although the <tt>simpleBS()</tt>
+ function is fairly easy to understand, one of its drawbacks is that the
+ way we’re processing it isn’t as efficient as it can be. We use <tt>BeautifulSoup</tt> to parse all the tags in this document and <span class="docEmphasis">then</span> look for the anchors. It would be quicker if we could just filter only the anchor tags (and ignore the rest).</p>
+<p class="docText">This is what <tt>fasterBS()</tt> does, accomplishing what we just described by using the <tt>SoupStrainer</tt> helper class (and passing that request to filter only anchor tags as the <tt>parseOnlyThese</tt> parameter). By using <tt>SoupStrainer</tt>, you can tell <tt>BeautifulSoup</tt>
+ to skip all the elements it isn’t interested in when building the parse
+ tree, so it saves time as well as memory. Also, once parsing has 
+completed, only the anchors make up the parse tree, so there’s no need 
+to use the <tt>findAll()</tt> method before iterating.</p>
+
+<h5 class="docSection4Title" id="title-ID0EQDAK">Lines 29–42</h5>
+<p class="docText">In <tt>htmlparser()</tt>, we use the standard library class <tt>HTMLParser.HTMLParser</tt> to do the parsing. You can see why <tt>BeautifulSoup</tt> is a popular parser; code is shorter and less complex than using <tt>HTMLParser</tt>. Our use of <tt>HTMLParser</tt> is also slower here because you have to manually build a list, that is, create an empty list and repeatedly call its <tt>append()</tt> method.</p>
+<p class="docText">You can also tell that <tt>HTMLParser</tt> is lower level than <tt>BeautifulSoup</tt>. You subclass it and have to create a method called <tt>handle_starttag()</tt>
+ that’s called every time a new tag is encountered in the file stream 
+(lines 31–39). We skip all non-anchor tags (lines 33–34), and then add 
+all anchor links to <tt>self.data</tt> (lines 37–39), initializing <tt>self.data</tt> when necessary (lines 35–36).</p>
+<p class="docText">To use your new parser, you instantiate and feed it (lines 40–41). The results, as you know, are placed into <tt>parser.data</tt>, and we create the full URLs and display them (line 42) as in our previous <tt>BeautifulSoup</tt> example.</p>
+
+<h5 class="docSection4Title" id="title-ID0EZGAK">Lines 44–49</h5>
+<p class="docText">The final example uses <tt>html5lib</tt>, a parser for HTML documents that follow the HTML5 specification. The simplest way of using <tt>html5lib</tt> is to call its <tt>parse()</tt> function with the payload (line 47). It builds and outputs a tree in its custom <tt>simpletree</tt> format.</p>
+<p class="docText">You can also choose to use any of a variety of popular tree formats, including <tt>minidom</tt>, <tt>ElementTree</tt>, <tt>lxml</tt>, or <tt>BeautifulSoup</tt>. To choose an alternative tree format, just pass the name of the desired format in to <tt>parse()</tt> as the <tt>treebuilder</tt> argument:</p>
+<div class="docText"><pre><span class="docEmphStrong">import</span> html5lib
+f = open("pycon.html")
+tree = html5lib.parse(f, treebuilder="lxml")
+f.close()</pre></div><br/>
+<p class="docText">Unless you need a specific tree, usually <tt>simpletree</tt> is good enough. If you were to perform a trial run and parse a generic document, you’d see output looking something like this:</p>
+<div class="docText"><pre class="preFixedHeight">&gt;&gt;&gt; <span class="docEmphStrong">import</span> html5lib
+&gt;&gt;&gt; f = open("pycon.html")
+&gt;&gt;&gt; tree = html5lib.parse(f)
+&gt;&gt;&gt; f.close()
+&gt;&gt;&gt; <span class="docEmphStrong">for</span> x <span class="docEmphStrong">in</span> data:
+...  <span class="docEmphStrong">print</span> x, type(x)
+...
+&lt;html&gt; &lt;class 'html5lib.treebuilders.simpletree.DocumentType'&gt;
+&lt;html&gt; &lt;class 'html5lib.treebuilders.simpletree.Element'&gt;
+&lt;head&gt; &lt;class 'html5lib.treebuilders.simpletree.Element'&gt;
+&lt;None&gt; &lt;class 'html5lib.treebuilders.simpletree.TextNode'&gt;
+&lt;meta&gt; &lt;class 'html5lib.treebuilders.simpletree.Element'&gt;
+&lt;None&gt; &lt;class 'html5lib.treebuilders.simpletree.TextNode'&gt;
+&lt;title&gt; &lt;class 'html5lib.treebuilders.simpletree.Element'&gt;
+&lt;None&gt; &lt;class 'html5lib.treebuilders.simpletree.TextNode'&gt;
+&lt;None&gt; &lt;class 'html5lib.treebuilders.simpletree.CommentNode'&gt;
+        . . .
+&lt;img&gt; &lt;class 'html5lib.treebuilders.simpletree.Element'&gt;
+&lt;None&gt; &lt;class 'html5lib.treebuilders.simpletree.TextNode'&gt;
+&lt;h1&gt; &lt;class 'html5lib.treebuilders.simpletree.Element'&gt;
+&lt;a&gt; &lt;class 'html5lib.treebuilders.simpletree.Element'&gt;
+&lt;None&gt; &lt;class 'html5lib.treebuilders.simpletree.TextNode'&gt;
+&lt;h2&gt; &lt;class 'html5lib.treebuilders.simpletree.Element'&gt;
+&lt;None&gt; &lt;class 'html5lib.treebuilders.simpletree.TextNode'&gt;
+        . . .
+
+					  </pre></div><br/>
+<p class="docText">Most of the traversed items are either <tt>Element</tt> or <tt>TextNode</tt> objects. We don’t really care about <tt>TextNode</tt> objects in our example here; we’re only concerned with one specific type of <tt>Element</tt> object, the anchor. To filter these out, we have two checks in the <span class="docEmphStrong"><tt>if</tt></span> clause of the generator expression: only look at <tt>Element</tt>s, and of those, only anchors (lines 47–49). For those that meet this criteria, we pull out their <tt>'href'</tt> attribute, merge into a complete URL, and output that as before (line 46).</p>
+
+<h5 class="docSection4Title" id="title-ID0EVKAK">Lines 51–72</h5>
+<p class="docText">The drivers of this application are the <tt>main()</tt>
+ function, which process each of links found on lines 11–14. It makes 
+one call to download the Web page and immediately sticks the data into a
+ <tt>StringIO</tt> object (lines 65–68) so that we can iterate over them using each of the parsers (line 69) via a call to <tt>process()</tt>.</p>
+<p class="docText">The <tt>process()</tt> function (lines 51–62) takes the target URL and the <tt>StringIO</tt>
+ object, and then calls on each parser to perform its duty and output 
+its result. With every successive parse (after the first), <tt>process()</tt> must also reset the <tt>StringIO</tt> object back to the beginning (lines 54, 57, and 60) for the next parser.</p>
+<p class="docText">Once you’re satisfied with 
+the code and have it working, you can run it and see how each parser 
+outputs all links (sorted in alphabetical order) found in anchor tags 
+within the Web page’s URL. Note that at the time of this writing, there 
+is a preliminary port of <tt>BeautifulSoup</tt> to Python 3 but not <tt>html5lib</tt>.</p>
+
+<h4 class="docSection2Title" id="title-ID0E2LAK">9.3.3. Programmatic Web Browsing</h4>
+<p class="docText">In this final section
+ on Web clients, we’ll present a slightly different example that uses a 
+third-party tool, Mechanize (based on a similarly-named tool written for
+ Perl), which is designed to simulate a browser. It also spawned off a 
+Ruby version.</p>
+<p class="docText">In the previous example (<tt>parse_links.py</tt>), <tt>BeautifulSoup</tt> was one of the parsers we used to decipher Web page content. We’ll use that again here.</p>
+<p class="docText">If you wish to play along, you’ll need to have both Mechanize and <tt>BeautifulSoup</tt> installed on your system. Again, you can obtain and install them separately, or you can use a tool like <tt>easy_install</tt> or <tt>pip</tt>.</p>
+<p class="docText">Example 9-5 presents the <tt>mech.py</tt> script, which is very much of a <span class="docEmphasis">script</span> or batch-style application. There are no classes or functions. The whole thing is just one large <tt>main()</tt>
+ broken up into seven parts, each of which explores one page of the Web 
+site we’re examining today: the PyCon conference Web site from 2011. We 
+chose this because the site is not likely to change over time (more 
+recent conferences will get their own customized application).</p>
+<p class="docText">If it <span class="docEmphasis">does</span>
+ change, however, there are many Web sites to which you can adapt this 
+example, such as logging in to any Web-based e-mail service you 
+subscribe to or some tech news or blog site you frequent. By going over <tt>mech.py</tt> and what it does, you should have a good enough understanding of how it works to easily port the sample code to work elsewhere.</p>
+<h5 class="docExampleTitle" id="title-ID0E1NAK">Example 9-5. Programmatic Web Browsing (<tt>mech.py</tt>)</h5><p></p><div class="box">
+<p class="docText">In a very batch-like, 
+straightforward script, we employ the Mechanize third-party tool to 
+explore the PyCon 2011 Web site, parsing it with another non-standard 
+tool, <tt>BeautifulSoup</tt>.</p>
+<pre class="preFixedHeight">1    #!/usr/bin/env python
+2
+3    <span class="docEmphStrong">from</span> BeautifulSoup <span class="docEmphStrong">import</span> BeautifulSoup, SoupStrainer
+4    <span class="docEmphStrong">from</span> mechanize <span class="docEmphStrong">import</span> Browser
+5
+6    br = Browser()
+7
+8    # home page
+9    rsp = br.open('http://us.pycon.org/2011/home/')
+10   <span class="docEmphStrong">print</span> '\n***', rsp.geturl()
+11   <span class="docEmphStrong">print</span> "Confirm home page has 'Log in' link; click it"
+12   page = rsp.read()
+13   <span class="docEmphStrong">assert</span> 'Log in' <span class="docEmphStrong">in</span> page, 'Log in not in page'
+14   rsp = br.follow_link(text_regex='Log in')
+15
+16   # login page
+17   <span class="docEmphStrong">print</span> '\n***', rsp.geturl()
+18   <span class="docEmphStrong">print</span> 'Confirm at least a login form; submit invalid creds'
+19   <span class="docEmphStrong">assert</span> len(list(br.forms())) &gt; 1, 'no forms on this page'
+20   br.select_form(nr=0)
+21   br.form['username'] = 'xxx'  # wrong login
+22   br.form['password'] = 'xxx'  # wrong passwd
+23   rsp = br.submit()
+24
+25   # login page, with error
+26   <span class="docEmphStrong">print</span> '\n***', rsp.geturl()
+27   <span class="docEmphStrong">print</span> 'Error due to invalid creds; resubmit w/valid creds'
+28   <span class="docEmphStrong">assert</span> rsp.geturl() == 'http://us.pycon.org/2011/account/login/',
+   rsp.geturl()
+29   page = rsp.read()
+30   err = str(BS(page).find("div",
+31       {"id": "errorMsg"}).find('ul').find('li').string)
+32   <span class="docEmphStrong">assert</span> err == 'The username and/or password you specified are not cor-
+   rect.', err
+33   br.select_form(nr=0)
+34   br.form['username'] = YOUR_LOGIN
+35   br.form['password'] = YOUR_PASSWD
+36   rsp = br.submit()
+37
+38   # login successful, home page redirect
+39   <span class="docEmphStrong">print</span> '\n***', rsp.geturl()
+40   <span class="docEmphStrong">print</span> 'Logged in properly on home page; click Account link'
+41   <span class="docEmphStrong">assert</span> rsp.geturl() == 'http://us.pycon.org/2011/home/',
+   rsp.geturl()
+42   page = rsp.read()
+43   <span class="docEmphStrong">assert</span> 'Logout' <span class="docEmphStrong">in</span> page, 'Logout not in page'
+44   rsp = br.follow_link(text_regex='Account')
+45
+46   # account page
+47   <span class="docEmphStrong">print</span> '\n***', rsp.geturl()
+48   <span class="docEmphStrong">print</span> 'Email address parseable on Account page; go back'
+49   <span class="docEmphStrong">assert</span> rsp.geturl() == 'http://us.pycon.org/2011/account/email/',
+   rsp.geturl()
+50   page = rsp.read()
+51   <span class="docEmphStrong">assert</span> 'Email Addresses' <span class="docEmphStrong">in</span> page, 'Missing email addresses'
+52   <span class="docEmphStrong">print</span> '    Primary e-mail: %r' % str(
+53       BS(page).find('table').find('tr').find('td').find('b').string)
+54   rsp = br.back()
+55
+56   # back to home page
+57   <span class="docEmphStrong">print</span> '\n***', rsp.geturl()
+58   <span class="docEmphStrong">print</span> 'Back works, on home page again; click Logout link'
+59   <span class="docEmphStrong">assert</span> rsp.geturl() == 'http://us.pycon.org/2011/home/', rsp.geturl()
+60   rsp = br.follow_link(url_regex='logout')
+61
+62   # logout page
+63   <span class="docEmphStrong">print</span> '\n***', rsp.geturl()
+64   <span class="docEmphStrong">print</span> 'Confirm on Logout page and Log in link at the top'
+65   <span class="docEmphStrong">assert</span> rsp.geturl() == 'http://us.pycon.org/2011/account/logout/',
+   rsp.geturl()
+66   page = rsp.read()
+67   <span class="docEmphStrong">assert</span> 'Log in' <span class="docEmphStrong">in</span> page, 'Log in not in page'
+68   <span class="docEmphStrong">print</span> '\n*** DONE'
+
+					  </pre><br/>
+</div><p></p>
+
+<h5 class="docSection3Title" id="title-ID0EZRAK">Line-by-Line Explanation</h5>
+
+<h5 class="docSection4Title" id="title-ID0EBSAK">Lines 1–6</h5>
+<p class="docText">This
+ script is fairly simplistic. In fact, we don’t use any standard library
+ packages/modules, so all you see here are the imports of the <tt>Mechanize.Browser</tt> and <tt>BeautifulSoup.BeautifulSoup</tt> classes.</p>
+
+<h5 class="docSection4Title" id="title-ID0EXTAK">Lines 8–14</h5>
+<p class="docText">The first place we visit on 
+the PyCon 2011 Web site is the home page. We display the URL to the user
+ as a confirmation (line 10). Note that this is the final URL that is 
+visited because the original link might have redirected the user 
+elsewhere. The last part of this section (lines 12–14) confirms that the
+ user is not logged in by looking for the <tt>'</tt><tt>Log in</tt><tt>'</tt> link and following it.</p>
+
+<h5 class="docSection4Title" id="title-ID0EHUAK">Lines 16–23</h5>
+<p class="docText">Once we’ve confirmed that we’re
+ on a login page (that has at least one form on it), we select the first
+ (and only) form, fill in the authentication fields with erroneous data 
+(unless, unfortunately, your login and password are both <tt>'xxx'</tt>), and submit it.</p>
+
+<h5 class="docSection4Title" id="title-ID0EVUAK">Lines 25–36</h5>
+<p class="docText">Upon confirmation of a login
+ error on the login page (lines 28–32), we fill in the fields with the 
+correct credentials (which the reader must supply [<tt>YOUR_LOGIN</tt>, <tt>YOUR_PASSWD</tt>]) and resubmit.</p>
+
+<h5 class="docSection4Title" id="title-ID0EFVAK">Lines 38–44</h5>
+<p class="docText">Once authentication has been 
+validated, you are directed back to the home page. This is confirmed (on
+ lines 41–43) by checking for a “Logout” link (which wouldn’t be there 
+if you had not successfully logged in). We then click the Account link.</p>
+
+<h5 class="docSection4Title" id="title-ID0EQVAK">Lines 46–54</h5>
+<p class="docText">You must register by using an
+ e-mail address. You can have more than one, but there must be a single 
+primary address. Your e-mail addresses are the first tab that you arrive
+ at when visiting this page for your Account information. We use <tt>BeautifulSoup</tt>
+ to parse and display the e-mail address table and peek into the first 
+cell of the first row of the table (lines 52–53). The next step is to 
+click the “click on the back button” to return to the home page.</p>
+
+<h5 class="docSection4Title" id="title-ID0E5VAK">Lines 56–60</h5>
+<p class="docText">This
+ is the shortest of all the sections; we really don’t do much here 
+except confirm that we’re back on the home page (lines 59), then follow 
+the “Logout” link.</p>
+
+<h5 class="docSection4Title" id="title-ID0ECYAK">Lines 62–68</h5>
+<p class="docText">The last section confirms 
+we’re on the logout page and that you’re not logged in. This is 
+accomplished by checking to see if there’s a “Log in” link on this page 
+(lines 66–67).</p>
+<p class="docText">This application demonstrates that, using <tt>Mechanize.Browser</tt>
+ is fairly straightforward. You just need to mentally map user activity 
+in a browser to the right method calls. Ultimately, the primary concern 
+is whether the underlying Web page or application will be altered by its
+ developers, potentially rendering our script out-of-date. Note that at 
+the time of this writing, there is no Python 3 port of Mechanize yet.</p>
+
+<h5 class="docSection3Title" id="title-ID0ETYAK">Summary</h5>
+<p class="docText">This concludes our look at various types of Web clients. We can now turn our attention to Web servers.</p>
+</div>
+</body>
+</html>

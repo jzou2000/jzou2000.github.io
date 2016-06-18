@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>11.12. Forms and Model Forms</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">11.12. Forms and Model Forms</h3>
+<p class="docText">In the previous section, we 
+demonstrated how to work with user input by showing you the steps to 
+create an HTML form. Now, we will show you how Django simplifies the 
+effort required to accept user data (Django Forms), especially forms 
+containing the exact fields that makes up a data model (Django Model 
+Forms).</p>
+
+<h4 class="docSection2Title" id="title-ID0EPSAK">11.12.1. Introducing Django Forms</h4>
+<p class="docText">Discounting the one-time 
+additional work required to handle CSRFs, the three earlier steps to 
+integrate a simple input form frankly look too laborious and 
+repetitious. After all, this <span class="docEmphasis">is</span> Django, virtuous student of the DRY principle.</p>
+<p class="docText">The most 
+suspiciously repetitious parts of our app involve seeing our data model 
+embedded everywhere. In the form, we see the name and title:</p>
+<div class="docText"><pre>Title: &lt;input type=text name=title&gt;&lt;br&gt;
+Body: &lt;textarea name=body rows=3 cols=60&gt;&lt;/textarea&gt;&lt;br&gt;</pre></div><br/>
+<p class="docText">And in the <tt>create_blogpost()</tt> view, we see pretty much the same:</p>
+<div class="docText"><pre>BlogPost(
+    title=request.POST.get('title'),
+    body=request.POST.get('body'),
+    timestamp=datetime.now(),
+).save()</pre></div><br/>
+<p class="docText">The point is that once you’ve
+ defined the data model, it should be the only place where you see 
+title, body, and perhaps timestamp (although the last is a special case 
+because we do not ask the user to input this value). Based on the data 
+model alone, isn’t it straightforward to expect the Web framework to 
+come up with the form fields? Why should the developer have to write 
+this in addition to the data model? This is where Django forms come in.</p>
+<p class="docText">First, let’s create a Django form for our input data:</p>
+<div class="docText"><pre><span class="docEmphStrong">from</span> django <span class="docEmphStrong">import</span> forms
+
+<span class="docEmphStrong">class</span> BlogPostForm(forms.Form):
+    title = forms.CharField(max_length=150)
+    body = forms.CharField(widget=forms.Textarea)
+    timestamp = forms.DateTimeField()</pre></div><br/>
+<p class="docText">Okay, that’s not quite 
+complete. In our HTML form, we specified the HTML textarea element to 
+have three rows and a width of sixty characters. Because we’re replacing
+ the raw HTML by writing code that automatically generates it, we need 
+to find a way to specify these requirements, and in this case, the 
+solution is to pass these attributes directly:</p>
+<div class="docText"><pre>body = forms.CharField(
+    widget=forms.Textarea(attrs={'rows':3, 'cols':60})
+)</pre></div><br/>
+
+<h4 class="docSection2Title" id="title-ID0EEVAK">11.12.2. The Case for Model Forms</h4>
+<p class="docText">Aside from the minor blip regarding specifying attributes, did you do a double-take when looking at the <tt>BlogPostForm</tt> definition? I mean, wasn’t <span class="docEmphasis">it</span> repetitious too? As you can see in the following, it looks nearly identical to the data model:</p>
+<div class="docText"><pre><span class="docEmphStrong">class</span> BlogPost(models.Model):
+    title = models.CharField(max_length=150)
+    body = models.TextField()
+    timestamp = models.DateTimeField()</pre></div><br/>
+<p class="docText">Yes, you would be 
+correct: they look almost like fraternal twins. This is far too much 
+duplication for any self-respecting Django script. What we did 
+previously by creating a stand-alone <tt>Form</tt> object is fine if we wanted to create a form for a Web page from scratch without a data model backing it.</p>
+<p class="docText">However, if the form fields are an exact match with a data model, then a <tt>Form</tt> isn’t what we’re looking for; instead, you would really do better with a Django <tt>ModelForm</tt>, as demonstrated here:</p>
+<div class="docText"><pre><span class="docEmphStrong">class</span> BlogPostForm(forms.ModelForm):
+    <span class="docEmphStrong">class</span> Meta:
+        model = BlogPost</pre></div><br/>
+<p class="docText">Much better—now that’s the laziness we’re looking for. By switching from a <tt>Form</tt> to a <tt>ModelForm</tt>, we can define a <tt>Meta</tt>
+ class that designates on which data model the form should be based. 
+When the HTML form is generated, it will have fields for all attributes 
+of the data model.</p>
+<p class="docText">In
+ our case though, we don’t trust the user to enter the correct 
+timestamp, and instead, we want our app to add that content 
+programmatically, per post entry. Not a problem, we only need to add one
+ more attribute named <tt>exclude</tt> to remove form items from the generated HTML. Integrate the import as well as the full <tt>BlogPostForm</tt> class presented in the following example to the bottom of your <tt>blog/models.py</tt> file, following your definition of <tt>BlogPost</tt>:</p>
+<div class="docText"><pre># blog/models.py
+<span class="docEmphStrong">from</span> django.db <span class="docEmphStrong">import</span> models
+<span class="docEmphStrong">from</span> django <span class="docEmphStrong">import</span> forms
+
+<span class="docEmphStrong">class</span> BlogPost(models.Model):
+. . .
+
+<span class="docEmphStrong">class</span> BlogPostForm(forms.ModelForm):
+    <span class="docEmphStrong">class</span> Meta:
+        model = BlogPost
+        exclude = ('timestamp',)</pre></div><br/>
+
+<h4 class="docSection2Title" id="title-ID0EMZAK">11.12.3. Using the <tt>ModelForm</tt> to Generate the HTML Form</h4>
+<p class="docText">What does this buy us? Well, right off the bat we can just cut out the fields in our form. Thus, change the code at the top of <tt>mysite/blog/templates/archive.html</tt> to:</p>
+<div class="docText"><pre>&lt;form action="/blog/create/" method=post&gt;{% csrf_token %}
+    &lt;table&gt;{{ form }}&lt;/table&gt;&lt;br&gt;
+    &lt;input type=submit&gt;
+&lt;/form&gt;</pre></div><br/>
+<p class="docText">Yeah, you need to leave the 
+submit button in there. Also, as you can see, the form defaults to the 
+innards of a table. Want some proof? Just go into the Django shell, make
+ a <tt>BlogPostForm</tt>, and then mess around with it a little. It’s as easy as this:</p>
+<div class="docText"><pre>&gt;&gt;&gt; <span class="docEmphStrong">from</span> blog.models <span class="docEmphStrong">import</span> BlogPostForm
+&gt;&gt;&gt; form = BlogPostForm()
+&gt;&gt;&gt; form
+&lt;blog.models.BlogPostForm object at 0x12d32d0&gt;
+&gt;&gt;&gt; str(form)
+'&lt;tr&gt;&lt;th&gt;&lt;label for="id_title"&gt;Title:&lt;/label&gt;&lt;/th&gt;&lt;td&gt;&lt;input
+id="id_title" type="text" name="title" maxlength="150" /&gt;&lt;/td&gt;&lt;/
+tr&gt;\n&lt;tr&gt;&lt;th&gt;&lt;label for="id_body"&gt;Body:&lt;/label&gt;&lt;/th&gt;&lt;td&gt;&lt;textarea
+id="id_body" rows="10" cols="40" name="body"&gt;&lt;/textarea&gt;&lt;/td&gt;&lt;/tr&gt;'</pre></div><br/>
+<p class="docText">That’s all the HTML that you <span class="docEmphasis">didn’t</span> have to write. (Again, note that due to our <tt>exclude</tt>,
+ the timestamp is left out of the form. For fun, you can temporarily 
+comment it out and see the additional timestamp field in the generated 
+HTML.)</p>
+<p class="docText">If you want output different from HTML table rows and cells, you can request it by using the <tt>as_*()</tt> methods: <tt>{{ form.as_p }}</tt> for <tt>&lt;p&gt;...&lt;/p&gt;</tt> delimited text, <tt>{{ form.as_ul</tt> <tt>}}</tt> for a bulleted list with <tt>&lt;li&gt;</tt> elements, etc.</p>
+<p class="docText">The URLconf stays the same, so the last modification necessary is updating the view function to send the <tt>ModelForm</tt>
+ over to the template. To do this, you instantiate it and pass it as an 
+additional key-value pair of the context dictionary. So, change the 
+final line of <tt>archive()</tt> in <tt>blog/views.py</tt> to the following:</p>
+<div class="docText"><pre><span class="docEmphStrong">return</span> render_to_response('archive.html', {'posts': posts,
+    <span class="docEmphasis">'form': BlogPostForm()</span>}, RequestContext(request))</pre></div><br/>
+<p class="docText">Don’t forget to add the import for both your data <span class="docEmphasis">and</span> form models at the top of <tt>views.py</tt>:</p>
+<div class="docText"><pre><span class="docEmphStrong">from</span> blog.models <span class="docEmphStrong">import</span> BlogPost, BlogPostForm</pre></div><br/>
+
+<h4 class="docSection2Title" id="title-ID0EC5AK">11.12.4. Processing the <tt>ModelForm</tt> Data</h4>
+<p class="docText">The changes we just made were to create the <tt>ModelForm</tt>
+ and have it generate the HTML to present to the user. What about after 
+the user has submitted her information? We still see duplication in the <tt>create_blogpost()</tt> view which, as you know, is also in <tt>blog/views.py</tt>. Similar to how we defined the <tt>Meta</tt> class for <tt>BlogPostForm</tt> to instruct it to take its fields from <tt>BlogPost</tt>, we shouldn’t have to create our object like this in <tt>create_blogpost()</tt>:</p>
+<div class="docText"><pre><span class="docEmphStrong">def</span> create_blogpost(request):
+    <span class="docEmphStrong">if</span> request.method == 'POST':
+        BlogPost(
+            title=request.POST.get('title'),
+            body=request.POST.get('body'),
+            timestamp=datetime.now(),
+        ).save()
+    <span class="docEmphStrong">return</span> HttpResponseRedirect('/blog/')</pre></div><br/>
+<p class="docText">There should be no need to 
+mention title, body, etc., because they’re in the data model. We should 
+be able to shorten this view to the following:</p>
+<div class="docText"><pre><span class="docEmphStrong">def</span> create_blogpost(request):
+    <span class="docEmphStrong">if</span> request.method == 'POST':
+        form = BlogPostForm(request.POST)
+        <span class="docEmphStrong">if</span> form.is_valid():
+            form.save()
+    <span class="docEmphStrong">return</span> HttpResponseRedirect('/blog/')</pre></div><br/>
+<p class="docText">Unfortunately, we can’t do this 
+because of the timestamp. We had to make an exception in the preceding 
+HTML form generation, so we need to do likewise here. Here is the <span class="docEmphStrong"><tt>if</tt></span> clause that we need to use:</p>
+<div class="docText"><pre><span class="docEmphStrong">if</span> form.is_valid():
+    post = form.save(commit=False)
+    post.timestamp=datetime.now()
+    post.save()</pre></div><br/>
+<p class="docText">As you can see, we have to
+ add the timestamp to our data and then manually save the object to get 
+our desired result. Note that this is the form <tt>save()</tt>, not the model <tt>save()</tt>, which returns an instance of the <tt>Blog</tt> model, but because <tt>commit=False</tt>, no data is written to the database until <tt>post.save()</tt> is called. Once these changes are in place, you can start using the form normally, as illustrated in Figure 11-20.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 11-20. The automatically generated user form.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="320" id="" src="Images/getfile-47.jpg" width="500"/><p></p>
+</center><p></p><br/>
+</div>
+</body>
+</html>

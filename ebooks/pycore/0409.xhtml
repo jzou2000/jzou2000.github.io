@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>4.9. Alternative Considerations to Threads</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">4.9. Alternative Considerations to Threads</h3>
+<p class="docText">Before you rush off and do 
+some threading, let’s do a quick recap: threading in general is a good 
+thing. However, because of the restrictions of the GIL in Python, 
+threading is more appropriate for I/O-bound applications (I/O releases 
+the GIL, allowing for more concurrency) than for CPU-bound applications.
+ In the latter case, to achieve greater parallelism, you’ll need 
+processes that can be executed by other cores or CPUs.</p>
+<p class="docText">Without going into too much 
+detail here (some of these topics have already been covered in the 
+“Execution Environment” chapter of <span class="docEmphasis">Core Python Programming</span> or <span class="docEmphasis">Core Python Language Fundamentals</span>), when looking at multiple threads or processes, the primary alternatives to the <tt>threading</tt> module include:</p>
+
+<h4 class="docSection2Title" id="title-ID0EJ4BG">4.9.1. The <tt>subprocess</tt> Module</h4>
+<p class="docText">
+<img alt="" border="0" height="34" id="" src="Images/getfile_002-15.jpg" width="54"/></p>
+<p class="docText">This is the primary 
+alternative when desiring to spawn processes, whether to purely execute 
+stuff or to communicate with another process via the standard files (<tt>stdin</tt>, <tt>stdout</tt>, <tt>stderr</tt>). It was introduced to Python in version 2.4.</p>
+
+<h4 class="docSection2Title" id="title-ID0EK5BG">4.9.2. The <tt>multiprocessing</tt> Module</h4>
+<p class="docText">
+<img alt="" border="0" height="35" id="" src="Images/getfile-17.jpg" width="54"/></p>
+<p class="docText">This
+ module, added in Python 2.6, lets you spawn processes for multiple 
+cores or CPUs but with an interface very similar to that of the 
+threading module; it also contains various mechanisms to pass data 
+between processes that are cooperating on shared work.</p>
+
+<h4 class="docSection2Title" id="title-ID0E3AAI">4.9.3. The <tt>concurrent.futures</tt> Module</h4>
+<p class="docText">This is a new high-level library 
+that operates only at a “job” level, which means that you no longer have
+ to fuss with synchronization, or managing threads or processes. you 
+just <span class="docEmphasis">specify</span> a 
+thread or process pool with a certain number of “workers,” submit jobs, 
+and collate the results. It’s new in Python 3.2, but a port for Python 
+2.6+ is available at http://code.google.com/p/pythonfutures.</p>
+<p class="docText">
+<img alt="" border="0" height="34" id="" src="Images/getfile_003-4.jpg" width="54"/></p>
+<p class="docText">What would <tt>bookrank3.py</tt> look like with this change? Assuming everything else stays the same, here’s the new import and modified <tt>_main()</tt> function:</p>
+<div class="docText"><pre><span class="docEmphStrong">from</span> concurrent.futures <span class="docEmphStrong">import</span> ThreadPoolExecutor
+         . . .
+<span class="docEmphStrong">def</span> _main():
+    print('At', ctime(), 'on Amazon...')
+    <span class="docEmphStrong">with</span> ThreadPoolExecutor(3) <span class="docEmphStrong">as</span> executor:
+        <span class="docEmphStrong">for</span> isbn <span class="docEmphStrong">in</span> ISBNs:
+            executor.submit(_showRanking, isbn)
+    print('all DONE at:', ctime())</pre></div><br/>
+<p class="docText">The argument given to <tt>concurrent.futures.ThreadPoolExecutor</tt>
+ is the thread pool size, and our application is looking for the 
+rankings of three books. Of course, this is an I/O-bound application for
+ which threads are more useful. For a CPU-bound application, we would 
+use <tt>concurrent. futures.ProcessPoolExecutor</tt>, instead.</p>
+<p class="docText">Once we have an executor 
+(whether threads or processes), which is responsible for dispatching the
+ jobs and collating the results, we can call its <tt>submit()</tt> method to execute what we would have had to spawn a thread to run previously.</p>
+<p class="docText">If we do a “full” port to Python 3 by replacing the string format operator with the <tt>str.format()</tt> method, making liberal use of the <span class="docEmphStrong"><tt>with</tt></span> statement, and using the executor’s <tt>map()</tt> method, we can actually delete <tt>_showRanking()</tt> and roll its functionality into <tt>_main()</tt>. In Example 4-13, you’ll find our final <tt>bookrank3CF.py</tt> script.</p>
+<p class="docText"></p><h5 class="docExampleTitle" id="title-ID0ECEAI">Example 4-13. Higher-Level Job Management (<tt>bookrank3CF.py</tt>)</h5><p></p><div class="box">
+<p class="docText">Our friend, the book rank screenscraper, but this time using <tt>concurrent.futures</tt>.</p>
+<pre class="preFixedHeight">1    #!/usr/bin/env python
+2
+3    <span class="docEmphStrong">from</span> concurrent.futures <span class="docEmphStrong">import</span> ThreadPoolExecutor
+4    <span class="docEmphStrong">from</span> re <span class="docEmphStrong">import</span> compile
+5    <span class="docEmphStrong">from</span> time <span class="docEmphStrong">import</span> ctime
+6    <span class="docEmphStrong">from</span> urllib.request <span class="docEmphStrong">import</span> urlopen <span class="docEmphStrong">as</span> uopen
+7
+8    REGEX = compile(b'#([\d,]+) in Books ')
+9    AMZN = 'http://amazon.com/dp/'
+10   ISBNs = {
+11       '0132269937': 'Core Python Programming',
+12       '0132356139': 'Python Web Development with Django',
+13       '0137143419': 'Python Fundamentals',
+14   }
+15
+16   <span class="docEmphStrong">def</span> getRanking(isbn):
+17       <span class="docEmphStrong">with</span> uopen('{0}{1}'.format(AMZN, isbn)) <span class="docEmphStrong">as</span> page:
+18           <span class="docEmphStrong">return</span> str(REGEX.findall(page.read())[0], 'utf-8')
+19
+20   <span class="docEmphStrong">def</span> _main():
+21       print('At', ctime(), 'on Amazon...')
+22       <span class="docEmphStrong">with</span> ThreadPoolExecutor(3) <span class="docEmphStrong">as</span> executor:
+23           <span class="docEmphStrong">for</span> isbn, ranking <span class="docEmphStrong">in</span> zip(
+24                   ISBNs, executor.map(getRanking, ISBNs)):
+25              print('- %r ranked %s' % (ISBNs[isbn], ranking)
+26       print('all DONE at:', ctime())
+27
+28   <span class="docEmphStrong">if</span> __name__ == '__main__':
+29       main()
+
+					  </pre><br/>
+</div><p></p>
+
+<h5 class="docSection3Title" id="title-ID0EKIAI">Line-by-Line Explanation</h5>
+
+<h5 class="docSection4Title" id="title-ID0ESIAI">Lines 1–14</h5>
+<p class="docText">Outside of the new <span class="docEmphStrong"><tt>import</tt></span> statement, everything in the first half of this script is identical to the <tt>bookrank3.py</tt> file we looked at earlier in this chapter.</p>
+
+<h5 class="docSection4Title" id="title-ID0EEJAI">Lines 16–18</h5>
+<p class="docText">The new <tt>getRanking()</tt> uses the <span class="docEmphStrong"><tt>with</tt></span> statement and <tt>str.format()</tt>. You can make the same change to <tt>bookrank.py</tt> because both features are available in version 2.6+ (they are not unique to version 3.x).</p>
+
+<h5 class="docSection4Title" id="title-ID0E1JAI">Lines 20–26</h5>
+<p class="docText">In the previous code example, we used <tt>executor.submit()</tt> to spawn the jobs. Here, we tweak this slightly by using <tt>executor.map()</tt> because it allows us to absorb the functionality from <tt>_showRanking()</tt>, letting us remove it entirely from our code.</p>
+<p class="docText">The output is nearly identical to what we’ve seen earlier:</p>
+<div class="docText"><pre>$ python3 bookrank3CF.py
+At Wed Apr  6 00:21:50 2011 on Amazon...
+- 'Core Python Programming' ranked 43,992
+- 'Python Fundamentals' ranked 1,018,454
+- 'Python Web Development with Django' ranked 502,566
+all DONE at: Wed Apr  6 00:21:55 2011</pre></div><br/>
+<p class="docText">You can read more about the <tt>concurrent.futures</tt> module origins at the link below.</p>
+<ul><li><p class="docList">http://docs.python.org/dev/py3k/library/concurrent.futures.html</p></li><li><p class="docList">http://code.google.com/p/pythonfutures/</p></li><li><p class="docList">http://www.python.org/dev/peps/pep-3148/</p></li></ul>
+<p class="docText">A summary of these options and other threading-related modules and packages can be found in the next section.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,863 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>The GNU Make Programming Language</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+<h3>The GNU Make Programming Language</h3>
+
+<p class="docText">The GNU Make tool is controlled by a user-written program script, stored in a file named <tt>Makefile</tt>.
+ GNU Make provides a comprehensive programming language and gives a 
+makefile developer enough functionality to describe the build process. 
+You might find it useful to view the GNU Make language as three distinct
+ programming languages integrated into one, each playing a slightly 
+different role.</p>
+
+<p class="docText">The three sublanguages are as follows:</p>
+
+<ul>
+  <li>
+    <p class="docText"><span class="docEmphStrong">File dependencies:</span> A rule-based syntax for describing the dependency relationships between files. A Make program is “executed” by matching disk filenames
+ against the rules that generate them. Instead of sequentially executing
+ rules, GNU Make performs a pattern-matching operation to decide which 
+rule to evaluate next.</p>
+    <div class="docText">
+      <pre>myprog: prog.c lib.c</pre>
+    </div>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphStrong">Shell commands:</span>
+ A list of shell commands encapsulated within each rule, to be executed 
+if the target of the rule is “out-of-date.” As with any shell script, 
+each command invokes a separate program, such as <tt>ls</tt>, <tt>cat</tt>, or <tt>gcc</tt>. Commands are executed in the order they’re listed and can use shell metacharacters to control sequencing and I/O redirection.</p>
+    <div class="docText">
+      <pre>cp myfile yourfile &amp;&amp; cp myfile1 yourfile1
+md5 &lt; myfile &gt;&gt;yourfile
+touch yourfile.done</pre>
+    </div>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphStrong">String processing:</span>
+ A language for manipulating GNU Make variables, such as treating them 
+as a list of values. This language uses the functional programming 
+paradigm in which each function is passed one or more string values as 
+input and returns a single string value as the result. By combining 
+different function calls, complex expressions can be evaluated.</p>
+    <div class="docText">
+      <pre>VARS := $(sort $(filter srcs-% cflags-%, $(.VARIABLES)))</pre>
+    </div>
+  </li>
+</ul>
+<p class="docText">With this combination of programming styles, it’s 
+possible to construct any type of build system, no matter how complex. 
+Let’s start by looking at GNU Make’s syntax and basic concepts. Later 
+you’ll examine how these can apply to real-world build scenarios.</p>
+
+
+<h4>Makefile Rules to Construct the Dependency Graph</h4>
+
+<p class="docText">To reiterate, a makefile consists of a number of 
+rules, each describing how to generate a particular target file from one
+ or more prerequisite input files. If the target file is out of date 
+with respect to the input files, the sequence of shell commands is 
+executed to bring it up-to-date. “Out-of-date” refers to the time stamp 
+on the file being older than the files it was derived from. Therefore, 
+the input files must have been changed more recently.</p>
+
+<p class="docText">As you saw in Chapter 2, the following makefile is a simplistic way of translating the <tt>calculator</tt> program’s dependency graph into code that GNU Make can understand.</p>
+
+<div class="docText">
+  <pre> 1  calculator: add.o calc.o mult.o sub.o
+ 2      gcc -g -o calculator add.o calc.o mult.o sub.o
+ 3
+ 4  add.o: add.c numbers.h
+ 5      gcc -g -c add.c
+ 6
+ 7  calc.o: calc.c numbers.h
+ 8      gcc -g -c calc.c
+ 9
+10  mult.o: mult.c numbers.h
+11      gcc -g -c mult.c
+12
+13  sub.o: sub.c numbers.h
+14      gcc -g -c sub.c</pre>
+</div>
+<br/>
+<p class="docText">Keep
+ in mind that GNU Make’s rule-based language doesn’t execute 
+sequentially, as would a program written in a procedural language. 
+Instead, the whole mechanism is based on matching target filenames 
+against whichever rule happens to match the name. As you see later, the 
+target of a rule (the left side) can also contain wildcards and variable
+ names, so locating a matching rule is not always a simple matter.</p>
+
+<p class="docText">Let’s not go into too much detail quite yet; this 
+chapter later examines GNU Make’s pattern-matching and rule-searching 
+algorithm. First you’ll learn about the different rules you can create.</p>
+
+
+
+<h4>Makefile Rule Types</h4>
+
+<p class="docText">In addition to the simple rules you’ve seen so far, 
+you can express dependencies in several other ways, making it easier for
+ makefile developers to get their job done. GNU Make is a flexible and 
+powerful language with a number of syntactical features for expressing 
+the relationship between files. Consider some examples:</p>
+
+<ul>
+  <li>
+    <p class="docText"><span class="docEmphStrong">Rules with multiple targets:</span>
+ The previous example had a single target file on the left side of the 
+rule. However, the following syntactical shortcut is also allowed:</p>
+    <div class="docText">
+      <pre>file1.o file2.o: source1.c source2.c source3.c
+        ... commands go here ...</pre>
+    </div>
+    <p class="docList">Of 
+course, this works only if both targets have the same set of 
+prerequisites and can be generated by the same list of shell commands.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphStrong">Rules with no prerequisites:</span>
+ Sometimes you want to define a target that doesn’t depend on any 
+prerequisites. You can use this approach to define pseudotargets that 
+don’t relate to actual disk files. In the following example, you’re 
+defining the <tt>help</tt> target to display a synopsis of the commands the developer can use:</p>
+    <div class="docText">
+      <pre>.PHONY: help
+help:
+        @echo "Usage: make all ARCH=[i386|mips]"
+        @echo "       make clean"</pre>
+    </div>
+    <p class="docList">If the developer types <tt>gmake help</tt>, no file named <tt>help</tt>
+ exists on the disk, and the shell commands shouldn’t proceed to create 
+that file. Additionally, the shell commands are executed every time the 
+help target is invoked because no time stamp checking needs to be 
+performed. Note the use of the <tt>PHONY</tt> directive to indicate that GNU Make should always execute the rule, even if somebody accidentally left a file named <tt>help</tt> sitting in the current directory.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphStrong">Rules with patterns in the filename:</span> As you probably noticed, the previous calculator example contained a lot of repetition. For every object file, such as <tt>add.o</tt>, there was a dependency on the corresponding C file, such as <tt>add.c</tt>.
+ Because there were four different source files, you had four different 
+rules that all looked similar. You can use wildcard characters as a 
+shortcut to specify that the target and prerequisite filenames must 
+match.</p>
+    <div class="docText">
+      <pre>%.o: %.c
+        ... commands go here ...</pre>
+    </div>
+    <p class="docList">This example matches any pair of files in which the target ends with <tt>.o</tt> and the prerequisite both ends with <tt>.c</tt> and also starts with the same sequence of characters (known as the <span class="docEmphStrong">stem</span>). In other words, a file <span class="docEmphasis">stem</span><tt>.o</tt> can be generated from the file <span class="docEmphasis">stem</span><tt>.c</tt> by executing the list of shell commands. When first asked to build the <tt>calculator</tt> target, GNU Make determines that <tt>calc.o</tt>, <tt>add.o</tt>, <tt>mult.o</tt>, and <tt>sub.o</tt> must all be generated and that this rule is capable of doing so.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphStrong">Rules that apply only to certain files:</span> To make the pattern matching in rules more useful, it’s also possible to state which files the pattern applies to. For example:</p>
+    <div class="docText">
+      <pre>a.o b.o: %.o: %.c
+     echo This rule is for a.o and b.o
+
+c.o d.o: %.o: %.c
+     echo This rule is for c.o and d.o</pre>
+    </div>
+    <p class="docList">By 
+being more specific about the list of files, you can create more 
+elaborate build systems. For example, you might want some object files 
+to be compiled with an x86-target compiler, whereas other object files 
+must be compiled with a MIPS compiler. Although you haven’t explored GNU
+ Make
+ variables in detail, this feature is a lot more useful if you have a 
+list of several hundred files stored in a single variable.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphStrong">Multiple rules with the same target:</span>
+ It’s often more useful to split the list of prerequisites for a target 
+across multiple rules than to define them all on the same line.</p>
+    <div class="docText">
+      <pre>chunk.o: chunk.c
+     gcc –c chunk.c
+
+chunk.o: chunk.h list.h data.h</pre>
+    </div>
+    <p class="docList">In this example, the rule states that <tt>chunk.o</tt> is generated from <tt>chunk.c</tt>, and a separate rule states that <tt>chunk.o</tt>
+ has dependencies on several other C header files. Only one of these 
+rules can contain a set of shell commands; the other rule simply 
+contributes to the list of prerequisites.</p>
+  </li>
+</ul>
+<p class="docText">If you’re curious about these and other ways of writing makefile rules, study the GNU Make reference manual for more examples.</p>
+
+
+
+<h4>Makefile Variables</h4>
+
+<p class="docText">As with any other language, writing a nontrivial 
+program without using variables is difficult. The examples seen so far 
+in this chapter have used hard-coded file names, but that won’t work in a
+ large build system with hundreds of files. Let’s now see how GNU Make 
+variables can simplify a makefile.</p>
+
+<p class="docText">GNU Make variables are similar to those in other 
+programming languages, but they have a few unique behaviors of their 
+own. The rules are listed here:</p>
+
+
+
+
+
+
+
+<table class="docText" border="0">
+  <tbody>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>1. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">Variables are given a value by an assignment statement, such as <tt>X := 5</tt>. As you’ll see shortly, several types of assignment exist, each with their own semantics.<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>2. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">Variable values are referenced using the syntax <tt>$(X)</tt>.<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>3. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">All
+ variables are of string type, with the valuecontaining zero or more 
+characters. No mechanism exists for declaring variables before they’re 
+used, so assigning to them for the first time creates the variable.<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>4. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">Variables have global scope, which means that all assignments and references to the variable <tt>X</tt> (within a single makefile) refer to the same variable.<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>5. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">Variable names can contain upper- and lowercase letters, numbers, and punctuation symbols such as <tt>@</tt>, <tt>^</tt>, <tt>&lt;</tt>, and <tt>&gt;</tt>. To make them more visible, this book typically uses uppercase letters in the examples, but that’s not a requirement.<br/><br/></div>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<p class="docText">To illustrate these rules, consider a simple example.
+ You shouldn’t see any real surprises in this code, although an unusual 
+feature is that strings don’t require quotation marks around them. 
+Instead, they simply consume the remainder of the input line, with the 
+exception of anything after the comment (<tt>#</tt>) character.</p>
+
+<div class="docText">
+  <pre>1  FIRST := Hello there
+2  SECOND := World    # comments go here
+3  MESSAGE := $(FIRST) $(SECOND)
+4  FILES := add.c sub.c mult.c
+5  $(info $(MESSAGE) – The files are $(FILES))</pre>
+</div>
+<br/>
+<p class="docText">The last line, containing the <tt>$(info ...)</tt> directive, displays the following message on the output:</p>
+
+<div class="docText">
+  <pre>Hello there World – The files are add.c sub.c mult.c</pre>
+</div>
+<br/>
+<p class="docText">Although this example shows only one type of assignment statement, several actually exist, each with its own semantics:</p>
+
+<ul>
+  <li>
+    <p class="docText"><span class="docEmphStrong">Immediate evaluation:</span> This is the case you’ve already seen, using the <tt>:=</tt>
+ operator. The right side of the assignment is fully evaluated to a 
+constant string and then assigned to the variable listed on the left 
+side. Most modern programming languages use this type of immediate 
+evaluation in their assignment statements.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphStrong">Deferred evaluation:</span> This second type of assignment, using <tt>=</tt> instead of <tt>:=</tt>
+ enables you to defer the evaluation of variables until they’re actually
+ used instead of immediately converting them to a constant string. Now 
+look at a case in which a variable is defined in terms of other 
+variables.</p>
+    <div class="docText">
+      <pre>1  CC := gcc
+2  CFLAGS := -g
+3  CCOMP = $(CC) $(CFLAGS)  # observe the use of =
+4  $(info Compiler is $(CCOMP))
+5  CC := i386-linux-gcc
+6  $(info Compiler is $(CCOMP))</pre>
+    </div>
+    <p class="docList">Note that line 3 uses deferred assignment (the <tt>=</tt> sign). When you execute this makefile, the right side of line 3 isn’t evaluated until the <tt>CCOMP</tt> variable is actually used (which, in this case, is on lines 4 and 6). Given that the <tt>CC</tt> variable is modified on line 5, the value of <tt>CCOMP</tt> changes when it’s used the second time.</p>
+    <div class="docText">
+      <pre>$ gmake
+Compiler is gcc –g
+Compiler is i386-linux-gcc -g</pre>
+    </div>
+    <p class="docList">This
+ feature might seem a little awkward, but the capability to define 
+variables and then modify individual parts of the variable later can be 
+useful. You’ll see this again when you look at GNU Make’s built-in 
+rules.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphStrong">Conditional assignment:</span> In a third situation, you assign a value if the variable doesn’t already have one.</p>
+    <div class="docText">
+      <pre>1  CFLAGS := -g
+2  CFLAGS ?= -O
+3  $(info CFLAGS is $(CFLAGS))</pre>
+    </div>
+    <p class="docList">In this case, you supply a default value for <tt>CFLAGS</tt>
+ (on line 2), which is used if the user hasn’t already provided a value 
+earlier in the program (on line 1 here). Although this is an 
+oversimplified example, this feature is useful when you include one 
+makefile from within another, where the parent makefile might or might 
+not want to explicitly define the <tt>CFLAGS</tt> variable. If it chooses not to, the default value is used.</p>
+  </li>
+</ul>
+<p class="docText">Now let’s look at some of the variables and rules built into the tool, making it easier to construct a makefile.</p>
+
+
+
+<h4>Built-In Variables and Rules</h4>
+
+<p class="docText">GNU Make provides built-in rules and variables to address common build system requirements. First examine <span class="docEmphStrong">automatic variables</span>,
+ so named because their value depends on the context in which they’re 
+used. Unlike many other programming languages, GNU Make variable names 
+can contain punctuation symbols such as <tt>@</tt>, <tt>&lt;</tt>, and <tt>^</tt>.</p>
+
+<ul>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>$@</tt>:</span>
+ Contains the filename of the current rule’s target. Instead of 
+hard-coding the name of the target into the sequence of shell commands, 
+you use <tt>$@</tt> to have it automatically inserted. This is handy 
+when the rule uses wildcards to match the name of the target file and 
+there’s no specific name to be hard-coded.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>$&lt;</tt>:</span> Represents the first prerequisite of a rule. As shown in the following example, you use <tt>$@</tt> to represent the target of the rule (the object file you’re generating), and you use <tt>$&lt;</tt> to represent the first source file in the list. (In this case, only one source file is mentioned in the rule.)</p>
+    <div class="docText">
+      <pre>%.o: %.c
+     gcc –c –o $@ $&lt;</pre>
+    </div>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>$^</tt>:</span> Similar to <tt>$&lt;</tt>, but it evaluates to the complete list of prerequisites in the rule, with spaces between them.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>$(@D)</tt>:</span> Evaluates to the directory containing the target of the rule. For example, if the target is <tt>/home/john/work/src.c</tt>, then <tt>$(@D)</tt> evaluates to /<tt>home/john/work</tt>. This is useful when you have a shell command such as <tt>mkdir</tt> that needs to manipulate the target file’s directory.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>$(@F)</tt>:</span> Similar to <tt>$(@D)</tt>, but evaluates to the base name of the target file. If the target is <tt>/home/john/work/src.c</tt>, then <tt>$(@F)</tt> evaluates to <tt>src.c</tt>.</p>
+  </li>
+</ul>
+<p class="docText">Of course, many more variables are available in GNU Make, but they aren’t all listed here.</p>
+
+<p class="docText">In addition to variables, GNU Make provides built-in 
+rules. These are used for compiling C, C++, Yacc, and Fortran code, 
+among others. Invoking GNU Make with the <tt>–p</tt> command-line option (<tt>gmake –p</tt>) shows you the rules built into the system. Here’s the built-in rule for C compilation.</p>
+
+<div class="docText">
+  <pre>1  COMPILE.c = $(CC) $(CFLAGS) $(CPPFLAGS) $(TARGET_ARCH) –c
+2  OUTPUT_OPTION = -o $@
+3  %.o: %.c
+4      $(COMPILE.c) $(OUTPUT_OPTION) $&lt;</pre>
+</div>
+<br/>
+<p class="docText">This fragment shows a wildcard rule (lines 3 and 4) for generating <tt>.o</tt> files from the correspondingly named <tt>.c</tt> files. The automatic variables <tt>$@</tt> and <tt>$&lt;</tt> represent the target and prerequisite of the rule, which could be any matching pair of filenames that end in <tt>.o</tt> or <tt>.c</tt>, respectively. Notice also that line 1 of this rule uses deferred evaluation (the <tt>=</tt> sign), permitting developers to add their own values for <tt>CC</tt>, <tt>CFLAGS</tt>, <tt>CPPFLAGS</tt>, and <tt>TARGET_ARCH</tt>
+ later. In theory, each time this wildcard rule is used, it could be 
+with a different combination of flags, as set by the makefile developer.</p>
+
+<p class="docText">As you saw in Chapter 2, the <tt>calculator</tt> example can be rewritten to take advantage of this built-in C compilation rule.</p>
+
+<div class="docText">
+  <pre>1  calculator: add.o calc.o mult.o sub.o
+2      gcc -g -o calculator add.o calc.o mult.o sub.o
+3
+4  add.o calc.o mult.o sub.o: numbers.h</pre>
+</div>
+<br/>
+<p class="docText">That is, you can remove all the makefile rules that 
+specify how to compile a C source file into an object file, because the 
+implicit rule handles that case. To make the code even more readable, 
+you can then define and reference a number of variables:</p>
+
+<div class="docText">
+  <pre> 1  SRCS = add.c calc.c mult.c sub.c
+ 2  PROG = calculator
+ 3  CC = gcc
+ 4  CFLAGS = -g
+ 5  OBJS = $(SRCS:.c=.o)
+ 6
+ 7  $(PROG): $(OBJS)
+ 8      $(CC) $(CFLAGS) -o $@ $^
+ 9
+10  $(OBJS): numbers.h</pre>
+</div>
+<br/>
+<p class="docText">Note that <tt>CC</tt> and <tt>CFLAGS</tt> (lines 3 and 4) are implicitly inserted into the built-in C compilation rule that you saw earlier because <tt>COMPILE.c</tt> used deferred evaluation.</p>
+
+<p class="docText">Line 5 uses some clever syntax to set <tt>OBJS</tt> to the same value as the <tt>SRCS</tt> variable (defined on line 1) but with all the <tt>.c</tt> extensions changed to <tt>.o</tt>.
+ As you know from programming experience, it’s a bad idea to list all 
+the filenames twice, so you instead define one variable in terms of the 
+other.</p>
+
+<p class="docText">Line 7 is still required to link the final 
+executable, but this time you’re making use of variables instead of 
+hard-coding filenames. Note that <tt>CC</tt> and <tt>CFLAGS</tt> are the
+ same variables used when compiling source files into object files. If 
+you decide to change to a different compiler or add new compilation 
+flags, only lines 3 and 4 need to be modified.</p>
+
+<p class="docText">Finally, line 10 states that all object files depend on <tt>numbers.h</tt>. This is shorter than the previous version, in which all the object files had to be listed.</p>
+
+
+
+<h4>Data Structures and Functions</h4>
+
+<p class="docText">All of GNU Make’s variables are of string type but 
+this needn’t stop you from representing other data types, such as 
+numbers, lists, and structures. The key to storing complex data is to 
+find a way to represent information as a sequence of space-separated 
+words. GNU Make has plenty of features for manipulating variables in 
+this form.</p>
+
+<p class="docText">The following are some typical data structures you might find yourself using:</p>
+
+<div class="docText">
+  <pre>1 PROG_NAME := my-calculator
+2 LIST_OF_SRCS := calc.c main.c math.h lib.c
+3 COLORS := red FF0000 green 00FF00 blue 0000FF purple FF00FF
+4 ORDERS := 100 green cups 200 blue plates</pre>
+</div>
+<br/>
+<p class="docText">Line 1 is a standard variable assignment of a simple 
+string, and you’ll see this type of assignment in almost every makefile.
+ Line 2 is a common way of expressing lists of things, although, 
+obviously, the elements of the list can’t contain spaces. This can be 
+painful if you were planning to store <tt>C:\Program Files</tt> in a list.</p>
+
+<p class="docText">Lines 3 and 4 demonstrate more complex data structures that you probably won’t use as often. For the <tt>ORDERS</tt>
+ variable, element 1 is the quantity, element 2 is the color, and 
+element 3 is the item to purchase. The pattern repeats itself for each 
+additional order item. As long as you have a mechanism for extracting 
+specific items out of a list, you can treat this variable like a 
+structured data type.</p>
+
+<p class="docText">Consider some of the most common functions for dealing with strings:</p>
+
+<ul>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>words</tt>:</span> Given a list as input, returns the number of space-separated words in that list. In this example, <tt>$(NUM_FILES)</tt> evaluates to 4.</p>
+    <div class="docText">
+      <pre>NUM_FILES := $(words $(LIST_OF_SRCS))</pre>
+    </div>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>word</tt>:</span> Given a list, extracts the nth word from that list. The list is 1-based, so <tt>$(SECOND_FILE)</tt> evaluates to <tt>main.c</tt>.</p>
+    <div class="docText">
+      <pre>SECOND_FILE := $(word 2, $(LIST_OF_SRCS))</pre>
+    </div>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>filter</tt>:</span>
+ Returns the words from a list, which match a specific pattern. A common
+ use is to select a subset of files that match a specific filename 
+pattern (such as all C source files).</p>
+    <div class="docText">
+      <pre>C_SRCS := $(filter %.c, $(LIST_OF_SRCS))</pre>
+    </div>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>patsubst</tt>:</span> For each word in a list, replaces any that match a specific pattern with a replacement pattern. The <tt>%</tt>
+ character identifies the part of each word that remains unchanged (the 
+stem). Note that the first comma must not be followed by a space 
+character; otherwise, the replacement list ends up with two spaces 
+between each word.</p>
+    <div class="docText">
+      <pre>OBJECTS := $(patsubst %.c,%.o, $(C_SRCS))</pre>
+    </div>
+    <p class="docList">This example is similar to the <tt>$(C_SRCS:.c=.o)</tt> syntax you’ve already seen, with the resulting list being <tt>calc.o math.o lib.o</tt>.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>addprefix</tt>:</span> For each word in a list, prepends an additional string. In the following example, you add the <tt>objs/</tt> prefix to each element in the <tt>$(OBJECTS)</tt> list.</p>
+    <div class="docText">
+      <pre>OBJ_LIST := $(addprefix objs/, $(OBJECTS))</pre>
+    </div>
+    <p class="docList">In this case, <tt>$(OBJ_LIST)</tt> evaluates to <tt>objs/calc.o objs/main.o objs/lib.o</tt>.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>foreach</tt>:</span> Visits
+ each word in a list and constructs a new list containing the “mapped” 
+values. The mapping expression can consist of any combination of GNU 
+Make function calls. The following example is identical to the <tt>addprefix</tt> case, in that you’re constructing a new list in which all the filenames are mapped to the expression <tt>obj/$(file)</tt>.</p>
+    <div class="docText">
+      <pre>OBJ_LIST_2 := $(foreach file, $(OBJECTS),objs/$(file))</pre>
+    </div>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>dir/notdir</tt>:</span> Given a file’s pathname, returns the directory name component or the filename component.</p>
+    <div class="docText">
+      <pre>DEFN_PATH := src/headers/idl/interface.idl
+DEFN_DIR := $(dir $(DEFN_PATH))
+DEFN_BASENAME := $(notdir $(DEFN_PATH))</pre>
+    </div>
+    <p class="docList">In this case, <tt>$(DEFN_DIR)</tt> evaluates to <tt>src/headers/idl/</tt> (including the final <tt>/</tt>) and <tt>$(DEFN_BASENAME)</tt> evaluates to <tt>interface.idl</tt>.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>shell</tt>:</span>
+ Executes a shell command and returns the command’s output as a string. 
+The following example demonstrates a nonportable way of determining the 
+owner of the <tt>/etc/passwd</tt> file. This assumes that the third word in the output of the <tt>ls –l</tt> command is the name of the file’s owner.</p>
+    <div class="docText">
+      <pre>PASSWD_OWNER := $(word 3, $(shell ls -l /etc/passwd))</pre>
+    </div>
+  </li>
+</ul>
+<p class="docText">In addition to these functions, and the many other 
+functions listed in the GNU Make documentation, certain language 
+features are designed to keep GNU Make programs short and concise.</p>
+
+<p class="docText">First, the concept of a <span class="docEmphStrong">macro</span>
+ enables you to associate a name with a complex GNU Make expression and 
+to pass arguments into that expression. This enables you to write your 
+own GNU Make functions, effectively extending the basic language. The 
+following code defines a macro named <tt>file_size</tt> that returns the number of bytes in a file (again, this is nonportable). You use the <tt>$(1)</tt> syntax to reference the first parameter of the <tt>$(call)</tt> expression.</p>
+
+<div class="docText">
+  <pre>file_size = $(word 5, $(shell ls -l $(1)))
+PASSWD_SIZE := $(call file_size,/etc/passwd)</pre>
+</div>
+<br/>
+<p class="docText">Another shortcut is to define a canned sequence of shell commands by using the <tt>define</tt>
+ directive. When specifying the shell commands to be executed in GNU 
+Make rule, you call upon that canned sequence instead of writing it out 
+every time.</p>
+
+<div class="docText">
+  <pre>define start-banner
+    @echo ==============
+    @echo Starting build
+    @echo ==============
+endef
+
+.PHONY: all
+all:
+    $(start-banner)
+    $(MAKE) -C lib1</pre>
+</div>
+<br/>
+<p class="docText">These
+ language features, and many more discussed in the GNU Make 
+documentation, make it possible to construct powerful makefile-based 
+build systems.</p>
+
+
+
+<h4>Understanding Program Flow</h4>
+
+<p class="docText">This discussion of the GNU Make programming language 
+finishes with a study of how a GNU Make program flows—that is, in which 
+sequence the makefile is scanned and interpreted, and in which order the
+ various parts of the program are executed. You’ve seen many of GNU 
+Make’s language features, but you also need to understand how and when 
+these features are called into action.</p>
+
+<p class="docText">You’ll explore three topics that are somewhat unrelated, except that they all deal with the flow of a GNU Make program:</p>
+
+
+
+
+
+<table class="docText" border="0">
+  <tbody>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>1. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText"><span class="docEmphStrong">Parsing a makefile:</span>
+ Parsing a makefile involves two main phases: reading the makefile to 
+build the dependency graph and then executing the compilation commands. 
+Recall that a makefile is essentially a text-based representation of the
+ dependency graph, which itself is a mathematical structure showing the 
+relationship between files.<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>2. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText"><span class="docEmphStrong">Controlling the parsing process:</span>
+ GNU Make provides a number of features for controlling how you include a
+ submakefile, or conditionally compile parts of the makefile.<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>3. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText"><span class="docEmphStrong">Executing the rules:</span> The rule execution algorithm decides the order in which rules are applied and the corresponding shell commands are executed.<br/><br/></div>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<h5>Parsing a Makefile</h5>
+
+<p class="docText">For the first topic, consider what happens when a developer invokes the <tt>gmake</tt> command:</p>
+
+
+
+
+<table class="docText" border="0">
+  <tbody>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>1. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText"><span class="docEmphStrong">The makefile parsing phase:</span>
+ The makefile is parsed and validated, and the full dependency graph is 
+constructed. All rules are scanned, all variable assignments are 
+performed, and all variables and functions are evaluated. Any problems that occur in the definition of rules or the construction of the dependency graph are reported at this time.<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>2. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText"><span class="docEmphStrong">The rule execution phase:</span>
+ When the entire dependency graph is in memory, GNU Make examines the 
+time stamps on all the files to determine which files (if any) are out 
+of date. If it finds any such targets, the appropriate shell commands 
+are executed to bring those targets up-to-date. Any problems that occur 
+within the shell commands are reported at this time.<br/><br/></div>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<p class="docText">Although in many cases you don’t need to be aware of 
+these phases, this next example illustrates the difference between the 
+two. Again, keep in mind that variables are assigned in the first phase 
+and shell commands are executed in the second phase.</p>
+
+<div class="docText">
+  <pre>1  X := Hello World
+2
+3  print:
+4       echo X is $(X)
+5
+6  X := Goodbye</pre>
+</div>
+<br/>
+<p class="docText">This example should seem straightforward, although you might be surprised to see the result of invoking the <tt>print</tt> target:</p>
+
+<div class="docText">
+  <pre>$ gmake print
+X is Goodbye</pre>
+</div>
+<br/>
+<p class="docText">The reason is that line 4 (a shell command) is simply saved until the second phase, and <tt>$(X)</tt> is not evaluated at all. This means that the second assignment on line 6 dictates the value of <tt>$(X)</tt> to be used when the shell command is finally evaluated.</p>
+
+<p class="docText">If you’re going to become a makefile expert, it’s 
+important to feel comfortable with the operation of these two phases. 
+Much of your build system’s functionality can be implemented either by 
+using GNU Make functions (processed during the first phase) or as part 
+of a shell script (processed during the second phase). Also, when you 
+need to debug your makefile problems, you must understand the 
+distinction between the two phases because different problems arise at 
+each point in time.</p>
+
+
+
+<h5>Controlling the Parsing Process</h5>
+
+<p class="docText">Next, you must consider some additional flow-control features in GNU Make that impact the execution of a GNU Make-based program.</p>
+
+<ul>
+  <li>
+    <p class="docText"><span class="docEmphStrong">File inclusion:</span> Similar to how C and C++ use the <tt>#include</tt> directive, GNU Make enables you to read additional files as if they were part of the main makefile.
+ Any rules and variables defined inside the included file are treated as
+ if they’re actually written inside the main file.</p>
+    <div class="docText">
+      <pre>FILES := src1.c src2.c
+
+include prog.mk    # content of prog.mk textually
+                   # inserted here
+
+src1.o src2.o: src.h</pre>
+    </div>
+    <p class="docList">As you’ve seen, this 
+approach can be used to include a framework file containing reusable 
+sections of code. You’ll see another practical case of file inclusion 
+later in this chapter.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphStrong">Conditional compilation:</span> Similar to C/C++’s <tt>#ifdef</tt>
+ directive, you can conditionally include or exclude parts of the 
+makefile. This inclusion is done within the first phase of the makefile 
+parsing, so the conditional expressions need to be pretty simple 
+(instead of using shell commands).</p>
+    <div class="docText">
+      <pre>CFLAGS := -DPATH="/usr/local"
+ifdef DEBUG
+   CFLAGS += -g    # debug case if DEBUG is defined
+else
+   CFLAGS += -O    # non-debug case if DEBUG not defined
+endif</pre>
+    </div>
+  </li>
+</ul>
+
+<h5>Executing the Rules</h5>
+
+<p class="docText">Finally, let’s examine the algorithm GNU Make uses to
+ construct a dependency graph, and see how the execution of the makefile
+ flows as a result. Consider the main steps (with some of the detail 
+left out for convenience).</p>
+
+
+
+
+
+
+<table class="docText" border="0">
+  <tbody>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>1. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">The developer who invokes GNU Make (with the <tt>gmake</tt>
+ shell command) must specify which target to build. This is typically 
+the name of an executable program, although you can also create 
+pseudotargets such as <tt>all</tt> or <tt>install</tt> that don’t relate
+ to actual disk files. If the developer doesn’t state which target file 
+to build, GNU Make attempts to build the first target listed in the 
+makefile (such as <tt>calculator</tt>).<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>2. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">If
+ GNU Make locates a rule to generate the target file, it examines each 
+of the prerequisites listed in that rule and treats them recursively as 
+targets. This ensures that each file used as an input to a compilation 
+tool is itself up-to-date. For example, before linking <tt>add.o</tt> and <tt>calc.o</tt> into the <tt>calculator</tt> executable program, GNU Make recursively searches for rules that have <tt>add.o</tt> or <tt>calc.o</tt> on the left side.<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>3. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">If
+ a rule is found for the target you’re trying to satisfy (either the 
+user-specified target or one that was found recursively), you have two 
+options:<br/><br/><div style="font-weight:bold"><ol class="docList" type="a"><li><div style="font-weight:normal"><p class="docList">If
+ the target file for the rule doesn’t yet exist (there’s currently no 
+disk file with that name), the rule’s shell command sequence is executed
+ and the file is created for the first time. This is often the case when
+ you’re compiling a completely fresh source tree and no object files 
+have yet been created.</p></div></li><li><div style="font-weight:normal"><p class="docList">On
+ the other hand, if the target file already exists on the disk, the time
+ stamp on each of the prerequisite files is examined to see if any are 
+newer than the target file. If so, you proceed to regenerate the target,
+ thereby making it newer than the input files.</p></div></li></ol></div></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>4. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">If step 3 fails, meaning that the makefile doesn’t contain a suitable rule to generate a target file, you also have two options:<br/><br/><div style="font-weight:bold"><ol class="docList" type="a"><li><div style="font-weight:normal"><p class="docList">If
+ the target file exists on the disk (but there’s no rule to regenerate 
+it), GNU Make can only assume that this is a source file that was 
+handwritten by the developer. This is where the rule recursion stops.</p></div></li><li><div style="font-weight:normal"><p class="docList">If
+ the target file doesn’t exist on the disk, GNU Make aborts with an 
+error and the build fails. GNU Make doesn’t know how to regenerate the 
+file, and because it doesn’t already exist on disk, you can’t proceed 
+any further.</p></div></li></ol></div></div>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<p class="docText">Throughout this process, GNU Make doesn’t preserve 
+any state between invocations and doesn’t maintain a database of file 
+time stamps. It determines whether a file has changed by comparing the 
+time stamps between the target and its prerequisites. As you’ll see in 
+later chapters, build tools that record time stamps in a database can 
+detect changes only by looking at that one file.</p>
+
+
+
+
+<h4>Further Reading</h4>
+
+<p class="docText">Although you’ve explored a number of GNU Make 
+features, you need to learn more before you can create your own build 
+system. The ultimate authority on GNU Make syntax and semantics is the 
+online reference document [16]; this is fairly tough going for beginners, though, so you’ll probably want to start with a more introductory guide [41]. For more advanced best practices for using GNU Make, refer to [42] in References.</p>
+
+<p class="docText">To simplify the construction of a makefile, consider using the GNU Make Standard Library [43]
+ which adds an extra layer of language support for logical operators; 
+manipulation of lists, strings, and sets; and basic arithmetic.</p>
+
+<p class="docText">Now let’s study how to use the GNU Make language to address common build system scenarios.</p>
+
+
+
+
+</body>
+</html>

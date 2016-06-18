@@ -1,0 +1,421 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>A Regression Test Script</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="A Regression Test Script"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="a_regression_test_script"></a>A Regression Test Script</h1>
+</div>
+</div>
+</div>
+<p>Mistakes happen. As<a id="sys6.5"></a> <a id="re6.5"></a><a id="sc6.5"></a>we’ve seen, Python provides interfaces to a variety of
+        system services, along with tools for adding others. Example 6-9 shows some of the more
+        commonly used system tools in action. It implements a simple
+        <span class="epub__emphasis"><em>regression test</em></span> system for Python scripts—it runs
+        each in a directory of Python scripts with provided input and
+        command-line arguments, and compares the output of each run to the
+        prior run’s results. As such, this script can be used as an automated
+        testing system to catch errors introduced by changes in program source
+        files; in a big system, you might not know when a fix is really a bug
+        in disguise.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id58"></a>
+<p class="epub__title">Example 6-9. PP4E\System\Tester\tester.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+################################################################################
+Test a directory of Python scripts, passing command-line arguments,
+piping in stdin, and capturing stdout, stderr, and exit status to
+detect failures and regressions from prior run outputs.  The subprocess
+module spawns and controls streams (much like os.popen3 in Python 2.X),
+and is cross-platform.  Streams are always binary bytes in subprocess.
+Test inputs, args, outputs, and errors map to files in subdirectories.
+
+This is a command-line script, using command-line arguments for
+optional test directory name, and force-generation flag.  While we
+could package it as a callable function, the fact that its results
+are messages and output files makes a call/return model less useful.
+
+Suggested enhancement: could be extended to allow multiple sets
+of command-line arguments and/or inputs per test script, to run a
+script multiple times (glob for multiple ".in*" files in Inputs?).
+Might also seem simpler to store all test files in same directory
+with different extensions, but this could grow large over time.
+Could also save both stderr and stdout to Errors on failures, but
+I prefer to have expected/actual output in Outputs on regressions.
+################################################################################
+"""
+
+import os, sys, glob, time
+from subprocess import Popen, PIPE
+
+# configuration args
+testdir  = sys.argv[1] if len(sys.argv) &gt; 1 else os.curdir
+forcegen = len(sys.argv) &gt; 2
+print('Start tester:', time.asctime())
+print('in', os.path.abspath(testdir))
+
+def verbose(*args):
+    print('-'*80)
+    for arg in args: print(arg)
+def quiet(*args): pass
+trace = quiet
+
+# glob scripts to be tested
+testpatt  = os.path.join(testdir, 'Scripts', '*.py')
+testfiles = glob.glob(testpatt)
+testfiles.sort()
+trace(os.getcwd(), *testfiles)
+
+numfail = 0
+for testpath in testfiles:                      # run all tests in dir
+    testname = os.path.basename(testpath)       # strip directory path
+
+    # get input and args
+    infile = testname.replace('.py', '.in')
+    inpath = os.path.join(testdir, 'Inputs', infile)
+    indata = open(inpath, 'rb').read() if os.path.exists(inpath) else b''
+
+    argfile = testname.replace('.py', '.args')
+    argpath = os.path.join(testdir, 'Args', argfile)
+    argdata = open(argpath).read() if os.path.exists(argpath) else ''
+
+    # locate output and error, scrub prior results
+    outfile = testname.replace('.py', '.out')
+    outpath = os.path.join(testdir, 'Outputs', outfile)
+    outpathbad = outpath + '.bad'
+    if os.path.exists(outpathbad): os.remove(outpathbad)
+
+    errfile = testname.replace('.py', '.err')
+    errpath = os.path.join(testdir, 'Errors', errfile)
+    if os.path.exists(errpath): os.remove(errpath)
+
+    # run test with redirected streams
+    pypath = sys.executable
+    command = '%s %s %s' % (pypath, testpath, argdata)
+    trace(command, indata)
+
+    process = Popen(command, shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    process.stdin.write(indata)
+    process.stdin.close()
+    outdata = process.stdout.read()
+    errdata = process.stderr.read()                          # data are bytes
+    exitstatus = process.wait()                              # requires binary files
+    trace(outdata, errdata, exitstatus)
+
+    # analyze results
+    if exitstatus != 0:
+        print('ERROR status:', testname, exitstatus)         # status and/or stderr
+    if errdata:
+        print('ERROR stream:', testname, errpath)            # save error text
+        open(errpath, 'wb').write(errdata)
+
+    if exitstatus or errdata:                                # consider both failure
+        numfail += 1                                         # can get status+stderr
+        open(outpathbad, 'wb').write(outdata)                # save output to view
+
+    elif not os.path.exists(outpath) or forcegen:
+        print('generating:', outpath)                        # create first output
+        open(outpath, 'wb').write(outdata)
+
+    else:
+        priorout = open(outpath, 'rb').read()                # or compare to prior
+        if priorout == outdata:
+            print('passed:', testname)
+        else:
+            numfail += 1
+            print('FAILED output:', testname, outpathbad)
+            open(outpathbad, 'wb').write(outdata)
+
+print('Finished:', time.asctime())
+print('%s tests were run, %s tests failed.' % (len(testfiles), numfail))</pre>
+</div>
+</div>
+<p>We’ve seen the tools used by this script earlier in this part of
+        the book—<code class="epub__literal">subprocess</code>, <code class="epub__literal">os.path</code>, <code class="epub__literal">glob</code>, files, and the like. This example
+        largely just pulls these tools together to solve a useful purpose. Its
+        core operation is comparing new outputs to old, in order to spot
+        changes (“regressions”). Along the way, it also manages command-line
+        arguments, error messages, status codes, and files.</p>
+<p>This script is also larger than most we’ve seen so far, but it’s
+        a realistic and representative system administration tool (in fact,
+        it’s derived from a similar tool I actually used in the past to detect
+        changes in a compiler). Probably the best way to understand how it
+        works is to demonstrate what it does. The next section steps through a
+        testing session to be read in conjunction with studying the test
+        script’s code.</p>
+<div class="epub__sect2" title="Running the Test Driver"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="running_the_test_driver"></a>Running the Test Driver</h2>
+</div>
+</div>
+</div>
+<p>Much of the magic behind the test driver script in Example 6-9 has to do with its
+          directory structure. When you run it for the first time in a test
+          directory (or force it to start from scratch there by passing a
+          second command-line argument), it:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Collects scripts to be run in the <code class="epub__literal">Scripts</code> subdirectory</p></li><li class="epub__listitem">
+<p>Fetches any associated script input and command-line
+              arguments from the <code class="epub__literal">Inputs</code> and
+              <code class="epub__literal">Args</code> subdirectories</p></li><li class="epub__listitem">
+<p>Generates initial <em class="epub__filename">stdout</em> output files for tests that
+              exit normally in the <code class="epub__literal">Outputs</code>
+<span>subdirectory</span></p></li><li class="epub__listitem">
+<p>Reports tests that fail either by exit status code or by
+              error messages appearing in <em class="epub__filename">stderr</em></p></li></ul>
+</div>
+<p>On all failures, the script also saves any <em class="epub__filename">stderr</em> error message text, as well as any
+          <em class="epub__filename">stdout</em> data generated up to the
+          point of failure; standard error text is saved to a file in the
+          <code class="epub__literal">Errors</code> subdirectory, and standard
+          output of failed tests is saved with a special “.bad” filename
+          extension in <code class="epub__literal">Outputs</code> (saving this
+          normally in the <code class="epub__literal">Outputs</code>
+          subdirectory would trigger a failure when the test is later fixed!).
+          Here’s a first run:</p><a id="I_programlisting5_d1e22734"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>python tester.py . 1</code></strong>
+Start tester: Mon Feb 22 22:13:38 2010
+in C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\System\Tester
+generating: .\Outputs\test-basic-args.out
+generating: .\Outputs\test-basic-stdout.out
+generating: .\Outputs\test-basic-streams.out
+generating: .\Outputs\test-basic-this.out
+ERROR status: test-errors-runtime.py 1
+ERROR stream: test-errors-runtime.py .\Errors\test-errors-runtime.err
+ERROR status: test-errors-syntax.py 1
+ERROR stream: test-errors-syntax.py .\Errors\test-errors-syntax.err
+ERROR status: test-status-bad.py 42
+generating: .\Outputs\test-status-good.out
+Finished: Mon Feb 22 22:13:41 2010
+8 tests were run, 3 tests failed.</pre>
+<p>To run each script, the tester configures any preset
+          command-line arguments provided, pipes in fetched canned input (if
+          any), and captures the script’s standard output and error streams,
+          along with its exit status code. When I ran this example, there were
+          8 test scripts, along with a variety of inputs and outputs. Since
+          the directory and file naming structures are the key to this
+          example, here is a listing of the test directory I used—the <code class="epub__literal">Scripts</code> directory is primary, because
+          that’s where tests to be run are <span>collected</span>:</p><a id="I_programlisting5_d1e22747"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>dir /B</code></strong>
+Args
+Errors
+Inputs
+Outputs
+Scripts
+tester.py
+xxold
+
+C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>dir /B Scripts</code></strong>
+test-basic-args.py
+test-basic-stdout.py
+test-basic-streams.py
+test-basic-this.py
+test-errors-runtime.py
+test-errors-syntax.py
+test-status-bad.py
+test-status-good.py</pre>
+<p>The other subdirectories contain any required inputs and any
+          generated outputs associated with scripts to be tested:</p><a id="I_programlisting5_d1e22757"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>dir /B Args</code></strong>
+test-basic-args.args
+test-status-good.args
+
+C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>dir /B Inputs</code></strong>
+test-basic-args.in
+test-basic-streams.in
+
+C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>dir /B Outputs</code></strong>
+test-basic-args.out
+test-basic-stdout.out
+test-basic-streams.out
+test-basic-this.out
+test-errors-runtime.out.bad
+test-errors-syntax.out.bad
+test-status-bad.out.bad
+test-status-good.out
+
+C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>dir /B Errors</code></strong>
+test-errors-runtime.err
+test-errors-syntax.err</pre>
+<p>I won’t list all these files here (as you can see, there are
+          many, and all are available in the book examples distribution
+          package), but to give you the general flavor, here are the files
+          associated with the test script <em class="epub__filename">test-basic-args.py</em>:</p><a id="I_programlisting5_d1e22778"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>type Scripts\test-basic-args.py</code></strong>
+# test args, streams
+import sys, os
+print(os.getcwd())                  # to Outputs
+print(sys.path[0])
+
+print('[argv]')
+for arg in sys.argv:                # from Args
+    print(arg)                      # to Outputs
+
+print('[interaction]')              # to Outputs
+text = input('Enter text:')         # from Inputs
+rept = sys.stdin.readline()         # from Inputs
+sys.stdout.write(text * int(rept))  # to Outputs
+
+C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>type Args\test-basic-args.args</code></strong>
+-command -line --stuff
+
+C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>type Inputs\test-basic-args.in</code></strong>
+Eggs
+10
+
+C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>type Outputs\test-basic-args.out</code></strong>
+C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\System\Tester
+C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\System\Tester\Scripts
+[argv]
+.\Scripts\test-basic-args.py
+-command
+-line
+--stuff
+[interaction]
+Enter text:EggsEggsEggsEggsEggsEggsEggsEggsEggsEggs</pre>
+<p>And here are two files related to one of the detected
+          errors—the first is its captured <em class="epub__filename">stderr</em>, and the second is its <em class="epub__filename">stdout</em> generated up to the point where
+          the error occurred; these are for human (or other tools) inspection,
+          and are automatically removed the next time the tester script
+          runs:</p><a id="I_programlisting5_d1e22802"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>type Errors\test-errors-runtime.err</code></strong>
+Traceback (most recent call last):
+  File ".\Scripts\test-errors-runtime.py", line 3, in &lt;module&gt;
+    print(1 / 0)
+ZeroDivisionError: int division or modulo by zero
+
+C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>type Outputs\test-errors-runtime.out.bad</code></strong>
+starting</pre>
+<p>Now, when run again without making any changes to the tests,
+          the test driver script compares saved prior outputs to new ones and
+          detects no regressions; failures designated by exit status and
+          <em class="epub__filename">stderr</em> messages are still
+          reported as before, but there are no deviations from other tests’
+          saved expected output:</p><a id="I_programlisting5_d1e22815"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>python tester.py</code></strong>
+Start tester: Mon Feb 22 22:26:41 2010
+in C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\System\Tester
+passed: test-basic-args.py
+passed: test-basic-stdout.py
+passed: test-basic-streams.py
+passed: test-basic-this.py
+ERROR status: test-errors-runtime.py 1
+ERROR stream: test-errors-runtime.py .\Errors\test-errors-runtime.err
+ERROR status: test-errors-syntax.py 1
+ERROR stream: test-errors-syntax.py .\Errors\test-errors-syntax.err
+ERROR status: test-status-bad.py 42
+passed: test-status-good.py
+Finished: Mon Feb 22 22:26:43 2010
+8 tests were run, 3 tests failed.</pre>
+<p>But when I make a change in one of the test scripts that will
+          produce different output (I changed a loop counter to print fewer
+          lines), the regression is caught and reported; the new and different
+          output of the script is reported as a failure, and saved in <code class="epub__literal">Outputs</code> as a “.bad”
+          for later viewing:</p><a id="I_programlisting5_d1e22825"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>python tester.py</code></strong>
+Start tester: Mon Feb 22 22:28:35 2010
+in C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\System\Tester
+passed: test-basic-args.py
+FAILED output: test-basic-stdout.py .\Outputs\test-basic-stdout.out.bad
+passed: test-basic-streams.py
+passed: test-basic-this.py
+ERROR status: test-errors-runtime.py 1
+ERROR stream: test-errors-runtime.py .\Errors\test-errors-runtime.err
+ERROR status: test-errors-syntax.py 1
+ERROR stream: test-errors-syntax.py .\Errors\test-errors-syntax.err
+ERROR status: test-status-bad.py 42
+passed: test-status-good.py
+Finished: Mon Feb 22 22:28:38 2010
+8 tests were run, 4 tests failed.
+
+C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>type Outputs\test-basic-stdout.out.bad</code></strong>
+begin
+Spam!
+Spam!Spam!
+Spam!Spam!Spam!
+Spam!Spam!Spam!Spam!
+end</pre>
+<p>One last usage note: if you change the <code class="epub__literal">trace</code> variable in this script to be
+          <code class="epub__literal">verbose</code>, you’ll get much more
+          output designed to help you trace the programs operation (but
+          probably too much for real testing runs):</p><a id="I_programlisting5_d1e22841"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Tester&gt; <strong class="epub__userinput"><code>tester.py</code></strong>
+Start tester: Mon Feb 22 22:34:51 2010
+in C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\System\Tester
+--------------------------------------------------------------------------------
+C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\System\Tester
+.\Scripts\test-basic-args.py
+.\Scripts\test-basic-stdout.py
+.\Scripts\test-basic-streams.py
+.\Scripts\test-basic-this.py
+.\Scripts\test-errors-runtime.py
+.\Scripts\test-errors-syntax.py
+.\Scripts\test-status-bad.py
+.\Scripts\test-status-good.py
+--------------------------------------------------------------------------------
+C:\Python31\python.exe .\Scripts\test-basic-args.py -command -line --stuff
+b'Eggs\r\n10\r\n'
+--------------------------------------------------------------------------------
+b'C:\\Users\\mark\\Stuff\\Books\\4E\\PP4E\\dev\\Examples\\PP4E\\System\\Tester\r
+\nC:\\Users\\mark\\Stuff\\Books\\4E\\PP4E\\dev\\Examples\\PP4E\\System\\Tester\\
+Scripts\r\n[argv]\r\n.\\Scripts\\test-basic-args.py\r\n-command\r\n-line\r\n--st
+uff\r\n[interaction]\r\nEnter text:EggsEggsEggsEggsEggsEggsEggsEggsEggsEggs'
+b''
+0
+passed: test-basic-args.py
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more lines deleted...</span></em></pre>
+<p>Study the test driver’s code for more details. Naturally,
+          there is much more to the general testing story than we have space
+          for here. For example, in-process tests don’t need to spawn programs
+          and can generally make do with importing modules and testing them in
+          <code class="epub__literal">try</code> exception handler statements.
+          There is also ample room for expansion and customization in our
+          testing script (see its docstring for starters). Moreover, Python
+          comes with two testing frameworks, <code class="epub__literal">doctest</code> and <code class="epub__literal">unittest</code> (a.k.a. PyUnit), which provide
+          techniques and structures for coding regression and unit
+          tests:</p><div class="epub__variablelist"><dl><dt><span class="epub__term">unittest</span></dt><dd>
+<p>An object-oriented <a id="I_indexterm5_d1e22866"></a>framework that specifies test cases, expected
+                results, and test suites. Subclasses provide test methods and
+                use inherited assertion calls to specify expected
+                results.</p></dd><dt><span class="epub__term">doctest</span></dt><dd>
+<p>Parses out and <a id="I_indexterm5_d1e22876"></a>reruns tests from an interactive session log
+                that is pasted into a module’s docstrings. The logs give test
+                calls and expected results; doctest essentially reruns the
+                interactive session.</p></dd></dl>
+</div>
+<p>See the Python library manual, the PyPI website, and your
+          favorite Web search engine for additional testing toolkits in both
+          Python itself and the third-party domain.</p>
+<p>For automated testing of Python command-line scripts that run
+          as independent programs and tap into standard script execution
+          context, though, our tester does the job. Because the test driver is
+          fully independent of the scripts it tests, we can drop in new test
+          cases without having to update the driver’s code. And because it is
+          written in Python, it’s quick and easy to change as our testing
+          needs evolve. As we’ll see again in the next section, this
+          “scriptability” that Python provides can be a decided advantage for
+          real <a id="I_indexterm5_d1e22885"></a><a id="I_indexterm5_d1e22887"></a><a id="I_indexterm5_d1e22889"></a>tasks.</p><div class="epub__sidebar"><a id="I_sidebar5_d1e22892"></a>
+<p class="epub__title">Testing Gone Bad?</p>
+<p>Once we learn about sending email from Python scripts in
+            Chapter 13, you might also want to
+            augment this script to automatically send out email when regularly
+            run tests fail (e.g., when run from a <code class="epub__literal">cron</code> job on Unix). That way, you don’t
+            even need to remember to check results. Of course, you could go
+            further still.</p>
+<p>One company I worked for added sound effects to compiler
+            test scripts; you got an audible round of applause if no
+            regressions were found and an entirely different noise otherwise.
+            (See <span class="epub__emphasis"><em>playfile.py</em></span> at the end of this chapter
+            for hints.)</p>
+<p>Another company in my development past ran a nightly test
+            script that automatically isolated the source code file check-in
+            that triggered a test regression and sent a nasty email to the
+            guilty party (and his or her supervisor). Nobody expects the
+            Spanish <span>Inquisition</span>!</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

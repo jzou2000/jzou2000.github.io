@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>GuiMixin: Common Tool Mixin Classes</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="GuiMixin: Common Tool Mixin Classes"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="guimixin_colon_common_tool_mixin_classes"></a>GuiMixin: Common Tool Mixin Classes</h1>
+</div>
+</div>
+</div>
+<p>If you read <a id="I_indexterm4_d1e41429"></a>the last three chapters, you probably noticed that the
+        code used to construct nontrivial GUIs can become long if we make each
+        widget by hand. Not only do we have to link up all the widgets
+        manually, but we also need to remember and then set dozens of options.
+        If we stick to this strategy, GUI programming often becomes an
+        exercise in typing, or at least in cut-and-paste text editor
+        operations.</p>
+<div class="epub__sect2" title="Widget Builder Functions"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="widget_builder_functions"></a>Widget Builder Functions</h2>
+</div>
+</div>
+</div>
+<p>Instead of <a id="I_indexterm4_d1e41440"></a><a id="I_indexterm4_d1e41443"></a>performing each step by hand, a better idea is to wrap
+          or automate as much of the GUI construction process as possible. One
+          approach is to code functions that provide typical widget
+          configurations, and automate the construction process for cases to
+          which they apply. For instance, we could define a button function to
+          handle configuration and packing details and support most of the
+          buttons we draw. Example 10-1 provides a
+          handful of such widget builder calls.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id106"></a>
+<p class="epub__title">Example 10-1. PP4E\Gui\Tools\widgets.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+###############################################################################
+wrap up widget construction in functions for easier use, based upon some
+assumptions (e.g., expansion); use **extras fkw args for width, font/color,
+etc., and repack result manually later to override defaults if needed;
+###############################################################################
+"""
+
+from tkinter import *
+
+def frame(root, side=TOP, **extras):
+    widget = Frame(root)
+    widget.pack(side=side, expand=YES, fill=BOTH)
+    if extras: widget.config(**extras)
+    return widget
+
+def label(root, side, text, **extras):
+    widget = Label(root, text=text, relief=RIDGE)        # default config
+    widget.pack(side=side, expand=YES, fill=BOTH)        # pack automatically
+    if extras: widget.config(**extras)                   # apply any extras
+    return widget
+
+def button(root, side, text, command, **extras):
+    widget = Button(root, text=text, command=command)
+    widget.pack(side=side, expand=YES, fill=BOTH)
+    if extras: widget.config(**extras)
+    return widget
+
+def entry(root, side, linkvar, **extras):
+    widget = Entry(root, relief=SUNKEN, textvariable=linkvar)
+    widget.pack(side=side, expand=YES, fill=BOTH)
+    if extras: widget.config(**extras)
+    return widget
+
+if __name__ == '__main__':
+    app = Tk()
+    frm = frame(app, TOP)               # much less code required here!
+    label(frm, LEFT, 'SPAM')
+    button(frm, BOTTOM, 'Press', lambda: print('Pushed'))
+    mainloop()</pre>
+</div>
+</div>
+<p>This module makes some assumptions about its clients’ use
+          cases, which allows it to automate typical construction chores such
+          as packing. The net effect is to reduce the amount of code required
+          of its importers. When run as a script, Example 10-1 creates a simple
+          window with a ridged label on the left and a button on the right
+          that prints a message when pressed, both of which expand along with
+          the window. Run this on your own for a look; its window isn’t really
+          anything new for us, and its code is meant more as library than
+          script—as we’ll see when we make use of it later in Chapter 19’s PyCalc.</p>
+<p>This function-based approach can cut down on the amount of
+          code required. As functions, though, its tools don’t lend themselves
+          to customization in the broader OOP sense. Moreover, because they
+          are not methods, they do not have access to the state of an object
+          representing the GUI.</p>
+</div>
+<div class="epub__sect2" title="Mixin Utility Classes"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="mixin_utility_classes"></a>Mixin Utility Classes</h2>
+</div>
+</div>
+</div>
+<p>Alternatively, we <a id="mix10.2.2"></a><a id="gui10.2.2"></a>can implement common methods in a class and inherit
+          them everywhere they are needed. Such classes are commonly called
+          <span class="epub__emphasis"><em>mixin</em></span> classes because their methods are “mixed
+          in” with other classes. Mixins serve to package generally useful
+          tools as methods. The concept is almost like importing a module, but
+          mixin classes can access the subject instance, <code class="epub__literal">self</code>, to utilize both per-instance state
+          and inherited methods. The script in Example 10-2 shows
+          how.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id107"></a>
+<p class="epub__title">Example 10-2. PP4E\Gui\Tools\guimixin.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+###############################################################################
+a "mixin" class for other frames: common methods for canned dialogs,
+spawning programs, simple text viewers, etc; this class must be mixed
+with a Frame (or a subclass derived from Frame) for its quit method
+###############################################################################
+"""
+
+from tkinter import *
+from tkinter.messagebox import *
+from tkinter.filedialog import *
+from PP4E.Gui.Tour.scrolledtext import ScrolledText     # or tkinter.scrolledtext
+from PP4E.launchmodes import PortableLauncher, System   # or use multiprocessing
+
+class GuiMixin:
+    def infobox(self, title, text, *args):              # use standard dialogs
+        return showinfo(title, text)                    # *args for bkwd compat
+
+    def errorbox(self, text):
+        showerror('Error!', text)
+
+    def question(self, title, text, *args):
+        return askyesno(title, text)                    # return True or False
+
+    def notdone(self):
+        showerror('Not implemented', 'Option not available')
+
+    def quit(self):
+        ans = self.question('Verify quit', 'Are you sure you want to quit?')
+        if ans:
+            Frame.quit(self)                            # quit not recursive!
+
+    def help(self):
+        self.infobox('RTFM', 'See figure 1...')         # override this better
+
+    def selectOpenFile(self, file="", dir="."):         # use standard dialogs
+        return askopenfilename(initialdir=dir, initialfile=file)
+
+    def selectSaveFile(self, file="", dir="."):
+        return asksaveasfilename(initialfile=file, initialdir=dir)
+
+    def clone(self, args=()):              # optional constructor args
+        new = Toplevel()                   # make new in-process version of me
+        myclass = self.__class__           # instance's (lowest) class object
+        myclass(new, *args)                # attach/run instance to new window
+
+    def spawn(self, pycmdline, wait=False):
+        if not wait:                                     # start new process
+            PortableLauncher(pycmdline, pycmdline)()     # run Python progam
+        else:
+            System(pycmdline, pycmdline)()               # wait for it to exit
+
+    def browser(self, filename):
+        new  = Toplevel()                                # make new window
+        view = ScrolledText(new, file=filename)          # Text with Scrollbar
+        view.text.config(height=30, width=85)            # config Text in Frame
+        view.text.config(font=('courier', 10, 'normal')) # use fixed-width font
+        new.title("Text Viewer")                         # set window mgr attrs
+        new.iconname("browser")                          # file text added auto
+
+    """
+    def browser(self, filename):                         # if tkinter.scrolledtext
+        new  = Toplevel()                                # included for reference
+        text = ScrolledText(new, height=30, width=85)
+        text.config(font=('courier', 10, 'normal'))
+        text.pack(expand=YES, fill=BOTH)
+        new.title("Text Viewer")
+        new.iconname("browser")
+        text.insert('0.0', open(filename, 'r').read() )
+    """
+
+if __name__ == '__main__':
+
+    class TestMixin(GuiMixin, Frame):      # standalone test
+        def __init__(self, parent=None):
+            Frame.__init__(self, parent)
+            self.pack()
+            Button(self, text='quit',  command=self.quit).pack(fill=X)
+            Button(self, text='help',  command=self.help).pack(fill=X)
+            Button(self, text='clone', command=self.clone).pack(fill=X)
+            Button(self, text='spawn', command=self.other).pack(fill=X)
+        def other(self):
+            self.spawn('guimixin.py')  # spawn self as separate process
+
+    TestMixin().mainloop()</pre>
+</div>
+</div>
+<p>Although Example 10-2 is geared toward
+          GUIs, it’s really about design concepts. The <code class="epub__literal">GuiMixin</code> class implements common
+          operations with standard interfaces that are immune to changes in
+          implementation. In fact, the implementations of some of this class’s
+          methods did change—between the first and second editions of this
+          book, old-style <code class="epub__literal">Dialog</code> calls were
+          replaced with the new Tk standard dialog calls; in the fourth
+          edition, the file browser was updated to use a different scrolled
+          text class. Because this class’s interface hides such details, its
+          clients did not have to be changed to use the new <span>techniques</span>.</p>
+<p>As is, <code class="epub__literal">GuiMixin</code> provides
+          methods for common dialogs, window cloning, program spawning, text
+          file browsing, and so on. We can add more methods to such a mixin
+          later if we find ourselves coding the same methods repeatedly; they
+          will all become available immediately everywhere this class is
+          imported and mixed. Moreover, <code class="epub__literal">GuiMixin</code>’s methods can be inherited and
+          used as is, or they can be redefined in subclasses. Such are the
+          natural advantages of classes over functions.</p>
+<p>There are a few details worth highlighting here:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>The <code class="epub__literal">quit</code> method serves
+              some of the same purpose as the reusable <code class="epub__literal">Quitter</code> button we used in earlier
+              chapters. Because mixin classes can define a large library of
+              reusable methods, they can be a more powerful way to package
+              reusable components than individual classes. If the mixin is
+              packaged well, we can get a lot more from it than a single
+              button’s callback.</p></li><li class="epub__listitem">
+<p>The <code class="epub__literal">clone</code> method makes
+              a new in-process copy, in a new top-level window, of the most
+              specific class that mixes in a <code class="epub__literal">GuiMixin</code> (<code class="epub__literal">self</code>.<code class="epub__literal">__class__</code> is the class object that the
+              instance was created from). Assuming that the class requires no
+              constructor arguments other than a parent container, this opens
+              a new independent copy of the window (pass in any extra
+              constructor arguments required).</p></li><li class="epub__listitem">
+<p>The <code class="epub__literal">browser</code> method
+              opens the <code class="epub__literal">ScrolledText</code> object
+              we wrote in Chapter 9 in a
+              new window and fills it with the text of a file to be viewed. As
+              noted in the preceding chapter, there is also a <code class="epub__literal">ScrolledText</code> widget in standard
+              library module <code class="epub__literal">tkinter.scrolledtext</code>, but its
+              interface differs, it does not load a file automatically, and it
+              is prone to becoming deprecated (though it hasn’t over many
+              years). For reference, its alternative code is included.</p></li><li class="epub__listitem">
+<p>The <code class="epub__literal">spawn</code> method
+              launches a Python program command line as a new independent
+              process and waits for it to end or not (depending on the default
+              False <code class="epub__literal">wait</code> <span>argument—</span>GUIs usually shouldn’t
+              wait). This method is simple, though, because we wrapped
+              launching details in the <code class="epub__literal">launchmodes</code> module presented at the
+              end of Chapter 5. <code class="epub__literal">GuiMixin</code> both fosters and practices
+              good code reuse habits.</p></li></ul>
+</div>
+<p>The <code class="epub__literal">GuiMixin</code> class is meant
+          to be a library of reusable tool methods and is essentially useless
+          by itself. In fact, it must generally be mixed with a <code class="epub__literal">Frame</code>-based class to be used: <code class="epub__literal">quit</code> assumes it’s mixed with a <code class="epub__literal">Frame</code>, and <code class="epub__literal">clone</code> assumes it’s mixed with a widget
+          class. To satisfy such constraints, this module’s self-test code at
+          the bottom combines <code class="epub__literal">GuiMixin</code> with
+          a <code class="epub__literal">Frame</code> widget.</p>
+<p>Figure 10-1 shows the
+          scene created by the module’s self-test after pressing “clone” and
+          “spawn” once each, and then “help” in one of the three copies.
+          Because they are separate processes, windows started with “spawn”
+          keep running after other windows are closed and do not impact other
+          windows when closed themselves; a “clone” window is in-process
+          instead—it is closed with others, but its “X” destroys just itself.
+          Make sure your PYTHONPATH includes the <em class="epub__filename">PP4E</em> directory’s container for the
+          cross-directory package imports in this example and later examples
+          which use it.</p><div class="epub__figure"><a id="guimixin_self-test_code_in_action"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e41615"></a><img alt="GuiMixin self-test code in action" src="Images/getfile-25.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 10-1. GuiMixin self-test code in action</p>
+</div>
+<p>We’ll see <code class="epub__literal">GuiMixin</code> show up
+          again as a mixin in later examples; that’s the whole point of code
+          reuse, after all. Although functions are often useful, classes
+          support inheritance and access to instance state, and provide an
+          extra organizational structure—features that are especially useful
+          given the coding requirements of GUIs. For instance, many of
+          <code class="epub__literal">GuiMixin</code>’s methods could be
+          replaced with simple functions, but <code class="epub__literal">clone</code> and <code class="epub__literal">quit</code> could not. The next section carries
+          these talents of mixin classes even <a id="I_indexterm4_d1e41634"></a><a id="I_indexterm4_d1e41636"></a>further.</p>
+</div>
+</div>
+</div>
+</body>
+</html>

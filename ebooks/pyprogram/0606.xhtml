@@ -1,0 +1,621 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Comparing Directory Trees</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Comparing Directory Trees"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="comparing_directory_trees"></a>Comparing Directory Trees</h1>
+</div>
+</div>
+</div>
+<p>Engineers <a id="dir6.7"></a><a id="sys6.7"></a><a id="com6.7"></a>can be a paranoid sort (but you didn’t hear that from
+        me). At least I am. It comes from decades of seeing things go terribly
+        wrong, I suppose. When I create a CD backup of my hard drive, for
+        instance, there’s still something a bit too magical about the process
+        to trust the CD writer program to do the right thing. Maybe I should,
+        but it’s tough to have a lot of faith in tools that occasionally trash
+        files and seem to crash my Windows machine every third Tuesday of the
+        month. When push comes to shove, it’s nice to be able to verify that
+        data copied to a backup CD is the same as the <span>original—</span>or at least to spot deviations
+        from the <span>original—</span>as soon as
+        possible. If a backup is ever needed, it will be
+        <span class="epub__emphasis"><em>really</em></span> needed.</p>
+<p>Because data CDs are accessible as simple directory trees in the
+        file system, we are once again in the realm of tree walkers—to verify
+        a backup CD, we simply need to walk its top-level directory. If our
+        script is general enough, we will also be able to use it to verify
+        other copy operations as well—e.g., downloaded tar files, hard-drive
+        backups, and so on. In fact, the combination of the <code class="epub__literal">cpall</code> script of the prior section and a
+        general tree comparison would provide a portable and scriptable way to
+        copy and verify data sets.</p>
+<p>We’ve already studied generic directory tree walkers, but they
+        won’t help us here directly: we need to walk <span class="epub__emphasis"><em>two</em></span>
+        directories in parallel and inspect common files along the way.
+        Moreover, walking either one of the two directories won’t allow us to
+        spot files and directories that exist only in the other. Something
+        more custom and recursive seems in order here.</p>
+<div class="epub__sect2" title="Finding Directory Differences"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="finding_directory_differences"></a>Finding Directory Differences</h2>
+</div>
+</div>
+</div>
+<p>Before we start coding, <a id="dir6.7.1"></a>the first thing we need to clarify is what it means to
+          compare two directory trees. If both trees have exactly the same
+          branch structure and depth, this problem reduces to comparing
+          corresponding files in each tree. In general, though, the trees can
+          have arbitrarily different shapes, depths, and so on.</p>
+<p>More generally, the contents of a directory in one tree may
+          have more or fewer entries than the corresponding directory in the
+          other tree. If those differing contents are filenames, there is no
+          corresponding file to compare with; if they are directory names,
+          there is no corresponding branch to descend through. In fact, the
+          only way to detect files and directories that appear in one tree but
+          not the other is to detect differences in each level’s
+          directory.</p>
+<p>In other words, a tree comparison algorithm will also have to
+          perform <span class="epub__emphasis"><em>directory</em></span> comparisons along the way.
+          Because this is a nested and simpler operation, let’s start by
+          coding and debugging a single-directory comparison of filenames in
+          Example 6-11.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id60"></a>
+<p class="epub__title">Example 6-11. PP4E\System\Filetools\dirdiff.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+################################################################################
+Usage: python dirdiff.py dir1-path dir2-path
+Compare two directories to find files that exist in one but not the other.
+This version uses the os.listdir function and list difference.  Note that
+this script checks only filenames, not file contents--see diffall.py for an
+extension that does the latter by comparing .read() results.
+################################################################################
+"""
+
+import os, sys
+
+def reportdiffs(unique1, unique2, dir1, dir2):
+    """
+    Generate diffs report for one dir: part of comparedirs output
+    """
+    if not (unique1 or unique2):
+        print('Directory lists are identical')
+    else:
+        if unique1:
+            print('Files unique to', dir1)
+            for file in unique1:
+                print('...', file)
+        if unique2:
+            print('Files unique to', dir2)
+            for file in unique2:
+                print('...', file)
+
+def difference(seq1, seq2):
+    """
+    Return all items in seq1 only;
+    a set(seq1) - set(seq2) would work too, but sets are randomly
+    ordered, so any platform-dependent directory order would be lost
+    """
+    return [item for item in seq1 if item not in seq2]
+
+
+def comparedirs(dir1, dir2, files1=None, files2=None):
+    """
+    Compare directory contents, but not actual files;
+    may need bytes listdir arg for undecodable filenames on some platforms
+    """
+    print('Comparing', dir1, 'to', dir2)
+    files1  = os.listdir(dir1) if files1 is None else files1
+    files2  = os.listdir(dir2) if files2 is None else files2
+    unique1 = difference(files1, files2)
+    unique2 = difference(files2, files1)
+    reportdiffs(unique1, unique2, dir1, dir2)
+    return not (unique1 or unique2)               # true if no diffs
+
+def getargs():
+    "Args for command-line mode"
+    try:
+        dir1, dir2 = sys.argv[1:]                 # 2 command-line args
+    except:
+        print('Usage: dirdiff.py dir1 dir2')
+        sys.exit(1)
+    else:
+        return (dir1, dir2)
+
+if __name__ == '__main__':
+    dir1, dir2 = getargs()
+    comparedirs(dir1, dir2)</pre>
+</div>
+</div>
+<p>Given listings of names in two directories, this script simply
+          picks out unique names in the first and unique names in the second,
+          and reports any unique names found as differences (that is, files in
+          one directory but not the other). Its <code class="epub__literal">comparedirs</code> function <a id="I_indexterm5_d1e23097"></a>returns a true result if no differences were found,
+          which is useful for detecting differences in callers.</p>
+<p>Let’s run this script on a few directories; differences are
+          detected and reported as names unique in either passed-in directory
+          pathname. Notice that this is only a <span class="epub__emphasis"><em>structural</em></span>
+          comparison that just checks names in listings, not file contents
+          (we’ll add the latter in a moment):</p><a id="I_programlisting5_d1e23106"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>dirdiff.py C:\temp\PP3E\Examples copytemp</code></strong>
+Comparing C:\temp\PP3E\Examples to copytemp
+Directory lists are identical
+
+C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>dirdiff.py C:\temp\PP3E\Examples\PP3E\System ..</code></strong>
+Comparing C:\temp\PP3E\Examples\PP3E\System to ..
+Files unique to C:\temp\PP3E\Examples\PP3E\System
+... App
+... Exits
+... Media
+... moreplus.py
+Files unique to ..
+... more.pyc
+... spam.txt
+... Tester
+... __init__.pyc</pre>
+<p>The <code class="epub__literal">unique</code> function
+          <a id="I_indexterm5_d1e23119"></a>is the heart of this script: it performs a simple list
+          difference <span>operation</span>. When
+          applied to directories, <span class="epub__emphasis"><em>unique</em></span> items represent
+          tree differences, and <span class="epub__emphasis"><em>common</em></span> items are names of
+          files or subdirectories that merit further comparisons or
+          traversals. In fact, in Python 2.4 and later, we could also use the
+          built-in <code class="epub__literal">set</code> object type if we
+          don’t care about the order in the results—because sets are not
+          sequences, they would not maintain any original and possibly
+          platform-specific left-to-right order of the directory listings
+          provided by <code class="epub__literal">os.listdir</code>. For that
+          reason (and to avoid requiring users to upgrade), we’ll keep using
+          our own comprehension-based function instead <span>of <a id="I_indexterm5_d1e23141"></a>sets</span>.</p>
+</div>
+<div class="epub__sect2" title="Finding Tree Differences"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="finding_tree_differences"></a>Finding Tree Differences</h2>
+</div>
+</div>
+</div>
+<p>We’ve just coded a directory <a id="dir6.7.2"></a>comparison tool that picks out unique files and
+          directories. Now all we need is a tree walker that applies<a id="dirdiff6.7.2"></a> <code class="epub__literal">dirdiff</code> at each
+          level to report unique items, explicitly compares the contents of
+          files in common, and descends through directories in common. Example 6-12 fits the bill.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id61"></a>
+<p class="epub__title">Example 6-12. PP4E\System\Filetools\diffall.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+################################################################################
+Usage: "python diffall.py dir1 dir2".
+Recursive directory tree comparison: report unique files that exist in only
+dir1 or dir2, report files of the same name in dir1 and dir2 with differing
+contents, report instances of same name but different type in dir1 and dir2,
+and do the same for all subdirectories of the same names in and below dir1
+and dir2.  A summary of diffs appears at end of output, but search redirected
+output for "DIFF" and "unique" strings for further details.  New: (3E) limit
+reads to 1M for large files, (3E) catch same name=file/dir, (4E) avoid extra
+os.listdir() calls in dirdiff.comparedirs() by passing results here along.
+################################################################################
+"""
+
+import os, dirdiff
+blocksize = 1024 * 1024              # up to 1M per read
+
+def intersect(seq1, seq2):
+    """
+    Return all items in both seq1 and seq2;
+    a set(seq1) &amp; set(seq2) woud work too, but sets are randomly
+    ordered, so any platform-dependent directory order would be lost
+    """
+    return [item for item in seq1 if item in seq2]
+
+def comparetrees(dir1, dir2, diffs, verbose=False):
+    """
+    Compare all subdirectories and files in two directory trees;
+    uses binary files to prevent Unicode decoding and endline transforms,
+    as trees might contain arbitrary binary files as well as arbitrary text;
+    may need bytes listdir arg for undecodable filenames on some platforms
+    """
+    # compare file name lists
+    print('-' * 20)
+    names1 = os.listdir(dir1)
+    names2 = os.listdir(dir2)
+    if not dirdiff.comparedirs(dir1, dir2, names1, names2):
+        diffs.append('unique files at %s - %s' % (dir1, dir2))
+
+    print('Comparing contents')
+    common = intersect(names1, names2)
+    missed = common[:]
+
+    # compare contents of files in common
+    for name in common:
+        path1 = os.path.join(dir1, name)
+        path2 = os.path.join(dir2, name)
+        if os.path.isfile(path1) and os.path.isfile(path2):
+            missed.remove(name)
+            file1 = open(path1, 'rb')
+            file2 = open(path2, 'rb')
+            while True:
+                bytes1 = file1.read(blocksize)
+                bytes2 = file2.read(blocksize)
+                if (not bytes1) and (not bytes2):
+                    if verbose: print(name, 'matches')
+                    break
+                if bytes1 != bytes2:
+                    diffs.append('files differ at %s - %s' % (path1, path2))
+                    print(name, 'DIFFERS')
+                    break
+
+    # recur to compare directories in common
+    for name in common:
+        path1 = os.path.join(dir1, name)
+        path2 = os.path.join(dir2, name)
+        if os.path.isdir(path1) and os.path.isdir(path2):
+            missed.remove(name)
+            comparetrees(path1, path2, diffs, verbose)
+
+    # same name but not both files or dirs?
+    for name in missed:
+        diffs.append('files missed at %s - %s: %s' % (dir1, dir2, name))
+        print(name, 'DIFFERS')
+
+
+if __name__ == '__main__':
+    dir1, dir2 = dirdiff.getargs()
+    diffs = []
+    comparetrees(dir1, dir2, diffs, True)      # changes diffs in-place
+    print('=' * 40)                            # walk, report diffs list
+    if not diffs:
+        print('No diffs found.')
+    else:
+        print('Diffs found:', len(diffs))
+        for diff in diffs: print('-', diff)</pre>
+</div>
+</div>
+<p>At each directory in the tree, this script simply runs the
+          <code class="epub__literal">dirdiff</code> tool to detect unique
+          names, and then compares names in common by intersecting directory
+          lists. It uses recursive function calls to traverse the tree and
+          visits subdirectories only after comparing all the files at each
+          level so that the output is more coherent to read (the trace output
+          for subdirectories appears after that for files; it is not
+          intermixed).</p>
+<p>Notice the <code class="epub__literal">misses</code> list,
+          added in the third edition of this book; it’s very unlikely, but not
+          impossible, that the same name might be a file in one directory and
+          a subdirectory in the other. Also notice the <code class="epub__literal">blocksize</code> variable; much like the tree
+          copy script we saw earlier, instead of blindly reading entire files
+          into memory all at once, we limit each read to grab up to 1 MB at a
+          time, just in case any files in the directories are too big to be
+          loaded into available memory. Without this limit, I ran into
+          <code class="epub__literal">MemoryError</code> exceptions on some
+          machines with a prior version of this script that read both files
+          all at once, like this:</p><a id="I_programlisting5_d1e23186"></a>
+<pre class="epub__programlisting">    bytes1 = open(path1, 'rb').read()
+    bytes2 = open(path2, 'rb').read()
+    if bytes1 == bytes2: ...</pre>
+<p>This code was simpler, but is less practical for very large
+          files that can’t fit into your available memory space (consider CD
+          and DVD image files, for example). In the new version’s loop, the
+          file reads return what is left when there is less than 1 MB present
+          or remaining and return empty strings at end-of-file. Files match if
+          all blocks read are the same, and they reach end-of-file at the same
+          time.</p>
+<p>We’re also dealing in binary files and byte strings again to
+          suppress Unicode decoding and end-line translations for file
+          content, because trees may contain arbitrary binary and text files.
+          The usual note about changing this to pass byte strings to <code class="epub__literal">os.listdir</code> on platforms where filenames
+          may generate Unicode decoding errors applies here as well (e.g. pass
+          <code class="epub__literal">dir1.encode()</code>). On some
+          platforms, you may also want to detect and skip certain kinds of
+          special files in order to be fully general, but these were not in my
+          trees, so they are not in my script.</p>
+<p>One minor change for the fourth edition of this book: <code class="epub__literal">os.listdir</code> results are now gathered just
+          once per subdirectory and passed along, to avoid extra calls in
+          <code class="epub__literal">dirdiff</code>—not a huge win, but every
+          cycle counts on the pitifully underpowered netbook I used when
+          writing this <a id="I_indexterm5_d1e23206"></a><a id="I_indexterm5_d1e23208"></a>edition.</p>
+</div>
+<div class="epub__sect2" title="Running the Script"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="running_the_script-id1"></a>Running the Script</h2>
+</div>
+</div>
+</div>
+<p>Since we’ve already studied the tree-walking tools this script
+          employs, let’s jump right into a few example runs. When run on
+          identical trees, status messages scroll during the traversal, and a
+          <code class="epub__literal">No diffs found.</code> message appears
+          at the end:</p><a id="I_programlisting5_d1e23219"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>diffall.py C:\temp\PP3E\Examples copytemp &gt; diffs.txt</code></strong>
+C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>type diffs.txt | more</code></strong>
+--------------------
+Comparing C:\temp\PP3E\Examples to copytemp
+Directory lists are identical
+Comparing contents
+README-root.txt matches
+--------------------
+Comparing C:\temp\PP3E\Examples\PP3E to copytemp\PP3E
+Directory lists are identical
+Comparing contents
+echoEnvironment.pyw matches
+LaunchBrowser.pyw matches
+Launcher.py matches
+Launcher.pyc matches
+<em class="epub__lineannotation"><span class="epub__lineannotation">...over 2,000 more lines omitted...</span></em>
+--------------------
+Comparing C:\temp\PP3E\Examples\PP3E\TempParts to copytemp\PP3E\TempParts
+Directory lists are identical
+Comparing contents
+109_0237.JPG matches
+lawnlake1-jan-03.jpg matches
+part-001.txt matches
+part-002.html matches
+========================================
+No diffs found.</pre>
+<p>I usually run this with the <code class="epub__literal">verbose</code> flag passed in as <code class="epub__literal">True</code>, and redirect output to a file (for
+          big trees, it produces too much output to scroll through
+          comfortably); use <code class="epub__literal">False</code> to watch
+          fewer status messages fly by. To show how differences are reported,
+          we need to generate a few; for simplicity, I’ll manually change a
+          few files scattered about one of the trees, but you could also run a
+          global search-and-replace script like the one we’ll write later in
+          this chapter. While we’re at it, let’s remove a few common files so
+          that directory uniqueness differences show up on the scope, too; the
+          last two removal commands in the following will generate one
+          difference in the same directory in different trees:</p><a id="I_programlisting5_d1e23241"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>notepad copytemp\PP3E\README-PP3E.txt</code></strong>
+C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>notepad copytemp\PP3E\System\Filetools\commands.py</code></strong>
+C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>notepad C:\temp\PP3E\Examples\PP3E\__init__.py</code></strong>
+
+C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>del copytemp\PP3E\System\Filetools\cpall_visitor.py</code></strong>
+C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>del copytemp\PP3E\Launcher.py</code></strong>
+C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>del C:\temp\PP3E\Examples\PP3E\PyGadgets.py</code></strong></pre>
+<p>Now, rerun the comparison walker to pick out differences and
+          redirect its output report to a file for easy inspection. The
+          following lists just the parts of the output report that identify
+          differences. In typical use, I inspect the summary at the bottom of
+          the report first, and then search for the strings <code class="epub__literal">"DIFF"</code> and <code class="epub__literal">"unique"</code> in the report’s text if I need
+          more information about the differences summarized; this interface
+          could be much more user-friendly, of course, but it does the job for
+          me:</p><a id="I_programlisting5_d1e23269"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>diffall.py C:\temp\PP3E\Examples copytemp &gt; diff2.txt</code></strong>
+C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>notepad diff2.txt</code></strong>
+--------------------
+Comparing C:\temp\PP3E\Examples to copytemp
+Directory lists are identical
+Comparing contents
+README-root.txt matches
+--------------------
+Comparing C:\temp\PP3E\Examples\PP3E to copytemp\PP3E
+Files unique to C:\temp\PP3E\Examples\PP3E
+... Launcher.py
+Files unique to copytemp\PP3E
+... PyGadgets.py
+Comparing contents
+echoEnvironment.pyw matches
+LaunchBrowser.pyw matches
+Launcher.pyc matches
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more omitted...</span></em>
+PyGadgets_bar.pyw matches
+README-PP3E.txt DIFFERS
+todos.py matches
+tounix.py matches
+__init__.py DIFFERS
+__init__.pyc matches
+--------------------
+Comparing C:\temp\PP3E\Examples\PP3E\System\Filetools to copytemp\PP3E\System\Fil...
+Files unique to C:\temp\PP3E\Examples\PP3E\System\Filetools
+... cpall_visitor.py
+Comparing contents
+commands.py DIFFERS
+cpall.py matches
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more omitted...</span></em>
+--------------------
+Comparing C:\temp\PP3E\Examples\PP3E\TempParts to copytemp\PP3E\TempParts
+Directory lists are identical
+Comparing contents
+109_0237.JPG matches
+lawnlake1-jan-03.jpg matches
+part-001.txt matches
+part-002.html matches
+========================================
+Diffs found: 5
+- unique files at C:\temp\PP3E\Examples\PP3E - copytemp\PP3E
+- files differ at C:\temp\PP3E\Examples\PP3E\README-PP3E.txt –
+         copytemp\PP3E\README-PP3E.txt
+- files differ at C:\temp\PP3E\Examples\PP3E\__init__.py –
+         copytemp\PP3E\__init__.py
+- unique files at C:\temp\PP3E\Examples\PP3E\System\Filetools –
+         copytemp\PP3E\System\Filetools
+- files differ at C:\temp\PP3E\Examples\PP3E\System\Filetools\commands.py –
+         copytemp\PP3E\System\Filetools\commands.py</pre>
+<p>I added line breaks and tabs in a few of these output lines to
+          make them fit on this page, but the report is simple to understand.
+          In a tree with 1,430 files and 185 directories, we found five
+          differences—the three files we changed by edits, and the two
+          directories we threw out of sync with the three removal
+          commands.</p>
+</div>
+<div class="epub__sect2" title="Verifying Backups"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="verifying_backups"></a>Verifying Backups</h2>
+</div>
+</div>
+</div>
+<p>So how does <a id="I_indexterm5_d1e23290"></a>this script placate CD backup paranoia? To
+          double-check my CD writer’s work, I run a command such as the
+          following. I can also use a command like this to find out what has
+          been changed since the last backup. Again, since the CD is “G:” on
+          my machine when plugged in, I provide a path rooted there; use a
+          root such as <span class="epub__emphasis"><em>/dev/cdrom</em></span> or
+          <span class="epub__emphasis"><em>/mnt/cdrom</em></span> on Linux:</p><a id="I_programlisting5_d1e23300"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>python diffall.py</code></strong> <strong class="epub__userinput"><code>Examples g:\PP3E\Examples &gt; diff0226</code></strong>
+C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>more diff0226</code></strong>
+<em class="epub__lineannotation"><span class="epub__lineannotation">...output omitted...</span></em></pre>
+<p>The CD spins, the script compares, and a summary of
+          differences appears at the end of the report. For an example of a
+          full difference report, see the file <span class="epub__emphasis"><em>diff*.txt</em></span>
+          files in the book’s examples distribution package. And to be
+          <span class="epub__emphasis"><em>really</em></span> sure, I run the following global
+          comparison command to verify the entire book development tree backed
+          up to a memory stick (which works just like a CD in terms of the
+          filesystem):</p><a id="I_programlisting5_d1e23321"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>diffall.py</code></strong> <strong class="epub__userinput"><code>F:\writing-backups\feb-26-10\dev</code></strong>
+                                 <strong class="epub__userinput"><code>C:\Users\mark\Stuff\Books\4E\PP4E\dev &gt; diff3.txt</code></strong>
+C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>more diff3.txt</code></strong>
+--------------------
+Comparing F:\writing-backups\feb-26-10\dev to C:\Users\mark\Stuff\Books\4E\PP4E\dev
+Directory lists are identical
+Comparing contents
+ch00.doc DIFFERS
+ch01.doc matches
+ch02.doc DIFFERS
+ch03.doc matches
+ch04.doc DIFFERS
+ch05.doc matches
+ch06.doc DIFFERS
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more output omitted...</span></em>
+--------------------
+Comparing F:\writing-backups\feb-26-10\dev\Examples\PP4E\System\Filetools to C:\…
+Files unique to C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\System\Filetools
+... copytemp
+... cpall.py
+... diff2.txt
+... diff3.txt
+... diffall.py
+... diffs.txt
+... dirdiff.py
+... dirdiff.pyc
+Comparing contents
+bigext-tree.py matches
+bigpy-dir.py matches
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more output omitted...</span></em>
+========================================
+Diffs found: 7
+- files differ at F:\writing-backups\feb-26-10\dev\ch00.doc –
+         C:\Users\mark\Stuff\Books\4E\PP4E\dev\ch00.doc
+- files differ at F:\writing-backups\feb-26-10\dev\ch02.doc –
+         C:\Users\mark\Stuff\Books\4E\PP4E\dev\ch02.doc
+- files differ at F:\writing-backups\feb-26-10\dev\ch04.doc –
+         C:\Users\mark\Stuff\Books\4E\PP4E\dev\ch04.doc
+- files differ at F:\writing-backups\feb-26-10\dev\ch06.doc –
+         C:\Users\mark\Stuff\Books\4E\PP4E\dev\ch06.doc
+- files differ at F:\writing-backups\feb-26-10\dev\TOC.txt –
+         C:\Users\mark\Stuff\Books\4E\PP4E\dev\TOC.txt
+- unique files at F:\writing-backups\feb-26-10\dev\Examples\PP4E\System\Filetools –
+         C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\System\Filetools
+- files differ at F:\writing-backups\feb-26-10\dev\Examples\PP4E\Tools\visitor.py –
+         C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\Tools\visitor.py</pre>
+<p>This particular run indicates that I’ve added a few examples
+          and changed some chapter files since the last backup; if run
+          immediately after a backup, nothing should show up on <code class="epub__literal">diffall</code> radar except for any files that
+          cannot be copied in general. This global comparison can take a few
+          minutes. It performs byte-for-byte comparisons of all chapter files
+          and screenshots, the examples tree, and more, but it’s an accurate
+          and complete verification. Given that this book development tree
+          contained many files, a more manual verification procedure without
+          Python’s help would be utterly impossible.</p>
+<p>After writing this script, I also started using it to verify
+          full automated backups of my laptops onto an external hard-drive
+          device. To do so, I run the <code class="epub__literal">cpall</code>
+          copy script we wrote earlier in the preceding section of this
+          chapter, and then the comparison script developed here to check
+          results and get a list of files that didn’t copy correctly. The last
+          time I did this, this procedure copied and compared 225,000 files
+          and 15,000 directories in 20 GB of space—not the sort of task that
+          lends itself to manual labor!</p>
+<p>Here are the magic incantations on my Windows laptop. <code class="epub__literal">f:\</code> is a partition on my external hard
+          drive, and you shouldn’t be surprised if each of these commands runs
+          for half an hour or more on currently common hardware. A
+          drag-and-drop copy takes at least as long (assuming it works at
+          all!):</p><a id="I_programlisting5_d1e23357"></a>
+<pre class="epub__programlisting">C:\...\System\Filetools&gt; <strong class="epub__userinput"><code>cpall.py c:\ f:\   &gt; f:\copy-log.txt</code></strong>
+C:\...\System\Filetools&gt; <strong class="epub__userinput"><code>diffall.py f:\ c:\ &gt; f:\diff-log.txt</code></strong></pre>
+</div>
+<div class="epub__sect2" title="Reporting Differences and Other Ideas"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="reporting_differences_and_other_ideas"></a>Reporting Differences and Other Ideas</h2>
+</div>
+</div>
+</div>
+<p>Finally, it’s worth <a id="re6.7.5"></a><a id="dir6.7.5"></a>noting that this script still only
+          <span class="epub__emphasis"><em>detects</em></span> differences in the tree but does not
+          give any further details about individual file differences. In fact,
+          it simply loads and compares the binary contents of corresponding
+          files with string comparisons. It’s a simple yes/no result.</p>
+<p>If and when I need more details about how two reported files
+          actually differ, I either edit the files or run the file-comparison
+          command on the host platform (e.g., <code class="epub__literal">fc</code> on Windows/DOS, <code class="epub__literal">diff</code> or <code class="epub__literal">cmp</code> on Unix and Linux). That’s not a
+          portable solution for this last step; but for my purposes, just
+          finding the differences in a 1,400-file tree was much more critical
+          than reporting which lines differ in files flagged in the
+          report.</p>
+<p>Of course, since we can always run shell commands in Python,
+          this last step could be automated by spawning a <code class="epub__literal">diff</code> or <code class="epub__literal">fc</code> command with <code class="epub__literal">os.popen</code> as differences are encountered
+          (or after the traversal, by scanning the report summary). The output
+          of these system calls could be displayed verbatim, or parsed for
+          relevant parts.</p>
+<p>We also might try to do a bit better here by opening true text
+          files in text mode to ignore line-terminator differences caused by
+          transferring across platforms, but it’s not clear that such
+          differences should be ignored (what if the caller wants to know
+          whether line-end markers have been changed?). For example, after
+          downloading a website with an FTP script we’ll meet in Chapter 13, the <code class="epub__literal">diffall</code> script detected a discrepancy
+          between the local copy of a file and the one at the remote server.
+          To probe further, I simply ran some interactive Python code:</p><a id="I_programlisting5_d1e23410"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>a = open('lp2e-updates.html', 'rb').read()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>b = open(r'C:\Mark\WEBSITE\public_html\lp2e-updates.html', 'rb').read()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>a == b</code></strong>
+False</pre>
+<p>This verifies that there really is a binary difference in the
+          downloaded and local versions of the file; to see whether it’s
+          because a Unix or DOS line end snuck into the file, try again in
+          text mode so that line ends are all mapped to the standard <code class="epub__literal">\n</code> character:</p><a id="I_programlisting5_d1e23426"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>a = open('lp2e-updates.html', 'r').read()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>b = open(r'C:\Mark\WEBSITE\public_html\lp2e-updates.html', 'r').read()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>a == b</code></strong>
+True</pre>
+<p>Sure enough; now, to find where the difference is, the
+          following code checks character by character until the first
+          mismatch is found (in binary mode, so we retain the <span>difference</span>):</p><a id="I_programlisting5_d1e23442"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>a = open('lp2e-updates.html', 'rb').read()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>b = open(r'C:\Mark\WEBSITE\public_html\lp2e-updates.html', 'rb').read()</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for (i, (ac, bc)) in enumerate(zip(a, b)):</code></strong>
+...     <strong class="epub__userinput"><code>if ac != bc:</code></strong>
+...         <strong class="epub__userinput"><code>print(i, repr(ac), repr(bc))</code></strong>
+...         <strong class="epub__userinput"><code>break</code></strong>
+...
+37966 '\r' '\n'</pre>
+<p>This means that at byte offset 37,966, there is a <code class="epub__literal">\r</code> in the downloaded file, but a <code class="epub__literal">\n</code> in the local copy. This line has a DOS
+          line end in one and a Unix line end in the other. To see more, print
+          text around the mismatch:</p><a id="I_programlisting5_d1e23472"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>for (i, (ac, bc)) in enumerate(zip(a, b)):</code></strong>
+...     <strong class="epub__userinput"><code>if ac != bc:</code></strong>
+...         <strong class="epub__userinput"><code>print(i, repr(ac), repr(bc))</code></strong>
+...         <strong class="epub__userinput"><code>print(repr(a[i-20:i+20]))</code></strong>
+...         <strong class="epub__userinput"><code>print(repr(b[i-20:i+20]))</code></strong>
+...         <strong class="epub__userinput"><code>break</code></strong>
+...
+37966 '\r' '\n'
+'re&gt;\r\ndef min(*args):\r\n    tmp = list(arg'
+'re&gt;\r\ndef min(*args):\n    tmp = list(args'</pre>
+<p>Apparently, I wound up with a Unix line end at one point in
+          the local copy and a DOS line end in the version I downloaded—the
+          combined effect of the text mode used by the download script itself
+          (which translated <code class="epub__literal">\n</code> to <code class="epub__literal">\r\n</code>) and years of edits on both Linux and
+          Windows PDAs and laptops (I probably coded this change on Linux and
+          copied it to my local Windows copy in binary mode). Code such as
+          this could be integrated into the <code class="epub__literal">diffall</code> script to make it more intelligent
+          about text files and difference <span>reporting</span>.</p>
+<p>Because Python excels at processing files and strings, it’s
+          even possible to go one step further and code a Python equivalent of
+          the <code class="epub__literal">fc</code> and <code class="epub__literal">diff</code> commands. In fact, much of the work
+          has already been done; the standard library module <code class="epub__literal">difflib</code> could make this task simple. See
+          the Python library manual for details and usage examples.</p>
+<p>We could also be smarter by avoiding the load and compare
+          steps for files that differ in size, and we might use a smaller
+          block size to reduce the script’s memory requirements. For most
+          trees, such optimizations are unnecessary; reading multimegabyte
+          files into strings is very fast in Python, and garbage collection
+          reclaims the space as you go.</p>
+<p>Since such extensions are beyond both this script’s scope and
+          this chapter’s size limits, though, they will have to await the
+          attention of a curious reader (this book doesn’t have formal
+          exercises, but that almost sounds like one, doesn’t it?). For now,
+          let’s move on to explore ways to code one more common directory
+          task: <a id="I_indexterm5_d1e23522"></a><a id="I_indexterm5_d1e23524"></a><a id="I_indexterm5_d1e23526"></a><a id="I_indexterm5_d1e23528"></a><a id="I_indexterm5_d1e23530"></a>search.</p>
+</div>
+</div>
+</div>
+</body>
+</html>

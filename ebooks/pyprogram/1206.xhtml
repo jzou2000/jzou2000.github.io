@@ -1,0 +1,610 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>A Simple Python File Server</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="A Simple Python File Server"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="a_simple_python_file_server"></a>A Simple Python File Server</h1>
+</div>
+</div>
+</div>
+<p>It’s time for <a id="server12.7"></a><a id="in12.7"></a><a id="net12.7"></a><a id="file12.7"></a>something realistic. Let’s conclude this chapter by
+        putting some of the socket ideas we’ve studied to work doing something
+        a bit more useful than echoing text back and forth. Example 12-17 implements both the
+        server-side and the client-side logic needed to ship a requested file
+        from server to client machines over a raw socket.</p>
+<p>In effect, this script implements a simple <span class="epub__emphasis"><em>file
+        download</em></span> system. One instance of the script is run on the
+        machine where downloadable files live (the server), and another on the
+        machines you wish to copy files to (the clients). Command-line
+        arguments tell the script which flavor to run and optionally name the
+        server machine and port number over which conversations are to occur.
+        A server instance can respond to any number of client file requests at
+        the port on which it listens, because it serves each in a <a id="get12.7"></a>thread.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id15"></a>
+<p class="epub__title">Example 12-17. PP4E\Internet\Sockets\getfile.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+#############################################################################
+implement client and server-side logic to transfer an arbitrary file from
+server to client over a socket; uses a simple control-info protocol rather
+than separate sockets for control and data (as in ftp), dispatches each
+client request to a handler thread, and loops to transfer the entire file
+by blocks; see ftplib examples for a higher-level transport scheme;
+#############################################################################
+"""
+
+import sys, os, time, _thread as thread
+from socket import *
+
+blksz = 1024
+defaultHost = 'localhost'
+defaultPort = 50001
+
+helptext = """
+Usage...
+server=&gt; getfile.py  -mode server            [-port nnn] [-host hhh|localhost]
+client=&gt; getfile.py [-mode client] -file fff [-port nnn] [-host hhh|localhost]
+"""
+
+def now():
+    return time.asctime()
+
+def parsecommandline():
+    dict = {}                        # put in dictionary for easy lookup
+    args = sys.argv[1:]              # skip program name at front of args
+    while len(args) &gt;= 2:            # example: dict['-mode'] = 'server'
+        dict[args[0]] = args[1]
+        args = args[2:]
+    return dict
+
+def client(host, port, filename):
+    sock = socket(AF_INET, SOCK_STREAM)
+    sock.connect((host, port))
+    sock.send((filename + '\n').encode())      # send remote name with dir: bytes
+    dropdir = os.path.split(filename)[1]       # filename at end of dir path
+    file = open(dropdir, 'wb')                 # create local file in cwd
+    while True:
+        data = sock.recv(blksz)                # get up to 1K at a time
+        if not data: break                     # till closed on server side
+        file.write(data)                       # store data in local file
+    sock.close()
+    file.close()
+    print('Client got', filename, 'at', now())
+
+def serverthread(clientsock):
+    sockfile = clientsock.makefile('r')        # wrap socket in dup file obj
+    filename = sockfile.readline()[:-1]        # get filename up to end-line
+    try:
+        file = open(filename, 'rb')
+        while True:
+            bytes = file.read(blksz)           # read/send 1K at a time
+            if not bytes: break                # until file totally sent
+            sent = clientsock.send(bytes)
+            assert sent == len(bytes)
+    except:
+        print('Error downloading file on server:', filename)
+    clientsock.close()
+
+def server(host, port):
+    serversock = socket(AF_INET, SOCK_STREAM)     # listen on TCP/IP socket
+    serversock.bind((host, port))                 # serve clients in threads
+    serversock.listen(5)
+    while True:
+        clientsock, clientaddr = serversock.accept()
+        print('Server connected by', clientaddr, 'at', now())
+        thread.start_new_thread(serverthread, (clientsock,))
+
+def main(args):
+    host = args.get('-host', defaultHost)         # use args or defaults
+    port = int(args.get('-port', defaultPort))    # is a string in argv
+    if args.get('-mode') == 'server':             # None if no -mode: client
+        if host == 'localhost': host = ''         # else fails remotely
+        server(host, port)
+    elif args.get('-file'):                       # client mode needs -file
+        client(host, port, args['-file'])
+    else:
+        print(helptext)
+
+if __name__ == '__main__':
+    args = parsecommandline()
+    main(args)</pre>
+</div>
+</div>
+<p>This script isn’t much different from the examples we saw
+        earlier. Depending on the command-line arguments passed, it invokes
+        one of two functions:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>The <code class="epub__literal">server</code> function farms
+            out each incoming client request to a thread that transfers the
+            requested file’s bytes.</p></li><li class="epub__listitem">
+<p>The <code class="epub__literal">client</code> function sends
+            the server a file’s name and stores all the bytes it gets back in
+            a local file of the same name.</p></li></ul>
+</div>
+<p>The most novel feature here is the protocol between client and
+        server: the client starts the conversation by shipping a filename
+        string up to the server, terminated with an end-of-line character, and
+        including the file’s directory path in the server. At the server, a
+        spawned thread extracts the requested file’s name by reading the
+        client socket, and opens and transfers the requested file back to the
+        client, one chunk of bytes at a <a id="I_indexterm1_d1e51901"></a>time.</p>
+<div class="epub__sect2" title="Running the File Server and Clients"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="running_the_file_server_and_clients"></a>Running the File Server and Clients</h2>
+</div>
+</div>
+</div>
+<p>Since the server uses threads to process clients, we can test
+          both client and server on the same Windows machine. First, let’s
+          start a server instance and execute two client instances on the same
+          machine while the server runs:</p><a id="I_programlisting1_d1e51909"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation">[server window, localhost]</span></em>
+C:\...\Internet\Sockets&gt; <strong class="epub__userinput"><code>python getfile.py -mode server</code></strong>
+Server connected by ('127.0.0.1', 59134) at Sun Apr 25 16:26:50 2010
+Server connected by ('127.0.0.1', 59135) at Sun Apr 25 16:27:21 2010
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[client window, localhost]</span></em>
+C:\...\Internet\Sockets&gt; <strong class="epub__userinput"><code>dir /B *.gif *.txt</code></strong>
+File Not Found
+
+C:\...\Internet\Sockets&gt; <strong class="epub__userinput"><code>python getfile.py -file testdir\ora-lp4e.gif</code></strong>
+Client got testdir\ora-lp4e.gif at Sun Apr 25 16:26:50 2010
+
+C:\...\Internet\Sockets&gt; <strong class="epub__userinput"><code>python getfile.py -file testdir\textfile.txt -port 50001</code></strong>
+Client got testdir\textfile.txt at Sun Apr 25 16:27:21 2010</pre>
+<p>Clients run in the directory where you want the downloaded
+          file to appear—the client instance code strips the server directory
+          path when making the local file’s name. Here the “download” simply
+          copies the requested files up to the local parent directory (the DOS
+          <code class="epub__literal">fc</code> command compares file
+          contents):</p><a id="I_programlisting1_d1e51933"></a>
+<pre class="epub__programlisting">C:\...\Internet\Sockets&gt; <strong class="epub__userinput"><code>dir /B *.gif *.txt</code></strong>
+ora-lp4e.gif
+textfile.txt
+
+C:\...\Internet\Sockets&gt; <strong class="epub__userinput"><code>fc /B ora-lp4e.gif testdir/ora-lp4e.gif</code></strong>
+FC: no differences encountered
+
+C:\...\Internet\Sockets&gt; <strong class="epub__userinput"><code>fc textfile.txt testdir\textfile.txt</code></strong>
+FC: no differences encountered</pre>
+<p>As usual, we can run server and clients on different machines
+          as well. For instance, here are the sort of commands we would use to
+          launch the server remotely and fetch files from it locally; run this
+          on your own to see the client and server outputs:</p><a id="I_programlisting1_d1e51946"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation">[remote server window]</span></em>
+[...]$ <strong class="epub__userinput"><code>python getfile.py -mode server</code></strong>
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[client window: requested file downloaded in a thread on server]</span></em>
+C:\...\Internet\Sockets&gt; <strong class="epub__userinput"><code>python getfile.py –mode client</code></strong>
+                             <strong class="epub__userinput"><code>-host learning-python.com</code></strong>
+                             <strong class="epub__userinput"><code>-port 50001 -file python.exe</code></strong>
+
+C:\...\Internet\Sockets&gt; <strong class="epub__userinput"><code>python getfile.py</code></strong>
+                             <strong class="epub__userinput"><code>-host learning-python.com -file index.html</code></strong></pre>
+<p><a name="security point"></a>One subtle security point here: the server instance code is
+          happy to send any server-side file whose pathname is sent from a
+          client, as long as the server is run with a username that has read
+          access to the requested file. If you care about keeping some of your
+          server-side files private, you should add logic to suppress
+          downloads of restricted files. I’ll leave this as a suggested
+          exercise here, but we will implement such filename checks in a
+          different <code class="epub__literal">getfile</code> download tool
+          later in this book.<sup>[47]</sup></p>
+</div>
+<div class="epub__sect2" title="Adding a User-Interface Frontend"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="adding_a_user-interface_frontend"></a>Adding a User-Interface Frontend</h2>
+</div>
+</div>
+</div>
+<p>After all the GUI commotion in the prior part of this book,
+          you might have noticed that we have been living in the realm of the
+          command line for this entire chapter—our socket clients and servers
+          have been started from simple DOS or Linux shells. Nothing is
+          stopping us from adding a nice point-and-click user interface to
+          some of these scripts, though; GUI and network scripting are not
+          mutually exclusive techniques. In fact, they can be arguably “sexy”
+          when used together well.</p>
+<p>For instance, it would be easy to implement a simple tkinter
+          GUI frontend to the client-side portion of the <code class="epub__literal">getfile</code> script we just met. Such a tool,
+          run on the client machine, may simply pop up a window with <code class="epub__literal">Entry</code> widgets for typing the desired
+          filename, server, and so on. Once download parameters have been
+          input, the user interface could either import and call the <code class="epub__literal">getfile.client</code> function with appropriate
+          option arguments, or build and run the implied <code class="epub__literal">getfile.py</code> command line using tools such
+          as <code class="epub__literal">os.system</code>, <code class="epub__literal">os.popen</code>, <code class="epub__literal">subprocess</code>, and so on.</p>
+<div class="epub__sect3" title="Using row frames and command lines"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="using_row_frames_and_command_lines"></a>Using row frames and command lines</h3>
+</div>
+</div>
+</div>
+<p>To help make all of this more concrete, let’s very quickly
+            explore a few simple scripts that add a tkinter frontend to the
+            <code class="epub__literal">getfile</code> client-side program.
+            All of these examples assume that you are running a server
+            instance of <code class="epub__literal">getfile</code>; they
+            merely add a GUI for the client side of the conversation, to fetch
+            a file from the server. The first, in Example 12-18, uses form
+            construction techniques we met in Chapters 8 and 9 to create a dialog for
+            inputting server, port, and filename information, and simply
+            constructs the corresponding <code class="epub__literal">getfile</code> command line and runs it with
+            the <code class="epub__literal">os.system</code> call we studied
+            in Part II.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id16"></a>
+<p class="epub__title">Example 12-18. PP4E\Internet\Sockets\getfilegui-1.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+launch getfile script client from simple tkinter GUI;
+could also use os.fork+exec, os.spawnv (see Launcher);
+windows: replace 'python' with 'start' if not on path;
+"""
+
+import sys, os
+from tkinter import *
+from tkinter.messagebox import showinfo
+
+def onReturnKey():
+    cmdline = ('python getfile.py -mode client -file %s -port %s -host %s' %
+                      (content['File'].get(),
+                       content['Port'].get(),
+                       content['Server'].get()))
+    os.system(cmdline)
+    showinfo('getfilegui-1', 'Download complete')
+
+box = Tk()
+labels = ['Server', 'Port', 'File']
+content = {}
+for label in labels:
+    row = Frame(box)
+    row.pack(fill=X)
+    Label(row, text=label, width=6).pack(side=LEFT)
+    entry = Entry(row)
+    entry.pack(side=RIGHT, expand=YES, fill=X)
+    content[label] = entry
+
+box.title('getfilegui-1')
+box.bind('&lt;Return&gt;', (lambda event: onReturnKey()))
+mainloop()</pre>
+</div>
+</div>
+<p>When run, this script creates the input form shown in Figure 12-1. Pressing the Enter key
+            (<code class="epub__literal">&lt;Return&gt;</code>) runs a
+            client-side instance of the <code class="epub__literal">getfile</code> program; when the generated
+            <code class="epub__literal">getfile</code> command line is
+            finished, we get the verification pop up displayed in <span>Figure 12-2.</span></p><div class="epub__figure-float"><div class="epub__figure"><a id="getfilegui-1_in_action"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject1_d1e52072"></a><img alt="getfilegui-1 in action" src="Images/getfile-39.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 12-1. getfilegui-1 in action</p>
+</div>
+</div><div class="epub__figure-float"><div class="epub__figure"><a id="getfilegui-1_verification_pop_up"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject1_d1e52080"></a><img alt="getfilegui-1 verification pop up" src="Images/getfile_004-19.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 12-2. getfilegui-1 verification pop up</p>
+</div>
+</div>
+</div>
+<div class="epub__sect3" title="Using grids and function calls"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="using_grids_and_function_calls"></a>Using grids and function calls</h3>
+</div>
+</div>
+</div>
+<p>The first user-interface script (Example 12-18) uses the <code class="epub__literal">pack</code> geometry manager and row <code class="epub__literal">Frames</code> with fixed-width labels to
+            <a id="I_indexterm1_d1e52098"></a><a id="I_indexterm1_d1e52103"></a>lay out the input form and runs the <code class="epub__literal">getfile</code> client as a standalone program.
+            As we learned in Chapter 9,
+            it’s arguably just as easy to use the <code class="epub__literal">grid</code> manager for layout and to import
+            and call the client-side logic function instead of running a
+            program. The script in Example 12-19 shows how.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id17"></a>
+<p class="epub__title">Example 12-19. PP4E\Internet\Sockets\getfilegui-2.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+same, but with grids and import+call, not packs and cmdline;
+direct function calls are usually faster than running files;
+"""
+
+import getfile
+from tkinter import *
+from tkinter.messagebox import showinfo
+
+def onSubmit():
+    getfile.client(content['Server'].get(),
+                   int(content['Port'].get()),
+                   content['File'].get())
+    showinfo('getfilegui-2', 'Download complete')
+
+box    = Tk()
+labels = ['Server', 'Port', 'File']
+rownum  = 0
+content = {}
+for label in labels:
+    Label(box, text=label).grid(column=0, row=rownum)
+    entry = Entry(box)
+    entry.grid(column=1, row=rownum, sticky=E+W)
+    content[label] = entry
+    rownum += 1
+
+box.columnconfigure(0, weight=0)   # make expandable
+box.columnconfigure(1, weight=1)
+Button(text='Submit', command=onSubmit).grid(row=rownum, column=0, columnspan=2)
+
+box.title('getfilegui-2')
+box.bind('&lt;Return&gt;', (lambda event: onSubmit()))
+mainloop()</pre>
+</div>
+</div>
+<p>This version makes a similar window (Figure 12-3), but adds a button at the
+            bottom that does the same thing as an Enter key press—it runs the
+            <code class="epub__literal">getfile</code> client procedure.
+            Generally speaking, importing and calling functions (as done here)
+            is faster than running command lines, especially if done more than
+            once. The <code class="epub__literal">getfile</code> script is set
+            up to work either way—as program or function library.</p><div class="epub__figure-float"><div class="epub__figure"><a id="getfilegui-2_in_action"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject1_d1e52138"></a><img alt="getfilegui-2 in action" src="Images/getfile_003-25.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 12-3. getfilegui-2 in action</p>
+</div>
+</div>
+</div>
+<div class="epub__sect3" title="Using a reusable form-layout class"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="using_a_reusable_form-layout_class"></a>Using a reusable form-layout class</h3>
+</div>
+</div>
+</div>
+<p>If you’re like me, though, writing all the GUI form layout
+            code in those two scripts can seem a bit tedious, whether you use
+            packing or grids. In fact, it became so tedious to me that I
+            decided to write a general-purpose form-layout class, shown in
+            Example 12-20, which
+            handles most of the GUI layout grunt work.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id18"></a>
+<p class="epub__title">Example 12-20. PP4E\Internet\Sockets\form.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+##################################################################
+a reusable form class, used by getfilegui (and others)
+##################################################################
+"""
+
+from tkinter import *
+entrysize = 40
+
+class Form:                                           # add non-modal form box
+    def __init__(self, labels, parent=None):          # pass field labels list
+        labelsize = max(len(x) for x in labels) + 2
+        box = Frame(parent)                           # box has rows, buttons
+        box.pack(expand=YES, fill=X)                  # rows has row frames
+        rows = Frame(box, bd=2, relief=GROOVE)        # go=button or return key
+        rows.pack(side=TOP, expand=YES, fill=X)       # runs onSubmit method
+        self.content = {}
+        for label in labels:
+            row = Frame(rows)
+            row.pack(fill=X)
+            Label(row, text=label, width=labelsize).pack(side=LEFT)
+            entry = Entry(row, width=entrysize)
+            entry.pack(side=RIGHT, expand=YES, fill=X)
+            self.content[label] = entry
+        Button(box, text='Cancel', command=self.onCancel).pack(side=RIGHT)
+        Button(box, text='Submit', command=self.onSubmit).pack(side=RIGHT)
+        box.master.bind('&lt;Return&gt;', (lambda event: self.onSubmit()))
+
+    def onSubmit(self):                                      # override this
+        for key in self.content:                             # user inputs in
+            print(key, '\t=&gt;\t', self.content[key].get())    # self.content[k]
+
+    def onCancel(self):                                      # override if need
+        Tk().quit()                                          # default is exit
+
+class DynamicForm(Form):
+    def __init__(self, labels=None):
+        labels = input('Enter field names: ').split()
+        Form.__init__(self, labels)
+    def onSubmit(self):
+        print('Field values...')
+        Form.onSubmit(self)
+        self.onCancel()
+
+if __name__ == '__main__':
+    import sys
+    if len(sys.argv) == 1:
+        Form(['Name', 'Age', 'Job'])     # precoded fields, stay after submit
+    else:
+        DynamicForm()                    # input fields, go away after submit
+    mainloop()</pre>
+</div>
+</div>
+<p>Compare the approach of this module with that of the form
+            row builder function we wrote in Chapter 10’s Example 10-9. While that
+            example much reduced the amount of code required, the module here
+            is a noticeably more complete and automatic <span>scheme—</span>it builds the entire form
+            given a set of label names, and provides a dictionary with every
+            field’s entry widget ready to be fetched.</p>
+<p>Running this module standalone triggers its self-test code
+            at the bottom. Without arguments (and when double-clicked in a
+            Windows file explorer), the self-test generates a form with canned
+            input fields captured in Figure 12-4, and displays the
+            fields’ values on Enter key presses or Submit button
+            clicks:</p><a id="I_programlisting1_d1e52168"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python form.py</code></strong>
+Age     =&gt;       40
+Name    =&gt;       Bob
+Job     =&gt;       Educator, Entertainer</pre><div class="epub__figure"><a id="form_test_comma_canned_fields"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject1_d1e52176"></a><img alt="Form test, canned fields" src="Images/getfile_005-15.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 12-4. Form test, canned fields</p>
+</div>
+<p>With a command-line argument, the form class module’s
+            self-test code prompts for an arbitrary set of field names for the
+            form; fields can be constructed as dynamically as we like. Figure 12-5 shows the input form
+            constructed in response to the following console interaction.
+            Field names could be accepted on the command line, too, but the
+            <code class="epub__literal">input</code> built-in function works
+            just as well for simple tests like this. In this mode, the GUI
+            goes away after the first submit, because <code class="epub__literal">DynamicForm.onSubmit</code> says so:</p><a id="I_programlisting1_d1e52191"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python form.py -</code></strong>
+Enter field names: Name Email Web Locale
+Field values...
+Locale  =&gt;       Florida
+Web     =&gt;       http://learning-python.com
+Name    =&gt;       Book
+Email   =&gt;       pp4e@learning-python.com</pre><div class="epub__figure-float"><div class="epub__figure"><a id="form_test_comma_dynamic_fields"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject1_d1e52199"></a><img alt="Form test, dynamic fields" src="Images/getfile_006-12.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 12-5. Form test, dynamic fields</p>
+</div>
+</div>
+<p>And last but not least, Example 12-21 shows the <code class="epub__literal">getfile</code> user interface again, this time
+            constructed with the reusable form layout class. We need to fill
+            in only the form labels list and provide an <code class="epub__literal">onSubmit</code> callback method of our own. All
+            of the work needed to construct the form comes “for free,” from
+            the imported and widely reusable <code class="epub__literal">Form</code> <span>superclass</span>.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id19"></a>
+<p class="epub__title">Example 12-21. PP4E\Internet\Sockets\getfilegui.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+launch getfile client with a reusable GUI form class;
+os.chdir to target local dir if input (getfile stores in cwd);
+to do: use threads, show download status and getfile prints;
+"""
+
+from form import Form
+from tkinter import Tk, mainloop
+from tkinter.messagebox import showinfo
+import getfile, os
+
+class GetfileForm(Form):
+    def __init__(self, oneshot=False):
+        root = Tk()
+        root.title('getfilegui')
+        labels = ['Server Name', 'Port Number', 'File Name', 'Local Dir?']
+        Form.__init__(self, labels, root)
+        self.oneshot = oneshot
+
+    def onSubmit(self):
+        Form.onSubmit(self)
+        localdir   = self.content['Local Dir?'].get()
+        portnumber = self.content['Port Number'].get()
+        servername = self.content['Server Name'].get()
+        filename   = self.content['File Name'].get()
+        if localdir:
+            os.chdir(localdir)
+        portnumber = int(portnumber)
+        getfile.client(servername, portnumber, filename)
+        showinfo('getfilegui', 'Download complete')
+        if self.oneshot: Tk().quit()  # else stay in last localdir
+
+if __name__ == '__main__':
+    GetfileForm()
+    mainloop()</pre>
+</div>
+</div>
+<p>The form layout class imported here can be used by any
+            program that needs to input form-like data; when used in this
+            script, we get a user interface like that shown in Figure 12-6 under Windows 7 (and similar on
+            other versions and platforms).</p><div class="epub__figure-float"><div class="epub__figure"><a id="getfilegui_in_action"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject1_d1e52233"></a><img alt="getfilegui in action" src="Images/getfile_002-32.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 12-6. getfilegui in action</p>
+</div>
+</div>
+<p>Pressing this form’s Submit button or the Enter key makes
+            the <code class="epub__literal">getfilegui</code> script call the
+            imported <code class="epub__literal">getfile.client</code>
+            client-side function as before. This time, though, we also first
+            change to the local directory typed into the form so that the
+            fetched file is stored there (<code class="epub__literal">getfile</code> stores in the current working
+            directory, whatever that may be when it is called). Here are the
+            messages printed in the client’s console, along with a check on
+            the file transfer; the server is still running above <code class="epub__literal">testdir</code>, but the client stores the file
+            elsewhere after it’s fetched on the socket:</p><a id="I_programlisting1_d1e52252"></a>
+<pre class="epub__programlisting">C:\...\Internet\Sockets&gt; <strong class="epub__userinput"><code>getfilegui.py</code></strong>
+Local Dir?      =&gt;       C:\users\Mark\temp
+File Name       =&gt;       testdir\ora-lp4e.gif
+Server Name     =&gt;       localhost
+Port Number     =&gt;       50001
+Client got testdir\ora-lp4e.gif at Sun Apr 25 17:22:39 2010
+
+C:\...\Internet\Sockets&gt; <strong class="epub__userinput"><code>fc /B C:\Users\mark\temp\ora-lp4e.gif testdir\ora-lp4e.gif</code></strong>
+FC: no differences encountered</pre>
+<p>As usual, we can use this interface to connect to servers
+            running locally on the same machine (as done here), or remotely on
+            a different computer. Use a different server name and file paths
+            if you’re running the server on a remote machine; the magic of
+            sockets make this all “just work” in either local or remote
+            modes.</p>
+<p>One caveat worth pointing out here: the GUI is essentially
+            dead while the download is in progress (even screen redraws aren’t
+            handled—try covering and uncovering the window and you’ll see what
+            I mean). We could make this better by running the download in a
+            thread, but since we’ll see how to do that in the next chapter
+            when we explore the FTP protocol, you should consider this problem
+            a preview.</p>
+<p>In closing, a few final notes: first, I should point out
+            that the scripts in this chapter use tkinter techniques we’ve seen
+            before and won’t go into here in the interest of space; be sure to
+            see the GUI chapters in this book for implementation hints.</p>
+<p>Keep in mind, too, that these interfaces just add a GUI on
+            top of the existing script to reuse its code; any command-line
+            tool can be easily GUI-ified in this way to make it more appealing
+            and user friendly. In Chapter 14, for
+            example, we’ll meet a more useful client-side tkinter user
+            interface for reading and sending email over sockets (PyMailGUI),
+            which largely just adds a GUI to mail-processing tools. Generally
+            speaking, GUIs can often be added as almost an afterthought to a
+            program. Although the degree of user-interface and core logic
+            separation varies per program, keeping the two distinct makes it
+            easier to focus on each.</p>
+<p>And finally, now that I’ve shown you how to build user
+            interfaces on top of this chapter’s <code class="epub__literal">getfile</code>, I should also say that they
+            aren’t really as useful as they might seem. In particular,
+            <code class="epub__literal">getfile</code> clients can talk only
+            to machines that are running a <code class="epub__literal">getfile</code> server. In the next chapter,
+            we’ll discover another way to download files—FTP—which also runs
+            on sockets but provides a higher-level interface and is available
+            as a standard service on many machines on the Net. We don’t
+            generally need to start up a custom server to transfer files over
+            FTP, the way we do with <code class="epub__literal">getfile</code>. In fact, the user-interface
+            scripts in this chapter could be easily changed to fetch the
+            desired file with Python’s FTP tools, instead of the <code class="epub__literal">getfile</code> module. But instead of spilling
+            all the beans here, I’ll just <a id="I_indexterm1_d1e52288"></a><a id="I_indexterm1_d1e52290"></a><a id="I_indexterm1_d1e52292"></a><a id="I_indexterm1_d1e52294"></a>say, “Read on.”</p><div class="epub__sidebar"><a id="using_serial_ports"></a>
+<p class="epub__title">Using Serial Ports</p>
+<p>Sockets, the main <a id="I_indexterm1_d1e52302"></a>subject of this chapter, are the programmer’s
+              interface to network connections in Python scripts. As we’ve
+              seen, they let us write scripts that converse with computers
+              arbitrarily located on a network, and they form the backbone of
+              the Internet and the Web.</p>
+<p>If you’re looking for a lower-level way to communicate
+              with devices in general, though, you may also be interested in
+              the topic of Python’s serial port interfaces. This isn’t quite
+              related to Internet scripting, but it’s similar enough in spirit
+              and is discussed often enough on the Net to merit a few words
+              here.</p>
+<p>In brief, scripts can use serial port interfaces to engage
+              in low-level communication with things like mice, modems, and a
+              wide variety of serial devices and hardware. Serial port
+              interfaces are also used to communicate with devices connected
+              over infrared ports (e.g., hand-held computers and remote
+              modems). Such interfaces let scripts tap into raw data streams
+              and implement device protocols of their own. Other Python tools
+              such as the<a id="I_indexterm1_d1e52310"></a><a id="I_indexterm1_d1e52315"></a> <code class="epub__literal">ctypes</code> and
+              <code class="epub__literal">struct</code> modules may provide
+              additional tools for creating and extracting the packed binary
+              data these ports transfer.</p>
+<p>At this writing, there are a variety of ways to send and
+              receive data over serial ports in Python scripts. Notable among
+              these options is an open source extension package known
+              as<a id="I_indexterm1_d1e52329"></a> <span class="epub__emphasis"><em>pySerial</em></span>, which allows
+              Python scripts to control serial ports on both Windows and
+              Linux, as well as BSD Unix, Jython (for Java), and IronPython
+              (for .Net and Mono). Unfortunately, there is not enough space to
+              cover this or any other serial port option in any sort of detail
+              in this text. As always, see your favorite web search engine for
+              up-to-date details on this front.</p>
+</div>
+</div>
+</div><div class="epub__footnotes"><br/><hr/><div class="epub__footnote">
+<p><sup>[47] </sup>We’ll see three more <code class="epub__literal">getfile</code> programs before we leave
+              Internet scripting. The next chapter’s
+              <span class="epub__emphasis"><em>getfile.py</em></span> fetches a file with the
+              higher-level FTP interface instead of using raw socket calls,
+              and its <span class="epub__emphasis"><em>http-getfile</em></span> scripts fetch files
+              over the HTTP protocol. Later, Chapter 15 presents a server-side
+              <span class="epub__emphasis"><em>getfile.py</em></span> CGI script that transfers file
+              contents over the HTTP port in response to a request made in a
+              web browser client (files are sent as the output of a CGI
+              script). All four of the download schemes presented in this text
+              ultimately use sockets, but only the version here makes that use
+              explicit.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

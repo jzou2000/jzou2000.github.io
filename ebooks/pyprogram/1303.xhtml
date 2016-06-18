@@ -1,0 +1,1071 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Transferring Directories with ftplib</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Transferring Directories with ftplib"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="transferring_directories_with_ftplib"></a>Transferring Directories with ftplib</h1>
+</div>
+</div>
+</div>
+<p>Once upon a time, <a id="client13.4"></a><a id="ftp13.4"></a><a id="dir13.4"></a><a id="tran13.4"></a>I used Telnet to manage my website at my <a id="I_indexterm2_d1e53523"></a><a id="I_indexterm2_d1e53526"></a>Internet Service Provider (ISP). I logged in to the web
+        server in a shell window, and performed all my edits directly on the
+        remote machine. There was only one copy of a site’s files—on the
+        machine that hosted it. Moreover, content updates could be performed
+        from any machine that ran a <a id="I_indexterm2_d1e53530"></a>Telnet client—ideal for people with travel-based
+        careers.<sup>[49]</sup></p>
+<p>Of course, times have changed. Like most personal websites,
+        today mine are maintained on my laptop and I transfer their files to
+        and from my ISP as needed. Often, this is a simple matter of one or
+        two files, and it can be accomplished with a command-line FTP client.
+        Sometimes, though, I need an easy way to transfer the entire site.
+        Maybe I need to download to detect files that have become out of sync.
+        Occasionally, the changes are so involved that it’s easier to upload
+        the entire site in a single step.</p>
+<p>Although there are a variety of ways to approach this task
+        (including options in site-builder tools), Python can help here, too:
+        writing Python scripts to automate the upload and download tasks
+        associated with maintaining my website on my laptop provides a
+        portable and mobile solution. Because Python FTP scripts will work on
+        any machine with sockets, they can be run on my laptop and on nearly
+        any other computer where Python is installed. Furthermore, the same
+        scripts used to transfer page files to and from my PC can be used to
+        copy my site to another web server as a backup copy, should my ISP
+        experience an outage. The effect is sometimes called a
+        <span class="epub__emphasis"><em>mirror</em></span>—a copy of a remote site.</p>
+<div class="epub__sect2" title="Downloading Site Directories"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="downloading_site_directories"></a>Downloading Site Directories</h2>
+</div>
+</div>
+</div>
+<p>The following two scripts <a id="remote13.4.1"></a>address these needs. The first,
+          <span class="epub__emphasis"><em>downloadflat.py</em></span>, automatically downloads (i.e.,
+          copies) by FTP all the files in a directory at a remote site to a
+          directory on the local machine. I keep the main copy of my website
+          files on my PC these days, but I use this script in two ways:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>To download my website to client machines where I want to
+              make edits, I fetch the contents of my web directory of my
+              account on my ISP’s machine.</p></li><li class="epub__listitem">
+<p>To mirror my site to my account on another server, I run
+              this script periodically on the target machine if it supports
+              Telnet or SSH secure shell; if it does not, I simply download to
+              one machine and upload from there to the target server.</p></li></ul>
+</div>
+<p>More generally, this script (shown in Example 13-10) will download a
+          directory full of files to any machine with Python and sockets, from
+          any machine running an FTP server.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id29"></a>
+<p class="epub__title">Example 13-10. PP4E\Internet\Ftp\Mirror\downloadflat.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/bin/env python
+"""
+###############################################################################
+use FTP to copy (download) all files from a single directory at a remote
+site to a directory on the local machine; run me periodically to mirror
+a flat FTP site directory to your ISP account;  set user to 'anonymous'
+to do anonymous FTP;  we could use try to skip file failures, but the FTP
+connection is likely closed if any files fail;  we could also try to
+reconnect with a new FTP instance before each transfer: connects once now;
+if failures, try setting nonpassive for active FTP, or disable firewalls;
+this also depends on a working FTP server, and possibly its load policies.
+###############################################################################
+"""
+
+import os, sys, ftplib
+from getpass   import getpass
+from mimetypes import guess_type
+
+nonpassive = False                        # passive FTP on by default in 2.1+
+remotesite = 'home.rmi.net'               # download from this site
+remotedir  = '.'                          # and this dir (e.g., public_html)
+remoteuser = 'lutz'
+remotepass = getpass('Password for %s on %s: ' % (remoteuser, remotesite))
+localdir   = (len(sys.argv) &gt; 1 and sys.argv[1]) or '.'
+cleanall   = input('Clean local directory first? ')[:1] in ['y', 'Y']
+
+print('connecting...')
+connection = ftplib.FTP(remotesite)                 # connect to FTP site
+connection.login(remoteuser, remotepass)            # login as user/password
+connection.cwd(remotedir)                           # cd to directory to copy
+if nonpassive:                                      # force active mode FTP
+    connection.set_pasv(False)                      # most servers do passive
+
+if cleanall:
+    for localname in os.listdir(localdir):          # try to delete all locals
+        try:                                        # first, to remove old files
+            print('deleting local', localname)      # os.listdir omits . and ..
+            os.remove(os.path.join(localdir, localname))
+        except:
+            print('cannot delete local', localname)
+
+count = 0                                           # download all remote files
+remotefiles = connection.nlst()                     # nlst() gives files list
+                                                    # dir()  gives full details
+for remotename in remotefiles:
+    if remotename in ('.', '..'): continue          # some servers include . and ..
+    mimetype, encoding = guess_type(remotename)     # e.g., ('text/plain', 'gzip')
+    mimetype  = mimetype or '?/?'                   # may be (None, None)
+    maintype  = mimetype.split('/')[0]              # .jpg ('image/jpeg', None')
+
+    localpath = os.path.join(localdir, remotename)
+    print('downloading', remotename, 'to', localpath, end=' ')
+    print('as', maintype, encoding or '')
+
+    if maintype == 'text' and encoding == None:
+        # use ascii mode xfer and text file
+        # use encoding compatible wth ftplib's
+        localfile = open(localpath, 'w', encoding=connection.encoding)
+        callback  = lambda line: localfile.write(line + '\n')
+        connection.retrlines('RETR ' + remotename, callback)
+
+    else:
+        # use binary mode xfer and bytes file
+        localfile = open(localpath, 'wb')
+        connection.retrbinary('RETR ' + remotename, localfile.write)
+
+    localfile.close()
+    count += 1
+
+connection.quit()
+print('Done:', count, 'files downloaded.')</pre>
+</div>
+</div>
+<p>There’s not much that is new to speak of in this script,
+          compared to other FTP examples we’ve seen thus far. We open a
+          connection with the remote FTP server, log in with a username and
+          password for the desired account (this script never uses anonymous
+          FTP), and go to the desired remote directory. New here, though, are
+          loops to iterate over all the files in local and remote directories,
+          text-based retrievals, and file deletions:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Deleting all local files</em></span></span></dt><dd>
+<p>This script has a <code class="epub__literal">cleanall</code> option, enabled by an
+                interactive prompt. If selected, the script first deletes all
+                the files in the local directory before downloading, to make
+                sure there are no extra files that aren’t also on the server
+                (there may be junk here from a prior download). To delete
+                local files, the script calls <code class="epub__literal">os.listdir</code> to get a list of
+                filenames in the directory, and <code class="epub__literal">os.remove</code> to delete each; see Chapter 4 (or the Python library
+                manual) for more details if you’ve forgotten what these calls
+                do.</p>
+<p>Notice the use of <code class="epub__literal">os.path.join</code> to concatenate a
+                directory path and filename according to the host platform’s
+                conventions; <code class="epub__literal">os.listdir</code>
+                returns filenames without their directory paths, and this
+                script is not necessarily run in the local directory where
+                downloads will be placed. The local directory defaults to the
+                current directory (“.”), but can be set differently with a
+                command-line argument to the script.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Fetching all remote files</em></span></span></dt><dd>
+<p>To grab all the files in a <a id="I_indexterm2_d1e53611"></a>remote directory, we first need a list of their
+                names. The FTP object’s <code class="epub__literal">nlst</code> method <a id="I_indexterm2_d1e53622"></a>is the remote equivalent of <code class="epub__literal">os.listdir</code>: <code class="epub__literal">nlst</code> returns a list of the string
+                names of all files in the current remote directory. Once we
+                have this list, we simply step through it in a loop, running
+                FTP retrieval commands for each filename in turn (more on this
+                in a minute).</p>
+<p>The <code class="epub__literal">nlst</code> method is,
+                more or less, like requesting a directory listing with an
+                <code class="epub__literal">ls</code> command in typical
+                interactive FTP programs, but Python automatically splits up
+                the listing’s text into a list of filenames. We can pass it a
+                remote directory to be listed; by default it lists the current
+                server directory. A related FTP method, <code class="epub__literal">dir</code>, returns the list of line
+                strings produced by an FTP <code class="epub__literal">LIST</code> command<a id="I_indexterm2_d1e53648"></a>; its result is like typing a <code class="epub__literal">dir</code> command in an FTP session, and
+                its lines contain complete file information, unlike <code class="epub__literal">nlst</code>. If you need to know more about
+                all the remote files, parse the result of a <code class="epub__literal">dir</code> method call (we’ll see how in a
+                later example).</p>
+<p>Notice how we skip “.” and “..” current and parent
+                directory indicators if present in remote directory listings;
+                unlike <code class="epub__literal">os.listdir</code>, some
+                (but not all) servers include these, so we need to either skip
+                these or catch the exceptions they may trigger (more on this
+                later when we start using <code class="epub__literal">dir</code>, too).</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Selecting transfer modes with
+              mimetypes</em></span></span></dt><dd>
+<p>We discussed output file modes for FTP earlier, but
+                <a id="I_indexterm2_d1e53677"></a>now that we’ve started transferring text, too, I
+                can fill in the rest of this story. To handle Unicode
+                encodings and to keep line-ends in sync with the machines that
+                my web files live on, this script distinguishes between binary
+                and text file transfers. It uses the Python <code class="epub__literal">mimetypes</code> module to choose between
+                text and binary transfer modes for each file.</p>
+<p>We met <code class="epub__literal">mimetypes</code> in
+                Chapter 6 near Example 6-23, where we used
+                it to play media files (see the examples and description there
+                for an introduction). Here, <code class="epub__literal">mimetypes</code> is used to decide whether
+                a file is text or binary by guessing from its filename
+                extension. For instance, HTML web pages and simple text files
+                are transferred as text with automatic line-end mappings, and
+                images and <span class="epub__emphasis"><em>tar</em></span> archives are transferred
+                in raw binary mode.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Downloading: text versus
+              binary</em></span></span></dt><dd>
+<p>For <span class="epub__emphasis"><em>binary files</em></span> data is pulled
+                <a id="I_indexterm2_d1e53711"></a>down with the <code class="epub__literal">retrbinary</code> method we met earlier,
+                and stored in a local file with binary open mode of <code class="epub__literal">wb</code>. This file open mode is required
+                to allow for the <code class="epub__literal">bytes</code>
+                strings passed to the <code class="epub__literal">write</code>
+                method by <code class="epub__literal">retrbinary</code>, but
+                it also suppresses line-end byte mapping and Unicode encodings
+                in the process. Again, text mode requires encodable text in
+                Python 3.X, and this fails for binary data like images. This
+                script may also be run on Windows or Unix-like platforms, and
+                we don’t want a <code class="epub__literal">\n</code> byte
+                embedded in an image to get expanded to <code class="epub__literal">\r\n</code> on Windows. We don’t use a
+                chunk-size third argument for binary transfers here, though—it
+                defaults to a reasonable size if omitted.</p>
+<p>For <span class="epub__emphasis"><em>text files</em></span>, the script instead
+                uses the <code class="epub__literal">retrlines</code> method,
+                passing in a function to be called for each line in the text
+                file downloaded. The text line handler function receives lines
+                in <code class="epub__literal">str</code> string form, and
+                mostly just writes the line to a local text file. But notice
+                that the handler function created by the <code class="epub__literal">lambda</code> here also adds a <code class="epub__literal">\n</code> line-end character to the end of
+                the line it is passed. Python’s <code class="epub__literal">retrlines</code> <a id="I_indexterm2_d1e53760"></a>method strips all line-feed characters from
+                lines to sidestep platform differences. By adding a <code class="epub__literal">\n</code>, the script ensures the proper
+                line-end marker character sequence for the local platform on
+                which this script runs when written to the file (<code class="epub__literal">\n</code> or <code class="epub__literal">\r\n</code>).</p>
+<p>For this auto-mapping of the <code class="epub__literal">\n</code> in the script to work, of course,
+                we must also open text output files in <code class="epub__literal">w</code> text mode, not in <code class="epub__literal">wb</code>—the mapping from <code class="epub__literal">\n</code> to <code class="epub__literal">\r\n</code> on <span>Windows</span> happens when data is
+                written to the file. As discussed earlier, text mode also
+                means that the file’s <code class="epub__literal">write</code>
+                method will allow for the <code class="epub__literal">str</code> string passed in by <code class="epub__literal">retrlines</code>, and that text will be
+                encoded per Unicode when written.</p>
+<p>Subtly, though, we also explicitly use the FTP <code class="epub__literal">connection</code> object’s Unicode
+                <span class="epub__emphasis"><em>encoding scheme</em></span> for our text output file
+                in <code class="epub__literal">open</code>, instead of the
+                default. Without this encoding option, the script aborted with
+                a <code class="epub__literal">UnicodeEncodeError</code>
+                exception for some files in my site. In <code class="epub__literal">retrlines</code>, the FTP object itself
+                reads the remote file data over a socket with a text-mode file
+                wrapper and an explicit encoding scheme for decoding; since
+                the FTP object can do no better than this encoding anyhow, we
+                use its encoding for our output file as well.</p>
+<p>By default, FTP objects use the <code class="epub__literal">latin1</code> scheme for decoding text
+                fetched (as well as for encoding text sent), but this can be
+                specialized by assigning to their <code class="epub__literal">encoding</code> attribute. Our
+                script’s local text output file will inherit whatever encoding
+                <code class="epub__literal">ftplib</code> uses and so be
+                compatible with the encoded text data that it produces and
+                passes.</p>
+<p>We could try to also catch Unicode exceptions for files
+                outside the Unicode encoding used by the FTP object, but
+                exceptions leave the FTP object in an unrecoverable state in
+                tests I’ve run in Python 3.1. Alternatively, we could use
+                <code class="epub__literal">wb</code> binary mode for the
+                local text output file and manually encode line strings with
+                <code class="epub__literal">line.encode</code>, or simply use
+                <code class="epub__literal">retrbinary</code> and binary mode
+                files in all cases, but both of these would fail to map
+                end-lines portably—the whole point of making text distinct in
+                this context.</p></dd></dl>
+</div>
+<p>All of this is simpler in action than in words. Here is the
+          command I use to download my entire book support website from my ISP
+          server account to my Windows laptop PC, in a single step:</p><a id="I_programlisting2_d1e53846"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Ftp\Mirror&gt; <strong class="epub__userinput"><code>downloadflat.py test</code></strong>
+Password for lutz on home.rmi.net:
+Clean local directory first? <strong class="epub__userinput"><code>y</code></strong>
+connecting...
+deleting local 2004-longmont-classes.html
+deleting local 2005-longmont-classes.html
+deleting local 2006-longmont-classes.html
+deleting local about-hopl.html
+deleting local about-lp.html
+deleting local about-lp2e.html
+deleting local about-pp-japan.html
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+
+downloading 2004-longmont-classes.html to test\2004-longmont-classes.html as text
+downloading 2005-longmont-classes.html to test\2005-longmont-classes.html as text
+downloading 2006-longmont-classes.html to test\2006-longmont-classes.html as text
+downloading about-hopl.html to test\about-hopl.html as text
+downloading about-lp.html to test\about-lp.html as text
+downloading about-lp2e.html to test\about-lp2e.html as text
+downloading about-pp-japan.html to test\about-pp-japan.html as text
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+
+downloading ora-pyref4e.gif to test\ora-pyref4e.gif as image
+downloading ora-lp4e-big.jpg to test\ora-lp4e-big.jpg as image
+downloading ora-lp4e.gif to test\ora-lp4e.gif as image
+downloading pyref4e-updates.html to test\pyref4e-updates.html as text
+downloading lp4e-updates.html to test\lp4e-updates.html as text
+downloading lp4e-examples.html to test\lp4e-examples.html as text
+downloading LP4E-examples.zip to test\LP4E-examples.zip as application
+Done: 297 files downloaded.</pre>
+<p>This may take a few moments to complete, depending on your
+          site’s size and your connection speed (it’s bound by network speed
+          constraints, and it usually takes roughly two to three minutes for
+          my site on my current laptop and wireless broadband connection). It
+          is much more accurate and easier than downloading files by hand,
+          though. The script simply iterates over all the remote files
+          returned by the <code class="epub__literal">nlst</code> method, and
+          downloads each with the FTP protocol (i.e., over sockets) in turn.
+          It uses text transfer mode for names that imply text data, and
+          binary mode for others.</p>
+<p>With the script running this way, I make sure the initial
+          assignments in it reflect the machines involved, and then run the
+          script from the local directory where I want <span>the site copy</span> to be stored. Because
+          the target download directory is often not where the script lives, I
+          may need to give Python the full path to the script file. When run
+          on a server in a Telnet or SSH session window, for instance, the
+          execution and script directory paths are different, but the script
+          works the same way.</p>
+<p>If you elect to delete local files in the download directory,
+          you may also see a batch of “deleting local…” messages scroll by on
+          the screen before any “downloading…” lines appear: this
+          automatically cleans out any garbage lingering from a prior
+          download. And if you botch the input of the remote site password, a
+          Python exception is raised; I sometimes need to run it again (and
+          type more slowly):</p><a id="I_programlisting2_d1e53873"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Ftp\Mirror&gt; <strong class="epub__userinput"><code>downloadflat.py test</code></strong>
+Password for lutz on home.rmi.net:
+Clean local directory first?
+connecting...
+Traceback (most recent call last):
+  File "C:\...\PP4E\Internet\Ftp\Mirror\downloadflat.py", line 29, in &lt;module&gt;
+    connection.login(remoteuser, remotepass)            # login as user/password
+  File "C:\Python31\lib\ftplib.py", line 375, in login
+    if resp[0] == '3': resp = self.sendcmd('PASS ' + passwd)
+  File "C:\Python31\lib\ftplib.py", line 245, in sendcmd
+    return self.getresp()
+  File "C:\Python31\lib\ftplib.py", line 220, in getresp
+    raise error_perm(resp)
+ftplib.error_perm: 530 Login incorrect.</pre>
+<p>It’s worth noting that this script is at least partially
+          configured by assignments near the top of the file. In addition, the
+          password and deletion options are given by interactive inputs, and
+          one command-line argument is allowed—the local directory name to
+          store the downloaded files (it defaults to “.”, the directory where
+          the script is run). <span>Command</span>-line arguments could be
+          employed to universally configure all the other download parameters
+          and options, too, but because of Python’s simplicity and lack of
+          compile/link steps, changing settings in the text of Python scripts
+          is usually just as easy as typing words on a command <a id="I_indexterm2_d1e53883"></a>line.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p>To check for version skew after a batch of downloads and
+            uploads, you can run the <code class="epub__literal">diffall</code> script we wrote in Chapter 6, Example 6-12. For instance, I
+            find files that have diverged over time due to updates on multiple
+            platforms by comparing the download to a local copy of my website
+            using a shell command line such as <code class="epub__literal">C:\...\PP4E\Internet\Ftp&gt;
+            ..\..\System\Filetools\diffall.py Mirror\test
+            C:\...\Websites\public_html</code>. See Chapter 6 for more details on this
+            tool, and file <em class="epub__filename">diffall.out.txt</em> in the <em class="epub__filename">diffs</em> subdirectory of the examples
+            distribution for a sample run; its text file differences stem from
+            either final line newline characters or newline differences
+            reflecting binary transfers that Windows <code class="epub__literal">fc</code> commands and FTP servers do not
+            notice.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Uploading Site Directories"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="uploading_site_directories"></a>Uploading Site Directories</h2>
+</div>
+</div>
+</div>
+<p>Uploading a full directory is <a id="remote13.4.2"></a>symmetric to downloading: it’s mostly a matter of
+          swapping the local and remote machines and operations in the program
+          we just met. The script in Example 13-11 uses FTP to copy all
+          files in a directory on the local machine on which it runs up to a
+          directory on a remote machine.</p>
+<p>I really use this script, too, most often to upload all of the
+          files maintained on my laptop PC to my ISP account in one fell
+          swoop. I also sometimes use it to copy my site from my PC to a
+          mirror machine or from the mirror machine back to my ISP. Because
+          this script runs on any computer with Python and sockets, it happily
+          transfers a directory from any machine on the Net to any machine
+          running an FTP server. Simply change the initial setting in this
+          module as appropriate for the transfer you have in mind.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id30"></a>
+<p class="epub__title">Example 13-11. PP4E\Internet\Ftp\Mirror\uploadflat.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/bin/env python
+"""
+##############################################################################
+use FTP to upload all files from one local dir to a remote site/directory;
+e.g., run me to copy a web/FTP site's files from your PC to your ISP;
+assumes a flat directory upload: uploadall.py does nested directories.
+see downloadflat.py comments for more notes: this script is symmetric.
+##############################################################################
+"""
+
+import os, sys, ftplib
+from getpass import getpass
+from mimetypes import guess_type
+
+nonpassive = False                                  # passive FTP by default
+remotesite = 'learning-python.com'                  # upload to this site
+remotedir  = 'books'                                # from machine running on
+remoteuser = 'lutz'
+remotepass = getpass('Password for %s on %s: ' % (remoteuser, remotesite))
+localdir   = (len(sys.argv) &gt; 1 and sys.argv[1]) or '.'
+cleanall   = input('Clean remote directory first? ')[:1] in ['y', 'Y']
+
+print('connecting...')
+connection = ftplib.FTP(remotesite)                 # connect to FTP site
+connection.login(remoteuser, remotepass)            # log in as user/password
+connection.cwd(remotedir)                           # cd to directory to copy
+if nonpassive:                                      # force active mode FTP
+    connection.set_pasv(False)                      # most servers do passive
+
+if cleanall:
+    for remotename in connection.nlst():            # try to delete all remotes
+        try:                                        # first, to remove old files
+            print('deleting remote', remotename)
+            connection.delete(remotename)           # skips . and .. if attempted
+        except:
+            print('cannot delete remote', remotename)
+
+count = 0                                           # upload all local files
+localfiles = os.listdir(localdir)                   # listdir() strips dir path
+                                                    # any failure ends script
+for localname in localfiles:
+    mimetype, encoding = guess_type(localname)      # e.g., ('text/plain', 'gzip')
+    mimetype  = mimetype or '?/?'                   # may be (None, None)
+    maintype  = mimetype.split('/')[0]              # .jpg ('image/jpeg', None')
+
+    localpath = os.path.join(localdir, localname)
+    print('uploading', localpath, 'to', localname, end=' ')
+    print('as', maintype, encoding or '')
+
+    if maintype == 'text' and encoding == None:
+        # use ascii mode xfer and bytes file
+        # need rb mode for ftplib's crlf logic
+        localfile = open(localpath, 'rb')
+        connection.storlines('STOR ' + localname, localfile)
+
+    else:
+        # use binary mode xfer and bytes file
+        localfile = open(localpath, 'rb')
+        connection.storbinary('STOR ' + localname, localfile)
+
+    localfile.close()
+    count += 1
+
+connection.quit()
+print('Done:', count, 'files uploaded.')</pre>
+</div>
+</div>
+<p>Similar to the mirror download script, this program
+          illustrates a handful of new FTP interfaces and a set of FTP
+          scripting techniques:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Deleting all remote files</em></span></span></dt><dd>
+<p>Just like the mirror script, the upload begins by asking
+                whether we want to delete all the files in the remote target
+                directory before copying any files there. This <code class="epub__literal">cleanall</code> option is useful if we’ve
+                deleted files in the local copy of the directory in the
+                client—the deleted files would remain on the server-side copy
+                unless we delete all files there first.</p>
+<p>To implement the remote cleanup, this script simply gets
+                a listing of all the files in the remote directory with the
+                FTP <code class="epub__literal">nlst</code> method, and
+                deletes each in turn with the<a id="I_indexterm2_d1e53952"></a><a id="I_indexterm2_d1e53957"></a> FTP <code class="epub__literal">delete</code>
+                method. Assuming we have delete permission, the directory will
+                be emptied (file permissions depend on the account we logged
+                into when connecting to the server). We’ve already moved to
+                the target remote directory when deletions occur, so no
+                directory paths need to be prepended to filenames here. Note
+                that <code class="epub__literal">nlst</code> may raise an
+                exception for some servers if the remote directory is empty;
+                we don’t catch the exception here, but you can simply not
+                select a cleaning if one fails for you. We do catch deletion
+                exceptions, because directory names like “.” and “..” may be
+                returned in the listing by some servers.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Storing all local files</em></span></span></dt><dd>
+<p>To apply the upload operation to each file in the local
+                directory, we get a list of local filenames with the standard
+                <code class="epub__literal">os.listdir</code> call, and
+                <a id="I_indexterm2_d1e53979"></a>take care to prepend the local source directory
+                path to each filename with the <code class="epub__literal">os.path.join</code> call. Recall that
+                <code class="epub__literal">os.listdir</code> returns
+                filenames without directory paths, and the source directory
+                may not be the same as the script’s execution directory if
+                passed on the command line.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Uploading: Text versus binary</em></span></span></dt><dd>
+<p>This script may also be run on both Windows and
+                Unix-like clients, so we need to handle text files specially.
+                Like the mirror download, this script picks text or binary
+                transfer modes by using Python’s<a id="I_indexterm2_d1e54000"></a> <code class="epub__literal">mimetypes</code>
+                module to guess a file’s type from its filename extension;
+                HTML and text files are moved in FTP text mode, for instance.
+                We already met the <code class="epub__literal">storbinary</code> FTP object method used to
+                upload files in binary mode—an exact, byte-for-byte copy
+                appears at the remote site.</p>
+<p><span class="epub__emphasis"><em>Text-mode transfers</em></span> work <a id="I_indexterm2_d1e54016"></a>almost identically: the <code class="epub__literal">storlines</code> method accepts an FTP
+                command string and a local file (or file-like) object, and
+                simply copies each line read from the local file to a
+                same-named file on the remote machine.</p>
+<p>Notice, though, that the local text input file must be
+                opened in <code class="epub__literal">rb</code>
+<span class="epub__emphasis"><em>binary mode</em></span> in Python3.X. Text input
+                files are normally opened in <code class="epub__literal">r</code> text mode to perform Unicode
+                decoding and to convert any <code class="epub__literal">\r\n</code> end-of-line sequences on
+                Windows to the <code class="epub__literal">\n</code>
+                platform-neutral character as lines are read. However,
+                <code class="epub__literal">ftplib</code> in Python 3.1
+                requires that the text file be opened in <code class="epub__literal">rb</code> binary mode, because it converts
+                all end-lines to the <code class="epub__literal">\r\n</code>
+                sequence for transmission; to do so, it must read lines as raw
+                bytes with <code class="epub__literal">readlines</code> and
+                perform <code class="epub__literal">bytes</code> string
+                processing, which implies binary mode files.</p>
+<p>This <code class="epub__literal">ftplib</code> string
+                processing worked with text-mode files in Python 2.X, but only
+                because there was no separate <code class="epub__literal">bytes</code> type; <code class="epub__literal">\n</code> was expanded to <code class="epub__literal">\r\n</code>. Opening the local file in
+                binary mode for <code class="epub__literal">ftplib</code> to
+                read also means no Unicode decoding will occur: the text is
+                sent over sockets as a byte string in already encoded form.
+                All of which is, of course, a prime lesson on the impacts of
+                Unicode encodings; consult the module <em class="epub__filename">ftplib.py</em> in the Python source
+                library directory for more details.</p>
+<p>For <span class="epub__emphasis"><em>binary mode transfers</em></span>, things
+                <a id="I_indexterm2_d1e54082"></a>are simpler—we open the local file in <code class="epub__literal">rb</code> binary mode to suppress Unicode
+                decoding and automatic mapping everywhere, and return the
+                <code class="epub__literal">bytes</code> strings expected by
+                <code class="epub__literal">ftplib</code> on read. Binary data
+                is not Unicode text, and we don’t want bytes in an audio file
+                that happen to have the same value as <code class="epub__literal">\r</code> to magically disappear when read
+                on Windows.</p></dd></dl>
+</div>
+<p>As for the mirror download script, this program simply
+          iterates over all files to be transferred (files in the local
+          directory listing this time), and transfers each in turn—in either
+          text or binary mode, depending on the files’ names. Here is the
+          command I use to upload my entire website from my laptop Windows PC
+          to a remote Linux server at my ISP, in a single step:</p><a id="I_programlisting2_d1e54101"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Ftp\Mirror&gt; <strong class="epub__userinput"><code>uploadflat.py test</code></strong>
+Password for lutz on learning-python.com:
+Clean remote directory first? y
+connecting...
+deleting remote .
+cannot delete remote .
+deleting remote ..
+cannot delete remote ..
+deleting remote 2004-longmont-classes.html
+deleting remote 2005-longmont-classes.html
+deleting remote 2006-longmont-classes.html
+deleting remote about-lp1e.html
+deleting remote about-lp2e.html
+deleting remote about-lp3e.html
+deleting remote about-lp4e.html
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+
+uploading test\2004-longmont-classes.html to 2004-longmont-classes.html as text
+uploading test\2005-longmont-classes.html to 2005-longmont-classes.html as text
+uploading test\2006-longmont-classes.html to 2006-longmont-classes.html as text
+uploading test\about-lp1e.html to about-lp1e.html as text
+uploading test\about-lp2e.html to about-lp2e.html as text
+uploading test\about-lp3e.html to about-lp3e.html as text
+uploading test\about-lp4e.html to about-lp4e.html as text
+uploading test\about-pp-japan.html to about-pp-japan.html as text
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+
+uploading test\whatsnew.html to whatsnew.html as text
+uploading test\whatsold.html to whatsold.html as text
+uploading test\wxPython.doc.tgz to wxPython.doc.tgz as application gzip
+uploading test\xlate-lp.html to xlate-lp.html as text
+uploading test\zaurus0.jpg to zaurus0.jpg as image
+uploading test\zaurus1.jpg to zaurus1.jpg as image
+uploading test\zaurus2.jpg to zaurus2.jpg as image
+uploading test\zoo-jan-03.jpg to zoo-jan-03.jpg as image
+uploading test\zopeoutline.htm to zopeoutline.htm as text
+Done: 297 files uploaded.</pre>
+<p>For my site and on my current laptop and wireless broadband
+          connection, this process typically takes six minutes, depending on
+          server load. As with the download script, I often run this command
+          from the local directory where my web files are kept, and I pass
+          Python the full path to the script. When I run this on a Linux
+          server, it works in the same way, but the paths to the script and my
+          web files directory <a id="I_indexterm2_d1e54114"></a><a id="I_indexterm2_d1e54116"></a>differ.<sup>[50]</sup></p>
+</div>
+<div class="epub__sect2" title="Refactoring Uploads and Downloads for Reuse"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="refactoring_uploads_and_downloads_for_re"></a>Refactoring Uploads and Downloads for Reuse</h2>
+</div>
+</div>
+</div>
+<p>The directory upload and download scripts of the prior two
+          sections work as advertised and, apart from the <code class="epub__literal">mimetypes</code> logic, were the only FTP
+          examples that were included in the second edition of this book. If
+          you look at these two scripts long enough, though, their
+          similarities will pop out at you eventually. In fact, they are
+          largely the same—they use identical code to configure transfer
+          parameters, connect to the FTP server, and determine file type. The
+          exact details have been lost to time, but some of this code was
+          certainly copied from one file to the other.</p>
+<p>Although such redundancy isn’t a cause for alarm if we never
+          plan on changing these scripts, it can be a killer in software
+          projects in general. When you have two copies of identical bits of
+          code, not only is there a danger of them becoming out of sync over
+          time (you’ll lose uniformity in user interface and behavior), but
+          you also effectively double your effort when it comes time to change
+          code that appears in both places. Unless you’re a big fan of extra
+          work, it pays to avoid redundancy wherever possible.</p>
+<p>This redundancy is especially glaring when we look at the
+          complex code that uses <code class="epub__literal">mimetypes</code>
+          to determine file types. Repeating magic like this in more than one
+          place is almost always a bad idea—not only do we have to remember
+          how it works every time we need the same utility, but it is a recipe
+          for errors.</p>
+<div class="epub__sect3" title="Refactoring with functions"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="refactoring_with_functions"></a>Refactoring with functions</h3>
+</div>
+</div>
+</div>
+<p>As originally coded, <a id="fun13.4.3.1"></a><a id="sc13.4.3.1"></a><a id="re13.4.3.1"></a>our download and upload scripts comprise top-level
+            script code that relies on global variables. Such a structure is
+            difficult to reuse—code runs immediately on imports, and it’s
+            difficult to generalize for varying contexts. Worse, it’s
+            difficult to maintain—when you program by cut-and-paste of
+            existing code, you increase the cost of future changes every time
+            you click the Paste button.</p>
+<p>To demonstrate how we might do better, Example 13-12 shows one way to
+            <span class="epub__emphasis"><em>refactor</em></span> (reorganize) the download script. By
+            wrapping its parts in functions, they become reusable in other
+            modules, including our upload program.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id31"></a>
+<p class="epub__title">Example 13-12. PP4E\Internet\Ftp\Mirror\downloadflat_modular.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/bin/env python
+"""
+##############################################################################
+use FTP to copy (download) all files from a remote site and directory
+to a directory on the local machine; this version works the same, but has
+been refactored to wrap up its code in functions that can be reused by the
+uploader, and possibly other programs in the future - else code redundancy,
+which may make the two diverge over time, and can double maintenance costs.
+##############################################################################
+"""
+
+import os, sys, ftplib
+from getpass   import getpass
+from mimetypes import guess_type, add_type
+
+defaultSite = 'home.rmi.net'
+defaultRdir = '.'
+defaultUser = 'lutz'
+
+def configTransfer(site=defaultSite, rdir=defaultRdir, user=defaultUser):
+    """
+    get upload or download parameters
+    uses a class due to the large number
+    """
+    class cf: pass
+    cf.nonpassive = False                 # passive FTP on by default in 2.1+
+    cf.remotesite = site                  # transfer to/from this site
+    cf.remotedir  = rdir                  # and this dir ('.' means acct root)
+    cf.remoteuser = user
+    cf.localdir   = (len(sys.argv) &gt; 1 and sys.argv[1]) or '.'
+    cf.cleanall   = input('Clean target directory first? ')[:1] in ['y','Y']
+    cf.remotepass = getpass(
+                    'Password for %s on %s:' % (cf.remoteuser, cf.remotesite))
+    return cf
+
+def isTextKind(remotename, trace=True):
+    """
+    use mimetype to guess if filename means text or binary
+    for 'f.html,   guess is ('text/html', None): text
+    for 'f.jpeg'   guess is ('image/jpeg', None): binary
+    for 'f.txt.gz' guess is ('text/plain', 'gzip'): binary
+    for unknowns,  guess may be (None, None): binary
+    mimetype can also guess name from type: see PyMailGUI
+    """
+    add_type('text/x-python-win', '.pyw')                       # not in tables
+    mimetype, encoding = guess_type(remotename, strict=False)   # allow extras
+    mimetype  = mimetype or '?/?'                               # type unknown?
+    maintype  = mimetype.split('/')[0]                          # get first part
+    if trace: print(maintype, encoding or '')
+    return maintype == 'text' and encoding == None              # not compressed
+
+def connectFtp(cf):
+    print('connecting...')
+    connection = ftplib.FTP(cf.remotesite)           # connect to FTP site
+    connection.login(cf.remoteuser, cf.remotepass)   # log in as user/password
+    connection.cwd(cf.remotedir)                     # cd to directory to xfer
+    if cf.nonpassive:                                # force active mode FTP
+        connection.set_pasv(False)                   # most servers do passive
+    return connection
+
+def cleanLocals(cf):
+    """
+    try to delete all locals files first to remove garbage
+    """
+    if cf.cleanall:
+        for localname in os.listdir(cf.localdir):    # local dirlisting
+            try:                                     # local file delete
+                print('deleting local', localname)
+                os.remove(os.path.join(cf.localdir, localname))
+            except:
+                print('cannot delete local', localname)
+
+def downloadAll(cf, connection):
+    """
+    download all files from remote site/dir per cf config
+    ftp nlst() gives files list, dir() gives full details
+    """
+    remotefiles = connection.nlst()                  # nlst is remote listing
+    for remotename in remotefiles:
+        if remotename in ('.', '..'): continue
+        localpath = os.path.join(cf.localdir, remotename)
+        print('downloading', remotename, 'to', localpath, 'as', end=' ')
+        if isTextKind(remotename):
+            # use text mode xfer
+            localfile = open(localpath, 'w', encoding=connection.encoding)
+            def callback(line): localfile.write(line + '\n')
+            connection.retrlines('RETR ' + remotename, callback)
+        else:
+            # use binary mode xfer
+            localfile = open(localpath, 'wb')
+            connection.retrbinary('RETR ' + remotename, localfile.write)
+        localfile.close()
+    connection.quit()
+    print('Done:', len(remotefiles), 'files downloaded.')
+
+if __name__ == '__main__':
+    cf = configTransfer()
+    conn = connectFtp(cf)
+    cleanLocals(cf)          # don't delete if can't connect
+    downloadAll(cf, conn)</pre>
+</div>
+</div>
+<p>Compare this version with the original. This script, and
+            every other in this section, runs the same as the original flat
+            download and upload programs. Although we haven’t changed its
+            behavior, though, we’ve modified the script’s software structure
+            <span>radically—</span>its code is now a
+            set of <span class="epub__emphasis"><em>tools</em></span> that can be imported and reused
+            in other programs.</p>
+<p>The refactored upload program in Example 13-13, for instance, is
+            now noticeably simpler, and the code it shares with the download
+            script only needs to be changed in one place if it ever requires
+            improvement.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id32"></a>
+<p class="epub__title">Example 13-13. PP4E\Internet\Ftp\Mirror\uploadflat_modular.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/bin/env python
+"""
+##############################################################################
+use FTP to upload all files from a local dir to a remote site/directory;
+this version reuses downloader's functions, to avoid code redundancy;
+##############################################################################
+"""
+
+import os
+from downloadflat_modular import configTransfer, connectFtp, isTextKind
+
+def cleanRemotes(cf, connection):
+    """
+    try to delete all remote files first to remove garbage
+    """
+    if cf.cleanall:
+        for remotename in connection.nlst():            # remote dir listing
+            try:                                        # remote file delete
+                print('deleting remote', remotename)    # skips . and .. exc
+                connection.delete(remotename)
+            except:
+                print('cannot delete remote', remotename)
+
+def uploadAll(cf, connection):
+    """
+    upload all files to remote site/dir per cf config
+    listdir() strips dir path, any failure ends script
+    """
+    localfiles = os.listdir(cf.localdir)            # listdir is local listing
+    for localname in localfiles:
+        localpath = os.path.join(cf.localdir, localname)
+        print('uploading', localpath, 'to', localname, 'as', end=' ')
+        if isTextKind(localname):
+            # use text mode xfer
+            localfile = open(localpath, 'rb')
+            connection.storlines('STOR ' + localname, localfile)
+        else:
+            # use binary mode xfer
+            localfile = open(localpath, 'rb')
+            connection.storbinary('STOR ' + localname, localfile)
+        localfile.close()
+    connection.quit()
+    print('Done:', len(localfiles), 'files uploaded.')
+
+if __name__ == '__main__':
+    cf = configTransfer(site='learning-python.com', rdir='books', user='lutz')
+    conn = connectFtp(cf)
+    cleanRemotes(cf, conn)
+    uploadAll(cf, conn)</pre>
+</div>
+</div>
+<p>Not only is the upload script simpler now because it reuses
+            common code, but it will also inherit any changes made in the
+            download module. For instance, the <code class="epub__literal">isTextKind</code> function was later augmented
+            with code that adds the <span class="epub__emphasis"><em>.pyw</em></span> extension to
+            <code class="epub__literal">mimetypes</code> tables (this file
+            type is not recognized by default); because it is a shared
+            function, the change is automatically picked up in the upload
+            program, too.</p>
+<p>This script and the one it imports achieve the same goals as
+            the originals, but changing them for easier code maintenance is a
+            <span class="epub__emphasis"><em>big deal</em></span> in the real world of software
+            development. The following, for example, downloads the site from
+            one server and uploads to <a id="I_indexterm2_d1e54206"></a><a id="I_indexterm2_d1e54208"></a><a id="I_indexterm2_d1e54210"></a>another:</p><a id="I_programlisting2_d1e54213"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Ftp\Mirror&gt; <strong class="epub__userinput"><code>python downloadflat_modular.py test</code></strong>
+Clean target directory first?
+Password for lutz on home.rmi.net:
+connecting...
+downloading 2004-longmont-classes.html to test\2004-longmont-classes.html as text
+<em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+downloading relo-feb010-index.html to test\relo-feb010-index.html as text
+Done: 297 files downloaded.
+
+C:\...\PP4E\Internet\Ftp\Mirror&gt; <strong class="epub__userinput"><code>python uploadflat_modular.py test</code></strong>
+Clean target directory first?
+Password for lutz on learning-python.com:
+connecting...
+uploading test\2004-longmont-classes.html to 2004-longmont-classes.html as text
+<em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+uploading test\zopeoutline.htm to zopeoutline.htm as text
+Done: 297 files uploaded.</pre>
+</div>
+<div class="epub__sect3" title="Refactoring with classes"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="refactoring_with_classes"></a>Refactoring with classes</h3>
+</div>
+</div>
+</div>
+<p>The function-based <a id="sc13.4.3.2"></a><a id="cl13.4.3.2"></a><a id="re13.4.3.2"></a>approach of the last two examples addresses the
+            redundancy issue, but they are perhaps clumsier than they need to
+            be. For instance, their <code class="epub__literal">cf</code>
+            configuration options object provides a namespace that replaces
+            global variables and breaks cross-file dependencies. Once we start
+            making objects to model namespaces, though, Python’s OOP support
+            tends to be a more natural structure for our code. As one last
+            twist, Example 13-14
+            refactors the FTP code one more time in order to leverage Python’s
+            class feature.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id33"></a>
+<p class="epub__title">Example 13-14. PP4E\Internet\Ftp\Mirror\ftptools.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/bin/env python
+"""
+##############################################################################
+use FTP to download or upload all files in a single directory from/to a
+remote site and directory;  this version has been refactored to use classes
+and OOP for namespace and a natural structure;  we could also structure this
+as a download superclass, and an upload subclass which redefines the clean
+and transfer methods, but then there is no easy way for another client to
+invoke both an upload and download;  for the uploadall variant and possibly
+others, also make single file upload/download code in orig loops methods;
+##############################################################################
+"""
+
+import os, sys, ftplib
+from getpass   import getpass
+from mimetypes import guess_type, add_type
+
+# defaults for all clients
+dfltSite = 'home.rmi.net'
+dfltRdir = '.'
+dfltUser = 'lutz'
+
+class FtpTools:
+
+    # allow these 3 to be redefined
+    def getlocaldir(self):
+        return (len(sys.argv) &gt; 1 and sys.argv[1]) or '.'
+
+    def getcleanall(self):
+        return input('Clean target dir first?')[:1] in ['y','Y']
+
+    def getpassword(self):
+        return getpass(
+               'Password for %s on %s:' % (self.remoteuser, self.remotesite))
+
+    def configTransfer(self, site=dfltSite, rdir=dfltRdir, user=dfltUser):
+        """
+        get upload or download parameters
+        from module defaults, args, inputs, cmdline
+        anonymous ftp: user='anonymous' pass=emailaddr
+        """
+        self.nonpassive = False             # passive FTP on by default in 2.1+
+        self.remotesite = site              # transfer to/from this site
+        self.remotedir  = rdir              # and this dir ('.' means acct root)
+        self.remoteuser = user
+        self.localdir   = self.getlocaldir()
+        self.cleanall   = self.getcleanall()
+        self.remotepass = self.getpassword()
+
+    def isTextKind(self, remotename, trace=True):
+        """
+        use mimetypes to guess if filename means text or binary
+        for 'f.html,   guess is ('text/html', None): text
+        for 'f.jpeg'   guess is ('image/jpeg', None): binary
+        for 'f.txt.gz' guess is ('text/plain', 'gzip'): binary
+        for unknowns,  guess may be (None, None): binary
+        mimetypes can also guess name from type: see PyMailGUI
+        """
+        add_type('text/x-python-win', '.pyw')                    # not in tables
+        mimetype, encoding = guess_type(remotename, strict=False)# allow extras
+        mimetype  = mimetype or '?/?'                            # type unknown?
+        maintype  = mimetype.split('/')[0]                       # get 1st part
+        if trace: print(maintype, encoding or '')
+        return maintype == 'text' and encoding == None           # not compressed
+
+    def connectFtp(self):
+        print('connecting...')
+        connection = ftplib.FTP(self.remotesite)           # connect to FTP site
+        connection.login(self.remoteuser, self.remotepass) # log in as user/pswd
+        connection.cwd(self.remotedir)                     # cd to dir to xfer
+        if self.nonpassive:                                # force active mode
+            connection.set_pasv(False)                     # most do passive
+        self.connection = connection
+
+    def cleanLocals(self):
+        """
+        try to delete all local files first to remove garbage
+        """
+        if self.cleanall:
+            for localname in os.listdir(self.localdir):    # local dirlisting
+                try:                                       # local file delete
+                    print('deleting local', localname)
+                    os.remove(os.path.join(self.localdir, localname))
+                except:
+                    print('cannot delete local', localname)
+
+    def cleanRemotes(self):
+        """
+        try to delete all remote files first to remove garbage
+        """
+        if self.cleanall:
+            for remotename in self.connection.nlst():       # remote dir listing
+                try:                                        # remote file delete
+                    print('deleting remote', remotename)
+                    self.connection.delete(remotename)
+                except:
+                    print('cannot delete remote', remotename)
+
+    def downloadOne(self, remotename, localpath):
+        """
+        download one file by FTP in text or binary mode
+        local name need not be same as remote name
+        """
+        if self.isTextKind(remotename):
+            localfile = open(localpath, 'w', encoding=self.connection.encoding)
+            def callback(line): localfile.write(line + '\n')
+            self.connection.retrlines('RETR ' + remotename, callback)
+        else:
+            localfile = open(localpath, 'wb')
+            self.connection.retrbinary('RETR ' + remotename, localfile.write)
+        localfile.close()
+
+    def uploadOne(self, localname, localpath, remotename):
+        """
+        upload one file by FTP in text or binary mode
+        remote name need not be same as local name
+        """
+        if self.isTextKind(localname):
+            localfile = open(localpath, 'rb')
+            self.connection.storlines('STOR ' + remotename, localfile)
+        else:
+            localfile = open(localpath, 'rb')
+            self.connection.storbinary('STOR ' + remotename, localfile)
+        localfile.close()
+
+    def downloadDir(self):
+        """
+        download all files from remote site/dir per config
+        ftp nlst() gives files list, dir() gives full details
+        """
+        remotefiles = self.connection.nlst()         # nlst is remote listing
+        for remotename in remotefiles:
+            if remotename in ('.', '..'): continue
+            localpath = os.path.join(self.localdir, remotename)
+            print('downloading', remotename, 'to', localpath, 'as', end=' ')
+            self.downloadOne(remotename, localpath)
+        print('Done:', len(remotefiles), 'files downloaded.')
+
+    def uploadDir(self):
+        """
+        upload all files to remote site/dir per config
+        listdir() strips dir path, any failure ends script
+        """
+        localfiles = os.listdir(self.localdir)       # listdir is local listing
+        for localname in localfiles:
+            localpath = os.path.join(self.localdir, localname)
+            print('uploading', localpath, 'to', localname, 'as', end=' ')
+            self.uploadOne(localname, localpath, localname)
+        print('Done:', len(localfiles), 'files uploaded.')
+
+    def run(self, cleanTarget=lambda:None, transferAct=lambda:None):
+        """
+        run a complete FTP session
+        default clean and transfer are no-ops
+        don't delete if can't connect to server
+        """
+        self.connectFtp()
+        cleanTarget()
+        transferAct()
+        self.connection.quit()
+
+if __name__ == '__main__':
+    ftp = FtpTools()
+    xfermode = 'download'
+    if len(sys.argv) &gt; 1:
+        xfermode = sys.argv.pop(1)   # get+del 2nd arg
+    if xfermode == 'download':
+        ftp.configTransfer()
+        ftp.run(cleanTarget=ftp.cleanLocals,  transferAct=ftp.downloadDir)
+    elif xfermode == 'upload':
+        ftp.configTransfer(site='learning-python.com', rdir='books', user='lutz')
+        ftp.run(cleanTarget=ftp.cleanRemotes, transferAct=ftp.uploadDir)
+    else:
+        print('Usage: ftptools.py ["download" | "upload"] [localdir]')</pre>
+</div>
+</div>
+<p>In fact, this last mutation combines uploads and downloads
+            into a single file, because they are so closely related. As
+            before, common code is factored into methods to avoid redundancy.
+            New here, the instance object itself becomes a natural namespace
+            for storing configuration options (they become <code class="epub__literal">self</code> attributes). Study this example’s
+            code for more details of the restructuring applied.</p>
+<p>Again, this revision runs the same as our original site
+            download and upload scripts; see its self-test code at the end for
+            usage details, and pass in a command-line argument to specify
+            “download” or “upload.” We haven’t changed what it does, we’ve
+            refactored it for maintainability and reuse:</p><a id="I_programlisting2_d1e54265"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Ftp\Mirror&gt; <strong class="epub__userinput"><code>ftptools.py download test</code></strong>
+Clean target dir first?
+Password for lutz on home.rmi.net:
+connecting...
+downloading 2004-longmont-classes.html to test\2004-longmont-classes.html as text
+<em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+downloading relo-feb010-index.html to test\relo-feb010-index.html as text
+Done: 297 files downloaded.
+
+
+C:\...\PP4E\Internet\Ftp\Mirror&gt; <strong class="epub__userinput"><code>ftptools.py upload test</code></strong>
+Clean target dir first?
+Password for lutz on learning-python.com:
+connecting...
+uploading test\2004-longmont-classes.html to 2004-longmont-classes.html as text
+<em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+uploading test\zopeoutline.htm to zopeoutline.htm as text
+Done: 297 files uploaded.</pre>
+<p>Although this file can still be run as a command-line script
+            like this, its class is really now a package of FTP tools that can
+            be mixed into other programs and reused. By wrapping its code in a
+            class, it can be easily customized by redefining its methods—its
+            configuration calls, such as <code class="epub__literal">getlocaldir</code>, for example, may be
+            redefined in subclasses for custom scenarios.</p>
+<p>Perhaps most importantly, using classes optimizes code
+            reusability. Clients of this file can both upload and download
+            directories by simply subclassing or embedding an instance of this
+            class and calling its methods. To see one example of how, let’s
+            move on to the next <a id="I_indexterm2_d1e54286"></a><a id="I_indexterm2_d1e54288"></a><a id="I_indexterm2_d1e54290"></a><a id="I_indexterm2_d1e54292"></a><a id="I_indexterm2_d1e54294"></a><a id="I_indexterm2_d1e54296"></a><a id="I_indexterm2_d1e54298"></a>section.</p>
+</div>
+</div><div class="epub__footnotes"><br/><hr/><div class="epub__footnote">
+<p><sup>[49] </sup>No, really. The second edition of this book included a tale
+            of woe here about how my ISP forced its users to wean themselves
+            off Telnet access. This seems like a small issue today. Common
+            practice on the Internet has come far in a short time. One of my
+            sites has even grown too complex for manual edits (except, of
+            course, to work around bugs in the site-builder tool). Come to
+            think of it, so has Python’s presence on the Web. When I first
+            found Python in 1992, it was a set of encoded email messages,
+            which users decoded and concatenated and hoped the result worked.
+            Yes, yes, I know—gee, Grandpa, tell us more…</p>
+</div><div class="epub__footnote">
+<p><sup>[50] </sup>Usage note: These scripts are highly dependent on the FTP
+              server functioning properly. For a while, the upload script
+              occasionally had timeout errors when running over my current
+              broadband connection. These errors went away later, when my ISP
+              fixed or reconfigured their server. If you have failures, try
+              running against a different server; connecting and disconnecting
+              around each transfer may or may not help (some servers limit
+              their number of connections).</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

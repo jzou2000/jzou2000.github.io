@@ -1,0 +1,394 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Coding Metaclasses</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div><h1 class="epub__title"><a id="coding_metaclasses"></a>Coding Metaclasses</h1>
+<p>So far, <a id="ch394metaclssscod"></a>we’ve seen how Python routes class creation calls to a
+        metaclass, if one is provided. How, though, do we actually code a
+        metaclass that customizes <code class="epub__literal">type</code>?</p>
+<p>It turns out that you already know most of the story—metaclasses
+        are coded with normal Python <code class="epub__literal">class</code>
+        statements and semantics. Their only substantial distinctions are that
+        Python calls them automatically at the end of a <code class="epub__literal">class</code> statement, and that they must adhere
+        to the interface expected by the <code class="epub__literal">type</code> superclass.</p>
+<div class="epub__sect2" title="A Basic Metaclass"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="a_basic_metaclass"></a>A Basic Metaclass</h2>
+</div>
+</div>
+</div>
+<p>Perhaps <a id="I_indexterm4_d1e102449"></a>the simplest metaclass you can code is simply a
+          subclass of <code class="epub__literal">type</code> with a <code class="epub__literal">__new__</code> method that creates the class
+          object by running the default version in <code class="epub__literal">type</code>. A metaclass <code class="epub__literal">__new__</code> like this is run by the <code class="epub__literal">__call__</code> method inherited from <code class="epub__literal">type</code>; it typically performs whatever
+          customization is required and calls the <code class="epub__literal">type</code> superclass’s <code class="epub__literal">__new__</code> method to create and return the
+          new class object:</p><a id="I_programlisting4_d1e102482"></a>
+<pre class="epub__programlisting">class Meta(type):
+    def __new__(meta, classname, supers, classdict):
+        <em class="epub__lineannotation"><span class="epub__lineannotation"># Run by inherited type.__call__</span></em>
+        return type.__new__(meta, classname, supers, classdict)</pre>
+<p>This metaclass doesn’t really do anything (we might as well
+          let the default <code class="epub__literal">type</code> class create
+          the class), but it demonstrates the way a metaclass taps into the
+          metaclass hook to customize—because the metaclass is called at the
+          end of a <code class="epub__literal">class</code> statement, and
+          because the <code class="epub__literal">type</code> object’s
+          <code class="epub__literal">__call__</code> dispatches to the
+          <code class="epub__literal">__new__</code> and <code class="epub__literal">__init__</code> methods, code we provide in these
+          methods can manage all the classes created from the
+          metaclass.</p>
+<p>Here’s our example in action again, with prints added to the
+          metaclass and the file at large to trace:</p><a id="I_programlisting4_d1e102510"></a>
+<pre class="epub__programlisting">class MetaOne(type):
+    def __new__(meta, classname, supers, classdict):
+        print('In MetaOne.new:', classname, supers, classdict, sep='\n...')
+        return type.__new__(meta, classname, supers, classdict)
+
+class Eggs:
+    pass
+
+print('making class')
+class Spam(Eggs, metaclass=MetaOne):      <em class="epub__lineannotation"><span class="epub__lineannotation"># Inherits from Eggs, instance of Meta</span></em>
+    data = 1                              <em class="epub__lineannotation"><span class="epub__lineannotation"># Class data attribute</span></em>
+    def meth(self, arg):                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Class method attribute</span></em>
+        pass
+
+print('making instance')
+X = Spam()
+print('data:', X.data)</pre>
+<p>Here, <code class="epub__literal">Spam</code> inherits from
+          <code class="epub__literal">Eggs</code> and is an instance of
+          <code class="epub__literal">MetaOne</code>, but <code class="epub__literal">X</code> is an instance of and inherits from
+          <code class="epub__literal">Spam</code>. When this code is run with
+          Python 3.0, notice how the metaclass is invoked at the
+          <span class="epub__emphasis"><em>end</em></span> of the <code class="epub__literal">class</code> statement, before we ever make an
+          instance—metaclasses are for
+          processing classes, and classes are for processing instances:</p><a id="I_programlisting4_d1e102548"></a>
+<pre class="epub__programlisting">making class
+In MetaOne.new:
+...Spam
+...(&lt;class '__main__.Eggs'&gt;,)
+...{'__module__': '__main__', 'data': 1, 'meth': &lt;function meth at 0x02AEBA08&gt;}
+making instance
+data: 1</pre>
+</div>
+<div class="epub__sect2" title="Customizing Construction and Initialization"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="customizing_construction_and_initializa"></a>Customizing Construction and Initialization</h2>
+</div>
+</div>
+</div>
+<p>Metaclasses <a id="I_indexterm4_d1e102555"></a>can also tap into the <code class="epub__literal">__init__</code> protocol invoked by the type
+          object’s <code class="epub__literal">__call__</code>: in general,
+          <code class="epub__literal">__new__</code> creates and returns the
+          class object, and <code class="epub__literal">__init__</code>
+          initializes the already created class. Metaclasses can use both
+          hooks to manage the class at creation time:</p><a id="I_programlisting4_d1e102575"></a>
+<pre class="epub__programlisting">class MetaOne(type):
+    def __new__(meta, classname, supers, classdict):
+        print('In MetaOne.new: ', classname, supers, classdict, sep='\n...')
+        return type.__new__(meta, classname, supers, classdict)
+
+    def __init__(Class, classname, supers, classdict):
+        print('In MetaOne init:', classname, supers, classdict, sep='\n...')
+        print('...init class object:', list(Class.__dict__.keys()))
+
+class Eggs:
+    pass
+
+print('making class')
+class Spam(Eggs, metaclass=MetaOne):      <em class="epub__lineannotation"><span class="epub__lineannotation"># Inherits from Eggs, instance of Meta</span></em>
+    data = 1                              <em class="epub__lineannotation"><span class="epub__lineannotation"># Class data attribute</span></em>
+    def meth(self, arg):                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Class method attribute</span></em>
+        pass
+
+print('making instance')
+X = Spam()
+print('data:', X.data)</pre>
+<p>In this case, the class initialization method is run after the
+          class construction method, but both run at the end of the <code class="epub__literal">class</code> statement before any instances are
+          made (conversely, an <code class="epub__literal">__init__</code> in Spam would run
+          at instance creation time, and is not affected or run by the
+          metaclass's <code class="epub__literal">__init__</code>):</p><a id="I_programlisting4_d1e102591"></a>
+<pre class="epub__programlisting">making class
+In MetaOne.new:
+...Spam
+...(&lt;class '__main__.Eggs'&gt;,)
+...{'__module__': '__main__', 'data': 1, 'meth': &lt;function meth at 0x02AAB810&gt;}
+In MetaOne init:
+...Spam
+...(&lt;class '__main__.Eggs'&gt;,)
+...{'__module__': '__main__', 'data': 1, 'meth': &lt;function meth at 0x02AAB810&gt;}
+...init class object: ['__module__', 'data', 'meth', '__doc__']
+making instance
+data: 1</pre>
+</div>
+<div class="epub__sect2" title="Other Metaclass Coding Techniques"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="other_metaclass_coding_techniques"></a>Other Metaclass Coding Techniques</h2>
+</div>
+</div>
+</div>
+<p>Although redefining the <code class="epub__literal">type</code> superclass’s <code class="epub__literal">__new__</code> and <code class="epub__literal">__init__</code> methods is the most common way
+          metaclasses insert logic into the class object creation process,
+          other schemes are possible, too.</p>
+<div class="epub__sect3" title="Using simple factory functions"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="using_simple_factory_functions"></a>Using simple factory functions</h3>
+</div>
+</div>
+</div>
+<p>For <a id="I_indexterm4_d1e102612"></a>example, metaclasses need not really be classes at
+            all. As we’ve learned, the <code class="epub__literal">class</code> statement issues a simple call to
+            create a class at the conclusion of its processing. Because of
+            this, <span class="epub__emphasis"><em>any callable object</em></span> can in principle be
+            used as a metaclass, provided it accepts the arguments passed and
+            returns an object compatible with the intended class. In fact, a
+            simple object factory function will serve just as well as a
+            class:</p><a id="I_programlisting4_d1e102626"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># A simple function can serve as a metaclass too</span></em>
+
+def MetaFunc(classname, supers, classdict):
+    print('In MetaFunc: ', classname, supers, classdict, sep='\n...')
+    return type(classname, supers, classdict)
+
+class Eggs:
+    pass
+
+print('making class')
+class Spam(Eggs, metaclass=MetaFunc):            <em class="epub__lineannotation"><span class="epub__lineannotation"># Run simple function at end</span></em>
+    data = 1                                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Function returns class</span></em>
+    def meth(self, args):
+        pass
+
+print('making instance')
+X = Spam()
+print('data:', X.data)</pre>
+<p>When run, the function is called at the end of the declaring
+            <code class="epub__literal">class</code> statement, and it returns
+            the expected new class object. The function is simply catching the
+            call that the <code class="epub__literal">type</code> object’s
+            <code class="epub__literal">__call__</code> normally intercepts by
+            default:</p><a id="I_programlisting4_d1e102647"></a>
+<pre class="epub__programlisting">making class
+In MetaFunc:
+...Spam
+...(&lt;class '__main__.Eggs'&gt;,)
+...{'__module__': '__main__', 'data': 1, 'meth': &lt;function meth at 0x02B8B6A8&gt;}
+making instance
+data: 1</pre>
+</div>
+<div class="epub__sect3" title="Overloading class creation calls with metaclasses"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="overloading_class_creation_calls_with_m"></a>Overloading class creation calls with metaclasses</h3>
+</div>
+</div>
+</div>
+<p>Since <a id="I_indexterm4_d1e102654"></a>they participate in normal OOP mechanics, it’s also
+            possible for metaclasses to catch the <span class="epub__emphasis"><em>creation
+            call</em></span> at the end of a <code class="epub__literal">class</code> statement directly, by redefining
+            the <code class="epub__literal">type</code> object’s <code class="epub__literal">__call__</code>. The required protocol is a bit
+            involved, though:</p><a id="I_programlisting4_d1e102674"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># __call__ can be redefined, metas can have metas</span></em>
+
+class SuperMeta(type):
+    def __call__(meta, classname, supers, classdict):
+        print('In SuperMeta.call: ', classname, supers, classdict, sep='\n...')
+        return type.__call__(meta, classname, supers, classdict)
+
+class SubMeta(type, metaclass=SuperMeta):
+    def __new__(meta, classname, supers, classdict):
+        print('In SubMeta.new: ', classname, supers, classdict, sep='\n...')
+        return type.__new__(meta, classname, supers, classdict)
+
+    def __init__(Class, classname, supers, classdict):
+        print('In SubMeta init:', classname, supers, classdict, sep='\n...')
+        print('...init class object:', list(Class.__dict__.keys()))
+
+class Eggs:
+    pass
+
+print('making class')
+class Spam(Eggs, metaclass=SubMeta):
+    data = 1
+    def meth(self, arg):
+        pass
+
+print('making instance')
+X = Spam()
+print('data:', X.data)</pre>
+<p>When this code is run, all three redefined methods run in
+            turn. This is essentially what the <code class="epub__literal">type</code> object does by default:</p><a id="I_programlisting4_d1e102683"></a>
+<pre class="epub__programlisting">making class
+In SuperMeta.call:
+...Spam
+...(&lt;class '__main__.Eggs'&gt;,)
+...{'__module__': '__main__', 'data': 1, 'meth': &lt;function meth at 0x02B7BA98&gt;}
+In SubMeta.new:
+...Spam
+...(&lt;class '__main__.Eggs'&gt;,)
+...{'__module__': '__main__', 'data': 1, 'meth': &lt;function meth at 0x02B7BA98&gt;}
+In SubMeta init:
+...Spam
+...(&lt;class '__main__.Eggs'&gt;,)
+...{'__module__': '__main__', 'data': 1, 'meth': &lt;function meth at 0x02B7BA98&gt;}
+...init class object: ['__module__', 'data', 'meth', '__doc__']
+making instance
+data: 1</pre>
+</div>
+<div class="epub__sect3" title="Overloading class creation calls with normal classes"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="overloading_class_creation_calls_with_n"></a>Overloading class creation calls with normal
+            classes</h3>
+</div>
+</div>
+</div>
+<p>The p<a id="I_indexterm4_d1e102690"></a>receding example is complicated by the fact that
+            metaclasses are used to create class objects, but don’t generate
+            instances of themselves. Because of this, with metaclasses name
+            lookup rules are somewhat different than what we are accustomed
+            to. The <code class="epub__literal">__call__</code> method, for
+            example, is looked up in the class of an object; for metaclasses,
+            this means the metaclass of a metaclass.</p>
+<p>To use normal inheritance-based name lookup, we can achieve
+            the same effect with normal classes and instances. The output of
+            the following is the same as the preceding version, but note that
+            <code class="epub__literal">__new__</code> and <code class="epub__literal">__init__</code> must have different names here,
+            or else they will run when the <code class="epub__literal">SubMeta</code> instance is created, not when it
+            is later called as a metaclass:</p><a id="I_programlisting4_d1e102715"></a>
+<pre class="epub__programlisting">class SuperMeta:
+    def __call__(self, classname, supers, classdict):
+        print('In SuperMeta.call: ', classname, supers, classdict, sep='\n...')
+        Class = self.__New__(classname, supers, classdict)
+        self.__Init__(Class, classname, supers, classdict)
+        return Class
+
+class SubMeta(SuperMeta):
+    def __New__(self, classname, supers, classdict):
+        print('In SubMeta.new: ', classname, supers, classdict, sep='\n...')
+        return type(classname, supers, classdict)
+
+    def __Init__(self, Class, classname, supers, classdict):
+        print('In SubMeta init:', classname, supers, classdict, sep='\n...')
+        print('...init class object:', list(Class.__dict__.keys()))
+
+class Eggs:
+    pass
+
+print('making class')
+class Spam(Eggs, metaclass=SubMeta()):          <em class="epub__lineannotation"><span class="epub__lineannotation"># Meta is normal class instance</span></em>
+    data = 1                                    <em class="epub__lineannotation"><span class="epub__lineannotation"># Called at end of statement</span></em>
+    def meth(self, arg):
+        pass
+
+print('making instance')
+X = Spam()
+print('data:', X.data)</pre>
+<p>Although these alternative forms work, most metaclasses get
+            their work done by redefining the <code class="epub__literal">type</code> superclass’s <code class="epub__literal">__new__</code> and <code class="epub__literal">__init__</code>; in practice, this is usually
+            as much control as is required, and it’s often simpler than other
+            schemes. However, we’ll see later that a simple function-based
+            metaclass can often work much like a class decorator, which allows
+            the metaclasses to manage instances as well as classes.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Instances Versus Inheritance"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="instances_versus_inheritance"></a>Instances Versus Inheritance</h2>
+</div>
+</div>
+</div>
+<p>Because <a id="I_indexterm4_d1e102739"></a>metaclasses are specified in similar ways to
+          inheritance superclasses, they can be a bit confusing at first
+          glance. A few key points should help summarize and clarify the
+          model:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p><span class="epub__strong"><strong>Metaclasses inherit from the type
+              class</strong></span>. Although they have a special role, metaclasses are coded with <code class="epub__literal">class</code> statements and follow the usual
+              OOP model in Python. For
+              example, as subclasses of <code class="epub__literal">type</code>, they can redefine the type
+              object’s methods, overriding and customizing them as needed.
+              Metaclasses typically redefine the <code class="epub__literal">type</code> class’s <code class="epub__literal">__new__</code> and <code class="epub__literal">__init__</code> to customize class creation
+              and initialization, but they can also redefine <code class="epub__literal">__call__</code> if they wish to catch the
+              end-of-class creation call directly. Although it’s unusual, they
+              can even be simple functions that return arbitrary objects,
+              instead of <code class="epub__literal">type</code>
+              subclasses.</p></li><li class="epub__listitem">
+<p><span class="epub__strong"><strong>Metaclass declarations are
+              inherited by subclasses</strong></span>. The <code class="epub__literal">metaclass=</code><em class="epub__replaceable"><code>M</code></em>
+              declaration in a user-defined class is
+              <span class="epub__emphasis"><em>inherited</em></span> by the class’s subclasses, too,
+              so the metaclass will run for the construction of each class
+              that inherits this specification in a superclass chain.</p></li><li class="epub__listitem">
+<p><span class="epub__strong"><strong>Metaclass attributes are not
+              inherited by class instances</strong></span>. Metaclass declarations
+              specify an <span class="epub__emphasis"><em>instance</em></span> relationship, which is
+              not the same as inheritance. Because classes are instances of
+              metaclasses, the behavior defined in a metaclass applies to the
+              class, but not the class’s later instances. Instances obtain
+              behavior from their classes and superclasses, but not from any
+              metaclasses. Technically, instance attribute lookups usually
+              search only the <code class="epub__literal">__dict__</code>
+              dictionaries of the instance and all its classes; the metaclass
+              is not included in inheritance lookup.</p></li></ul>
+</div>
+<p>To illustrate the last two points, consider the following
+          example:</p><a id="I_programlisting4_d1e102810"></a>
+<pre class="epub__programlisting">class MetaOne(type):
+    def __new__(meta, classname, supers, classdict):        <em class="epub__lineannotation"><span class="epub__lineannotation"># Redefine type method</span></em>
+        print('In MetaOne.new:', classname)
+        return type.__new__(meta, classname, supers, classdict)
+    def toast(self):
+        print('toast')
+
+class Super(metaclass=MetaOne):        <em class="epub__lineannotation"><span class="epub__lineannotation"># Metaclass inherited by subs too</span></em>
+    def spam(self):                    <em class="epub__lineannotation"><span class="epub__lineannotation"># MetaOne run twice for two classes</span></em>
+        print('spam')
+
+class C(Super):                        <em class="epub__lineannotation"><span class="epub__lineannotation"># Superclass: inheritance versus instance</span></em>
+    def eggs(self):                    <em class="epub__lineannotation"><span class="epub__lineannotation"># Classes inherit from superclasses</span></em>
+        print('eggs')                  <em class="epub__lineannotation"><span class="epub__lineannotation"># But not from metclasses</span></em>
+
+X = C()
+X.eggs()       <em class="epub__lineannotation"><span class="epub__lineannotation"># Inherited from C</span></em>
+X.spam()       <em class="epub__lineannotation"><span class="epub__lineannotation"># Inherited from Super</span></em>
+X.toast()      <em class="epub__lineannotation"><span class="epub__lineannotation"># Not inherited from metaclass</span></em></pre>
+<p>When this code is run, the metaclass handles construction of
+          <span class="epub__emphasis"><em>both</em></span> client classes, and instances inherit
+          class attributes but <span class="epub__emphasis"><em>not</em></span> metaclass
+          attributes:</p><a id="I_programlisting4_d1e102847"></a>
+<pre class="epub__programlisting">In MetaOne.new: Super
+In MetaOne.new: C
+eggs
+spam
+AttributeError: 'C' object has no attribute 'toast'</pre>
+<p>Although detail matters, it’s important to keep the big
+          picture in mind when dealing with metaclasses. Metaclasses like
+          those we’ve seen here will be run automatically for every class that
+          declares them. Unlike the helper function approaches we saw earlier,
+          such classes will automatically acquire whatever augmentation the
+          metaclass provides. Moreover, changes in such augmentation only need
+          to be coded in one place—the metaclass—which simplifies making
+          modifications as our needs evolve. Like so many tools in Python,
+          metaclasses ease maintenance work by eliminating redundancy. To
+          fully sample their power, though, we need to move on to some larger
+          use-case <a id="I_indexterm4_d1e102851"></a>examples.</p>
+</div>
+<div class="epub__sect1" title="Example: Adding Methods to Classes"><div class="epub__titlepage"><div>
+<div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

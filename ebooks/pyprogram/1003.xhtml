@@ -1,0 +1,549 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>ShellGui: GUIs for Command-Line Tools</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="ShellGui: GUIs for Command-Line Tools"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="shellgui_colon_guis_for_command-line_too"></a>ShellGui: GUIs for Command-Line Tools</h1>
+</div>
+</div>
+</div>
+<p>Demos are fun, but to <a id="I_indexterm4_d1e42168"></a><a id="com10.4"></a><a id="gui10.4"></a>better show how things like the <code class="epub__literal">GuiMixin</code> class can be of practical use, we
+        need a more realistic application. Here’s one: suppose you’ve written
+        a set of command-line system administration scripts, along the lines
+        of those we studied in Part II. As we
+        saw, such scripts work well from a command line, but require you to
+        remember all their options each time they are run; if you’re like me,
+        this usually implies having to pore over the source code after a
+        period of nonuse.</p>
+<p>Instead of requiring users of such tools (including yourself) to
+        type cryptic commands at a shell, why not also provide an easy-to-use
+        tkinter GUI interface for running such programs? Such a GUI can prompt
+        for command-line inputs, instead of expecting users to remember them.
+        While we’re at it, why not generalize the whole notion of running
+        command-line tools from a GUI, to make it easy to support future tools
+        too?</p>
+<div class="epub__sect2" title="A Generic Shell-Tools Display"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="a_generic_shell-tools_display"></a>A Generic Shell-Tools Display</h2>
+</div>
+</div>
+</div>
+<p>Examples 10-5 through 10-11—seven files, spanning two
+          command-line scripts, one <a id="shell10.4.1"></a>GUI utility module, two GUI dialogs, and a main GUI
+          and its options specification module—comprise a concrete
+          implementation of these artificially rhetorical musings. Because I
+          want this to be a general-purpose tool that can run any <span>command</span>-line program, its design is
+          factored into modules that become more application-specific as we go
+          lower in the software hierarchy. At the top, things are about as
+          generic as they can be, as shown in Example 10-5.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id110"></a>
+<p class="epub__title">Example 10-5. PP4E\Gui\ShellGui\shellgui.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/local/bin/python
+"""
+################################################################################
+tools launcher; uses guimaker templates, guimixin std quit dialog;
+I am just a class library: run mytools script to display the GUI;
+################################################################################
+"""
+
+from tkinter import *                               # get widgets
+from PP4E.Gui.Tools.guimixin import GuiMixin        # get quit, not done
+from PP4E.Gui.Tools.guimaker import *               # menu/toolbar builder
+
+class ShellGui(GuiMixin, GuiMakerWindowMenu):       # a frame + maker + mixins
+    def start(self):                                # use GuiMaker if component
+        self.setMenuBar()
+        self.setToolBar()
+        self.master.title("Shell Tools Listbox")
+        self.master.iconname("Shell Tools")
+
+    def handleList(self, event):                    # on listbox double-click
+        label = self.listbox.get(ACTIVE)            # fetch selection text
+        self.runCommand(label)                      # and call action here
+
+    def makeWidgets(self):                          # add listbox in middle
+        sbar = Scrollbar(self)                      # cross link sbar, list
+        list = Listbox(self, bg='white')            # or use Tour.ScrolledList
+        sbar.config(command=list.yview)
+        list.config(yscrollcommand=sbar.set)
+        sbar.pack(side=RIGHT, fill=Y)                     # pack 1st=clip last
+        list.pack(side=LEFT, expand=YES, fill=BOTH)       # list clipped first
+        for (label, action) in self.fetchCommands():      # add to listbox
+            list.insert(END, label)                       # and menu/toolbars
+        list.bind('&lt;Double-1&gt;', self.handleList)          # set event handler
+        self.listbox = list
+
+    def forToolBar(self, label):                          # put on toolbar?
+        return True                                       # default = all
+
+    def setToolBar(self):
+        self.toolBar = []
+        for (label, action) in self.fetchCommands():
+            if self.forToolBar(label):
+                self.toolBar.append((label, action, dict(side=LEFT)))
+        self.toolBar.append(('Quit', self.quit, dict(side=RIGHT)))
+
+    def setMenuBar(self):
+        toolEntries  = []
+        self.menuBar = [
+            ('File',  0, [('Quit', −1, self.quit)]),    # pull-down name
+            ('Tools', 0, toolEntries)                   # menu items list
+            ]                                           # label,underline,action
+        for (label, action) in self.fetchCommands():
+            toolEntries.append((label, −1, action))     # add app items to menu
+
+################################################################################
+# delegate to template type-specific subclasses
+# which delegate to app tool-set-specific subclasses
+################################################################################
+
+class ListMenuGui(ShellGui):
+    def fetchCommands(self):             # subclass: set 'myMenu'
+        return self.myMenu               # list of (label, callback)
+    def runCommand(self, cmd):
+        for (label, action) in self.myMenu:
+            if label == cmd: action()
+
+class DictMenuGui(ShellGui):
+    def fetchCommands(self):
+        return self.myMenu.items()
+    def runCommand(self, cmd):
+        self.myMenu[cmd]()</pre>
+</div>
+</div>
+<p>The <code class="epub__literal">ShellGui</code> class in this
+          module knows how to use the <code class="epub__literal">GuiMaker</code> and <code class="epub__literal">GuiMixin</code> interfaces to construct a
+          selection window that displays tool names in menus, a scrolled list,
+          and a toolbar. It also provides a <code class="epub__literal">forToolBar</code> method that you can override
+          and that allows subclasses to specify which tools should and should
+          not be added to the window’s toolbar (the toolbar can become crowded
+          in a hurry). However, it is deliberately ignorant about both the
+          names of tools that should be displayed in those places and about
+          the actions to be run when tool names are selected.</p>
+<p>Instead, <code class="epub__literal">ShellGui</code> relies on
+          the <code class="epub__literal">ListMenuGui</code> and <code class="epub__literal">DictMenuGui</code> subclasses in this file to
+          provide a list of tool names from a <code class="epub__literal">fetchCommands</code> method and dispatch actions
+          by name in a <code class="epub__literal">runCommand</code> method.
+          These two subclasses really just serve to interface to <span>application</span>-specific tool sets laid
+          out as lists or dictionaries, though; they are still naïve about
+          what tool names really go up on the GUI. That’s by design,
+          too—because the tool sets displayed are defined by lower subclasses,
+          we can use <code class="epub__literal">ShellGui</code> to display a
+          variety of different <a id="I_indexterm4_d1e42252"></a>tool sets.</p>
+</div>
+<div class="epub__sect2" title="Application-Specific Tool Set Classes"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="application-specific_tool_set_classes"></a>Application-Specific Tool Set Classes</h2>
+</div>
+</div>
+</div>
+<p>To get to the <a id="I_indexterm4_d1e42260"></a>actual tool sets, we need to go one level down. The
+          module in Example 10-6
+          defines subclasses of the two type-specific <code class="epub__literal">ShellGui</code> classes, to provide sets of
+          available tools in both list and dictionary formats (you would
+          normally need only one, but this module is meant for illustration).
+          This is also the module that is actually <span class="epub__emphasis"><em>run</em></span> to
+          kick off the GUI—the <code class="epub__literal">shellgui</code>
+          module is a class library only.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id111"></a>
+<p class="epub__title">Example 10-6. PP4E\Gui\ShellGui\mytools.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/local/bin/python
+"""
+################################################################################
+provide type-specific option sets for application
+################################################################################
+"""
+
+from shellgui import *                 # type-specific option gui
+from packdlg  import runPackDialog     # dialogs for data entry
+from unpkdlg  import runUnpackDialog   # they both run app classes
+
+class TextPak1(ListMenuGui):
+    def __init__(self):
+        self.myMenu = [('Pack  ', runPackDialog),      # simple functions
+                       ('Unpack', runUnpackDialog),    # use same width here
+                       ('Mtool ', self.notdone)]       # method from guimixin
+        ListMenuGui.__init__(self)
+    def forToolBar(self, label):
+        return label in {'Pack  ', 'Unpack'}           # 3.x set syntax
+
+class TextPak2(DictMenuGui):
+    def __init__(self):
+        self.myMenu = {'Pack  ': runPackDialog,        # or use input here...
+                       'Unpack': runUnpackDialog,      # instead of in dialogs
+                       'Mtool ': self.notdone}
+        DictMenuGui.__init__(self)
+
+if __name__ == '__main__':                           # self-test code...
+    from sys import argv                             # 'menugui.py list|^'
+    if len(argv) &gt; 1 and argv[1] == 'list':
+        print('list test')
+        TextPak1().mainloop()
+    else:
+        print('dict test')
+        TextPak2().mainloop()</pre>
+</div>
+</div>
+<p>The classes in this module are specific to a particular tool
+          set; to display a different set of tool names, simply code and run a
+          new subclass. By separating out application logic into distinct
+          subclasses and modules like this, software can become widely
+          reusable.</p>
+<p>Figure 10-5 shows
+          the main <code class="epub__literal">ShellGui</code> window created
+          when the <code class="epub__literal">mytools</code> script is run
+          with its list-based menu layout class on Windows 7, along with menu
+          tear-offs so that you can see what they contain. This window’s menu
+          and toolbar are built by <code class="epub__literal">GuiMaker</code>, and its Quit and Help buttons
+          and menu selections trigger quit and help methods inherited from
+          <code class="epub__literal">GuiMixin</code> through the <code class="epub__literal">ShellGui</code> module’s superclasses. Are you
+          starting to see why this book preaches code reuse so often?</p><div class="epub__figure-float"><div class="epub__figure"><a id="mytools_items_in_a_shellgui_window"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e42305"></a><img alt="mytools items in a ShellGui window" src="Images/getfile_003-18.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 10-5. mytools items in a ShellGui window</p>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="Adding GUI Frontends to Command Lines"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="adding_gui_frontends_to_command_lines"></a>Adding GUI Frontends to Command Lines</h2>
+</div>
+</div>
+</div>
+<p>So far, we’ve coded a <a id="shell10.4.3"></a>general shell tools class library, as well as an
+          application-specific tool set module that names callback handlers in
+          its option menus. To complete the picture, we still need to define
+          the callback handlers run by the GUI, as well as the scripts they
+          ultimately invoke.</p>
+<div class="epub__sect3" title="Non-GUI scripts"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="non-gui_scripts"></a>Non-GUI scripts</h3>
+</div>
+</div>
+</div>
+<p>To test the <a id="shell10.4.3.1"></a>shell GUI’s ability to run command-line scripts, we
+            need a few command-line scripts, of course. At the bottom of the
+            hierarchy, the following two scripts make use of system tools and
+            techniques from Part II to implement
+            a simple text file archive utility. The first, Example 10-7, simply
+            concatenates the contents of multiple text files into a single
+            file, with predefined separator lines between them.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id112"></a>
+<p class="epub__title">Example 10-7. PP4E\Gui\ShellGui\packer.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># pack text files into a single file with separator lines (simple archive)
+
+import sys, glob
+marker = ':' * 20 + 'textpak=&gt;'      # hopefully unique separator
+
+def pack(ofile, ifiles):
+    output = open(ofile, 'w')
+    for name in ifiles:
+        print('packing:', name)
+        input = open(name, 'r').read()        # open the next input file
+        if input[-1] != '\n': input += '\n'   # make sure it has endline
+        output.write(marker + name + '\n')    # write a separator line
+        output.write(input)                   # and write the file's contents
+
+if __name__ == '__main__':
+    ifiles = []
+    for patt in sys.argv[2:]:
+        ifiles += glob.glob(patt)             # not globbed auto on Windows
+    pack(sys.argv[1], ifiles)                 # pack files listed on cmdline</pre>
+</div>
+</div>
+<p>The second script, Example 10-8, scans archive
+            files created by the first, to unpack into individual files
+            again.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id113"></a>
+<p class="epub__title">Example 10-8. PP4E\Gui\ShellGui\unpacker.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># unpack files created by packer.py (simple textfile archive)
+
+import sys
+from packer import marker             # use common separator key
+mlen = len(marker)                    # filenames after markers
+
+def unpack(ifile, prefix='new-'):
+    for line in open(ifile):                # for all input lines
+        if line[:mlen] != marker:
+            output.write(line)              # write real lines
+        else:
+            name = prefix + line[mlen:-1]   # or make new output
+            print('creating:', name)
+            output = open(name, 'w')
+
+if __name__ == '__main__': unpack(sys.argv[1])</pre>
+</div>
+</div>
+<p>These scripts are fairly basic, and this GUI part of the
+            book assumes you’ve already scanned the system tools chapters, so
+            we won’t go into their code in depth. Variants of these scripts
+            appeared in the first edition of this book in 1996; I actually
+            used them early on in my Python career to bundle files before I
+            could rely on tools like tar and zip to be present on all the
+            machines I used (and before Python grew tar and zip support
+            modules in its standard library). Their operation is
+            straightforward—consider these three text files:</p><a id="I_programlisting4_d1e42354"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Gui\ShellGui&gt; <strong class="epub__userinput"><code>type spam.txt</code></strong>
+spam
+Spam
+SPAM
+C:\...\PP4E\Gui\ShellGui&gt; <strong class="epub__userinput"><code>type eggs.txt</code></strong>
+eggs
+
+C:\...\PP4E\Gui\ShellGui&gt; <strong class="epub__userinput"><code>type ham.txt</code></strong>
+h
+  a
+     m</pre>
+<p>When run from the command line, the packer script combines
+            them into a single text file, and the unpacker extracts them from
+            there; the packer must take care to glob (expand) filename
+            patterns, because this isn’t done by default in Windows:</p><a id="I_programlisting4_d1e42367"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Gui\ShellGui&gt; <strong class="epub__userinput"><code>packer.py packed.txt *.txt</code></strong>
+packing: eggs.txt
+packing: ham.txt
+packing: spam.txt
+
+C:\...\PP4E\Gui\ShellGui&gt; <strong class="epub__userinput"><code>unpacker.py packed.txt</code></strong>
+creating: new-eggs.txt
+creating: new-ham.txt
+creating: new-spam.txt</pre>
+<p>The result files have a unique name by default (with an
+            added prefix to avoid accidental overwrites, especially during
+            testing), but you otherwise get back what you packed:</p><a id="I_programlisting4_d1e42377"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Gui\ShellGui&gt; <strong class="epub__userinput"><code>type new-spam.txt</code></strong>
+spam
+Spam
+SPAM
+
+C:\...\PP4E\Gui\ShellGui&gt; <strong class="epub__userinput"><code>type packed.txt</code></strong>
+::::::::::::::::::::textpak=&gt;eggs.txt
+eggs
+::::::::::::::::::::textpak=&gt;ham.txt
+h
+  a
+     m
+::::::::::::::::::::textpak=&gt;spam.txt
+spam
+Spam
+SPAM</pre>
+<p>These scripts don’t do anything about binary files,
+            compression, or the like, but they serve to illustrate
+            command-line scripts that require arguments when run. Although
+            they can be launched with shell commands as above (and hence
+            Python tools like <code class="epub__literal">os.popen</code> and
+            <code class="epub__literal">subprocess</code>), their logic is
+            also packaged to be imported and called. For running them from a
+            GUI, we’ll use the latter direct call <a id="I_indexterm4_d1e42396"></a>interface.</p>
+</div>
+<div class="epub__sect3" title="GUI input dialogs"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="gui_input_dialogs"></a>GUI input dialogs</h3>
+</div>
+</div>
+</div>
+<p>One final <a id="shell10.4.3.2"></a>piece remains. As is, the packing and unpacking
+            scripts function well as command-line tools. The callback actions
+            named in Example 10-6’s <em class="epub__filename">mytools.py</em> GUI, though, are expected to
+            do something GUI-oriented. Because the original file packing and
+            unpacking scripts live in the world of text-based streams and
+            shells, we need to code wrappers that accept input parameters from
+            more GUI-minded users. In particular, we need dialogs that prompt
+            for the command-line arguments required.</p>
+<p>First, the module in Example 10-9 and its client
+            script in Example 10-10 use the custom
+            modal dialog techniques we studied in Chapter 8 to pop up an input
+            display to collect pack script parameters. The code in Example 10-9 was split off
+            to a separate module because it’s generally useful, In fact, we
+            will reuse it, in both the unpack dialog and again in PyEdit in
+            Chapter 11.</p>
+<p>This is yet another way to automate GUI construction—using
+            it to build a form’s rows trades 7 or more lines of code per row
+            (6 without a linked variable or browse button) for just 1. We’ll
+            see another even more automatic form building approach in Chapter 12’s <em class="epub__filename">form.py</em>. The utility here, though, is
+            sufficient to shave dozens of lines of code for nontrivial
+            forms.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id114"></a>
+<p class="epub__title">Example 10-9. PP4E\Gui\ShellGui\formrows.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">""""
+create a label+entry row frame, with optional file open browse button;
+this is a separate module because it can save code in other programs too;
+caller (or callbacks here): retain returned linked var while row is in use;
+"""
+
+from tkinter import *                                # widgets and presets
+from tkinter.filedialog import askopenfilename       # file selector dialog
+
+def makeFormRow(parent, label, width=15, browse=True, extend=False):
+    var = StringVar()
+    row = Frame(parent)
+    lab = Label(row, text=label + '?', relief=RIDGE, width=width)
+    ent = Entry(row, relief=SUNKEN, textvariable=var)
+    row.pack(fill=X)                                  # uses packed row frames
+    lab.pack(side=LEFT)                               # and fixed-width labels
+    ent.pack(side=LEFT, expand=YES, fill=X)           # or use grid(row, col)
+    if browse:
+        btn = Button(row, text='browse...')
+        btn.pack(side=RIGHT)
+        if not extend:
+            btn.config(command=
+                 lambda: var.set(askopenfilename() or var.get()) )
+        else:
+            btn.config(command=
+                 lambda: var.set(var.get() + ' ' + askopenfilename()) )
+    return var</pre>
+</div>
+</div>
+<p>Next, Example 10-10’s <code class="epub__literal">runPackDialog</code> function is the actual
+            callback handler invoked when tool names are selected in the main
+            <code class="epub__literal">ShellGui</code> window. It uses the
+            form row builder module of Example 10-9 and applies
+            the custom modal dialog techniques we studied earlier.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id115"></a>
+<p class="epub__title">Example 10-10. PP4E\Gui\ShellGui\packdlg.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># popup a GUI dialog for packer script arguments, and run it
+
+from glob import glob                           # filename expansion
+from tkinter import *                           # GUI widget stuff
+from packer import pack                         # use pack script/module
+from formrows import makeFormRow                # use form builder tool
+
+def packDialog():                               # a new top-level window
+    win = Toplevel()                            # with 2 row frames + ok button
+    win.title('Enter Pack Parameters')
+    var1 = makeFormRow(win, label='Output file')
+    var2 = makeFormRow(win, label='Files to pack', extend=True)
+    Button(win, text='OK', command=win.destroy).pack()
+    win.grab_set()
+    win.focus_set()                  # go modal: mouse grab, keyboard focus, wait
+    win.wait_window()                # wait till destroy; else returns now
+    return var1.get(), var2.get()    # fetch linked var values
+
+def runPackDialog():
+    output, patterns = packDialog()                  # pop-up GUI dialog
+    if output != "" and patterns != "":              # till ok or wm-destroy
+        patterns = patterns.split()                  # do non-GUI part now
+        filenames = []
+        for sublist in map(glob, patterns):          # do expansion manually
+            filenames += sublist                     # Unix shells do this auto
+        print('Packer:', output, filenames)
+        pack(ofile=output, ifiles=filenames)         # should show msgs in GUI too
+
+if __name__ == '__main__':
+    root = Tk()
+    Button(root, text='popup', command=runPackDialog).pack(fill=X)
+    Button(root, text='bye',   command=root.quit).pack(fill=X)
+    root.mainloop()</pre>
+</div>
+</div>
+<p>When run standalone, the “popup” button of script in Example 10-10 creates the
+            input form shown in Figure 10-6;
+            this is also what we get when its main function is launched by the
+            <em class="epub__filename">mytools.py</em> shell tools GUI.
+            Users may either type input and output filenames into the entry
+            fields or press the “browse” buttons to pop up standard file
+            selection dialogs. They can also enter filename patterns—the
+            manual <code class="epub__literal">glob</code> call in this script
+            expands filename patterns to match names and filters out
+            nonexistent input filenames. Again, the Unix command line does
+            this pattern expansion automatically when running the packer from
+            a shell, but Windows does not.</p><div class="epub__figure-float"><div class="epub__figure"><a id="the_packdlg_input_form"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e42471"></a><img alt="The packdlg input form" src="Images/getfile-27.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 10-6. The packdlg input form</p>
+</div>
+</div>
+<p>When the form is filled in and submitted with its OK button,
+            parameters are finally passed along to the main function of the
+            non-GUI packer script listed earlier to perform file
+            concatenations.</p>
+<p>The GUI interface to the <span class="epub__emphasis"><em>unpacking</em></span>
+            script is simpler because there is only one input field—the name
+            of the packed file to scan. We also get to reuse the form row
+            builder module developed for the packer’s dialog, because this
+            task is so similar. The script in Example 10-11 (and its main
+            function run by the <em class="epub__filename">mytools.py</em> shell tool GUI’s selections)
+            generates the input form window shown in Figure 10-7.</p><div class="epub__figure-float"><div class="epub__figure"><a id="the_unpkdlg_input_form"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e42494"></a><img alt="The unpkdlg input form" src="Images/getfile_002-21.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 10-7. The unpkdlg input form</p>
+</div>
+</div><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id116"></a>
+<p class="epub__title">Example 10-11. PP4E\Gui\ShellGui\unpkdlg.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># popup a GUI dialog for unpacker script arguments, and run it
+
+from tkinter import *                             # widget classes
+from unpacker import unpack                       # use unpack script/module
+from formrows import makeFormRow                  # form fields builder
+
+def unpackDialog():
+    win = Toplevel()
+    win.title('Enter Unpack Parameters')
+    var = makeFormRow(win, label='Input file', width=11)
+    win.bind('&lt;Key-Return&gt;', lambda event: win.destroy())
+    win.grab_set()
+    win.focus_set()                  # make myself modal
+    win.wait_window()                # till I'm destroyed on return
+    return var.get()                 # or closed by wm action
+
+def runUnpackDialog():
+    input = unpackDialog()                    # get input from GUI
+    if input != '':                           # do non-GUI file stuff
+        print('Unpacker:', input)             # run with input from dialog
+        unpack(ifile=input, prefix='')
+
+if __name__ == "__main__":
+    Button(None, text='popup', command=runUnpackDialog).pack()
+    mainloop()</pre>
+</div>
+</div>
+<p>The “browse” button in Figure 10-7 pops up a file selection
+            dialog just as the <code class="epub__literal">packdlg</code> form
+            did. Instead of an OK button, this dialog binds the Enter
+            key-press event to kill the window and end the modal wait state
+            pause; on submission, the name of the packed file is passed to the
+            main function of the unpacker script shown earlier to perform the
+            actual file scan <a id="I_indexterm4_d1e42511"></a>process.</p>
+</div>
+<div class="epub__sect3" title="Room for improvement"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="room_for_improvement"></a>Room for improvement</h3>
+</div>
+</div>
+</div>
+<p>All of this works as advertised—by making command-line tools
+            available in graphical form like this, they become much more
+            attractive to users accustomed to the GUI way of life. We’ve
+            effectively added a simple GUI front-end to command-line tools.
+            Still, two aspects of this design seem prime for
+            improvement.</p>
+<p>First, both of the input dialogs use common code to build
+            the rows of their input forms, but it’s tailored to this specific
+            use case; we might be able to simplify the dialogs further by
+            importing a more generic form-builder module instead. We met
+            general form builder code in Chapters 8 and 9, and we’ll meet more later—see
+            the <code class="epub__literal">form.py</code> module in Chapter 12 for pointers on further
+            genericizing form construction.</p>
+<p>Second, at the point where the user submits input data in
+            either form dialog, we’ve lost the GUI trail—the GUI is blocked,
+            and messages are routed back to the console. The GUI is
+            technically blocked and will not update itself while the pack and
+            unpack utilities run; although these operations are fast enough
+            for my files as to be negligible, we would probably want to spawn
+            these calls off in threads for very large files to keep the main
+            GUI thread active (more on threads later in this chapter).</p>
+<p>The console issue is more blatant: <code class="epub__literal">packer</code> and <code class="epub__literal">unpacker</code> messages still show up in the
+            <code class="epub__literal">stdout</code> console window, not in
+            the GUI (all the filenames here include full directory paths if
+            you select them with the GUI’s Browse buttons, courtesy of the
+            standard Open dialog):</p><a id="I_programlisting4_d1e42543"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Gui\ShellGui\temp&gt; <strong class="epub__userinput"><code>python ..\mytools.py list</code></strong>
+PP4E scrolledtext
+list test
+Packer: packed.all ['spam.txt', 'ham.txt', 'eggs.txt']
+packing: spam.txt
+packing: ham.txt
+packing: eggs.txt
+Unpacker: packed.all
+creating: spam.txt
+creating: ham.txt
+creating: eggs.txt</pre>
+<p>This may be less than ideal for a GUI’s users; they may not
+            expect (or even be able to find) the command-line console. We can
+            do better here, by <span class="epub__emphasis"><em>redirecting</em></span> <code class="epub__literal">stdout</code> to an object that throws text up
+            in a GUI window as it is received. You’ll have to read the next
+            section to see <a id="I_indexterm4_d1e42556"></a><a id="I_indexterm4_d1e42558"></a><a id="I_indexterm4_d1e42560"></a>how.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

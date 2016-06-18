@@ -1,0 +1,551 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Wrapping C++ Classes with SWIG</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Wrapping C++ Classes with SWIG"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="wrapping_c_plus_plus_classes_with_swig"></a>Wrapping C++ Classes with SWIG</h1>
+</div>
+</div>
+</div>
+<p>So far in this <a id="wrap20.6"></a><a id="c20.6"></a><a id="swig20.6"></a>chapter, we’ve been dealing with C extension
+        modules—flat function libraries. To implement multiple-instance
+        objects in C, you need to code a <span class="epub__emphasis"><em>C extension
+        type</em></span>, not a module. Like Python classes, C types generate
+        multiple-instance objects and can overload (i.e., intercept and
+        implement) Python expression operators and type operations. C types
+        can also support subclassing just like Python classes, largely because
+        the type/class distinction has largely evaporated in Python
+        3.X.</p>
+<p>You can see what C types look like in Python’s own source
+        library tree; look for the <em class="epub__filename">Objects</em> directory there. The code required
+        for a C type can be large—it defines instance creation, named methods,
+        operator implementations, an iterator type, and so on, and links all
+        these together with tables—but is largely boilerplate code that is
+        structurally the same for most types.</p>
+<p>You can code new object types in C manually like this, and in
+        some applications, this approach may make sense. But you don’t
+        necessarily have to—because SWIG knows how to generate glue code for
+        <span class="epub__emphasis"><em>C++ classes</em></span>, you can instead
+        <span class="epub__emphasis"><em>automatically</em></span> generate all the C extension and
+        wrapper class code required to integrate such an object, simply by
+        running SWIG over an appropriate class declaration. The wrapped C++
+        class provides a multiple-instance datatype much like the C extension
+        type, but it can be substantially simpler for you to code because SWIG
+        handles language integration details.</p>
+<p>Here’s how—given a C++ class declaration and special
+        command-line settings, SWIG generates the following:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>A C++-coded Python extension module with accessor functions
+            that interface with the C++ class’s methods and members</p></li><li class="epub__listitem">
+<p>A Python-coded module with a wrapper class (called a
+            “shadow” or “proxy” class in SWIG-speak) that interfaces with the
+            C++ class accessor functions module</p></li></ul>
+</div>
+<p>As we did earlier, to use SWIG in this domain, write and debug
+        your class as though it would be used only from C++. Then, simply run
+        SWIG in your makefile to scan the <span>C++</span> class declaration and compile and
+        link its output. The end result is that by importing the shadow class
+        in your Python scripts, you can utilize C++ classes as though they
+        were really coded in Python. Not only can Python programs make and use
+        instances of the C++ class, they can also customize it by subclassing
+        the generated shadow class.</p>
+<div class="epub__sect2" title="A Simple C++ Extension Class"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="a_simple_c_plus_plus_extension_class"></a>A Simple C++ Extension Class</h2>
+</div>
+</div>
+</div>
+<p>To see how this <a id="ex20.6.1"></a>works, we need a C++ class. To illustrate, let’s code
+          one to be used in Python scripts. You have to understand C++ to make
+          sense of this section, of course, and SWIG supports advanced C++
+          tools (including templates and overloaded functions and operators),
+          but I’ll keep this example simple for illustration. The following
+          C++ files define a <code class="epub__literal">Number</code> class
+          with four methods (<code class="epub__literal">add</code>, <code class="epub__literal">sub</code>, <code class="epub__literal">square</code>, and <code class="epub__literal">display</code>), a data member (<code class="epub__literal">data</code>), and a constructor and destructor.
+          Example 20-14 shows the
+          header file.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id13"></a>
+<p class="epub__title">Example 20-14. PP4E\Integrate\Extend\Swig\Shadow\number.h</p><div class="epub__example-contents">
+<pre class="epub__programlisting">class Number
+{
+public:
+    Number(int start);             // constructor
+    ~Number();                     // destructor
+    void add(int value);           // update data member
+    void sub(int value);
+    int  square();                 // return a value
+    void display();                // print data member
+    int data;
+};</pre>
+</div>
+</div>
+<p>Example 20-15 is the
+          C++ class’s implementation file; most methods print a message when
+          called to trace class operations. Notice how this uses <code class="epub__literal">printf</code> instead of C++’s <code class="epub__literal">cout</code>; this once resolved an output overlap
+          issue when mixing C++ <code class="epub__literal">cout</code> with
+          Python 2.X standard output streams on Cygwin. It’s probably a moot
+          point today—because Python 3.X’s output system and buffering might
+          mix with C++’s arbitrarily, C++ should generally flush the output
+          stream (with <code class="epub__literal">fflush(stdout)</code> or
+          <code class="epub__literal">cout&lt;&lt;flush</code>) if it prints
+          intermixed text that doesn’t end in a newline. Obscure but true when
+          disparate language systems are mixed.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id14"></a>
+<p class="epub__title">Example 20-15. PP4E\Integrate\Extend\Swig\Shadow\number.cxx</p><div class="epub__example-contents">
+<pre class="epub__programlisting">///////////////////////////////////////////////////////////////
+// implement a C++ class, to be used from Python code or not;
+// caveat: cout and print usually both work, but I ran into a
+// c++/py output overlap issue on Cygwin that prompted printf
+///////////////////////////////////////////////////////////////
+
+#include "number.h"
+#include "stdio.h"                       // versus #include "iostream.h"
+
+Number::Number(int start) {
+    data = start;                        // python print goes to stdout
+    printf("Number: %d\n", data);        // or: cout &lt;&lt; "Number: " &lt;&lt; data &lt;&lt; endl;
+}
+
+Number::~Number() {
+    printf("~Number: %d\n", data);
+}
+
+void Number::add(int value) {
+    data += value;
+    printf("add %d\n", value);
+}
+
+void Number::sub(int value) {
+    data -= value;
+    printf("sub %d\n", value);
+}
+
+int Number::square() {
+    return data * data;       // if print label, fflush(stdout) or cout &lt;&lt; flush
+}
+
+void Number::display() {
+    printf("Number=%d\n", data);
+}</pre>
+</div>
+</div>
+<p>So that you can compare languages, the following is how this
+          class is used in a C++ program. Example 20-16 makes a <code class="epub__literal">Number</code> object, calls its methods, and
+          fetches and sets its data attribute directly (C++ distinguishes
+          between “members” and “methods,” while they’re usually both called
+          “attributes” in Python).</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id15"></a>
+<p class="epub__title">Example 20-16. PP4E\Integrate\Extend\Swig\Shadow\main.cxx</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#include "iostream.h"
+#include "number.h"
+
+main()
+{
+    Number *num;
+    int res, val;
+
+    num = new Number(1);            // make a C++ class instance
+    num-&gt;add(4);                    // call its methods
+    num-&gt;display();
+    num-&gt;sub(2);
+    num-&gt;display();
+
+    res = num-&gt;square();                     // method return value
+    cout &lt;&lt; "square: " &lt;&lt; res &lt;&lt; endl;
+
+    num-&gt;data = 99;                          // set C++ data member
+    val = num-&gt;data;                         // fetch C++ data member
+    cout &lt;&lt; "data:   " &lt;&lt; val &lt;&lt; endl;
+    cout &lt;&lt; "data+1: " &lt;&lt; val + 1 &lt;&lt; endl;
+
+    num-&gt;display();
+    cout &lt;&lt; num &lt;&lt; endl;            // print raw instance ptr
+    delete num;                     // run destructor
+}</pre>
+</div>
+</div>
+<p>You can use the <code class="epub__literal">g++</code>
+          command-line C++ compiler program to compile and run this code
+          on<a id="I_indexterm4_d1e86804"></a> Cygwin (it’s the same on Linux). If you don’t use a
+          similar system, you’ll have to extrapolate; there are far too many
+          C++ compiler differences to list here. Type the compile command
+          directly or use the <code class="epub__literal">cxxtest</code>
+          target in this example directory’s makefile shown ahead, and then
+          run the purely C++ program <a id="I_indexterm4_d1e86813"></a>created:</p><a id="I_programlisting4_d1e86816"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Extend/Swig/Shadow$ <strong class="epub__userinput"><code>make -f makefile.number-swig cxxtest</code></strong>
+g++ main.cxx number.cxx -Wno-deprecated
+
+.../PP4E/Integrate/Extend/Swig/Shadow$ <strong class="epub__userinput"><code>./a.exe</code></strong>
+Number: 1
+add 4
+Number=5
+sub 2
+Number=3
+square: 9
+data:   99
+data+1: 100
+Number=99
+0xe502c0
+~Number: 99</pre>
+</div>
+<div class="epub__sect2" title="Wrapping the C++ Class with SWIG"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="wrapping_the_c_plus_plus_class_with_swig"></a>Wrapping the C++ Class with SWIG</h2>
+</div>
+</div>
+</div>
+<p>But enough C++: let’s get back to Python. To use the C++
+          <code class="epub__literal">Number</code> class of the preceding
+          section in Python scripts, you need to code or generate a glue logic
+          layer between the two languages, just as in prior C extension
+          examples. To generate that layer automatically, write a SWIG input
+          file like the one shown in Example 20-17.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id16"></a>
+<p class="epub__title">Example 20-17. PP4E\Integrate\Extend\Swig\Shadow\number.i</p><div class="epub__example-contents">
+<pre class="epub__programlisting">/********************************************************
+ * Swig module description file for wrapping a C++ class.
+ * Generate by running "swig -c++ -python number.i".
+ * The C++ module is generated in file number_wrap.cxx;
+ * module 'number' refers to the number.py shadow class.
+ ********************************************************/
+
+%module number
+
+%{
+#include "number.h"
+%}
+
+%include number.h</pre>
+</div>
+</div>
+<p>This interface file simply directs SWIG to read the C++
+          class’s type signature information from the %-included
+          <span class="epub__emphasis"><em>number.h</em></span> header file. SWIG uses the class
+          declaration to generate two different Python modules again:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">number_wrap.cxx</code></span></dt><dd>
+<p>A C++ extension module with class accessor
+                functions</p></dd><dt><span class="epub__term"><code class="epub__literal">number.py</code></span></dt><dd>
+<p>A Python shadow class module that wraps accessor
+                functions</p></dd></dl>
+</div>
+<p>The former must be compiled into a binary library. The latter
+          imports and uses the former’s compiled form and is the file that
+          Python scripts ultimately import. As for simple functions, SWIG
+          achieves the integration with a combination of Python and <span>C++</span> code.</p>
+<p>After running SWIG, the Cygwin makefile shown in Example 20-18 combines the
+          generated <em class="epub__filename">number_wrap.cxx</em> C++
+          wrapper code module with the C++ class implementation file to create
+          a <em class="epub__filename">_number.dll</em>—a dynamically
+          loaded extension module that must be in a directory on your Python
+          module search path when imported from a Python script, along with
+          the generated <em class="epub__filename">number.py</em> (all
+          files are in the same current working directory here).</p>
+<p>As before, the compiled C extension module must be named with
+          a leading underscore in SWIG today: <em class="epub__filename">_number.dll</em>, following a Python
+          convention, rather than the other formats used by earlier releases.
+          The shadow class module <em class="epub__filename">number.py</em> internally imports <em class="epub__filename">_number.dll</em>. Be sure to use a <code class="epub__literal">-c++</code> command-line argument for SWIG; an
+          older <code class="epub__literal">-shadow</code> argument is no longer needed
+          to create the wrapper class in addition to the lower-level
+          functional interface module, as this is enabled by default.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id17"></a>
+<p class="epub__title">Example 20-18. PP4E\Integrate\Extend\Swig\Shadow\makefile.number-swig</p><div class="epub__example-contents">
+<pre class="epub__programlisting">###########################################################################
+# Use SWIG to integrate the number.h C++ class for use in Python programs.
+# Update: name "_number.dll" matters, because shadow class imports _number.
+# Update: the "-shadow" swig command line arg is deprecated (on by default).
+# Update: swig no longer creates a .doc file to rm here (ancient history).
+###########################################################################
+
+PYLIB = /usr/local/bin
+PYINC = /usr/local/include/python3.1
+SWIG  = /cygdrive/c/temp/swigwin-2.0.0/swig
+
+all: _number.dll number.py
+
+# wrapper + real class
+_number.dll: number_wrap.o number.o
+        g++ -shared number_wrap.o number.o -L$(PYLIB) -lpython3.1 -o $@
+
+# generated class wrapper module(s)
+number_wrap.o: number_wrap.cxx number.h
+        g++ number_wrap.cxx -c -g -I$(PYINC)
+
+number_wrap.cxx: number.i
+        $(SWIG) -c++ -python number.i
+
+number.py: number.i
+        $(SWIG) -c++ -python number.i
+
+# wrapped C++ class code
+number.o: number.cxx number.h
+        g++ number.cxx -c -g -Wno-deprecated
+
+# non Python test
+cxxtest:
+        g++ main.cxx number.cxx -Wno-deprecated
+
+clean:
+        rm -f *.pyc *.o *.dll core a.exe
+force:
+        rm -f *.pyc *.o *.dll core a.exe number_wrap.cxx number.py</pre>
+</div>
+</div>
+<p>As usual, run this makefile to generate and compile the
+          necessary glue code into an extension module that can be imported by
+          Python programs:</p><a id="I_programlisting4_d1e86901"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Extend/Swig/Shadow$ <strong class="epub__userinput"><code>make -f makefile.number-swig</code></strong>
+/cygdrive/c/temp/swigwin-2.0.0/swig -c++ -python number.i
+g++ number_wrap.cxx -c -g -I/usr/local/include/python3.1
+g++ number.cxx -c -g -Wno-deprecated
+g++ -shared number_wrap.o number.o -L/usr/local/bin -lpython3.1 -o _number.dll
+
+.../PP4E/Integrate/Extend/Swig/Shadow$ <strong class="epub__userinput"><code>ls</code></strong>
+_number.dll  makefile.number-swig  number.i   number_wrap.cxx
+a.exe        number.cxx            number.o   number_wrap.o
+main.cxx     number.h              number.py</pre>
+</div>
+<div class="epub__sect2" title="Using the C++ Class in Python"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="using_the_c_plus_plus_class_in_python"></a>Using the C++ Class in Python</h2>
+</div>
+</div>
+</div>
+<p>Once the glue code is generated and compiled, Python scripts
+          can access the C++ class as though it were coded in Python. In fact,
+          it is—the imported <em class="epub__filename">number.py</em>
+          shadow class which runs on top of the extension module is generated
+          Python code. Example 20-19
+          repeats the <em class="epub__filename">main.cxx</em> file’s
+          class tests. Here, though, the <span class="epub__emphasis"><em>C++</em></span> class is
+          being utilized from the Python programming language—an arguably
+          amazing feat, but the code is remarkably natural on the Python side
+          of the fence.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id18"></a>
+<p class="epub__title">Example 20-19. PP4E\Integrate\Extend\Swig\Shadow\main.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+use C++ class in Python code (c++ module + py shadow class)
+this script runs the same tests as the main.cxx C++ file
+"""
+
+from number import Number         # imports .py C++ shadow class module
+
+num = Number(1)                   # make a C++ class object in Python
+num.add(4)                        # call its methods from Python
+num.display()                     # num saves the C++ 'this' pointer
+num.sub(2)
+num.display()
+
+res = num.square()                # converted C++ int return value
+print('square: ', res)
+
+num.data = 99                     # set C++ data member, generated __setattr__
+val = num.data                    # get C++ data member, generated __getattr__
+print('data:   ', val)            # returns a normal Python integer object
+print('data+1: ', val + 1)
+
+num.display()
+print(num)                        # runs repr in shadow/proxy class
+del num                           # runs C++ destructor automatically</pre>
+</div>
+</div>
+<p>Because the C++ class and its wrappers are automatically
+          loaded when imported by the <em class="epub__filename">number.py</em> shadow class module, you run
+          this script like any other:</p><a id="I_programlisting4_d1e86935"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Extend/Swig/Shadow$ <strong class="epub__userinput"><code>python main.py</code></strong>
+Number: 1
+add 4
+Number=5
+sub 2
+Number=3
+square:  9
+data:    99
+data+1:  100
+Number=99
+&lt;number.Number; proxy of &lt;Swig Object of type 'Number *' at 0x7ff4bb48&gt; &gt;
+~Number: 99</pre>
+<p>Much of this output is coming from the C++ class’s methods and
+          is largely the same as the <span class="epub__emphasis"><em>main.cxx</em></span> results
+          shown in Example 20-16
+          (less the instance output format—it’s a Python shadow class instance
+          now).</p>
+<div class="epub__sect3" title="Using the low-level extension module"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="using_the_low-level_extension_module"></a>Using the low-level extension module</h3>
+</div>
+</div>
+</div>
+<p>SWIG implements integrations as a C++/Python combination,
+            but you can always use the generated accessor functions module if
+            you want to, as in Example 20-20. This version
+            runs the C++ extension module directly without the shadow class,
+            to demonstrate how the shadow class maps calls back to C++.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id19"></a>
+<p class="epub__title">Example 20-20. PP4E\Integrate\Extend\Swig\Shadow\main_low.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+run similar tests to main.cxx and main.py
+but use low-level C accessor function interface
+"""
+
+from _number import *           # c++ extension module wrapper
+
+num = new_Number(1)
+Number_add(num, 4)              # pass C++ 'this' pointer explicitly
+Number_display(num)             # use accessor functions in the C module
+Number_sub(num, 2)
+Number_display(num)
+print(Number_square(num))
+
+Number_data_set(num, 99)
+print(Number_data_get(num))
+Number_display(num)
+print(num)
+delete_Number(num)</pre>
+</div>
+</div>
+<p>This script generates essentially the same output as
+            <span class="epub__emphasis"><em>main.py</em></span>, but it’s been slightly simplified,
+            and the C++ class instance is something lower level than the proxy
+            class here:</p><a id="I_programlisting4_d1e86964"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Extend/Swig/Shadow$ <strong class="epub__userinput"><code>python main_low.py</code></strong>
+Number: 1
+add 4
+Number=5
+sub 2
+Number=3
+9
+99
+Number=99
+_6025aa00_p_Number
+~Number: 99</pre>
+</div>
+<div class="epub__sect3" title="Subclassing the C++ class in Python"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="subclassing_the_c_plus_plus_class_in_pyt"></a>Subclassing the C++ class in Python</h3>
+</div>
+</div>
+</div>
+<p>Using the <a id="I_indexterm4_d1e86974"></a>extension module directly works, but there is no
+            obvious advantage to moving from the shadow class to functions
+            here. By using the shadow class, you get both an object-based
+            interface to C++ and a customizable Python object. For instance,
+            the Python module shown in Example 20-21 extends the C++
+            class, adding an extra <code class="epub__literal">print</code>
+            call statement to the C++ <code class="epub__literal">add</code>
+            method and defining a brand-new <code class="epub__literal">mul</code> method. Because the shadow class is
+            pure Python, this works naturally.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id20"></a>
+<p class="epub__title">Example 20-21. PP4E\Integrate\Extend\Swig\Shadow\main_subclass.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"sublass C++ class in Python (generated shadow class)"
+
+from number import Number                # import shadow class
+
+class MyNumber(Number):
+    def add(self, other):                # extend method
+        print('in Python add...')
+        Number.add(self, other)
+    def mul(self, other):                # add new method
+        print('in Python mul...')
+        self.data = self.data * other
+
+num = MyNumber(1)               # same tests as main.cxx, main.py
+num.add(4)                      # using Python subclass of shadow class
+num.display()                   # add() is specialized in Python
+num.sub(2)
+num.display()
+print(num.square())
+
+num.data = 99
+print(num.data)
+num.display()
+
+num.mul(2)                      # mul() is implemented in Python
+num.display()
+print(num)                      # repr from shadow superclass
+del num</pre>
+</div>
+</div>
+<p>Now we get extra messages out of <code class="epub__literal">add</code> calls, and <code class="epub__literal">mul</code> changes the C++ class’s data member
+            automatically when it assigns <code class="epub__literal">self.data</code>—the Python code extends the
+            C++ code:</p><a id="I_programlisting4_d1e87007"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Extend/Swig/Shadow$ <strong class="epub__userinput"><code>python main_subclass.py</code></strong>
+Number: 1
+in Python add...
+add 4
+Number=5
+sub 2
+Number=3
+9
+99
+Number=99
+in Python mul...
+Number=198
+&lt;__main__.MyNumber; proxy of &lt;Swig Object of type 'Number *' at 0x7ff4baa0&gt; &gt;
+~Number: 198</pre>
+<p>In other words, SWIG makes it easy to use C++ class
+            libraries as base classes in your Python scripts. Among other
+            things, this allows us to leverage existing C++ class libraries in
+            Python scripts and optimize by coding parts of class hierarchies
+            in C++ when needed. We can do much the same with C extension types
+            today since types are classes (and vice versa), but wrapping C++
+            classes with SWIG is often much simpler.</p>
+</div>
+<div class="epub__sect3" title="Exploring the wrappers interactively"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="exploring_the_wrappers_interactively"></a>Exploring the wrappers interactively</h3>
+</div>
+</div>
+</div>
+<p>As usual, you can import the C++ class interactively to
+            experiment with it some <span>more—</span>besides demonstrating a few
+            more salient properties here, this technique allows us to test
+            wrapped C++ classes at the Python interactive prompt:</p><a id="I_programlisting4_d1e87022"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Extend/Swig/Shadow$ <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import _number</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>_number.__file__</code></strong>              # the C++ class plus generated glue module
+'_number.dll'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import number</code></strong>                 # the generated Python shadow class module
+&gt;&gt;&gt; <strong class="epub__userinput"><code>number.__file__</code></strong>
+'number.py'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = number.Number(2)</code></strong>          # make a C++ class instance in Python
+Number: 2
+&gt;&gt;&gt; <strong class="epub__userinput"><code>y = number.Number(4)</code></strong>          # make another C++ object
+Number: 4
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x, y</code></strong>
+(&lt;number.Number; proxy of &lt;Swig Object of type 'Number *' at 0x7ff4bcf8&gt; &gt;,
+ &lt;number.Number; proxy of &lt;Swig Object of type 'Number *' at 0x7ff4b998&gt; &gt;)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.display()</code></strong>                   # call C++ method (like C++ x-&gt;display())
+Number=2
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.add(y.data)</code></strong>                 # fetch C++ data member, call C++ method
+add 4
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.display()</code></strong>
+Number=6
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>y.data = x.data + y.data + 32</code></strong>         # set C++ data member
+&gt;&gt;&gt; <strong class="epub__userinput"><code>y.display()</code></strong>                           # y records the C++ this pointer
+Number=42
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>y.square()</code></strong>                            # method with return value
+1764
+&gt;&gt;&gt; <strong class="epub__userinput"><code>t = y.square()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>t, type(t)</code></strong>                            # type is class in Python 3.X
+(1764, &lt;class 'int'&gt;)</pre>
+<p>Naturally, this example uses a small C++ class to underscore
+            the basics, but even at this level, the seamlessness of the
+            Python-to-C++ integration we get from SWIG is astonishing. Python
+            code uses C++ members and methods as though they are Python code.
+            Moreover, this integration transparency still applies once we step
+            up to more realistic C++ class libraries.</p>
+<p>So what’s the catch? Nothing much, really, but if you start
+            using SWIG in earnest, the biggest downside may be that SWIG
+            cannot handle every feature of C++ today. If your classes use some
+            esoteric C++ tools (and there are many), you may need to handcode
+            simplified class type declarations for SWIG instead of running
+            SWIG over the original class header files. SWIG development is
+            ongoing, so you should consult the SWIG manuals and website for
+            more details on these and other topics.</p>
+<p>In return for any such trade-offs, though, SWIG can
+            completely obviate the need to code glue layers to access C and
+            C++ libraries from Python scripts. If you have ever coded such
+            layers by hand in the past, you already know that this can be a
+            <span class="epub__emphasis"><em>very</em></span> big win.</p>
+<p>If you do go the handcoded route, though, consult Python’s
+            standard extension manuals for more details on both API calls used
+            in this chapter, as well as additional extension tools we don’t
+            have space to cover in this text. C extensions can run the gamut
+            from short SWIG input files to code that is staunchly wedded to
+            the internals of the Python interpreter; as a rule of thumb, the
+            former survives the ravages of time much better than the
+            <a id="I_indexterm4_d1e87085"></a><a id="I_indexterm4_d1e87087"></a><a id="I_indexterm4_d1e87089"></a>latter.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

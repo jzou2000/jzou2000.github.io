@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>4.3. Threads and Python</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">4.3. Threads and Python</h3>
+<p class="docText">In
+ this section, we discuss how to use threads in Python. This includes 
+the limitations of threads due to the global interpreter lock and a 
+quick demo script.</p>
+
+<h4 class="docSection2Title" id="title-ID0EPKBG">4.3.1. Global Interpreter Lock</h4>
+<p class="docText">Execution of Python code is controlled by the <span class="docEmphasis">Python Virtual Machine</span> (a.k.a. the <span class="docEmphasis">interpreter main loop</span>).
+ Python was designed in such a way that only one thread of control may 
+be executing in this main loop, similar to how multiple processes in a 
+system share a single CPU. Many programs can be in memory, but only <span class="docEmphasis">one</span>
+ is live on the CPU at any given moment. Likewise, although multiple 
+threads can run within the Python interpreter, only one thread is being 
+executed by the interpreter at any given time.</p>
+<p class="docText">Access to the Python Virtual Machine is controlled by the <span class="docEmphasis">global interpreter lock</span>
+ (GIL). This lock is what ensures that exactly one thread is running. 
+The Python Virtual Machine executes in the following manner in an MT 
+environment:</p>
+<div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Set the GIL</p></div></li><li><div style="font-weight:normal"><p class="docList">Switch in a thread to run</p></div></li><li><div style="font-weight:normal"><p class="docList">Execute either of the following:</p><div style="font-weight:bold"><ol class="docList" type="a"><li><div style="font-weight:normal"><p class="docList">For a specified number of bytecode instructions, or</p></div></li><li><div style="font-weight:normal"><p class="docList">If the thread voluntarily yields control (can be accomplished <tt>time.sleep(0)</tt>)</p></div></li></ol></div></div></li><li><div style="font-weight:normal"><p class="docList">Put the thread back to sleep (switch out thread)</p></div></li><li><div style="font-weight:normal"><p class="docList">Unlock the GIL</p></div></li><li><div style="font-weight:normal"><p class="docList">Do it all over again (lather, rinse, repeat)</p></div></li></ol></div>
+<p class="docText">When a call is made to 
+external code—that is, any C/C++ extension built-in function—the GIL 
+will be locked until it has completed (because there are no Python 
+bytecodes to count as the interval). Extension programmers do have the 
+ability to unlock the GIL, however, so as the Python developer, you 
+shouldn’t have to worry about your Python code locking up in those 
+situations.</p>
+<p class="docText">As an example, for any 
+Python I/O-oriented routines (which invoke built-in operating system C 
+code), the GIL is released before the I/O call is made, allowing other 
+threads to run while the I/O is being performed. Code that <span class="docEmphasis">doesn’t</span> have much I/O will tend to keep the processor (and GIL) for
+ the full interval a thread is allowed before it yields. In other words,
+ I/O-bound Python programs stand a much better chance of being able to 
+take advantage of a multithreaded environment than CPU-bound code.</p>
+<p class="docText">Those of you who are interested in the source code, the interpreter main loop, and the GIL can take a look at the <tt>Python/ceval.c</tt> file.</p>
+
+<h4 class="docSection2Title" id="title-ID0EIPBG">4.3.2. Exiting Threads</h4>
+<p class="docText">When a thread 
+completes execution of the function it was created for, it exits. 
+Threads can also quit by calling an exit function such as <tt>thread.exit()</tt>, or any of the standard ways of exiting a Python process such as <tt>sys.exit()</tt> or raising the <tt>SystemExit</tt> exception. You cannot, however, go and “kill” a thread.</p>
+<p class="docText">We will discuss in detail the two Python modules related to threads in the next section, but of the two, the <tt>thread</tt> module is the one we do <span class="docEmphasis">not</span>
+ recommend. There are many reasons for this, but an obvious one is that 
+when the main thread exits, all other threads die without cleanup. The 
+other module, <tt>threading</tt>, ensures that the 
+whole process stays alive until all “important” child threads have 
+exited. (For a clarification of what important means, read the upcoming 
+Core Tip, “Avoid using the thread module.”)</p>
+<p class="docText">Main threads should always 
+be good managers, though, and perform the task of knowing what needs to 
+be executed by individual threads, what data or arguments each of the 
+spawned threads requires, when they complete execution, and what results
+ they provide. In so doing, those main threads can collate the 
+individual results into a final, meaningful conclusion.</p>
+
+<h4 class="docSection2Title" id="title-ID0EFQBG">4.3.3. Accessing Threads from Python</h4>
+<p class="docText">Python supports multithreaded
+ programming, depending on the operating system on which it’s running. 
+It is supported on most Unix-based platforms, such as Linux, Solaris, 
+Mac OS X, *BSD, as well as Windows-based PCs. Python uses 
+POSIX-compliant threads, or <span class="docEmphasis">pthreads</span>, as they are commonly known.</p>
+<p class="docText">By default, threads are enabled
+ when building Python from source (since Python 2.0) or the Win32 
+installed binary. To determine whether threads are available for your 
+interpreter, simply attempt to import the <tt>thread</tt> module from the interactive interpreter, as shown here (no errors occur when threads are available):</p>
+<div class="docText"><pre>&gt;&gt;&gt; <span class="docEmphStrong">import</span> thread
+&gt;&gt;&gt;</pre></div><br/>
+<p class="docText">If your Python interpreter was <span class="docEmphasis">not</span> compiled with threads enabled, the module import fails:</p>
+<div class="docText"><pre>&gt;&gt;&gt; <span class="docEmphStrong">import</span> thread
+Traceback (innermost last):
+  File "&lt;stdin&gt;", line 1, in ?
+ImportError: No module named thread</pre></div><br/>
+<p class="docText">In such cases, you might need to recompile your Python interpreter to get access to threads. This usually involves invoking the <tt>configure</tt> script with the <tt>--with-thread</tt> option. Check the <tt>README</tt> file for your distribution to obtain specific instructions on how to compile Python with threads for your system.</p>
+
+<h4 class="docSection2Title" id="title-ID0EMTBG">4.3.4. Life Without Threads</h4>
+<p class="docText">For our first set of examples, we are going to use the <tt>time.sleep()</tt> function to show how threads work. <tt>time.sleep()</tt>
+ takes a floating point argument and “sleeps” for the given number of 
+seconds, meaning that execution is temporarily halted for the amount of 
+time specified.</p>
+<p class="docText">Let’s create two time loops: one that sleeps for 4 seconds (<tt>loop0()</tt>), and one that sleeps for 2 seconds (<tt>loop1()</tt>),
+ respectively. (We use the names “loop0” and “loop1” as a hint that we 
+will eventually have a sequence of loops.) If we were to execute <tt>loop0()</tt> and <tt>loop1()</tt> sequentially in a one-process or single-threaded program, as <tt>onethr.py</tt> does in Example 4-1, the total execution time would be at least 6 seconds. There might or might not be a 1-second gap between the starting of <tt>loop0()</tt> and <tt>loop1()</tt> as well as other execution overhead which can cause the overall time to be bumped to 7 seconds.</p>
+<h5 class="docExampleTitle" id="title-ID0ESUBG">Example 4-1. Loops Executed by a Single Thread (<tt>onethr.py</tt>)</h5><p></p><div class="box">
+<p class="docText">This script executes two 
+loops consecutively in a single-threaded program. One loop must complete
+ before the other can begin. The total elapsed time is the sum of times 
+taken by each loop.</p>
+<pre class="preFixedHeight">1    #!/usr/bin/env python
+2
+3    <span class="docEmphStrong">from</span> time <span class="docEmphStrong">import</span> sleep, ctime
+4
+5    <span class="docEmphStrong">def</span> loop0():
+6        <span class="docEmphStrong">print</span> 'start loop 0 at:', ctime()
+7        sleep(4)
+8        <span class="docEmphStrong">print</span> 'loop 0 done at:', ctime()
+9
+10   <span class="docEmphStrong">def</span> loop1():
+11       <span class="docEmphStrong">print</span> 'start loop 1 at:', ctime()
+12       sleep(2)
+13       <span class="docEmphStrong">print</span> 'loop 1 done at:', ctime()
+14
+15   <span class="docEmphStrong">def</span> main():
+16       <span class="docEmphStrong">print</span> 'starting at:', ctime()
+17       loop0()
+18       loop1()
+19       <span class="docEmphStrong">print</span> 'all DONE at:', ctime()
+20
+21   <span class="docEmphStrong">if</span> __name__ == '__main__':
+22       main()
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">We can verify this by executing <tt>onethr.py</tt>, which renders the following output:</p>
+<div class="docText"><pre>$ onethr.py
+starting at: Sun Aug 13 05:03:34 2006
+start loop 0 at: Sun Aug 13 05:03:34 2006
+loop 0 done at: Sun Aug 13 05:03:38 2006
+start loop 1 at: Sun Aug 13 05:03:38 2006
+loop 1 done at: Sun Aug 13 05:03:40 2006
+all DONE at: Sun Aug 13 05:03:40 2006</pre></div><br/>
+<p class="docText">Now, assume that rather than sleeping, <tt>loop0()</tt> and <tt>loop1()</tt>
+ were separate functions that performed individual and independent 
+computations, all working to arrive at a common solution. Wouldn’t it be
+ useful to have them run in parallel to cut down on the overall running 
+time? That is the premise behind MT programming that we now introduce.</p>
+
+<h4 class="docSection2Title" id="title-ID0ECYBG">4.3.5. Python Threading Modules</h4>
+<p class="docText">Python provides several modules to support MT programming, including the <tt>thread</tt>, <tt>threading</tt>, and <tt>Queue</tt> modules. Programmers can us the <tt>thread</tt> and <tt>threading</tt> modules to create and manage threads. The <tt>thread</tt> module provides basic thread and locking support; <tt>threading</tt> provides higher-level, fully-featured thread management. With the <tt>Queue</tt>
+ module, users can create a queue data structure that can be shared 
+across multiple threads. We will take a look at these modules 
+individually and present examples and intermediate-sized applications.</p>
+<div class="docNote"><p class="docNoteTitle">Core Tip: Avoid using the <tt>thread</tt> module</p><p></p><table border="0" cellpadding="1" cellspacing="0" width="90%"><tbody><tr><td valign="top" width="60">
+<img align="LEFT" alt="" border="0" height="37" id="" src="Images/getfile_002-12.jpg" width="37"/>
+</td><td valign="top"><p class="docText">We recommend using the high-level <tt>threading</tt> module instead of the <tt>thread</tt> module for many reasons. <tt>threading</tt> is more contemporary, has better thread support, and some attributes in the <tt>thread</tt> module can conflict with those in the <tt>threading</tt> module. Another reason is that the lower-level <tt>thread</tt> module has few synchronization primitives (actually only one) while <tt>threading</tt> has many.</p><p class="docText">However, in the interest of learning Python and threading in general, we do present some code that uses the <tt>thread</tt>
+ module. We present these for learning purposes only; hopefully they 
+give you a much better insight as to why you would want to avoid using <tt>thread</tt>. We will also show you how to use more appropriate tools such as those available in the <tt>threading</tt> and <tt>Queue</tt> modules.</p><p class="docText">Another reason to avoid using <tt>thread</tt>
+ is because there is no control of when your process exits. When the 
+main thread finishes, any other threads will also die, without warning 
+or proper cleanup. As mentioned earlier, at least <tt>threading</tt> allows the important child threads to finish first before exiting.</p>
+<p class="docText">
+<img alt="" border="0" height="35" id="" src="Images/getfile-13.jpg" width="54"/></p>
+<p class="docText">Use of the <tt>thread</tt> module is recommended only for experts desiring lower-level thread access. To emphasize this, it is renamed to <tt>_thread</tt> in Python 3. Any multithreaded application you create should utilize <tt>threading</tt> and perhaps other higher-level modules.</p></td></tr></tbody></table><p></p></div><br/>
+</div>
+</body>
+</html>

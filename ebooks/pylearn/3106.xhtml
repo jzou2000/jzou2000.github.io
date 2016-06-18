@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Decorators and Metaclasses: Part 1</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div><h1 class="epub__title"><a id="decorators_and_metaclasses_colon_part_1"></a>Decorators and Metaclasses: Part 1</h1>
+<p>Because <a id="ch31clsssfuncdec"></a>the <code class="epub__literal">staticmethod</code> call
+        technique described in the prior section initially seemed obscure to
+        some users, a feature was eventually added to make the operation
+        simpler. <span class="epub__emphasis"><em>Function decorators</em></span> provide a way to
+        specify special operation modes for functions, by wrapping them in an
+        extra layer of logic implemented as another function<a id="ch31funcdec"></a>.</p>
+<p>Function decorators turn out to be general tools: they are
+        useful for adding many types of logic to functions besides the static
+        method use case. For instance, they may be used to augment functions
+        with code that logs calls made to them, checks the types of passed
+        arguments during debugging, and so on. In some ways, function
+        decorators are similar to the <span class="epub__emphasis"><em>delegation</em></span> design
+        pattern we explored in Chapter 30, but
+        they are designed to augment a specific function or method call, not
+        an entire object interface.</p>
+<p>Python provides some built-in function decorators for operations
+        such as marking static methods, but programmers can also code
+        arbitrary decorators of their own. Although they are not strictly tied
+        to classes, user-defined function decorators often are coded as
+        classes to save the original functions, along with other data, as
+        state information. There’s also a more recent related extension
+        available in Python 2.6 and 3.0: <span class="epub__emphasis"><em>class decorators</em></span>
+        are directly tied to the class model, and their roles overlap with
+        <span class="epub__emphasis"><em>metaclasses</em></span>.</p>
+<div class="epub__sect2" title="Function Decorator Basics"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="function_decorator_basics"></a>Function Decorator Basics</h2>
+</div>
+</div>
+</div>
+<p>Syntactically, a <a id="I_indexterm7_d1e79865"></a>function decorator is a sort of runtime declaration
+          about the function that follows. A function decorator is coded on a
+          line by itself just before the <code class="epub__literal">def</code> statement that defines a function or
+          method. It consists of the <a id="I_indexterm7_d1e79874"></a><code class="epub__literal">@</code> symbol, followed
+          by what we call a <span class="epub__emphasis"><em><a id="I_indexterm7_d1e79881"></a>metafunction</em></span>—a function (or other callable
+          object) that manages another function. <a id="I_indexterm7_d1e79886"></a>Static methods today, for example, may be coded with
+          decorator syntax like this:</p><a id="I_programlisting7_d1e79892"></a>
+<pre class="epub__programlisting">class C:
+   @staticmethod                                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Decoration syntax</span></em>
+   def meth():
+       ...</pre>
+<p>Internally, this syntax has the same effect as the following
+          (passing the function through the decorator and assigning the result
+          back to the original name):</p><a id="I_programlisting7_d1e79899"></a>
+<pre class="epub__programlisting">class C:
+   def meth():
+       ...
+   meth = staticmethod(meth)                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Rebind name</span></em></pre>
+<p>Decoration rebinds the method name to the decorator’s result.
+          The net effect is that calling the method function’s name later
+          actually triggers the result of its <code class="epub__literal">static</code><code class="epub__literal">method</code> decorator first. Because a
+          decorator can return any sort of object, this allows the decorator
+          to insert a layer of logic to be run on every call. The decorator
+          function is free to return either the original function itself, or a
+          new object that saves the original function passed to the decorator
+          to be invoked indirectly after the extra logic layer runs.</p>
+<p>With this addition, here’s a better way to code our static
+          method example from the prior section in either Python 2.6 or 3.0
+          (the <code class="epub__literal">classmethod</code> decorator is
+          used the same way):</p><a id="I_programlisting7_d1e79916"></a>
+<pre class="epub__programlisting">class Spam:
+    numInstances = 0
+    def __init__(self):
+        Spam.numInstances = Spam.numInstances + 1
+
+    @staticmethod
+    def printNumInstances():
+        print("Number of instances created: ", Spam.numInstances)
+
+a = Spam()
+b = Spam()
+c = Spam()
+Spam.printNumInstances()      <em class="epub__lineannotation"><span class="epub__lineannotation"># Calls from both classes and instances work now!</span></em>
+a.printNumInstances()         <em class="epub__lineannotation"><span class="epub__lineannotation"># Both print "Number of instances created:  3"</span></em></pre>
+<p>Keep in mind that <code class="epub__literal">staticmethod</code> is still a built-in function;
+          it may be used in decoration syntax, just because it takes a
+          function as argument and returns a callable. In fact, any such
+          function can be used in this way—even user-defined functions we code
+          ourselves, as the next section explains.</p>
+</div>
+<div class="epub__sect2" title="A First Function Decorator Example"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="a_first_function_decorator_example"></a>A First Function Decorator Example</h2>
+</div>
+</div>
+</div>
+<p>Although <a id="I_indexterm7_d1e79933"></a>Python provides a handful of built-in functions that
+          can be used as decorators, we can also write custom decorators of
+          our own. Because of their wide utility, we’re going to devote an
+          entire chapter to coding decorators in the final part of this book.
+          As a quick example, though, let’s look at a simple user-defined
+          decorator at work.</p>
+<p>Recall from Chapter 29 that the
+          <code class="epub__literal">__call__</code> operator overloading
+          method implements a function-call interface for class instances. The
+          following code uses this to define a class that saves the decorated
+          function in the instance and catches calls to the original name.
+          Because this is a class, it also has state information (a counter of
+          calls made):</p><a id="I_programlisting7_d1e79946"></a>
+<pre class="epub__programlisting">class tracer:
+    def __init__(self, func):
+        self.calls = 0
+        self.func  = func
+    def __call__(self, *args):
+        self.calls += 1
+        print('call %s to %s' % (self.calls, self.func.__name__))
+        self.func(*args)
+
+@tracer                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Same as spam = tracer(spam)</span></em>
+def spam(a, b, c):            <em class="epub__lineannotation"><span class="epub__lineannotation"># Wrap spam in a decorator object</span></em>
+    print(a, b, c)
+
+spam(1, 2, 3)                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Really calls the tracer wrapper object</span></em>
+spam('a', 'b', 'c')           <em class="epub__lineannotation"><span class="epub__lineannotation"># Invokes __call__ in class</span></em>
+spam(4, 5, 6)                 <em class="epub__lineannotation"><span class="epub__lineannotation"># __call__ adds logic and runs original object</span></em></pre>
+<p>Because the <code class="epub__literal">spam</code> function
+          is run through the <code class="epub__literal">tracer</code>
+          decorator, when the original <code class="epub__literal">spam</code>
+          name is called it actually triggers the <code class="epub__literal">__call__</code> method in the class. This method
+          counts and logs the call, and then dispatches it to the original
+          wrapped function. Note how the <code class="epub__literal">*name</code> argument syntax is used to pack and
+          unpack the passed-in arguments; because of this, this decorator can
+          be used to wrap any function with any number of positional
+          arguments.</p>
+<p>The net effect, again, is to add a layer of logic to the
+          original <code class="epub__literal">spam</code> function. Here is
+          the script’s output—the first line comes from the <code class="epub__literal">tracer</code><a name="second comes"></a> class, and the second comes from
+          the <code class="epub__literal">spam</code> function:</p><a id="I_programlisting7_d1e79990"></a>
+<pre class="epub__programlisting">call 1 to spam
+1 2 3
+call 2 to spam
+a b c
+call 3 to spam
+4 5 6</pre>
+<p>Trace through this example’s code for more insight. As it is,
+          this decorator works for any function that takes positional
+          arguments, but it does not return the decorated function’s
+          <span class="epub__emphasis"><em>result</em></span>, doesn’t handle
+          <span class="epub__emphasis"><em>keyword</em></span> arguments, and cannot decorate class
+          <span class="epub__emphasis"><em>method</em></span> functions (in short, for methods its
+          <code class="epub__literal">__call__</code> would be passed a
+          <code class="epub__literal">tracer</code> instance only). As we’ll
+          see in Part VIII, there are a variety of
+          ways to code function decorators, including nested <code class="epub__literal">def</code> statements; some of the alternatives
+          are better suited to methods than the version shown here.</p>
+</div>
+<div class="epub__sect2" title="Class Decorators and Metaclasses"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="class_decorators_and_metaclasses"></a>Class Decorators and Metaclasses</h2>
+</div>
+</div>
+</div>
+<p>Function <a id="I_indexterm7_d1e80020"></a>decorators turned out to be so useful that Python 2.6
+          and 3.0 expanded the model, allowing decorators to be applied to
+          classes as well as functions. In short, <span class="epub__emphasis"><em>class
+          decorators</em></span> are similar to function decorators, but they
+          are run at the end of a <code class="epub__literal">class</code>
+          statement to rebind a class name to a callable. As such, they can be
+          used to either manage classes just after they are created, or insert
+          a layer of wrapper logic to manage instances when they are later
+          created. Symbolically, the code structure:</p><a id="I_programlisting7_d1e80032"></a>
+<pre class="epub__programlisting">def decorator(aClass): ...
+
+@decorator
+class C: ...</pre>
+<p>is mapped to the following equivalent:</p><a id="I_programlisting7_d1e80036"></a>
+<pre class="epub__programlisting">def decorator(aClass): ...
+
+class C: ...
+C = decorator(C)</pre>
+<p>The class decorator is free to augment the class itself, or
+          return an object that intercepts later instance construction calls.
+          For instance, in the example in the section Counting instances per class with class methods, we could use
+          this hook to automatically augment the classes with instance
+          counters and any other data required:</p><a id="I_programlisting7_d1e80042"></a>
+<pre class="epub__programlisting">def count(aClass):
+    aClass.numInstances = 0
+    return aClass                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Return class itself, instead of a wrapper</span></em>
+
+@count
+class Spam: ...                    <em class="epub__lineannotation"><span class="epub__lineannotation"># Same as Spam = count(Spam)</span></em>
+
+@count
+class Sub(Spam): ...               <em class="epub__lineannotation"><span class="epub__lineannotation"># numInstances = 0 not needed here</span></em>
+
+@count
+class Other(Spam): ...</pre>
+<p><span class="epub__emphasis"><em>Metaclasses</em></span> <a id="I_indexterm7_d1e80057"></a>are <a id="I_indexterm7_d1e80061"></a>a similarly advanced class-based tool whose roles
+          often intersect with those of class decorators. They provide an
+          alternate model, which routes the creation of a class object to a
+          subclass of the top-level <code class="epub__literal">type</code>
+          class, at the conclusion of a <code class="epub__literal">class</code> statement:</p><a id="I_programlisting7_d1e80073"></a>
+<pre class="epub__programlisting">class Meta(type):
+    def __new__(meta, classname, supers, classdict): ...
+
+class C(metaclass=Meta): ...</pre>
+<p>In Python 2.6, the effect is the
+          same, but the coding differs—use a class attribute instead of a
+          keyword argument in the <code class="epub__literal">class</code>
+          header:</p><a id="I_programlisting7_d1e80081"></a>
+<pre class="epub__programlisting">class C:
+    __metaclass__ = Meta
+    ...</pre>
+<p>The metaclass generally redefines the <code class="epub__literal">__new__</code> or <code class="epub__literal">__init__</code> method of the <code class="epub__literal">type</code> class, in order to assume control of
+          the creation or initialization of a new class object. The net
+          effect, as with class decorators, is to define code to be run
+          automatically at class creation time. Both schemes are free to
+          augment a class or return an arbitrary object to replace it—a
+          protocol with almost limitless class-based possibilities.</p>
+</div>
+<div class="epub__sect2" title="For More Details"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="for_more_details"></a>For More Details</h2>
+</div>
+</div>
+</div>
+<p>Naturally, there’s much more to the decorator and metaclass
+          stories than I’ve shown here. Although they are a general mechanism,
+          decorators and metaclasses are advanced features of interest
+          primarily to tool writers, not application programmers, so we’ll
+          defer additional coverage until the final part of this book:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p>Chapter 37 shows how to code
+              properties using function decorator syntax.</p></li><li class="epub__listitem">
+<p>Chapter 38 has much more on decorators,
+              including more comprehensive examples.</p></li><li class="epub__listitem">
+<p>Chapter 39 covers metaclasses, and
+              more on the class and instance management story.</p></li></ul>
+</div>
+<p>Although these chapters cover advanced topics, they’ll also
+          provide us with a chance to see Python at work in more substantial
+          examples than much of the rest of the book was able to <a id="I_indexterm7_d1e80118"></a><a id="I_indexterm7_d1e80120"></a>provide.</p>
+</div>
+<div class="epub__sect1" title="Class Gotchas"><div class="epub__titlepage"><div>
+<div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

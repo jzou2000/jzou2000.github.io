@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>12.10. Adding Users Service</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">12.10. Adding Users Service</h3>
+<p class="docText">In Chapter 11,
+ for our Django blog, we didn’t add any authentication (users, 
+passwords, accounts, etc.), but we did use Django’s own authentication 
+system in the TweetApprove application. Similarly, let’s do 
+authentication in this blog by using Google Accounts. This sure beats 
+giving <span class="docEmphasis">any</span> 
+user who visits your page the ability to add new blog posts; if we did, 
+it would then be a guestbook right? Having authentication here shouldn’t
+ be a shocker. Let’s assume that you wanted to create the next industry 
+blog, like TechCrunch, Engadget, etc. The blog needs to support multiple
+ authors, and you want them to be the only ones who can post to the 
+blog, not just any ’ol John or Jane.</p>
+
+<h4 class="docSection2Title" id="title-ID0EVCCK">12.10.1. Google Accounts Authentication</h4>
+<p class="docText">When you create your App 
+Engine application, the authentication that’s used by default is Google 
+Accounts. However, if you don’t add any authentication mechanism, either
+ in the configuration settings or in the actual application code, it’s 
+the same as not having authentication at all: anyone can post to your 
+blog. Let’s add in authentication checking by inserting a couple of 
+lines at the very beginning of <tt>MainHandler.get()</tt> so that it looks like this:</p>
+<div class="docText"><pre class="preFixedHeight">. . .
+<span class="docEmphStrong"><span class="docEmphasis">from</span></span> <span class="docEmphasis">google.appengine.api <span class="docEmphStrong">import</span> users</span>
+. . .
+<span class="docEmphStrong">class</span> MainHandler(webapp.RequestHandler):
+    <span class="docEmphStrong">def</span> get(self):
+       user = users.get_current_user()
+       <span class="docEmphasis"><span class="docEmphStrong">if</span> user:</span>
+          <span class="docEmphasis">self.response.out.write('Hello %s' % user.nickname())</span>
+       <span class="docEmphasis"><span class="docEmphStrong">else</span>:</span>
+          <span class="docEmphasis">self.response.out.write('Hello World! [&lt;a href=%s&gt;sign</span>
+<span class="docEmphasis">in&lt;/a&gt;]' % (</span>
+                <span class="docEmphasis">users.create_login_url(self.request.uri)))</span>
+       self.response.out.write('&lt;h1&gt;The Greatest Blog&lt;/h1&gt;')
+
+       <span class="docEmphStrong"><span class="docEmphasis">if</span></span> <span class="docEmphasis">user:</span>
+            <span class="docEmphasis">self.response.out.write('''</span>
+                <span class="docEmphasis">&lt;form action="/post" method=post&gt;</span>
+                <span class="docEmphasis">Title:</span>
+                <span class="docEmphasis">&lt;br&gt;&lt;input type=text name=title&gt;</span>
+                <span class="docEmphasis">&lt;br&gt;Body:</span>
+                <span class="docEmphasis">&lt;br&gt;&lt;textarea name=body rows=3 cols=60&gt;&lt;/textarea&gt;</span>
+                <span class="docEmphasis">&lt;br&gt;&lt;input type=submit value="Post"&gt;</span>
+                <span class="docEmphasis">&lt;/form&gt;</span>
+                <span class="docEmphasis">&lt;hr&gt;</span>
+            <span class="docEmphasis">''')</span>
+
+        posts = memcache.get(KEY)
+        <span class="docEmphStrong">if not</span> posts:
+            posts = BlogPost.all().order('-timestamp').fetch(10)
+            memcache.add(KEY, posts)
+        <span class="docEmphStrong">for</span> post <span class="docEmphStrong">in</span> posts:
+            self.response.out.write(
+                '&lt;hr&gt;&lt;strong&gt;%s&lt;/strong&gt;&lt;br&gt;%s
+                     &lt;blockquote&gt;%s&lt;/blockquote&gt;' % (
+                       post.title, post.timestamp, post.body
+            ))
+
+					  </pre></div><br/>
+<p class="docText">If you don’t want to add specific code to ask users to login like we’ve just done, you can force it at the <tt>app.yaml</tt> configuration level. Just add a <tt>login:</tt> <tt>required</tt>
+ directive; any URL that accesses that handler will force the user to 
+login before she can access your application or its content. Here’s an 
+example of how to use that directive to block out all access to our main
+ handler without a valid Google accounts login:</p>
+<div class="docText"><pre>- url: .*
+  script: main.py
+  <span class="docEmphasis">login: required</span></pre></div><br/>
+<p class="docText">Another alternative is <tt>login:</tt> <tt>admin</tt>
+ which requires a logged-in administrator of the application to access 
+this handler, such as for critical user, app, or data access or 
+manipulation. Users who are not administrators will get an error page 
+which states that administrator access is required. You can read more 
+about these directives at http://code.google.com/appengine/docs/python/config/appconfig.html#Requiring_Login_or_Administrator_Status.</p>
+
+<h4 class="docSection2Title" id="title-ID0EMICK">12.10.2. Federated Authentication</h4>
+<p class="docText">If you’re 
+uncomfortable with either creating your own authentication or do not 
+wish to require that all of your users have a Google Account, you will 
+probably want federated login with OpenID. With OpenID, you can allow 
+users to sign in to your application by using accounts they created at a
+ variety of providers, including (but not limited to) Yahoo!, Flickr, 
+WordPress, Blogger, LiveJournal, AOL, MyOpenID, MySpace, and even 
+Google.</p>
+<p class="docText">If you’re using federated login, you’ll need to make a minor adjustment to your call that creates login links by adding a <tt>federated_identity</tt> parameter such as <tt>users.create_login_url(federated_identity=URL)</tt>, where <span class="docEmphasis"><tt>URL</tt></span>
+ is any of the OpenID vendors (gmail.com [Google], yahoo.com, 
+myspace.com, aol.com, etc). Future support for federated authentication 
+will be integrated with the new Google Identity Toolkit (GIT).</p>
+<p class="docText">For more on users, the GIT, and OpenID, go to the following links:</p>
+<ul><li><p class="docList">http://code.google.com/appengine/docs/python/users/overview.html</p></li><li><p class="docList">http://code.google.com/appengine/articles/openid.html</p></li><li><p class="docList">http://openid.net</p></li><li><p class="docList">http://code.google.com/apis/identitytoolkit/</p></li></ul>
+</div>
+</body>
+</html>

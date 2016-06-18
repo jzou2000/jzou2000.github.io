@@ -1,0 +1,430 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Web Scripting Trade-Offs</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Web Scripting Trade-Offs"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="web_scripting_trade-offs"></a>Web Scripting Trade-Offs</h1>
+</div>
+</div>
+</div>
+<p>As shown in <a id="I_indexterm5_d1e72808"></a><a id="sc16.8"></a>this chapter, PyMailCGI is still something of a system
+        in the making, but it does work as advertised: when it is installed on
+        a remote server machine, by pointing a browser at the main page’s URL,
+        I can check and send email from anywhere I happen to be, as long as I
+        can find a machine with a web browser (and can live with the
+        limitations of a prototype). In fact, any machine and browser will do:
+        Python doesn’t have to be installed anew, and I don’t need POP or SMTP
+        access on the client machine itself. That’s not the case with the
+        PyMailGUI client-side program we wrote in Chapter 14. This property is especially useful
+        at sites that allow web access but restrict more direct protocols such
+        as POP email.</p>
+<p>But before we all jump on the collective Internet bandwagon and
+        utterly abandon traditional desktop APIs such as tkinter, a few words
+        of larger context may be in order in conclusion.</p>
+<div class="epub__sect2" title="PyMailCGI Versus PyMailGUI"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="pymailcgi_versus_pymailgui"></a>PyMailCGI Versus PyMailGUI</h2>
+</div>
+</div>
+</div>
+<p>Besides illustrating <a id="I_indexterm5_d1e72825"></a><a id="I_indexterm5_d1e72832"></a>larger CGI applications in general, the PyMailGUI and
+          PyMailCGI examples were chosen for this book on purpose to
+          underscore some of the trade-offs you run into when building
+          applications to run on the Web. PyMailGUI and PyMailCGI do roughly
+          the same things but are radically different in
+          implementation:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>PyMailGUI</em></span></span></dt><dd>
+<p>This is a traditional “desktop” user-interface program:
+                it runs entirely on the local machine, calls out to an
+                in-process GUI API library to implement interfaces, and talks
+                to the Internet through sockets only when it has to (e.g., to
+                load or send email on demand). User requests are routed
+                immediately to callback handler method functions running
+                locally and in-process, with shared variables and memory that
+                automatically retain state between requests. As mentioned,
+                because its memory is retained between events, PyMailGUI can
+                cache messages in memory—it loads email headers and selected
+                mails only once, fetches only newly arrived message headers on
+                future loads, and has enough information to perform general
+                inbox synchronization checks. On deletions, PyMailGUI can
+                simply refresh its memory cache of loaded headers without
+                having to reload from the server. Moreover, because PyMailGUI
+                runs as a single process on the local machine, it can leverage
+                tools such as multithreading to allow mail transfers to
+                overlap in time (you can send while a load is in progress),
+                and it can more easily support extra functionality such as
+                local mail file saves and opens.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>PyMailCGI</em></span></span></dt><dd>
+<p>Like all CGI systems, PyMailCGI consists of scripts that
+                reside and run on a server machine and generate HTML to
+                interact with a user’s web browser on the client machine. It
+                runs only in the context of a web browser or other HTML-aware
+                client, and it handles user requests by running CGI scripts on
+                the web server. Without manually managed state retention
+                techniques such as a server-side database system, there is no
+                equivalent to the persistent memory of PyMailGUI—each request
+                handler runs autonomously, with no memory except that which is
+                explicitly passed along by prior states as hidden form fields,
+                URL query parameters, and so on. Because of that, PyMailCGI
+                currently must reload all email headers whenever it needs to
+                display the selection list, naively reloads messages already
+                fetched earlier in the session, and cannot perform general
+                inbox synchronization tests. This can be improved by more
+                advanced state-retention schemes such as cookies and
+                server-side databases, but none is as straightforward as the
+                persistent in-process memory of PyMailGUI.</p></dd></dl>
+</div>
+</div>
+<div class="epub__sect2" title="The Web Versus the Desktop"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_web_versus_the_desktop"></a>The Web Versus the Desktop</h2>
+</div>
+</div>
+</div>
+<p>Of course, <a id="py16.8.2"></a>these systems’ specific functionality isn’t exactly
+          the same—PyMailCGI is roughly a functional subset of PyMailGUI—but
+          they are close enough to capture common trade-offs. On a basic
+          level, both of these systems use the Python POP and SMTP modules to
+          fetch and send email through sockets. The implementation
+          alternatives they represent, though, have some critical
+          ramifications that you should consider when evaluating the prospect
+          of delivering systems on the Web:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Performance costs</em></span></span></dt><dd>
+<p><span class="epub__emphasis"><em>Networks are slower than CPUs</em></span>. As
+                implemented, PyMailCGI <a id="I_indexterm5_d1e72876"></a><a id="I_indexterm5_d1e72881"></a>isn’t nearly as fast or as complete as
+                PyMailGUI. In PyMailCGI, every time the user clicks a Submit
+                button, the request goes across the network (it’s routed to
+                another program on the same machine for “localhost,” but this
+                setup is for testing, not deployment). More specifically,
+                every user request incurs a network transfer overhead, every
+                callback handler may take the form of a newly spawned process
+                or thread on most servers, parameters come in as text strings
+                that must be parsed out, and the lack of state information on
+                the server between pages means that either mail needs to be
+                <span>reloaded</span> often or state
+                retention options must be employed which are slower and more
+                complex than shared process memory.</p>
+<p>In contrast, user clicks in PyMailGUI trigger in-process
+                function calls rather than network traffic and program
+                executions, and state is easily saved as Python in-process
+                variables. Even with an ultra-fast Internet connection, a
+                server-side CGI system is slower than a client-side program.
+                To be fair, some tkinter operations are sent to the underlying
+                Tcl library as strings, too, which must be parsed. This may
+                change in time, but the contrast here is with CGI scripts
+                versus GUI libraries in general. Function calls will probably
+                always beat network transfers.</p>
+<p>Some of these bottlenecks may be designed away at the
+                cost of extra program complexity. For instance, some web
+                servers use threads and process pools to minimize process
+                creation for CGI scripts. Moreover, as we’ve seen, some state
+                information can be manually passed along from page to page in
+                hidden form fields, generated URL parameters, and client-side
+                cookies, and state can be saved between pages in a
+                concurrently accessible database to minimize mail reloads. But
+                there’s no getting past the fact that routing events and data
+                over a network to scripts is slower than calling a Python
+                function directly. Not every application must care, but some
+                do.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Complexity costs</em></span></span></dt><dd>
+<p><span class="epub__emphasis"><em>HTML isn’t pretty</em></span>. Because
+                PyMailCGI must generate HTML to interact with the user in a
+                web browser, it is also more complex (or at least, less
+                readable) than PyMailGUI. In some sense, CGI scripts embed
+                HTML code in Python; templating systems such as PSP often take
+                the opposite approach. Either way, because the end result of
+                this is a mixture of two very different languages, creating an
+                interface with HTML in a CGI script can be much less
+                straightforward than making calls to a GUI API such as
+                tkinter.</p>
+<p>Witness, for example, all the care we’ve taken to escape
+                HTML and URLs in this chapter’s examples; such constraints are
+                grounded in the nature of HTML. Furthermore, changing the
+                system to retain loaded-mail list state in a database between
+                pages would introduce further complexities to the CGI-based
+                solution (and, most likely, yet another language such as SQL,
+                even if it only appears near the bottom of the software
+                stack). And secure HTTP would eliminate the manual encryption
+                complexity but would introduce new server configuration
+                complexity.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Functionality limitations</em></span></span></dt><dd>
+<p><span class="epub__emphasis"><em>HTML can say only so much</em></span>. HTML is
+                a portable way to specify simple pages and forms, but it is
+                poor to useless when it comes to describing more complex user
+                interfaces. Because CGI scripts create user interfaces by
+                writing HTML back to a browser, they are highly limited in
+                terms of user-interface constructs. For example, consider
+                implementing an image-processing and animation program as CGI
+                scripts: HTML doesn’t easily apply once we leave the domain of
+                fill-out forms and simple interactions.</p>
+<p>It is possible to generate graphics in CGI scripts. They
+                may be created and stored in temporary files on the server,
+                with per-session filenames referenced in image tags in the
+                generated HTML reply. For browsers that support the notion,
+                graphic images may also be in-lined in HTML image tags,
+                encoded in Base64 format or similar. Either technique is
+                substantially more complex than using an image in the tkinter
+                GUI library, though. Moreover, responsive animation and
+                drawing applications are beyond the scope of a protocol such
+                as CGI, which requires a network transaction per interaction.
+                The interactive drawing and animation scripts we wrote at the
+                end of Chapter 9, for
+                example, could not be implemented as normal server-side
+                scripts.</p>
+<p>This is precisely the limitation that Java applets were
+                designed to <span>address—</span><span>programs</span> that are stored on a
+                server but are pulled down to run on a client on demand and
+                are given access to a full-featured GUI API for creating
+                richer user interfaces. Nevertheless, strictly server-side
+                programs are inherently limited by the constraints of
+                HTML.</p>
+<p>Beyond HTML’s limitations, client-side programs such as
+                PyMailGUI also have access to tools such as multithreading
+                which are difficult to emulate in a CGI-based application
+                (threads spawned by a CGI script cannot outlive the CGI script
+                itself, or augment its reply once sent). Persistent process
+                models for web applications such as FastCGI may provide
+                options here, but the picture is not as clear-cut as on the
+                client.</p>
+<p>Although web developers make noble efforts at emulating
+                client-side <span>capabilities—</span>see the discussion
+                of RIAs and HTML 5 ahead—such efforts add additional
+                complexity, can stretch the server-side programming model
+                nearly to its breaking point, and account for much of the
+                plethora of divergent web techniques.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Portability benefits</em></span></span></dt><dd>
+<p><span class="epub__emphasis"><em>All you need is a browser on
+                clients</em></span>. On the upside, because PyMailCGI runs over
+                the Web, it can be run on any machine with a web browser,
+                whether that machine has Python and tkinter installed or not.
+                That is, Python needs to be installed on only one computer—the
+                web server machine where the scripts actually live and run. In
+                fact, this is probably the most compelling benefit to the web
+                application model. As long as you know that the users of your
+                system have an Internet browser, installation is simple. You
+                still need Python on the server, but that’s easier to <span>guarantee</span>.</p>
+<p>Python and tkinter, you will recall, are very portable,
+                too—they run on all major window systems (X11, Windows,
+                Mac)—but to run a client-side Python/tkinter program such as
+                PyMailGUI, you need Python and tkinter on the client machine
+                itself. Not so with an application built as CGI scripts: it
+                will work on Macintosh, Linux, Windows, and any other machine
+                that can somehow render HTML web pages. In this sense, HTML
+                becomes a sort of portable GUI API language in web scripts,
+                interpreted by your web browser, which is itself a kind of
+                generalized GUI for rendering GUIs. You don’t even need the
+                source code or bytecode for the CGI scripts themselves—they
+                run on a remote server that exists somewhere else on the Net,
+                not on the machine running the browser.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Execution requirements</em></span></span></dt><dd>
+<p><span class="epub__emphasis"><em>But you do need a browser</em></span>. That is,
+                the very nature of web-enabled systems can render them useless
+                in some environments. Despite the pervasiveness of the
+                Internet, many applications still run in settings that don’t
+                have web browsers or Internet access. Consider, for instance,
+                embedded systems, real-time systems, and secure government
+                applications. While an <span class="epub__emphasis"><em>intranet</em></span> (a local
+                network without external connections) can sometimes make web
+                applications feasible in some such environments, I have worked
+                at more than one company whose client sites had no web
+                browsers to speak of. On the other hand, such clients may be
+                more open to installing systems like Python on local machines,
+                as opposed to supporting an internal or external
+                network.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Administration requirements</em></span></span></dt><dd>
+<p><span class="epub__emphasis"><em>You really need a server, too</em></span>. You
+                can’t write CGI-based systems at all without access to a web
+                server. Further, keeping programs on a centralized server
+                creates some fairly critical administrative overheads. Simply
+                put, in a pure client/server architecture, clients are
+                simpler, but the server becomes a critical path resource and a
+                potential performance bottleneck. If the centralized server
+                goes down, you, your employees, and your customers may be
+                knocked out of commission. Moreover, if enough clients use a
+                shared server at the same time, the speed costs of web-based
+                systems become even more pronounced. In production systems,
+                advanced techniques such as load balancing and fail-over
+                servers help, but they add new <span>requirements</span>.</p>
+<p>In fact, one could make the argument that moving toward
+                a web server architecture is akin to stepping backward in
+                time—to the time of centralized mainframes and dumb terminals.
+                Some would include the emerging <span class="epub__emphasis"><em>cloud
+                computing</em></span> model in this analysis, arguably in part
+                a throwback to older computing models. Whichever way we step,
+                offloading and distributing processing to client machines at
+                least partially avoids this processing <a id="I_indexterm5_d1e72975"></a>bottleneck.</p></dd></dl>
+</div>
+</div>
+<div class="epub__sect2" title="Other Approaches"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="other_approaches"></a>Other Approaches</h2>
+</div>
+</div>
+</div>
+<p>So what’s <a id="py16.8.3"></a>the best way to build applications for the Internet—as
+          client-side programs that talk to the Net or as server-side programs
+          that live and breathe on the Net? Naturally, there is no one answer
+          to that question, since it depends upon each application’s unique
+          constraints. Moreover, there are more possible answers to it than
+          have been disclosed so far. Although the client and server
+          programming models do imply trade-offs, many of the common web and
+          CGI drawbacks already have common proposed solutions. For
+          example:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Client-side solutions</em></span></span></dt><dd>
+<p>Client- and server-side <a id="I_indexterm5_d1e72999"></a><a id="I_indexterm5_d1e73004"></a>programs can be mixed in many ways. For
+                instance, applet programs live on a server but are downloaded
+                to and run as client-side programs with access to rich GUI
+                libraries.</p>
+<p>Other technologies, such as embedding JavaScript or
+                Python directly in HTML code, also support client-side
+                execution and richer GUI possibilities. Such scripts live in
+                HTML on the server but run on the client when downloaded and
+                access browser components through an exposed object model to
+                customize pages.</p>
+<p>The Dynamic HTML (DHTML) extensions provide yet another
+                client-side scripting option for changing web pages after they
+                have been constructed. And the newly emerging AJAX model
+                offers additional ways to add interactivity and responsiveness
+                to web pages, and is at the heart of the RIA model noted
+                ahead. All of these client-side technologies add extra
+                complexities all their own, but they ease some of the
+                limitations imposed by straight HTML.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>State retention solutions</em></span></span></dt><dd>
+<p>We discussed general <a id="I_indexterm5_d1e73021"></a>state retention options in detail in the prior
+                chapter, and we will study full-scale database systems for
+                Python in Chapter 17. Some
+                web application servers (e.g., Zope) naturally support state
+                retention between pages by providing concurrently accessible
+                object databases. Some of these systems have an explicit
+                underlying database component (e.g., Oracle and MySQL); others
+                may use flat files or Python persistent shelves with
+                appropriate locking. In addition, object relational mappers
+                (ORMs) such as SQLObject allow relational databases to be
+                processed as Python classes.</p>
+<p>Scripts can also pass state information around in hidden
+                form fields and generated URL parameters, as done in
+                PyMailCGI, or they can store it on the client machine itself
+                using the standard cookie protocol. As we learned in Chapter 15, cookies are strings of
+                information that are stored on the client upon request from
+                the server, and that are transferred back to the server when a
+                page is revisited (data is sent back and forth in HTTP header
+                lines). Cookies are more complex than program variables and
+                are somewhat controversial and optional, but they can offload
+                some simple state retention tasks.</p>
+<p>Alternative models such as FastCGI and <code class="epub__literal">mod_python</code> offer additional
+                persistence options—where supported, FastCGI applications may
+                retain context in long-lived processes, and <code class="epub__literal">mod_python</code> provides session data
+                within Apache.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>HTML generation solutions</em></span></span></dt><dd>
+<p>Third-party extensions <a id="I_indexterm5_d1e73048"></a>can also take some of the complexity out of
+                embedding HTML in Python CGI scripts, albeit at some cost to
+                execution speed. For instance, the HTMLgen system and its
+                relatives let programs build pages as trees of Python objects
+                that “know” how to produce HTML. Other frameworks prove an
+                object-based interface to reply-stream generation (e.g., a
+                reply object with methods). When a system like this is
+                employed, Python scripts deal only with objects, not with the
+                syntax of HTML itself.</p>
+<p>For instance, systems such as PHP, Python Server Pages
+                (PSP), Zope’s DTML and ZPT, and Active Server Pages provide
+                server-side <a id="I_indexterm5_d1e73056"></a>templating languages, which allow scripting
+                language code to be embedded in HTML and executed on the
+                server, to dynamically generate or determine part of the HTML
+                that is sent back to a client in response to requests. The net
+                result can cleanly insulate Python code from the complexity of
+                HTML code and promote the separation of display format and
+                business logic, but may add complexities of its own due to the
+                mixture of different <span>languages</span>.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Generalized user interface
+              development</em></span></span></dt><dd>
+<p>To cover both bases, some systems attempt to separate
+                logic from display so much as to make the choice almost
+                irrelevant—by completely encapsulating display details, a
+                single program can, in principle, render its user interface as
+                either a traditional GUI or an HTML-based web page. Due to the
+                vastly different architectures, though, this ideal is
+                difficult to achieve well and does not address larger
+                disparities between the client and server platforms. Issues
+                such as state retention and network interfaces are much more
+                significant than generation of windows and controls, and may
+                impact code more.</p>
+<p>Other systems may try to achieve similar goals by
+                abstracting the display representation—a common XML
+                representation, for instance, might lend itself to both a GUI
+                and an HTML rendering. Again, though, this addresses only the
+                rendering of the display, not the fundamental architectural
+                differences of client- and server-side approaches.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Emerging technologies: RIAs and HTML
+              5</em></span></span></dt><dd>
+<p>Finally, higher-level approaches such as the <a id="I_indexterm5_d1e73081"></a>RIA (Rich Internet Application) toolkits
+                introduced in Chapters 7 and 12
+                can offer additional functionality that HTML lacks and can
+                approach the utility on GUI toolkits. On the other hand, they
+                can also complicate the web development story even further,
+                and add yet additional languages to the mix. Though this can
+                vary, the net result is often something of a Web-hosted Tower
+                of Babel, whose development might require simultaneously
+                programming in Python, HTML, SQL, JavaScript, a server-side
+                templating language, an object-relational mapping API, and
+                more, and even nested and embedded combinations of these. The
+                resulting software stack can be more complex than Python and a
+                GUI toolkit.</p>
+<p>Moreover, RIAs today inherit the inherent speed
+                degradation of network-based systems in general; although AJAX
+                can add interactivity to web pages, it still implies network
+                access instead of in-process function calls. Ironically, much
+                like desktop applications, RIAs may also still require
+                installation of a browser plug-in on the client to be used at
+                all. The emerging HTML 5 standard may address the plug-in
+                constraint and ease the complexity somewhat, but it brings
+                along with it a grab bag of new complexities all its own which
+                we won’t describe here.</p></dd></dl>
+</div>
+<p>Clearly, Internet technology does come with some compromises,
+          and it is still evolving rapidly. It is nevertheless an appropriate
+          delivery context for many, though not all, applications. As with
+          every design choice, you must be the judge. While delivering systems
+          on the Web may have some costs in terms of performance,
+          functionality, and complexity, it is likely that the significance of
+          those overheads will continue to diminish with time. See the start
+          of Chapter 12 for more on some systems
+          that promise such change, and watch the Web for the ever-changing
+          Internet story to <a id="I_indexterm5_d1e73095"></a><a id="I_indexterm5_d1e73097"></a>unfold.</p><div class="epub__sidebar"><a id="suggested_reading_colon_the_pyerrata_sys"></a>
+<p class="epub__title">Suggested Reading: The PyErrata System</p>
+<p>Now that I’ve <a id="I_indexterm5_d1e73105"></a>told you all the reasons you might not want to
+            design systems for the Web, I’m going to completely contradict
+            myself and refer you to a system that almost requires a web-based
+            implementation. The second edition of this book included a chapter
+            that presented the PyErrata website—a Python program that lets
+            arbitrary people on arbitrary machines submit book comments and
+            bug reports (usually called errata) over the Web, using just a web
+            browser. Such a system must store information on a server, so it
+            can be read by arbitrary clients.</p>
+<p>Because of space concerns, that chapter was cut in this
+            book’s third edition. However, we’re making its original content
+            available as optional, supplemental reading. You can find this
+            example’s code, as well as the original chapter’s file in the
+            directory <span class="epub__emphasis"><em>PP4E\Internet\Web\PyErrata</em></span> of the
+            book examples distribution tree (see the Preface for more on the examples
+            distribution).</p>
+<p>PyErrata is in some ways simpler than the PyMailCGI case
+            study presented in this chapter. From a user’s perspective,
+            PyErrata is more hierarchical than linear: user interactions are
+            shorter and spawn fewer pages. There is also little state
+            retention in the web pages themselves in PyErrata—URL parameters
+            pass state in only one isolated case, and no hidden form fields
+            are generated.</p>
+<p>On the other hand, PyErrata introduces an entirely new
+            dimension: persistent data storage. State (error and comment
+            reports) is stored permanently by this system on the server,
+            either in flat pickle files or in a shelve-based database. Both
+            raise the specter of concurrent updates, since any number of users
+            out in cyberspace may be accessing the site at the same time, so
+            PyErrata also introduces file-locking techniques along the
+            way.</p>
+<p>I no longer maintain the website described by this extra
+            chapter, and the material itself is slightly out of date in some
+            ways. For instance, the <code class="epub__literal">os.open</code>
+            call is preferred for file locking now; I would probably use a
+            different data storage system today, such as ZODB; the code and
+            its chapter may still be in Python 2.X form in the examples
+            package; and this site might be better implemented as a blog or
+            wiki, concepts and labels that arose after the site was
+            developed.</p>
+<p>Still, PyErrata provides an additional Python website case
+            study, and it more closely reflects websites that must store
+            information on the server.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

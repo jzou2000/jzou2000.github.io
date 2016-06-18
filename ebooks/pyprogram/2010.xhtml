@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Using Python Classes in C</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Using Python Classes in C"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="using_python_classes_in_c"></a>Using Python Classes in C</h1>
+</div>
+</div>
+</div>
+<p>Earlier in this chapter, <a id="c20.11"></a><a id="classes20.11"></a>we learned how to use C++ classes in Python by wrapping
+        them with SWIG. But what about going the other way—using Python
+        classes from other languages? It turns out that this is really just a
+        matter of applying interfaces already shown.</p>
+<p>Recall that Python scripts generate class instance objects by
+        <span class="epub__emphasis"><em>calling</em></span> class objects as though they were
+        functions. To do this from C (or C++), simply follow the same steps:
+        import a class from a module, build an arguments tuple, and call it to
+        generate an instance using the same C API tools you use to call Python
+        functions. Once you’ve got an instance, you can fetch its attributes
+        and methods with the same tools you use to fetch globals out of a
+        module. Callables and attributes work the same everywhere they
+        live.</p>
+<p>To illustrate how this works in practice, Example 20-33 defines a simple
+        Python class in a module that we can utilize from C.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id32"></a>
+<p class="epub__title">Example 20-33. PP4E\Integrate\Embed\Pyclasss\module.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># call this class from C to make objects
+
+class klass:
+    def method(self, x, y):
+        return "brave %s %s" % (x, y)     # run me from C</pre>
+</div>
+</div>
+<p>This is nearly as simple as it gets, but it’s enough to
+        illustrate the basics. As usual, make sure that this module is on your
+        Python search path (e.g., in the current directory, or one listed on
+        your <code class="epub__literal">PYTHONPATH</code> setting), or else
+        the import call to access it from C will fail, just as it would in a
+        Python script. As you surely know if you’ve gotten this far in this
+        book, you can make always use of this Python class from a Python
+        program as follows:</p><a id="I_programlisting4_d1e88661"></a>
+<pre class="epub__programlisting">...\PP4E\Integrate\Embed\Pyclass$ <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import module</code></strong>                                   # import the file
+&gt;&gt;&gt; <strong class="epub__userinput"><code>object = module.klass()</code></strong>                         # make class instance
+&gt;&gt;&gt; <strong class="epub__userinput"><code>result = object.method('sir', 'robin')</code></strong>          # call class method
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(result)</code></strong>
+brave sir robin</pre>
+<p>This is fairly easy stuff in Python. You can do all of these
+        operations in C, too, but it takes a bit more code. The C file in
+        Example 20-34 implements
+        these steps by arranging calls to the appropriate Python API
+        tools.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id33"></a>
+<p class="epub__title">Example 20-34. PP4E\Integrate\Embed\Pyclass\objects.c</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#include &lt;Python.h&gt;
+#include &lt;stdio.h&gt;
+
+main() {
+  /* run objects with low-level calls */
+  char *arg1="sir", *arg2="robin", *cstr;
+  PyObject *pmod, *pclass, *pargs, *pinst, *pmeth, *pres;
+
+  /* instance = module.klass() */
+  Py_Initialize();
+  pmod   = PyImport_ImportModule("module");         /* fetch module */
+  pclass = PyObject_GetAttrString(pmod, "klass");   /* fetch module.class */
+  Py_DECREF(pmod);
+
+  pargs  = Py_BuildValue("()");
+  pinst  = PyEval_CallObject(pclass, pargs);        /* call class() */
+  Py_DECREF(pclass);
+  Py_DECREF(pargs);
+
+  /* result = instance.method(x,y) */
+  pmeth  = PyObject_GetAttrString(pinst, "method"); /* fetch bound method */
+  Py_DECREF(pinst);
+  pargs  = Py_BuildValue("(ss)", arg1, arg2);       /* convert to Python */
+  pres   = PyEval_CallObject(pmeth, pargs);         /* call method(x,y) */
+  Py_DECREF(pmeth);
+  Py_DECREF(pargs);
+
+  PyArg_Parse(pres, "s", &amp;cstr);                    /* convert to C */
+  printf("%s\n", cstr);
+  Py_DECREF(pres);
+}</pre>
+</div>
+</div>
+<p>Step through this source file for more details; it’s mostly a
+        matter of figuring out how you would accomplish the task in Python,
+        and then calling equivalent C functions in the Python API. To build
+        this source into a C executable program, run the makefile in this
+        file’s directory in the book examples package (it’s analogous to
+        makefiles we’ve already seen, so we’ll omit it here). After compiling,
+        run it as you would any other C program:</p><a id="I_programlisting4_d1e88689"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Embed/Pyclass$ <strong class="epub__userinput"><code>./objects</code></strong>
+brave sir robin</pre>
+<p>This output might seem anticlimactic, but it actually reflects
+        the return values sent back to C by the Python class method in file
+        <span class="epub__emphasis"><em>module.py</em></span>. C did a lot of work to get this little
+        string—it imported the module, fetched the class, made an instance,
+        and fetched and called the instance method with a tuple of arguments,
+        performing data conversions and reference count management every step
+        of the way. In return for all the work, C gets to use the techniques
+        shown in this file to reuse <span class="epub__emphasis"><em>any</em></span> Python
+        class.</p>
+<p>Of course, this example could be more complex in practice. As
+        mentioned earlier, you generally need to check the return value of
+        every Python API call to make sure it didn’t fail. The module import
+        call in this C code, for instance, can fail easily if the module isn’t
+        on the search path; if you don’t trap the <code class="epub__literal">NULL</code> pointer result, your program will
+        almost certainly crash when it tries to use the pointer (at least
+        eventually). Example 20-35 is
+        a recoding of Example 20-34
+        with full error-checking; it’s big, but it’s robust.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id34"></a>
+<p class="epub__title">Example 20-35. PP4E\Integrate\Embed\Pyclasss\objects-err.c</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#include &lt;Python.h&gt;
+#include &lt;stdio.h&gt;
+#define error(msg) do { printf("%s\n", msg); exit(1); } while (1)
+
+main() {
+  /* run objects with low-level calls and full error checking */
+  char *arg1="sir", *arg2="robin", *cstr;
+  PyObject *pmod, *pclass, *pargs, *pinst, *pmeth, *pres;
+
+  /* instance = module.klass() */
+  Py_Initialize();
+  pmod = PyImport_ImportModule("module");           /* fetch module */
+  if (pmod == NULL)
+      error("Can't load module");
+
+  pclass = PyObject_GetAttrString(pmod, "klass");   /* fetch module.class */
+  Py_DECREF(pmod);
+  if (pclass == NULL)
+      error("Can't get module.klass");
+
+  pargs = Py_BuildValue("()");
+  if (pargs == NULL) {
+      Py_DECREF(pclass);
+      error("Can't build arguments list");
+  }
+  pinst = PyEval_CallObject(pclass, pargs);         /* call class() */
+  Py_DECREF(pclass);
+  Py_DECREF(pargs);
+  if (pinst == NULL)
+      error("Error calling module.klass()");
+
+  /* result = instance.method(x,y) */
+  pmeth  = PyObject_GetAttrString(pinst, "method"); /* fetch bound method */
+  Py_DECREF(pinst);
+  if (pmeth == NULL)
+      error("Can't fetch klass.method");
+
+  pargs = Py_BuildValue("(ss)", arg1, arg2);        /* convert to Python */
+  if (pargs == NULL) {
+      Py_DECREF(pmeth);
+      error("Can't build arguments list");
+  }
+  pres = PyEval_CallObject(pmeth, pargs);           /* call method(x,y) */
+  Py_DECREF(pmeth);
+  Py_DECREF(pargs);
+  if (pres == NULL)
+      error("Error calling klass.method");
+
+  if (!PyArg_Parse(pres, "s", &amp;cstr))               /* convert to C */
+     error("Can't convert klass.method result");
+  printf("%s\n", cstr);
+  Py_DECREF(pres);
+}</pre>
+</div>
+</div>
+<p>These 53 lines of C code (not counting its makefile) achieve the
+        same results as the <span>4 lines</span> of
+        interactive Python we ran earlier—not exactly a stellar result from a
+        developer productivity perspective! Nevertheless, the model it uses
+        allows C and C++ to leverage Python in the same way that Python can
+        employ C and C++. As I’ll discuss in this book’s conclusion in a
+        moment, such combinations can often be more powerful than their
+        <a id="I_indexterm4_d1e88722"></a><a id="I_indexterm4_d1e88724"></a>individual parts.</p>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,366 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Wrapping C Environment Calls</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Wrapping C Environment Calls"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="wrapping_c_environment_calls"></a>Wrapping C Environment Calls</h1>
+</div>
+</div>
+</div>
+<p>Our next example is a C extension module that integrates the
+        standard C <a id="I_indexterm4_d1e86263"></a><a id="I_indexterm4_d1e86268"></a><a id="c20.5"></a><a id="wrap20.5"></a><a id="shell20.5"></a>library’s <code class="epub__literal">getenv</code> and
+        <code class="epub__literal">putenv</code> shell environment variable
+        calls for use in Python scripts. Example 20-8 is a C file that
+        achieves this goal in a hand-coded, manual fashion.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id7"></a>
+<p class="epub__title">Example 20-8. PP4E\Integrate\Extend\Cenviron\cenviron.c</p><div class="epub__example-contents">
+<pre class="epub__programlisting">/******************************************************************
+ * A C extension module for Python, called "cenviron".  Wraps the
+ * C library's getenv/putenv routines for use in Python programs.
+ ******************************************************************/
+
+#include &lt;Python.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+/***********************/
+/* 1) module functions */
+/***********************/
+
+static PyObject *                                   /* returns object */
+wrap_getenv(PyObject *self, PyObject *args)         /* self not used */
+{                                                   /* args from python */
+    char *varName, *varValue;
+    PyObject *returnObj = NULL;                         /* null=exception */
+
+    if (PyArg_Parse(args, "(s)", &amp;varName)) {           /* Python -&gt; C */
+        varValue = getenv(varName);                     /* call C getenv */
+        if (varValue != NULL)
+            returnObj = Py_BuildValue("s", varValue);   /* C -&gt; Python */
+        else
+            PyErr_SetString(PyExc_SystemError, "Error calling getenv");
+    }
+    return returnObj;
+}
+
+static PyObject *
+wrap_putenv(PyObject *self, PyObject *args)
+{
+    char *varName, *varValue, *varAssign;
+    PyObject *returnObj = NULL;
+
+    if (PyArg_Parse(args, "(ss)", &amp;varName, &amp;varValue))
+    {
+        varAssign = malloc(strlen(varName) + strlen(varValue) + 2);
+        sprintf(varAssign, "%s=%s", varName, varValue);
+        if (putenv(varAssign) == 0) {
+            Py_INCREF(Py_None);                   /* C call success */
+            returnObj = Py_None;                  /* reference None */
+        }
+        else
+            PyErr_SetString(PyExc_SystemError, "Error calling putenv");
+    }
+    return returnObj;
+}
+
+/**************************/
+/* 2) registration table  */
+/**************************/
+
+static PyMethodDef cenviron_methods[] = {
+    {"getenv",  wrap_getenv, METH_VARARGS, "getenv doc"},  /* name, &amp;func,... */
+    {"putenv",  wrap_putenv, METH_VARARGS, "putenv doc"},  /* name, &amp;func,... */
+    {NULL, NULL, 0, NULL}                                  /* end of table marker */
+};
+
+/*************************/
+/* 3) module definition  */
+/*************************/
+
+static struct PyModuleDef cenvironmodule = {
+   PyModuleDef_HEAD_INIT,
+   "cenviron",        /* name of module */
+   "cenviron doc",    /* module documentation, may be NULL */
+   −1,                /* size of per-interpreter module state, −1=in global vars */
+   cenviron_methods   /* link to methods table */
+};
+
+/*************************/
+/* 4) module initializer */
+/*************************/
+
+PyMODINIT_FUNC
+PyInit_cenviron()                      /* called on first import */
+{                                      /* name matters if loaded dynamically */
+    return PyModule_Create(&amp;cenvironmodule);
+}</pre>
+</div>
+</div>
+<p>Though demonstrative, this example is arguably less useful now
+        than it was in the first edition of this book—as we learned in Part II, not only can you fetch shell
+        environment variables by indexing the<a id="I_indexterm4_d1e86309"></a> <code class="epub__literal">os.environ</code> table,
+        but assigning to a key in this table automatically calls C’s <code class="epub__literal">putenv</code> to export the new setting to the C
+        code layer in the process. That is, <code class="epub__literal">os.environ['key']</code> fetches the value of the
+        shell variable <code class="epub__literal">'key'</code>, and <code class="epub__literal">os.environ</code><code class="epub__literal">['key']</code><code class="epub__literal">=value</code> assigns a
+        variable both in Python and in C.</p>
+<p>The second action—pushing assignments out to C—was added to
+        Python releases after the first edition of this book was published.
+        Besides illustrating additional extension coding techniques, though,
+        this example still serves a practical purpose: even today, changes
+        made to shell variables by the C code linked into a Python process are
+        not picked up when you index <code class="epub__literal">os.environ</code> in Python code. That is, once
+        your program starts, <code class="epub__literal">os.environ</code>
+        reflects only subsequent changes made by Python code in the
+        process.</p>
+<p>Moreover, although Python now has both a <code class="epub__literal">putenv</code> and a <code class="epub__literal">getenv</code> call in its <code class="epub__literal">os</code> module, their integration seems
+        incomplete. Changes to <code class="epub__literal">os.environ</code>
+        call <code class="epub__literal">os.putenv</code>, <a id="I_indexterm4_d1e86363"></a>but direct calls to <code class="epub__literal">os.putenv</code> do not update <code class="epub__literal">os.environ</code>, so the two can become out of
+        sync. And <code class="epub__literal">os.getenv</code> today simply
+        translates to an <code class="epub__literal">os.environ</code> fetch,
+        and hence will not pick up environment changes made in the process
+        outside of Python code after startup time. This may rarely, if ever,
+        be an issue for you, but this C extension module is not completely
+        without purpose; to truly interface environment variables with
+        linked-in C code, we need to call the C library routines directly (at
+        least until Python changes this <span>model
+        again!</span>).</p>
+<p>The <span class="epub__emphasis"><em>cenviron.c</em></span> C file in Example 20-8 creates a Python
+        module called<a id="I_indexterm4_d1e86391"></a> <code class="epub__literal">cenviron</code> that does a
+        bit more than the prior examples—it exports two functions, sets some
+        exception descriptions explicitly, and makes a reference count call
+        for the Python <code class="epub__literal">None</code> object (it’s
+        not created anew, so we need to add a reference before passing it to
+        Python). As before, to add this code to Python, compile and link into
+        an object file; the Cygwin makefile in Example 20-9 builds the C source
+        code for dynamic binding on imports.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id8"></a>
+<p class="epub__title">Example 20-9. PP4E\Integrate\Extend\Cenviron\makefile.cenviron</p><div class="epub__example-contents">
+<pre class="epub__programlisting">##################################################################
+# Compile cenviron.c into cenviron.dll--a shareable object file
+# on Cygwin, which is loaded dynamically when first imported.
+##################################################################
+
+PYLIB = /usr/local/bin
+PYINC = /usr/local/include/python3.1
+
+cenviron.dll: cenviron.c
+        gcc cenviron.c -g -I$(PYINC) -shared  -L$(PYLIB) -lpython3.1 -o $@
+
+clean:
+        rm -f *.pyc cenviron.dll</pre>
+</div>
+</div>
+<p>To build, type <code class="epub__literal">make -f
+        makefile.cenviron</code> at your shell. To run, make sure the
+        resulting <span class="epub__emphasis"><em>.dll</em></span> file is in a directory on Python’s
+        module path (the current working directory works too):</p><a id="I_programlisting4_d1e86417"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Extend/Cenviron$ <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import cenviron</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>cenviron.getenv('USER')</code></strong>                # like os.environ[key] but refetched
+'mark'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>cenviron.putenv('USER', 'gilligan')</code></strong>    # like os.environ[key]=value
+&gt;&gt;&gt; <strong class="epub__userinput"><code>cenviron.getenv('USER')</code></strong>                # C sees the changes too
+'gilligan'</pre>
+<p>As before, <code class="epub__literal">cenviron</code> is a bona
+        fide Python module object after it is imported, with all the usual
+        attached information, and errors are raised and reported correctly on
+        errors:</p><a id="I_programlisting4_d1e86440"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>dir(cenviron)</code></strong>
+['__doc__', '__file__', '__name__', '__packge__', 'getenv', 'putenv']
+&gt;&gt;&gt; <strong class="epub__userinput"><code>cenviron.__file__</code></strong>
+'cenviron.dll'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>cenviron.__name__</code></strong>
+'cenviron'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>cenviron.getenv</code></strong>
+&lt;built-in function getenv&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>cenviron</code></strong>
+&lt;module 'cenviron' from 'cenviron.dll'&gt;
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>cenviron.getenv('HOME')</code></strong>
+'/home/mark'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>cenviron.getenv('NONESUCH')</code></strong>
+SystemError: Error calling getenv</pre>
+<p>Here is an example of the problem this
+        module addresses (but you have to pretend that some of these calls are
+        made by linked-in C code, not by Python; I changed USER in the shell
+        prior to this session with an <code class="epub__literal">export</code> command):</p><a id="I_programlisting4_d1e86470"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Extend/Cenviron$ <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import os</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>os.environ['USER']</code></strong>                      # initialized from the shell
+'skipper'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from cenviron import getenv, putenv</code></strong>     # direct C library call access
+&gt;&gt;&gt; <strong class="epub__userinput"><code>getenv('USER')</code></strong>
+'skipper'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>putenv('USER', 'gilligan')</code></strong>              # changes for C but not Python
+&gt;&gt;&gt; <strong class="epub__userinput"><code>getenv('USER')</code></strong>
+'gilligan'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>os.environ['USER']</code></strong>                      # oops--does not fetch values again
+'skipper'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>os.getenv('USER')</code></strong>                       # ditto
+'skipper'</pre>
+<div class="epub__sect2" title="Adding Wrapper Classes to Flat Libraries"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="adding_wrapper_classes_to_flat_libraries"></a>Adding Wrapper Classes to Flat Libraries</h2>
+</div>
+</div>
+</div>
+<p>As is, the C extension module exports a function-based
+          interface, but it’s easy to wrap its functions in Python code that
+          makes the interface look any way you like. For instance, Example 20-10 makes the functions
+          accessible by dictionary indexing and integrates with the <code class="epub__literal">os.environ</code> object—it guarantees that the
+          object will stay in sync with fetches and changes made by calling
+          our C extension functions.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id9"></a>
+<p class="epub__title">Example 20-10. PP4E\Integrate\Extend\Cenviron\envmap.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">import os
+from cenviron import getenv, putenv       # get C module's methods
+
+class EnvMapping:                         # wrap in a Python class
+    def __setitem__(self, key, value):
+        os.environ[key] = value           # on writes: Env[key]=value
+        putenv(key, value)                # put in os.environ too
+
+    def __getitem__(self, key):
+        value = getenv(key)               # on reads: Env[key]
+        os.environ[key] = value           # integrity check
+        return value
+
+Env = EnvMapping()                        # make one instance</pre>
+</div>
+</div>
+<p>To use this module, clients may import its<a id="I_indexterm4_d1e86517"></a> <code class="epub__literal">Env</code> object using
+          <code class="epub__literal">Env['var']</code> dictionary syntax to
+          refer to environment variables. Example 20-11 goes a step further
+          and exports the functions as qualified attribute names rather than
+          as calls or keys—variables are referenced with <code class="epub__literal">Env.var</code> attribute syntax.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id10"></a>
+<p class="epub__title">Example 20-11. PP4E\Integrate\Extend\Cenviron\envattr.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">import os
+from cenviron import getenv, putenv       # get C module's methods
+
+class EnvWrapper:                         # wrap in a Python class
+    def __setattr__(self, name, value):
+        os.environ[name] = value          # on writes: Env.name=value
+        putenv(name, value)               # put in os.environ too
+
+    def __getattr__(self, name):
+        value = getenv(name)              # on reads: Env.name
+        os.environ[name] = value          # integrity check
+        return value
+
+Env = EnvWrapper()                        # make one instance</pre>
+</div>
+</div>
+<p>The following shows our Python wrappers running atop our C
+          extension module’s functions to access environment variables. The
+          main point to notice here is that you can graft many different sorts
+          of interface models on top of extension functions by providing
+          Python wrappers in addition to C extensions:</p><a id="I_programlisting4_d1e86544"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from envmap import Env</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>Env['USER']</code></strong>
+'skipper'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>Env['USER'] = 'professor'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>Env['USER']</code></strong>
+'professor'
+&gt;&gt;&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from envattr import Env</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>Env.USER</code></strong>
+'professor'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>Env.USER = 'gilligan'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>Env.USER</code></strong>
+'gilligan'</pre>
+</div>
+<div class="epub__sect2" title="Wrapping C Environment Calls with SWIG"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="wrapping_c_environment_calls_with_swig"></a>Wrapping C Environment Calls with SWIG</h2>
+</div>
+</div>
+</div>
+<p>You can <a id="I_indexterm4_d1e86576"></a><a id="I_indexterm4_d1e86579"></a>manually code extension modules like we just did, but
+          you don’t necessarily have to. Because this example really just
+          wraps functions that already exist in standard C libraries, the
+          entire <span class="epub__emphasis"><em>cenviron.c</em></span> C code file in Example 20-8 can be replaced with
+          a simple SWIG input file that looks like Example 20-12.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id11"></a>
+<p class="epub__title">Example 20-12. PP4E\Integrate\Extend\Swig\Environ\environ.i</p><div class="epub__example-contents">
+<pre class="epub__programlisting">/***************************************************************
+ * Swig module description file, to generate all Python wrapper
+ * code for C lib getenv/putenv calls: "swig -python environ.i".
+ ***************************************************************/
+
+%module environ
+
+extern char * getenv(const char *varname);
+extern int    putenv(char *assignment);</pre>
+</div>
+</div>
+<p>And you’re done. Well, almost; you still need to run this file
+          through SWIG and compile its output. As before, simply add a SWIG
+          step to your makefile and compile its output file into a shareable
+          object for dynamic linking, and you’re in business. Example 20-13 is a Cygwin
+          makefile that does the job.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id12"></a>
+<p class="epub__title">Example 20-13. PP4E\Integrate\Extend\Swig\Environ\makefile.environ-swig</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># build environ extension from SWIG generated code
+
+PYLIB = /usr/local/bin
+PYINC = /usr/local/include/python3.1
+SWIG  = /cygdrive/c/temp/swigwin-2.0.0/swig
+
+_environ.dll: environ_wrap.c
+        gcc environ_wrap.c -g -I$(PYINC) -L$(PYLIB) -lpython3.1 -shared -o $@
+
+environ_wrap.c: environ.i
+        $(SWIG) -python environ.i
+
+clean:
+        rm -f *.o *.dll *.pyc core environ_wrap.c environ.py</pre>
+</div>
+</div>
+<p>When run on <span class="epub__emphasis"><em>environ.i</em></span>, SWIG generates two
+          files and two modules—<span class="epub__emphasis"><em>environ.py</em></span> (the Python
+          interface module we import) and <span class="epub__emphasis"><em>environ_wrap.c</em></span>
+          (the lower-level glue code module file we compile into
+          <span class="epub__emphasis"><em>_environ.dll</em></span> to be imported by the
+          <span class="epub__emphasis"><em>.py</em></span>). Because the functions being wrapped here
+          live in standard linked-in C libraries, there is nothing to combine
+          with the generated code; this makefile simply runs SWIG and compiles
+          the wrapper file into a C extension module, ready to be
+          imported:</p><a id="I_programlisting4_d1e86623"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Extend/Swig/Environ$ <strong class="epub__userinput"><code>make -f makefile.environ-swig</code></strong>
+/cygdrive/c/temp/swigwin-2.0.0/swig -python environ.i
+gcc environ_wrap.c -g -I/usr/local/include/python3.1 -L/usr/local/bin -lpython3.1
+    -shared -o _environ.dll</pre>
+<p>And now you’re really done. The resulting C extension module
+          is linked when imported, and it’s used as before (except that SWIG
+          handled all the gory <a id="I_indexterm4_d1e86630"></a><a id="I_indexterm4_d1e86632"></a><a id="I_indexterm4_d1e86634"></a><a id="I_indexterm4_d1e86636"></a>bits):</p><a id="I_programlisting4_d1e86642"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Extend/Swig/Environ$ <strong class="epub__userinput"><code>ls</code></strong>
+_environ.dll  environ.i  environ.py  environ_wrap.c  makefile.environ-swig
+
+.../PP4E/Integrate/Extend/Swig/Environ$ <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import environ</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>environ.getenv('USER')</code></strong>
+'gilligan'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>environ.__name__, environ.__file__, environ</code></strong>
+('environ', 'environ.py', &lt;module 'environ' from 'environ.py'&gt;)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>dir(environ)</code></strong>
+[ ... '_environ', 'getenv', 'putenv' ... ]</pre><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p>If you look closely, you may notice that I didn’t call
+            <code class="epub__literal">putenv</code> this time. It turns out
+            there’s good cause: the C library’s <code class="epub__literal">putenv</code> wants a string of the form
+            “USER=Gilligan” to be passed, which becomes part of the
+            environment. In C code, this means we must create a new piece of
+            memory to pass in; we used <code class="epub__literal">malloc</code> in Example 20-8 to satisfy this
+            constraint. However, there’s no simple and direct way to guarantee
+            this on the Python side of the fence. In a prior Python release,
+            it was apparently sufficient to hold on to the string passed to
+            <code class="epub__literal">putenv</code> in a temporary Python
+            variable, but this no longer works with Python 3.X and/or SWIG
+            2.0. A fix may require either a custom C function or SWIG’s
+            typemaps which allow its handling of data translations to be
+            customized. In the interest of space, we’ll leave addressing this
+            as suggested exercise; see SWIG for details.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

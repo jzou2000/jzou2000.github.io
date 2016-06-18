@@ -1,0 +1,374 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Sending Mail by SMTP</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Sending Mail by SMTP"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="sending_mail_by_smtp"></a>Sending Mail by SMTP</h1>
+</div>
+</div>
+</div>
+<p>PyMailCGI supports <a id="I_indexterm5_d1e70520"></a><a id="smtp16.4"></a><a id="email16.4"></a>two main functions, as links on the root page: composing
+        and sending new mail to others, and viewing incoming mail. The View
+        function leads to pages that let users read, reply to, forward, and
+        delete existing email. Since the Send function is the simplest, let’s
+        start with its pages and scripts first.</p>
+<div class="epub__sect2" title="The Message Composition Page"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_message_composition_page"></a>The Message Composition Page</h2>
+</div>
+</div>
+</div>
+<p>The root <a id="py16.4.1"></a>page Send function steps users through two other
+          pages: one to edit a message and one to confirm delivery. When you
+          click on the Send link on the main page in Figure 16-2, the Python CGI script in Example 16-3 runs on the web
+          server.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id99"></a>
+<p class="epub__title">Example 16-3. PP4E\Internet\Web\PyMailCgi\cgi-bin\onRootSendLink.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/bin/python
+"""
+################################################################################
+On 'send' click in main root window: display composition page
+################################################################################
+"""
+import commonhtml
+from externs import mailconfig
+
+commonhtml.editpage(kind='Write', headers={'From': mailconfig.myaddress})</pre>
+</div>
+</div>
+<p>No, this file wasn’t truncated; there’s not much to see in
+          this script because all the action has been encapsulated in the
+          <code class="epub__literal">commonhtml</code> and <code class="epub__literal">externs</code> modules. All that we can tell here
+          is that the script calls something named <code class="epub__literal">editpage</code> to generate a reply, passing in
+          something called <code class="epub__literal">myaddress</code> for
+          its “From” header.</p>
+<p>That’s by design—by hiding details in shared utility modules
+          we make top-level scripts such as this much easier to read and
+          write, avoid code redundancy, and achieve a common look-and-feel to
+          all our pages. There are no inputs to this script either; when run,
+          it produces a page for composing a new message, as shown in Figure 16-3.</p><div class="epub__figure"><a id="pymailcgi_send_open_parenthesis_write_cl"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e70581"></a><img alt="PyMailCGI send (write) page" src="Images/getfile_002-39.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-3. PyMailCGI send (write) page</p>
+</div>
+<p>Most of the composition page is self-explanatory—fill in
+          headers and the main text of the message (a “From” header and
+          standard signature line are initialized from settings in the
+          <code class="epub__literal">mailconfig</code> module, discussed
+          further ahead). The Choose File buttons open file selector dialogs,
+          for picking an attachment. This page’s interface looks very
+          different from the PyMailGUI client program in Chapter 14, but it is functionally very
+          similar. Also notice the top and bottom of this page—for reasons
+          explained in the next section, they are going to look the same in
+          all the pages of our <a id="I_indexterm5_d1e70593"></a>system.</p>
+</div>
+<div class="epub__sect2" title="The Send Mail Script"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_send_mail_script"></a>The Send Mail Script</h2>
+</div>
+</div>
+</div>
+<p>As usual, <a id="py16.4.2"></a>the HTML of the edit page in Figure 16-3 names its
+          handler script. When we click its Send button, Example 16-4 runs on the server
+          to process our inputs and send the mail message.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id100"></a>
+<p class="epub__title">Example 16-4. PP4E\Internet\Web\PyMailCgi\cgi-bin\onEditPageSend.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/bin/python
+"""
+################################################################################
+On submit in edit window: finish a write, reply, or forward;
+
+in 2.0+, we reuse the send tools in mailtools to construct and send the message,
+instead of older manual string scheme;  we also inherit attachment structure
+composition and MIME encoding for sent mails from that module;
+
+3.0: CGI uploads fail in the py3.1 cgi module for binary and incompatibly-encoded
+text, so we simply use the platform default here (cgi's parser does no better);
+3.0: use simple Unicode encoding rules for main text and attachments too;
+################################################################################
+"""
+
+import cgi, sys, commonhtml, os
+from externs import mailtools
+
+savedir = 'partsupload'
+if not os.path.exists(savedir):
+    os.mkdir(savedir)
+
+def saveAttachments(form, maxattach=3, savedir=savedir):
+    """
+    save uploaded attachment files in local files on server from
+    which mailtools will add to mail;  the 3.1 FieldStorage parser
+    and other parts of cgi module can fail for many upload types,
+    so we don't try very hard to handle Unicode encodings here;
+    """
+    partnames = []
+    for i in range(1, maxattach+1):
+        fieldname = 'attach%d' % i
+        if fieldname in form and form[fieldname].filename:
+            fileinfo = form[fieldname]                     # sent and filled?
+            filedata = fileinfo.value                      # read into string
+            filename = fileinfo.filename                   # client's pathname
+            if '\\' in filename:
+                basename = filename.split('\\')[-1]        # try DOS clients
+            elif '/' in filename:
+                basename = filename.split('/')[-1]         # try Unix clients
+            else:
+                basename = filename                        # assume dir stripped
+            pathname = os.path.join(savedir, basename)
+            if isinstance(filedata, str):                  # 3.0: rb needs bytes
+                filedata = filedata.encode()               # 3.0: use encoding?
+            savefile = open(pathname, 'wb')
+            savefile.write(filedata)                       # or a with statement
+            savefile.close()                               # but EIBTI still
+            os.chmod(pathname, 0o666)                      # need for some srvrs
+            partnames.append(pathname)                     # list of local paths
+    return partnames                                       # gets type from name
+
+#commonhtml.dumpstatepage(0)
+form = cgi.FieldStorage()                      # parse form input data
+attaches = saveAttachments(form)               # cgi.print_form(form) to see
+
+# server name from module or get-style URL
+smtpservername = commonhtml.getstandardsmtpfields(form)
+
+# parms assumed to be in form or URL here
+from commonhtml import getfield                # fetch value attributes
+From = getfield(form, 'From')                  # empty fields may not be sent
+To   = getfield(form, 'To')
+Cc   = getfield(form, 'Cc')
+Subj = getfield(form, 'Subject')
+text = getfield(form, 'text')
+if Cc == '?': Cc = ''
+
+# 3.0: headers encoded per utf8 within mailtools if non-ascii
+parser = mailtools.MailParser()
+Tos = parser.splitAddresses(To)                # multiple recip lists: ',' sept
+Ccs = (Cc and parser.splitAddresses(Cc)) or ''
+extraHdrs = [('Cc', Ccs), ('X-Mailer', 'PyMailCGI 3.0')]
+
+# 3.0: resolve main text and text attachment encodings; default=ascii in mailtools
+bodyencoding = 'ascii'
+try:
+    text.encode(bodyencoding)          # try ascii first (or latin-1?)
+except (UnicodeError, LookupError):    # else use tuf8 as fallback (or config?)
+    bodyencoding = 'utf-8'             # tbd: this is more limited than PyMailGUI
+
+# 3.0: use utf8 for all attachments; we can't ask here
+attachencodings = ['utf-8'] * len(attaches)    # ignored for non-text parts
+
+# encode and send
+sender = mailtools.SilentMailSender(smtpservername)
+try:
+    sender.sendMessage(From, Tos, Subj, extraHdrs, text, attaches,
+                                           bodytextEncoding=bodyencoding,
+                                           attachesEncodings=attachencodings)
+except:
+    commonhtml.errorpage('Send mail error')
+else:
+    commonhtml.confirmationpage('Send mail')</pre>
+</div>
+</div>
+<p>This script gets mail header and text input information from
+          the edit page’s form (or from query parameters in an explicit URL)
+          and sends the message off using Python’s standard <code class="epub__literal">smtplib</code> module, courtesy of the <code class="epub__literal">mailtools</code> package. We studied <code class="epub__literal">mailtools</code> in Chapter 13, so I won’t say much more about
+          it now. Note, though, that because we are reusing its send call,
+          sent mail is automatically saved in a <em class="epub__filename">sentmail.txt</em> file on the server; there
+          are no tools for viewing this in PyMailCGI itself, but it serves as
+          a log.</p>
+<p>New in version 2.0, the <code class="epub__literal">saveAttachments</code> function grabs any part
+          files sent from the browser and stores them in temporary local files
+          on the server from which they will be added to the mail when sent.
+          We covered CGI upload in detail at the end of Chapter 15; see that discussion for more on
+          how the code here works (as well as its limitations in Python 3.1
+          and this edition—we’re attaching simple text here to accommodate).
+          The business of attaching the files to the mail itself is automatic
+          in <code class="epub__literal">mailtools</code>.</p>
+<p>A utility in <code class="epub__literal">commonhtml</code>
+          ultimately fetches the name of the SMTP server to receive the
+          message from either the <code class="epub__literal">mailconfig</code> module or the script’s inputs
+          (in a form field or URL query parameter). If all goes well, we’re
+          presented with a generated confirmation page, as captured in Figure 16-4.</p><div class="epub__figure"><a id="pymailcgi_send_confirmation_page"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e70657"></a><img alt="PyMailCGI send confirmation page" src="Images/getfile-50.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-4. PyMailCGI send confirmation page</p>
+</div>
+<p>Open file <em class="epub__filename">sentmail.txt</em> in
+          PyMailCGI’s source directory if you want to see what the resulting
+          mail’s raw text looks like when sent (or fetch the message in an
+          email client with a raw text view, such as PyMailGUI). In this
+          version, each attachment part is MIME encoded per Base64 with UTF-8
+          Unicode <a id="I_indexterm5_d1e70667"></a>encoding in the multipart message, but the main text
+          part is sent as simple ASCII if it works as such.</p>
+<p>As we’ll see, this send mail script is also used to deliver
+          <span class="epub__emphasis"><em>reply</em></span> and <span class="epub__emphasis"><em>forward</em></span> messages
+          for incoming POP mail. The user interface for those operations is
+          slightly different for composing new email from scratch, but as in
+          PyMailGUI, the submission handler logic has been factored into the
+          same, shared code—replies and forwards are really just mail send
+          operations with quoted text and preset header fields.</p>
+<p>Notice that there are no usernames or passwords to be found
+          here; as we saw in Chapter 13, SMTP
+          usually requires only a server that listens on the SMTP port, not a
+          user account or password. As we also saw in that chapter, SMTP send
+          operations that fail either raise a Python exception (e.g., if the
+          server host can’t be reached) or return a dictionary of failed
+          recipients; our <code class="epub__literal">mailtools</code> package
+          modules insulate us from these details by always raising an
+          exception in <a id="I_indexterm5_d1e70688"></a>either case.</p>
+</div>
+<div class="epub__sect2" title="Error Pages"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="error_pages"></a>Error Pages</h2>
+</div>
+</div>
+</div>
+<p>If there is a <a id="I_indexterm5_d1e70696"></a>problem during mail delivery, we get an error page
+          such as the one shown in Figure 16-5. This page reflects a failed
+          recipient and includes a stack trace generated by the standard
+          <a id="I_indexterm5_d1e70706"></a>library’s <code class="epub__literal">traceback</code>
+          module. On errors Python detects, the Python error message and extra
+          details would be displayed.</p><div class="epub__figure"><a id="pymailcgi_send_error_page"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e70718"></a><img alt="PyMailCGI send error page" src="Images/getfile_003-31.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-5. PyMailCGI send error page</p>
+</div>
+<p>It’s also worth pointing out that the <code class="epub__literal">commonhtml</code> module encapsulates the
+          generation of both the confirmation and the error pages so that all
+          such pages look the same in PyMailCGI no matter where and when they
+          are produced. Logic that generates the mail edit page in <code class="epub__literal">commonhtml</code> is reused by the reply and
+          forward actions, too (but with different mail headers).</p>
+</div>
+<div class="epub__sect2" title="Common Look-and-Feel"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="common_look-and-feel"></a>Common Look-and-Feel</h2>
+</div>
+</div>
+</div>
+<p>In fact, <code class="epub__literal">commonhtml</code> makes
+          <a id="I_indexterm5_d1e70739"></a>all pages look similar—it also provides common page
+          <span class="epub__emphasis"><em>header</em></span> (top) and <span class="epub__emphasis"><em>footer</em></span>
+          (bottom) generation functions, which are used everywhere in the
+          system. You may have already noticed that all the pages so far
+          follow the same pattern: they start with a title and horizontal
+          rule, have something unique in the middle, and end with another
+          rule, followed by a Python icon and link at the bottom. This
+          <span class="epub__emphasis"><em>common look-and-feel</em></span> is the product of shared
+          code in <code class="epub__literal">commonhtml</code>; it generates
+          everything but the middle section for every page in the system
+          (except the root page, a static HTML file).</p>
+<p>Most important, if we ever change the header and footer format
+          functions in the <code class="epub__literal">common</code><code class="epub__literal">html</code> module, all our page’s headers
+          and footers will automatically be updated. If you are interested in
+          seeing how this encapsulated logic works right now, flip ahead to
+          Example 16-14. We’ll
+          explore its code after we study the rest of the mail site’s
+          pages.</p>
+</div>
+<div class="epub__sect2" title="Using the Send Mail Script Outside a Browser"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="using_the_send_mail_script_outside_a_bro"></a>Using the Send Mail Script Outside a Browser</h2>
+</div>
+</div>
+</div>
+<p>I initially wrote the <a id="py16.4.5"></a><a id="brow16.4.5"></a>send script to be used only within PyMailCGI using
+          values typed into the mail edit form. But as we’ve seen, inputs can
+          be sent in either form fields or URL query parameters. Because the
+          send mail script checks for inputs in CGI inputs before importing
+          from the<a id="I_indexterm5_d1e70787"></a> <code class="epub__literal">mailconfig</code> module,
+          it’s also possible to call this script outside the edit page to send
+          email—for instance, explicitly typing a URL of this nature into your
+          browser’s address field (but all on one line and with no intervening
+          spaces):</p><a id="I_programlisting5_d1e70794"></a>
+<pre class="epub__programlisting">http://localhost:8000/cgi-bin/
+               onEditPageSend.py?site=smtp.rmi.net&amp;
+                                 From=lutz@rmi.net&amp;
+                                 To=lutz@rmi.net&amp;
+                                 Subject=test+url&amp;
+                                 text=Hello+Mark;this+is+Mark</pre>
+<p>will indeed send an email message as specified by the input
+          parameters at the end. That URL string is a lot to type into a
+          browser’s address field, of course, but it might be useful if
+          generated automatically by another script. As we saw in Chapters
+          13 and 15,
+          the module <code class="epub__literal">urllib.request</code>
+<a id="I_indexterm5_d1e70805"></a>can then be used to submit such a URL string to the
+          server from within a Python program. Example 16-5 shows one way to
+          automate this.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id101"></a>
+<p class="epub__title">Example 16-5. PP4E\Internet\Web\PyMailCgi\sendurl.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+####################################################################
+Send email by building a URL like this from inputs:
+http://servername/pathname/
+          onEditPageSend.py?site=smtp.rmi.net&amp;
+                            From=lutz@rmi.net&amp;
+                            To=lutz@rmi.net&amp;
+                            Subject=test+url&amp;
+                            text=Hello+Mark;this+is+Mark
+####################################################################
+"""
+from urllib.request import urlopen
+from urllib.parse   import quote_plus
+
+url = 'http://localhost:8000/cgi-bin/onEditPageSend.py'
+url += '?site=%s'    % quote_plus(input('Site&gt;'))
+url += '&amp;From=%s'    % quote_plus(input('From&gt;'))
+url += '&amp;To=%s'      % quote_plus(input('To  &gt;'))
+url += '&amp;Subject=%s' % quote_plus(input('Subj&gt;'))
+url += '&amp;text=%s'    % quote_plus(input('text&gt;'))    # or input loop
+
+print('Reply html:')
+print(urlopen(url).read().decode())   # confirmation or error page HTML</pre>
+</div>
+</div>
+<p>Running this script from the system command line is yet
+          another way to send an email message—this time, by contacting our
+          CGI script on a web server machine to do all the work. The script
+          <span class="epub__emphasis"><em>sendurl.py</em></span> runs on any machine with Python and
+          sockets, lets us input mail parameters interactively, and invokes
+          another Python script that lives on a possibly remote machine. It
+          prints HTML returned by our CGI script:</p><a id="I_programlisting5_d1e70823"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Web\PyMailCgi&gt; <strong class="epub__userinput"><code>sendurl.py</code></strong>
+Site&gt;<strong class="epub__userinput"><code>smtpout.secureserver.net</code></strong>
+From&gt;<strong class="epub__userinput"><code>PP4E@learning-python.com</code></strong>
+To  &gt;<strong class="epub__userinput"><code>lutz@learning-python.com</code></strong>
+Subj&gt;<strong class="epub__userinput"><code>testing sendurl.py</code></strong>
+text&gt;<strong class="epub__userinput"><code>But sir, it's only wafer-thin...</code></strong>
+Reply html:
+&lt;html&gt;&lt;head&gt;&lt;title&gt;PyMailCGI: Confirmation page (PP4E)&lt;/title&gt;&lt;/head&gt;
+&lt;body bgcolor="#FFFFFF"&gt;&lt;h1&gt;PyMailCGI Confirmation&lt;/h1&gt;&lt;hr&gt;
+&lt;h2&gt;Send mail operation was successful&lt;/h2&gt;
+&lt;p&gt;Press the link below to return to the main page.&lt;/p&gt;
+&lt;/p&gt;&lt;hr&gt;&lt;a href="http://www.python.org"&gt;
+&lt;img src="../PythonPoweredSmall.gif"
+align=left alt="[Python Logo]" border=0 hspace=15&gt;&lt;/a&gt;
+&lt;a href="../pymailcgi.html"&gt;Back to root page&lt;/a&gt;
+&lt;/body&gt;&lt;/html&gt;</pre>
+<p>The HTML reply printed by this script would normally be
+          rendered into a new web page if caught by a browser. Such cryptic
+          output might be less than ideal, but you could easily search the
+          reply string for its components to determine the result (e.g., using
+          the string <code class="epub__literal">find</code> method or an
+          <code class="epub__literal">in</code> membership test to look for
+          “successful”), parse out its components with Python’s standard
+          <code class="epub__literal">html.parse</code> or <code class="epub__literal">re</code> modules (covered in <span>Chapter 19</span>),
+          and so on. The resulting mail message—viewed, for variety, with
+          <span>Chapter 14’s</span> PyMailGUI program—shows
+          up in this book’s email account as seen in <span>Figure 16-6</span>
+          (it’s a single text-part message).</p><div class="epub__figure-float"><div class="epub__figure"><a id="sendurl.py_result"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e70872"></a><img alt="sendurl.py result" src="Images/getfile_004-24.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-6. sendurl.py result</p>
+</div>
+</div>
+<p>Of course, there are other, less remote ways to send email
+          from a client machine. For instance, the Python <code class="epub__literal">smtplib</code> module (used by <code class="epub__literal">mailtools</code>) itself depends only upon the
+          client and SMTP server connections being operational, whereas this
+          script also depends on the web server machine and CGI script
+          (requests go from client to web server to CGI script to SMTP
+          server). Because our CGI script supports general URLs, though, it
+          can do more than a <code class="epub__literal">mailto:</code> HTML
+          tag and can be invoked with <code class="epub__literal">urllib.request</code> outside the context of a
+          running web browser. For instance, as discussed in Chapter 15, scripts like
+          <span class="epub__emphasis"><em>sendurl.py</em></span> can be used to invoke and
+          <span class="epub__emphasis"><em>test</em></span> server-side <a id="I_indexterm5_d1e70900"></a><a id="I_indexterm5_d1e70902"></a><a id="I_indexterm5_d1e70904"></a><a id="I_indexterm5_d1e70906"></a>programs.</p>
+</div>
+</div>
+</div>
+</body>
+</html>

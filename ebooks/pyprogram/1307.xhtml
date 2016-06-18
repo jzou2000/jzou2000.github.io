@@ -1,0 +1,580 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>SMTP: Sending Email</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="SMTP: Sending Email"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="smtp_colon_sending_email"></a>SMTP: Sending Email</h1>
+</div>
+</div>
+</div>
+<p>There is a <a id="client13.8"></a><a id="I_indexterm2_d1e55285"></a><a id="email13.8"></a>proverb in hackerdom that states that every useful
+        computer program eventually grows complex enough to send email.
+        Whether such wisdom rings true or not in practice, the ability to
+        automatically initiate email from within a program is a powerful
+        tool.</p>
+<p>For instance, test systems can automatically email failure
+        reports, user interface programs can ship purchase orders to suppliers
+        by email, and so on. Moreover, a portable Python mail script could be
+        used to send messages from any computer in the world with Python and
+        an Internet connection that supports standard email protocols. Freedom
+        from dependence on mail programs like Outlook is an attractive feature
+        if you happen to make your living traveling around teaching Python on
+        all sorts of computers.</p>
+<p>Luckily, sending email from within a Python script is just as
+        easy as reading it. In fact, there are at least four ways to do
+        so:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Calling</em></span> <code class="epub__literal">os.popen</code> <span class="epub__emphasis"><em>to launch a
+            command-line mail program</em></span></span></dt><dd>
+<p>On some systems, <a id="I_indexterm2_d1e55314"></a><a id="I_indexterm2_d1e55321"></a>you can send email from a script with a call of
+              the form:</p><a id="I_programlisting2_d1e55327"></a>
+<pre class="epub__programlisting">os.popen('mail -s "xxx" a@b.c', 'w').write(text)</pre>
+<p>As we saw earlier in the book, the <code class="epub__literal">popen</code> tool runs the command-line
+              string passed to its first argument, and returns a file-like
+              object connected to it. If we use an open mode of <code class="epub__literal">w</code>, we are connected to the command’s
+              standard input stream—here, we write the text of the new mail
+              message to the standard Unix <code class="epub__literal">mail</code> command-line program. The net
+              effect is as if we had run <code class="epub__literal">mail</code> interactively, but it happens
+              inside a running Python script.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Running the</em></span> <code class="epub__literal">sendmail</code>
+<span class="epub__emphasis"><em>program</em></span></span></dt><dd>
+<p>The open source <code class="epub__literal">sendmail</code> program <a id="I_indexterm2_d1e55359"></a>offers another way to initiate mail from a
+              program. Assuming it is installed and configured on your system,
+              you can launch it using Python tools like the <code class="epub__literal">os.popen</code> call of the previous
+              paragraph.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Using the standard</em></span> <code class="epub__literal">smtplib</code> <span class="epub__emphasis"><em>Python
+            module</em></span></span></dt><dd>
+<p>Python’s standard library comes <a id="I_indexterm2_d1e55379"></a>with support for the client-side interface to
+              <span>SMTP—</span>the Simple Mail
+              Transfer Protocol—a higher-level Internet standard for sending
+              mail over sockets. Like the <code class="epub__literal">poplib</code> module we met in the previous
+              section, <code class="epub__literal">smtplib</code> hides all
+              the socket and protocol details and can be used to send mail on
+              any machine with Python and a suitable socket-based Internet
+              link.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Fetching and using third-party packages and
+            tools</em></span></span></dt><dd>
+<p>Other tools in the open source library provide
+              higher-level mail handling packages for Python; most build upon
+              one of the prior three techniques.</p></dd></dl>
+</div>
+<p>Of these four options, <code class="epub__literal">smtplib</code> is by far the most portable and
+        direct. Using <code class="epub__literal">os.popen</code> to spawn a
+        mail program usually works on Unix-like platforms only, not on Windows
+        (it assumes a command-line mail program), and requires spawning one or
+        more processes along the way. And although the <code class="epub__literal">sendmail</code> program is powerful, it is also
+        somewhat Unix-biased, complex, and may not be installed even on all
+        Unix-like machines.</p>
+<p>By contrast, the <code class="epub__literal">smtplib</code>
+        module works on any machine that has Python and an Internet link that
+        supports SMTP access, including Unix, Linux, Mac, and Windows. It
+        sends mail over sockets in-process, instead of starting other programs
+        to do the work. Moreover, SMTP affords us much control over the
+        formatting and routing of email.</p>
+<div class="epub__sect2" title="SMTP Mail Sender Script"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="smtp_mail_sender_script"></a>SMTP Mail Sender Script</h2>
+</div>
+</div>
+</div>
+<p>Since SMTP is arguably <a id="mail13.8.1"></a><a id="smtp13.8.1a"></a><a id="smtp13.8.1b"></a>the best option for sending mail from a Python script,
+          let’s explore a simple mailing program that illustrates its
+          interfaces. The Python script shown in Example 13-19 is intended to be
+          used from an interactive command line; it reads a new mail message
+          from the user and sends the new mail by SMTP using Python’s <code class="epub__literal">smtplib</code> module.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id38"></a>
+<p class="epub__title">Example 13-19. PP4E\Internet\Email\smtpmail.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/local/bin/python
+"""
+###########################################################################
+use the Python SMTP mail interface module to send email messages; this
+is just a simple one-shot send script--see pymail, PyMailGUI, and
+PyMailCGI for clients with more user interaction features; also see
+popmail.py for a script that retrieves mail, and the mailtools pkg
+for attachments and formatting with the standard library email package;
+###########################################################################
+"""
+
+import smtplib, sys, email.utils, mailconfig
+mailserver = mailconfig.smtpservername         # ex: smtp.rmi.net
+
+From = input('From? ').strip()                 # or import from mailconfig
+To   = input('To?   ').strip()                 # ex: python-list@python.org
+Tos  = To.split(';')                           # allow a list of recipients
+Subj = input('Subj? ').strip()
+Date = email.utils.formatdate()                # curr datetime, rfc2822
+
+# standard headers, followed by blank line, followed by text
+text = ('From: %s\nTo: %s\nDate: %s\nSubject: %s\n\n' % (From, To, Date, Subj))
+
+print('Type message text, end with line=[Ctrl+d (Unix), Ctrl+z (Windows)]')
+while True:
+    line = sys.stdin.readline()
+    if not line:
+        break                        # exit on ctrl-d/z
+   #if line[:4] == 'From':
+   #    line = '&gt;' + line            # servers may escape
+    text += line
+
+print('Connecting...')
+server = smtplib.SMTP(mailserver)              # connect, no log-in step
+failed = server.sendmail(From, Tos, text)
+server.quit()
+if failed:                                     # smtplib may raise exceptions
+    print('Failed recipients:', failed)        # too, but let them pass here
+else:
+    print('No errors.')
+print('Bye.')</pre>
+</div>
+</div>
+<p>Most of this script is user interface—it inputs the sender’s
+          address (From), one or more recipient addresses (To, separated by
+          “;” if more than one), and a subject line. The sending date is
+          picked up from Python’s standard <code class="epub__literal">time</code> module, standard header lines are
+          formatted, and the <code class="epub__literal">while</code> loop
+          reads message lines until the user types the end-of-file character
+          (Ctrl-Z on Windows, Ctrl-D on Linux).</p>
+<p>To be robust, be sure to add a <span class="epub__emphasis"><em>blank line</em></span>
+          between the header lines and the body in the message’s text; it’s
+          required by the SMTP protocol and some SMTP servers enforce this.
+          Our script conforms by inserting an empty line with <code class="epub__literal">\n\n</code> at the end of the string format
+          expression—one <code class="epub__literal">\n</code> to terminate
+          the current line and another for a blank line; <code class="epub__literal">smtplib</code> expands <code class="epub__literal">\n</code> to Internet-style <code class="epub__literal">\r\n</code> internally prior to transmission, so
+          the short form is fine here. Later in this chapter, we’ll format our
+          messages with the Python <code class="epub__literal">email</code>
+          package, which handles such details for us automatically.</p>
+<p>The rest of the script is where all the SMTP magic occurs: to
+          send a mail by SMTP, simply run these two sorts of calls:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">server =
+              smtplib.SMTP(mailserver)</code></span></dt><dd>
+<p>Make an instance of the SMTP object, passing in the name
+                of the SMTP server that will dispatch the message first. If
+                this doesn’t throw an exception, you’re connected to the SMTP
+                server via a socket when the call returns. Technically, the
+                <code class="epub__literal">connect</code> method establishes
+                connection to a server, but the SMTP object calls this method
+                automatically if the mail server name is passed in this
+                way.</p></dd><dt><span class="epub__term"><code class="epub__literal">failed = server.sendmail(From,
+              Tos, text)</code></span></dt><dd>
+<p>Call the SMTP object’s <code class="epub__literal">sendmail</code> method, passing in the
+                sender address, one or more recipient addresses, and the raw
+                text of the message itself with as many standard mail header
+                lines as you care to provide.</p></dd></dl>
+</div>
+<p>When you’re done, be sure to call the object’s <code class="epub__literal">quit</code> method to disconnect from the server
+          and finalize the transaction. Notice that, on failure, the <code class="epub__literal">sendmail</code> method may either raise an
+          exception or return a list of the recipient addresses that failed;
+          the script handles the latter case itself but lets exceptions kill
+          the script with a Python error <span>message</span>.</p>
+<p>Subtly, calling the server object’s <code class="epub__literal">quit</code> method after <code class="epub__literal">sendmail</code> raises an exception may or may
+          not work as expected—<code class="epub__literal">quit</code> can
+          actually hang until a server timeout if the send fails internally
+          and leaves the interface in an unexpected state. For instance, this
+          can occur on Unicode encoding errors when translating the outgoing
+          mail to bytes per the ASCII scheme (the <code class="epub__literal">rset</code> reset request hangs in this case,
+          too). An alternative <code class="epub__literal">close</code> method
+          simply closes the client’s sockets without attempting to send a quit
+          command to the server; <code class="epub__literal">quit</code> calls
+          close internally as a last step (assuming the quit command can be
+          sent!).</p>
+<p>For advanced usage, SMTP objects provide additional calls not
+          used in this example:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p><code class="epub__literal">server.login(user,
+              password)</code> provides an interface to SMTP servers that
+              require and support <span class="epub__emphasis"><em>authentication</em></span>; watch
+              for this call to appear as an option in the <code class="epub__literal">mailtools</code> package example later in
+              this chapter.</p></li><li class="epub__listitem">
+<p><code class="epub__literal">server.starttls([keyfile[,
+              certfile]])</code> puts the SMTP connection in Transport
+              Layer Security (TLS) mode; all commands will be encrypted using
+              the Python <code class="epub__literal">ssl</code> module’s
+              socket wrapper SSL support, and they assume the server supports
+              this mode.</p></li></ul>
+</div>
+<p>See the Python library manual for more on these and other
+          calls not covered here.</p>
+</div>
+<div class="epub__sect2" title="Sending Messages"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="sending_messages"></a>Sending Messages</h2>
+</div>
+</div>
+</div>
+<p>Let’s ship a few messages across the world. The <code class="epub__literal">smtpmail</code> script is a one-shot tool: each
+          run allows you to send a single new mail message. Like most of the
+          client-side tools in this chapter, it can be run from any computer
+          with Python and an Internet link that supports SMTP (most do, though
+          some public access machines may restrict users to HTTP [Web] access
+          only or require special server SMTP configuration). Here it is
+          running on Windows:</p><a id="I_programlisting2_d1e55564"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Email&gt; <strong class="epub__userinput"><code>smtpmail.py</code></strong>
+From? <strong class="epub__userinput"><code>Eric.the.Half.a.Bee@yahoo.com</code></strong>
+To?   <strong class="epub__userinput"><code>PP4E@learning-python.com</code></strong>
+Subj? <strong class="epub__userinput"><code>A B C D E F G</code></strong>
+Type message text, end with line=[Ctrl+d (Unix), Ctrl+z (Windows)]
+<strong class="epub__userinput"><code>Fiddle de dum, Fiddle de dee,</code></strong>
+<strong class="epub__userinput"><code>Eric the half a bee.</code></strong>
+<strong class="epub__userinput"><code>^Z</code></strong>
+Connecting...
+No errors.
+Bye.</pre>
+<p>This mail is sent to the book’s email account address
+          (<span class="epub__email">PP4E@learning-python.com</span>), so it ultimately shows up
+          in the inbox at my ISP, but only after being routed through an
+          arbitrary number of machines on the Net, and across arbitrarily
+          distant network links. It’s complex at the bottom, but usually, the
+          Internet “just works.”</p>
+<p>Notice the From address, though—it’s completely fictitious (as
+          far as I know, at least). It turns out that we can usually provide
+          any From address we like because SMTP doesn’t check its validity
+          (only its general format is checked). Furthermore, unlike POP, there
+          is usually no notion of a username or password in SMTP, so the
+          sender is more difficult to determine. We need only pass email to
+          any machine with a server listening on the SMTP port, and we don’t
+          need an account or login on that machine. Here, <span>the name <em class="epub__filename">Eric.the.Half.a.Bee@yahoo.com</em>
+          works</span> just fine as the sender; <em class="epub__filename">Marketing</em><em class="epub__filename">.</em><em class="epub__filename">Geek</em><em class="epub__filename">.</em><em class="epub__filename">From.Hell@spam.com</em> might work just as
+          well.</p>
+<p>In fact, I didn’t import a From email address from the
+          <em class="epub__filename">mailconfig.py</em> module on
+          purpose, because I wanted to be able to demonstrate this behavior;
+          it’s the basis <a id="I_indexterm2_d1e55617"></a>of some of those annoying junk emails that show up in
+          your mailbox without a real sender’s address.<sup>[52]</sup> Marketers infected with e-millionaire mania will email
+          advertising to all addresses on a list without providing a real From
+          address, to cover their tracks.</p>
+<p>Normally, of course, you should use the same To address in the
+          message and the SMTP call and provide your real email address as the
+          From value (that’s the only way people will be able to reply to your
+          message). Moreover, apart from teasing your significant other,
+          sending phony addresses is often just plain bad Internet
+          citizenship. Let’s run the script again to ship off another mail
+          with more politically correct coordinates:</p><a id="I_programlisting2_d1e55627"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Email&gt; <strong class="epub__userinput"><code>smtpmail.py</code></strong>
+From? <strong class="epub__userinput"><code>PP4E@learning-python.com</code></strong>
+To?   <strong class="epub__userinput"><code>PP4E@learning-python.com</code></strong>
+Subj? <strong class="epub__userinput"><code>testing smtpmail</code></strong>
+Type message text, end with line=[Ctrl+d (Unix), Ctrl+z (Windows)]
+<strong class="epub__userinput"><code>Lovely Spam! Wonderful Spam!</code></strong>
+<strong class="epub__userinput"><code>^Z</code></strong>
+Connecting...
+No errors.
+Bye.</pre>
+<div class="epub__sect3" title="Verifying receipt"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="verifying_receipt"></a>Verifying receipt</h3>
+</div>
+</div>
+</div>
+<p>At this point, we could run whatever email tool we normally
+            use to access our mailbox to verify the results of these two send
+            operations; the two new emails should show up in our mailbox
+            regardless of which mail client is used to view them. Since we’ve
+            already written a Python script for reading mail, though, let’s
+            put it to use as a verification <span>tool—</span>running the <code class="epub__literal">popmail</code> script from the last section
+            reveals our two new messages at the end of the mail list (again
+            parts of the output have been trimmed to conserve space and
+            protect the innocent here):</p><a id="I_programlisting2_d1e55659"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Email&gt; <strong class="epub__userinput"><code>popmail.py</code></strong>
+Password for pop.secureserver.net?
+Connecting...
+b'+OK &lt;29464.1273155506@pop08.mesa1.secureserver.net&gt;'
+There are 4 mail messages in 5326 bytes
+(b'+OK ', [b'1 1860', b'2 1408', b'3 1049', b'4 1009'], 32)
+--------------------------------------------------------------------------------
+[Press Enter key]
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">...first two mails omitted...</span></em>
+
+Received: (qmail 25683 invoked from network); 6 May 2010 14:12:07 −0000
+Received: from unknown (HELO p3pismtp01-018.prod.phx3.secureserver.net) ([10.6.1
+          (envelope-sender &lt;Eric.the.Half.a.Bee@yahoo.com&gt;)
+          by p3plsmtp06-04.prod.phx3.secureserver.net (qmail-1.03) with SMTP
+          for &lt;PP4E@learning-python.com&gt;; 6 May 2010 14:12:07 −0000
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more deleted...</span></em>
+Received: from [66.194.109.3] by smtp.mailmt.com (ArGoSoft Mail Server .NET v.1.
+        for &lt;PP4E@learning-python.com&gt;; Thu, 06 May 2010 10:12:12 −0400
+From: Eric.the.Half.a.Bee@yahoo.com
+To: PP4E@learning-python.com
+Date: Thu, 06 May 2010 14:11:07 −0000
+Subject: A B C D E F G
+Message-ID: &lt;jdlohzf0j8dp8z4x06052010101212@SMTP&gt;
+X-FromIP: 66.194.109.3
+X-Nonspam: None
+
+Fiddle de dum, Fiddle de dee,
+Eric the half a bee.
+
+
+--------------------------------------------------------------------------------
+[Press Enter key]
+Received: (qmail 4634 invoked from network); 6 May 2010 14:16:57 −0000
+Received: from unknown (HELO p3pismtp01-025.prod.phx3.secureserver.net) ([10.6.1
+          (envelope-sender &lt;PP4E@learning-python.com&gt;)
+          by p3plsmtp06-05.prod.phx3.secureserver.net (qmail-1.03) with SMTP
+          for &lt;PP4E@learning-python.com&gt;; 6 May 2010 14:16:57 −0000
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more deleted...</span></em>
+Received: from [66.194.109.3] by smtp.mailmt.com (ArGoSoft Mail Server .NET v.1.
+        for &lt;PP4E@learning-python.com&gt;; Thu, 06 May 2010 10:17:03 −0400
+From: PP4E@learning-python.com
+To: PP4E@learning-python.com
+Date: Thu, 06 May 2010 14:16:31 −0000
+Subject: testing smtpmail
+Message-ID: &lt;8fad1n462667fik006052010101703@SMTP&gt;
+X-FromIP: 66.194.109.3
+X-Nonspam: None
+
+Lovely Spam! Wonderful Spam!
+
+
+--------------------------------------------------------------------------------
+Bye.</pre>
+<p>Notice how the fields we input to our script show up as
+            headers and text in the email’s raw text delivered to the
+            recipient. Technically, some ISPs test to make sure that at least
+            the domain of the email sender’s address (the part after “@”) is a
+            real, valid domain name, and disallow delivery if not. As
+            mentioned earlier, some servers also require that SMTP senders
+            have a direct connection to their network and may require an
+            authentication call with username and password (described near the
+            end of the preceding section). In the second edition of the book,
+            I used an ISP that let me get away with more nonsense, but this
+            may vary per server; the rules have tightened since then to limit
+            spam.</p>
+</div>
+<div class="epub__sect3" title="Manipulating both From and To"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="manipulating_both_from_and_to"></a>Manipulating both From and To</h3>
+</div>
+</div>
+</div>
+<p>The first mail listed at the end of the preceding section
+            was the one we sent with a fictitious sender address; the second
+            was the more legitimate message. Like sender addresses, header
+            lines are a bit arbitrary under SMTP. Our <code class="epub__literal">smtpmail</code> script automatically adds From
+            and To header lines in the message’s text with the same addresses
+            that are passed to the SMTP interface, but only as a polite
+            convention. Sometimes, though, you can’t tell who a mail was sent
+            to, either—to obscure the target audience or to support legitimate
+            email lists, senders may manipulate the contents of both these
+            headers in the message’s text.</p>
+<p>For example, if we change <code class="epub__literal">smtpmail</code> to not automatically generate a
+            “To:” header line with the same address(es) sent to the SMTP
+            interface call:</p><a id="I_programlisting2_d1e55688"></a>
+<pre class="epub__programlisting">text = ('From: %s\nDate: %s\nSubject: %s\n' % (From, Date, Subj))</pre>
+<p>we can then manually type a “To:” header that differs from
+            the address we’re really sending to—the “To” address list passed
+            into the <code class="epub__literal">smtplib</code> send call
+            gives the true recipients, but the “To:” header line in the text
+            of the message is what most mail clients will display (see
+            <em class="epub__filename">smtpmail-noTo.py</em> in the
+            examples package for the code needed to support such anonymous
+            behavior, and be sure to type a blank line after “To:”):</p><a id="I_programlisting2_d1e55698"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Email&gt; <strong class="epub__userinput"><code>smtpmail-noTo.py</code></strong>
+From? <strong class="epub__userinput"><code>Eric.the.Half.a.Bee@aol.com</code></strong>
+To?   <strong class="epub__userinput"><code>PP4E@learning-python.com</code></strong>
+Subj? <strong class="epub__userinput"><code>a b c d e f g</code></strong>
+Type message text, end with line=(ctrl + D or Z)
+<strong class="epub__userinput"><code>To: nobody.in.particular@marketing.com</code></strong>
+
+<strong class="epub__userinput"><code>Spam; Spam and eggs; Spam, spam, and spam.</code></strong>
+<strong class="epub__userinput"><code>^Z</code></strong>
+Connecting...
+No errors.
+Bye.</pre>
+<p>In some ways, the From and To addresses in send method calls
+            and message header lines are similar to addresses on envelopes and
+            letters in envelopes, respectively. The former is used for
+            routing, but the latter is what the reader sees. Here, From is
+            fictitious in both places. Moreover, I gave the real To address
+            for the account on the server, but then gave a fictitious name in
+            the manually typed “To:” header line—the first address is where it
+            really goes and the second appears in mail clients. If your mail
+            tool picks out the “To:” line, such mails will look odd when
+            viewed.</p>
+<p>For instance, when the mail we just sent shows up in my
+            mailbox at <em class="epub__filename">learning-</em><em class="epub__filename">python.com</em>, it’s difficult to tell
+            much about its origin or destination in the webmail <span>interface</span> my ISP provides, as
+            captured in Figure 13-5.</p><div class="epub__figure-float"><div class="epub__figure"><a id="anonymous_mail_in_a_web-mail_client_open"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject2_d1e55739"></a><img alt="Anonymous mail in a web-mail client (see also ahead: PyMailGUI)" src="Images/getfile-41.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 13-5. Anonymous mail in a web-mail client (see also ahead:
+              PyMailGUI)</p>
+</div>
+</div>
+<p>Furthermore, this email’s raw text won’t help unless we look
+            closely at the “Received:” headers added by the machines it has
+            been routed through:</p><a id="I_programlisting2_d1e55746"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Email&gt; <strong class="epub__userinput"><code>popmail.py</code></strong>
+Password for pop.secureserver.net?
+Connecting...
+b'+OK &lt;4802.1273156821@p3plpop03-03.prod.phx3.secureserver.net&gt;'
+There are 5 mail messages in 6364 bytes
+(b'+OK ', [b'1 1860', b'2 1408', b'3 1049', b'4 1009', b'5 1038'], 40)
+--------------------------------------------------------------------------------
+[Press Enter key]
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">...first three mails omitted...</span></em>
+
+
+Received: (qmail 30325 invoked from network); 6 May 2010 14:33:45 −0000
+Received: from unknown (HELO p3pismtp01-004.prod.phx3.secureserver.net) ([10.6.1
+          (envelope-sender &lt;Eric.the.Half.a.Bee@aol.com&gt;)
+          by p3plsmtp06-03.prod.phx3.secureserver.net (qmail-1.03) with SMTP
+          for &lt;PP4E@learning-python.com&gt;; 6 May 2010 14:33:45 −0000
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more deleted...</span></em>
+Received: from [66.194.109.3] by smtp.mailmt.com (ArGoSoft Mail Server .NET v.1.
+        for &lt;PP4E@learning-python.com&gt;; Thu, 06 May 2010 10:33:16 −0400
+From: Eric.the.Half.a.Bee@aol.com
+Date: Thu, 06 May 2010 14:32:32 −0000
+Subject: a b c d e f g
+To: nobody.in.particular@marketing.com
+Message-ID: &lt;66koqg66e0q1c8hl06052010103316@SMTP&gt;
+X-FromIP: 66.194.109.3
+X-Nonspam: None
+
+Spam; Spam and eggs; Spam, spam, and spam.
+
+
+--------------------------------------------------------------------------------
+Bye.</pre>
+<p>Once again, though, don’t do this unless you have good
+            cause. This demonstration is intended only to help you understand
+            how mail headers factor into email processing. To write an
+            automatic spam filter that deletes incoming junk mail, for
+            instance, you need to know some of the telltale signs to look for
+            in a message’s text. Spamming techniques have grown much more
+            sophisticated than simply forging sender and recipient names, of
+            course (you’ll find much more on the subject on the Web at large
+            and in the <span class="epub__emphasis"><em>SpamBayes</em></span> mail filter written in
+            Python), but it’s one common trick.</p>
+<p>On the other hand, such To address juggling may also be
+            useful in the context of legitimate <span class="epub__emphasis"><em>mailing
+            lists</em></span>—the name of the list appears in the “To:” header
+            when the message is viewed, not the potentially many individual
+            recipients named in the send-mail call. As the next section’s
+            example demonstrates, a mail client can simply send a mail to all
+            on the list but insert the general list name in the “To:”
+            header.</p>
+<p>But in other contexts, sending email with bogus “From:” and
+            “To:” lines is equivalent to making anonymous phone calls. Most
+            mailers won’t even let you change the From line, and they don’t
+            distinguish between the To address and header line. When you
+            program mail scripts of your own, though, SMTP is wide open in
+            this regard. So be good out there, OK?</p><div class="epub__sidebar"><a id="does_anybody_really_know_what_time_it_is"></a>
+<p class="epub__title">Does Anybody Really Know What Time It Is?</p>
+<p>In the prior version of the <code class="epub__literal">smtpmail</code> script of Example 13-19, a simple date
+              format was used for the Date email header that didn’t quite
+              follow the SMTP <a id="I_indexterm2_d1e55780"></a>date formatting standard:</p><a id="I_programlisting2_d1e55786"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>import time</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>time.asctime()</code></strong>
+'Wed May 05 17:52:05 2010'</pre>
+<p>Most servers don’t care and will let any sort of date text
+              appear in date header lines, or even add one if needed. Clients
+              are often similarly forgiving, but not always; one of my ISP
+              webmail programs shows dates correctly anyhow, but another
+              leaves such ill-formed dates blank in mail displays. If you want
+              to be more in line with the standard, you could format the date
+              header with code like this (the result can be parsed with
+              standard tools such as the <code class="epub__literal">time.strptime</code> call):</p><a id="I_programlisting2_d1e55799"></a>
+<pre class="epub__programlisting">import time
+gmt = time.gmtime(time.time())
+fmt = '%a, %d %b %Y %H:%M:%S GMT'
+str = time.strftime(fmt, gmt)
+hdr = 'Date: ' + str
+print(hdr)</pre>
+<p>The <code class="epub__literal">hdr</code> variable’s
+              value looks like this when this code is run:</p><a id="I_programlisting2_d1e55806"></a>
+<pre class="epub__programlisting">Date: Wed, 05 May 2010 21:49:32 GMT</pre>
+<p>The <code class="epub__literal">time.strftime</code> call
+              allows arbitrary date and time formatting; <code class="epub__literal">time.asctime</code> is just one standard
+              format. Better yet, do what <code class="epub__literal">smtpmail</code> does now—in the newer
+              <code class="epub__literal">email</code> package (described in
+              this chapter), an <code class="epub__literal">email.utils</code>
+              call can be used to properly format date and time automatically.
+              The <code class="epub__literal">smtpmail</code> script uses the
+              first of the following format <span>alternatives</span>:</p><a id="I_programlisting2_d1e55832"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>import email.utils</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>email.utils.formatdate()</code></strong>
+'Wed, 05 May 2010 21:54:28 −0000'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>email.utils.formatdate(localtime=True)</code></strong>
+'Wed, 05 May 2010 17:54:52 −0400'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>email.utils.formatdate(usegmt=True)</code></strong>
+'Wed, 05 May 2010 21:55:22 GMT'</pre>
+<p>See the <code class="epub__literal">pymail</code> and
+              <code class="epub__literal">mailtools</code> examples in this
+              chapter for additional usage examples; the latter is reused by
+              the larger PyMailGUI and PyMailCGI email clients later in this
+              book.</p>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="Sending Email at the Interactive Prompt"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="sending_email_at_the_interactive_prompt"></a>Sending Email at the Interactive Prompt</h2>
+</div>
+</div>
+</div>
+<p>So where <a id="I_indexterm2_d1e55859"></a><a id="I_indexterm2_d1e55861"></a><a id="I_indexterm2_d1e55863"></a><a id="I_indexterm2_d1e55865"></a><a id="I_indexterm2_d1e55870"></a>are we in the Internet abstraction model now? With all
+          this email fetching and sending going on, it’s easy to lose the
+          forest for the trees. Keep in mind that because mail is transferred
+          over sockets (remember sockets?), they are at the root of all this
+          activity. All email read and written ultimately consists of
+          formatted bytes shipped over sockets between computers on the Net.
+          As we’ve seen, though, the POP and SMTP interfaces in Python hide
+          all the details. Moreover, the scripts we’ve begun writing even hide
+          the Python interfaces and provide higher-level interactive
+          tools.</p>
+<p>Both the <code class="epub__literal">popmail</code> and
+          <code class="epub__literal">smtpmail</code> scripts provide portable
+          email tools but aren’t quite what we’d expect in terms of usability
+          these days. Later in this chapter, we’ll use what we’ve seen thus
+          far to implement a more interactive, console-based mail tool. In the
+          next chapter, we’ll also code a tkinter email GUI, and then we’ll go
+          on to build a web-based interface in a later chapter. All of these
+          tools, though, vary primarily in terms of user interface only; each
+          ultimately employs the Python mail transfer modules we’ve met here
+          to transfer mail message text over the Internet with sockets.</p>
+<p>Before we move on, one more SMTP note: just as for reading
+          mail, we can use the Python interactive prompt as our email sending
+          client, too, if we type calls manually. The following, for example,
+          sends a message through my ISP’s SMTP server to two recipient
+          addresses assumed to be part of a mail list:</p><a id="I_programlisting2_d1e55886"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Email&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from smtplib import SMTP</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn = SMTP('smtpout.secureserver.net')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn.sendmail(</code></strong>
+... <strong class="epub__userinput"><code>'PP4E@learning-python.com',</code></strong>                           # true sender
+... <strong class="epub__userinput"><code>['lutz@rmi.net', 'PP4E@learning-python.com'],</code></strong>         # true recipients
+... <strong class="epub__userinput"><code>"""From: PP4E@learning-python.com</code></strong>
+... <strong class="epub__userinput"><code>To: maillist</code></strong>
+... <strong class="epub__userinput"><code>Subject: test interactive smtplib</code></strong>
+...
+... <strong class="epub__userinput"><code>testing 1 2 3...</code></strong>
+... <strong class="epub__userinput"><code>""")</code></strong>
+{}
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn.quit()</code></strong>                                # quit() required, Date added
+(221, b'Closing connection. Good bye.')</pre>
+<p>We’ll verify receipt of this message in a later email client
+          program; the “To” recipient shows up as “maillist” in email
+          clients—a completely valid use case for header manipulation. In
+          fact, you can achieve the same effect with the <code class="epub__literal">smtpmail-noTo</code> script by separating
+          recipient addresses at the “To?” prompt with a semicolon (e.g.
+          <span class="epub__email">lutz@rmi.net</span>;
+          <span class="epub__email">PP4E@learning-python.com</span>) and typing the email list’s
+          name in the “To:” header line. Mail clients that support mailing
+          lists automate such steps.</p>
+<p>Sending mail interactively this way is a bit tricky to get
+          right, though—header lines are governed by standards: the blank line
+          after the subject line is required and significant, for instance,
+          and Date is omitted altogether (one is added for us). Furthermore,
+          mail formatting gets much more complex as we start writing messages
+          with attachments. In practice, the <code class="epub__literal">email</code> package in the standard library is
+          generally used to construct emails, before shipping them off with
+          <code class="epub__literal">smtplib</code>. The package lets us
+          build mails by assigning headers and attaching and possibly encoding
+          parts, and creates a correctly formatted mail text. To learn how,
+          let’s move on to the next <a id="I_indexterm2_d1e55945"></a><a id="I_indexterm2_d1e55947"></a>section.</p>
+</div><div class="epub__footnotes"><br/><hr/><div class="epub__footnote">
+<p><sup>[52] </sup>We all know by now that such junk mail is usually referred
+              to as spam, but not everyone knows that this name is a reference
+              to a Monty Python skit in which a restaurant’s customers find it
+              difficult to hear the reading of menu options over a group of
+              Vikings singing an increasingly loud chorus of “spam, spam,
+              spam…”. Hence the tie-in to junk email. Spam is used in Python
+              program examples as a sort of generic variable name, though it
+              also pays homage to the skit.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

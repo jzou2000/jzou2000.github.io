@@ -1,0 +1,739 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>PyClock: An Analog/Digital Clock Widget</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="PyClock: An Analog/Digital Clock Widget"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="pyclock_colon_an_analog_solidus_digital"></a>PyClock: An Analog/Digital Clock Widget</h1>
+</div>
+</div>
+</div>
+<p>One <a id="I_indexterm5_d1e46402"></a><a id="I_indexterm5_d1e46404"></a>of the first things I always look for when exploring a
+        new computer interface is a clock. Because I spend so much time glued
+        to computers, it’s essentially impossible for me to keep track of the
+        time unless it is right there on the screen in front of me (and even
+        then, it’s iffy). The next program, PyClock, implements such a clock
+        widget in Python. It’s not substantially different from the clock
+        programs that you may be used to seeing on the X Window System.
+        Because it is coded in Python, though, this one is both easily
+        customized and fully portable among Windows, the X Window System, and
+        Macs, like all the code in this chapter. In addition to advanced GUI
+        techniques, this example demonstrates Python <code class="epub__literal">math</code> and <code class="epub__literal">time</code> module tools.</p>
+<div class="epub__sect2" title="A Quick Geometry Lesson"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="a_quick_geometry_lesson"></a>A Quick Geometry Lesson</h2>
+</div>
+</div>
+</div>
+<p>Before I show <a id="py11.6.1"></a><a id="plot11.6.1"></a>you PyClock, though, let me provide a little
+          background and a confession. Quick—how do you plot points on a
+          circle? This, along with time formats and events, turns out to be a
+          core concept in clock widget programs. To draw an analog clock face
+          on a canvas widget, you essentially need to be able to sketch a
+          circle—the clock face itself is composed of points on a circle, and
+          the second, minute, and hour hands of the clock are really just
+          lines from a circle’s center out to a point on the circle. Digital
+          clocks are simpler to draw, but not much to look at.</p>
+<p>Now the confession: when I started writing PyClock, I couldn’t
+          answer the last paragraph’s opening question. I had utterly
+          forgotten the math needed to sketch out points on a circle (as had
+          most of the professional software developers I queried about this
+          magic formula). It happens. After going unused for a few decades,
+          such knowledge tends to be garbage collected. I finally was able to
+          dust off a few neurons long enough to code the plotting math needed,
+          but it wasn’t my finest intellectual hour.<sup>[40]</sup></p>
+<p>If you are in the same boat, I don’t have space to teach
+          geometry in depth here, but I can show you one way to code the
+          point-plotting formulas in Python in simple terms. Before tackling
+          the more complex task of implementing a clock, I wrote the <code class="epub__literal">plotterGui</code> script shown in Example 11-11 to focus on just
+          the circle-plotting logic.</p>
+<p>Its <code class="epub__literal">point</code> function is where
+          the circle logic lives—it plots the (X,Y) coordinates of a point on
+          the circle, given the relative point number, the total number of
+          points to be placed on the circle, and the circle’s radius (the
+          distance from the circle’s center to the points drawn upon it). It
+          first calculates the point’s angle from the top by dividing 360 by
+          the number of points to be plotted, and then multiplying by the
+          point number; in case you’ve forgotten too, it’s 360 degrees around
+          the whole circle (e.g., if you plot 4 points on a circle, each is 90
+          degrees from the last, or 360/4). Python’s standard <code class="epub__literal">math</code> module gives all the required
+          constants and functions from that point forward—pi, sine, and
+          cosine. The math is really not too obscure if you study this long
+          enough (in conjunction with your old geometry text if necessary).
+          There are alternative ways to code the number crunching, but I’ll
+          skip the details here (see the examples package for hints).</p>
+<p>Even if you don’t care about the math, though, check out Example 11-11’s <code class="epub__literal">circle</code> function. Given the (X,Y)
+          coordinates of a point on the circle returned by <code class="epub__literal">point</code>, it draws a line from the circle’s
+          center out to the point and a small rectangle around the point
+          itself—not unlike the hands and points of an analog clock. Canvas
+          tags are used to associate drawn objects for deletion before each
+          plot.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id145"></a>
+<p class="epub__title">Example 11-11. PP4E\Gui\Clock\plotterGui.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># plot circles on a canvas
+
+import math, sys
+from tkinter import *
+
+def point(tick, range, radius):
+    angle = tick * (360.0 / range)
+    radiansPerDegree = math.pi / 180
+    pointX = int( round( radius * math.sin(angle * radiansPerDegree) ))
+    pointY = int( round( radius * math.cos(angle * radiansPerDegree) ))
+    return (pointX, pointY)
+
+def circle(points, radius, centerX, centerY, slow=0):
+    canvas.delete('lines')
+    canvas.delete('points')
+    for i in range(points):
+        x, y = point(i+1, points, radius-4)
+        scaledX, scaledY = (x + centerX), (centerY - y)
+        canvas.create_line(centerX, centerY, scaledX, scaledY, tag='lines')
+        canvas.create_rectangle(scaledX-2, scaledY-2,
+                                scaledX+2, scaledY+2,
+                                           fill='red', tag='points')
+        if slow: canvas.update()
+
+def plotter():   # 3.x // trunc div
+    circle(scaleVar.get(), (Width // 2), originX, originY, checkVar.get())
+
+def makewidgets():
+    global canvas, scaleVar, checkVar
+    canvas = Canvas(width=Width, height=Width)
+    canvas.pack(side=TOP)
+    scaleVar = IntVar()
+    checkVar = IntVar()
+    scale = Scale(label='Points on circle', variable=scaleVar, from_=1, to=360)
+    scale.pack(side=LEFT)
+    Checkbutton(text='Slow mode', variable=checkVar).pack(side=LEFT)
+    Button(text='Plot', command=plotter).pack(side=LEFT, padx=50)
+
+if __name__ == '__main__':
+    Width = 500                                       # default width, height
+    if len(sys.argv) == 2: Width = int(sys.argv[1])   # width cmdline arg?
+    originX = originY = Width // 2                    # same as circle radius
+    makewidgets()                                     # on default Tk root
+    mainloop()                                        # need 3.x // trunc div</pre>
+</div>
+</div>
+<p>The circle defaults to 500 pixels wide unless you pass a width
+          on the command line. Given a number of points on a circle, this
+          script marks out the circle in clockwise order every time you press
+          Plot, by drawing lines out from the center to small rectangles at
+          points on the circle’s shape. Move the slider to plot a different
+          number of points and click the checkbox to make the drawing happen
+          slow enough to notice the clockwise order in which lines and points
+          are drawn (this forces the script to <code class="epub__literal">update</code> the display after each line is
+          drawn). Figure 11-19 shows the result for
+          plotting 120 points with the circle width set to 400 on the command
+          line; if you ask for 60 and 12 points on the circle, the
+          relationship to clock faces and hands starts becoming
+          clearer.</p><div class="epub__figure-float"><div class="epub__figure"><a id="plottergui_in_action"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e46475"></a><img alt="plotterGui in action" src="Images/getfile-37.png" width="486"/>
+</div>
+</div>
+<p class="epub__title">Figure 11-19. plotterGui in action</p>
+</div>
+</div>
+<p>For more help, this book’s examples distribution also includes
+          text-based versions of this plotting script that print circle point
+          coordinates to the <code class="epub__literal">stdout</code> stream
+          for review, instead of rendering them in a GUI. See the <em class="epub__filename">plotterText.py</em> scripts in the clock’s
+          <span>directory</span>. Here is the sort of
+          output they produce when plotting 4 and 12 points on a circle that
+          is 400 points wide and high; the output format is simply:</p><a id="I_programlisting5_d1e46491"></a>
+<pre class="epub__programlisting">pointnumber : angle = (Xcoordinate, Ycoordinate)</pre>
+<p>and assumes that the circle is centered at coordinate
+          (0,0):</p><a id="I_programlisting5_d1e46496"></a>
+<pre class="epub__programlisting">----------
+1 : 90.0 = (200, 0)
+2 : 180.0 = (0, −200)
+3 : 270.0 = (−200, 0)
+4 : 360.0 = (0, 200)
+----------
+1 : 30.0 = (100, 173)
+2 : 60.0 = (173, 100)
+3 : 90.0 = (200, 0)
+4 : 120.0 = (173, −100)
+5 : 150.0 = (100, −173)
+6 : 180.0 = (0, −200)
+7 : 210.0 = (−100, −173)
+8 : 240.0 = (−173, −100)
+9 : 270.0 = (−200, 0)
+10 : 300.0 = (−173, 100)
+11 : 330.0 = (−100, 173)
+12 : 360.0 = (0, 200)
+----------</pre><div class="epub__sidebar"><a id="numeric_python_tools"></a>
+<p class="epub__title">Numeric Python Tools</p>
+<p>If you do enough <a id="I_indexterm5_d1e46503"></a>number crunching to have followed this section’s
+            abbreviated geometry lesson, you will probably also be interested
+            in exploring the<a id="I_indexterm5_d1e46507"></a> <span class="epub__emphasis"><em>NumPy</em></span> numeric programming
+            extension for Python. It adds things such as vector objects and
+            advanced mathematical operations, effectively turning Python into
+            a scientific/numeric programming tool that supports efficient
+            numerical array computations, and it has been compared to MatLab.
+            NumPy has been used effectively by many organizations, including
+            Lawrence Livermore and Los Alamos National Labs—in many cases,
+            allowing Python with NumPy to replace legacy FORTRAN code.</p>
+<p>NumPy must be fetched and installed separately; see Python’s
+            website for links. On the web, you’ll also find related numeric
+            tools (e.g., SciPy), as well as visualization and 3-D animation
+            tools (e.g., PyOpenGL, Blender, Maya, vtk, and VPython). At this
+            writing, NumPy (like the many numeric packages that depend upon
+            it) is officially available for Python 2.X only, but a version
+            that supports both versions 2.X and 3.X is in early development
+            release form. Besides the <code class="epub__literal">math</code>
+            module, Python itself also has a built-in complex number type for
+            engineering work, a fixed-precision decimal type added in release
+            2.4, and a rational fraction type added in 2.6 and 3.0. See the
+            library manual and Python language fundamentals books such as
+            <span class="epub__emphasis"><em>Learning
+            Python</em></span> for details.</p>
+</div>
+<p>To understand how these points are mapped to a canvas, you
+          first need to know that the width and height of a circle are always
+          the same—the radius × 2. Because tkinter canvas (X,Y) coordinates
+          start at (0,0) in the upper-left corner, the plotter GUI must offset
+          the circle’s center point to coordinates (width/2, width/2)—the
+          origin point from which lines are drawn. For instance, in a 400 ×
+          400 circle, the canvas center is (200,200). A line to the 90-degree
+          angle point on the right side of the circle runs from (200,200) to
+          (400,200)—the result of adding the (200,0) point coordinates plotted
+          for the radius and angle. A line to the bottom at 180 degrees runs
+          from (200,200) to (200,400) after factoring in the (0,-200) point
+          plotted.</p>
+<p>This point-plotting algorithm used by <code class="epub__literal">plotterGui</code>, along with a few scaling
+          constants, is at the heart of the PyClock analog display. If this
+          still seems a bit much, I suggest you focus on the PyClock script’s
+          <span class="epub__emphasis"><em>digital</em></span> display implementation first; the
+          analog geometry plots are really just extensions of underlying
+          timing mechanisms used for both display modes. In fact, the clock
+          itself is structured as a generic <code class="epub__literal">Frame</code> object that
+          <span class="epub__emphasis"><em>embeds</em></span> digital and analog display objects and
+          dispatches time change and resize events to both in the same way.
+          The analog display is an attached <code class="epub__literal">Canvas</code> that knows how to draw circles, but
+          the digital object is simply an attached <code class="epub__literal">Frame</code> with labels to show time <a id="I_indexterm5_d1e46546"></a><a id="I_indexterm5_d1e46548"></a>components.</p>
+</div>
+<div class="epub__sect2" title="Running PyClock"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="running_pyclock"></a>Running PyClock</h2>
+</div>
+</div>
+</div>
+<p>Apart from the <a id="py11.6.2"></a>circle geometry bit, the rest of PyClock is
+          straightforward. It simply draws a clock face to represent the
+          current time and uses widget <code class="epub__literal">after</code> methods to wake itself up 10 times
+          per second to check whether the system time has rolled over to the
+          next second. On second rollovers, the analog second, minute, and
+          hour hands are redrawn to reflect the new time (or the text of the
+          digital display’s labels is changed). In terms of GUI construction,
+          the analog display is etched out on a canvas, redrawn whenever the
+          window is resized, and changes to a digital format upon
+          request.</p>
+<p>PyClock also puts Python’s standard <code class="epub__literal">time</code> module into service to fetch and
+          convert system time information as needed for a clock. In brief, the
+          <code class="epub__literal">onTimer</code> method gets system time
+          with <code class="epub__literal">time.time</code>, a built-in tool
+          that returns a floating-point number giving seconds since the
+          <span class="epub__emphasis"><em>epoch</em></span>—the point from which your computer counts
+          time. The <code class="epub__literal">time.localtime</code> call is
+          then used to convert epoch time into a tuple that contains hour,
+          minute, and second values; see the script and Python library manual
+          for additional details.</p>
+<p>Checking the system time 10 times per second may seem intense,
+          but it guarantees that the second hand ticks when it should, without
+          jerks or skips (<code class="epub__literal">after</code> events
+          aren’t precisely timed). It is not a significant CPU drain on
+          systems I use. On Linux and Windows, PyClock uses negligible
+          processor resources—what it does use is spent largely on screen
+          updates in analog display mode, not on <code class="epub__literal">after</code> events.<sup>[41]</sup></p>
+<p>To minimize screen updates, PyClock redraws only clock hands
+          on second rollovers; points on the clock’s circle are redrawn only
+          at startup and on window resizes. Figure 11-20 shows the default
+          initial PyClock display format you get when the file
+          <span class="epub__emphasis"><em>clock.py</em></span> is run directly.</p><div class="epub__figure-float"><div class="epub__figure"><a id="pyclock_default_analog_display"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e46603"></a><img alt="PyClock default analog display" src="Images/getfile_006-11.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 11-20. PyClock default analog display</p>
+</div>
+</div>
+<p>The clock hand lines are given arrows at their endpoints with
+          the canvas line object’s <code class="epub__literal">arrow</code>
+          and <code class="epub__literal">arrowshape</code> options. The
+          <code class="epub__literal">arrow</code> option can be <code class="epub__literal">first</code>, <code class="epub__literal">last</code>, <code class="epub__literal">none</code>, or <code class="epub__literal">both</code>; the <code class="epub__literal">arrowshape</code> option takes a tuple giving the
+          length of the arrow touching the line, its overall length, and its
+          width.</p>
+<p>Like PyView, PyClock also uses the widget <code class="epub__literal">pack_forget</code> and <code class="epub__literal">pack</code> methods to dynamically erase and
+          redraw portions of the display on demand (i.e., in response to bound
+          events). Clicking on the clock with a left mouse button changes its
+          display to digital by erasing the analog widgets and drawing the
+          digital interface; you get the simpler display captured in Figure 11-21.</p><div class="epub__figure-float"><div class="epub__figure"><a id="pyclock_goes_digital"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e46648"></a><img alt="PyClock goes digital" src="Images/getfile_005-14.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 11-21. PyClock goes digital</p>
+</div>
+</div>
+<p>This digital display form is useful if you want to conserve
+          real estate on your computer screen and minimize PyClock CPU
+          utilization (it incurs very little screen update overhead).
+          Left-clicking on the clock again changes back to the analog display.
+          The analog and digital displays are both constructed when the script
+          starts, but only one is ever packed at any given time.</p>
+<p>A right mouse click on the clock in either display mode shows
+          or hides an attached label that gives the current date in simple
+          text form. Figure 11-22
+          shows a PyClock running with an analog display, a clicked-on date
+          label, and a centered photo image object (this is clock style
+          started by the PyGadgets launcher):</p><div class="epub__figure-float"><div class="epub__figure"><a id="pyclock_extended_display_with_an_image"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e46664"></a><img alt="PyClock extended display with an image" src="Images/getfile_004-18.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 11-22. PyClock extended display with an image</p>
+</div>
+</div>
+<p>The image in the middle of Figure 11-22 is added by
+          passing in a configuration object with appropriate settings to the
+          PyClock object constructor. In fact, almost everything about this
+          display can be customized with attributes in PyClock configuration
+          <span>objects—</span>hand colors, clock
+          tick colors, center photos, and initial size.</p>
+<p>Because PyClock’s analog display is based upon a manually
+          sketched figure on a canvas, it has to process window
+          <span class="epub__emphasis"><em>resize</em></span> events itself: whenever the window
+          shrinks or expands, the clock face has to be redrawn and scaled for
+          the new window size. To catch screen resizes, the script registers
+          for the <code class="epub__literal">&lt;Configure&gt;</code> event
+          with <code class="epub__literal">bind</code>; surprisingly, this
+          isn’t a top-level window manager event like the Close button. As you
+          expand a PyClock, the clock face gets bigger with the window—try
+          expanding, shrinking, and maximizing the clock window on your
+          computer. Because the clock face is plotted in a square coordinate
+          system, PyClock always expands in equal horizontal and vertical
+          proportions, though; if you simply make the window only wider or
+          taller, the clock is unchanged.</p>
+<p>Added in the third edition of this book is a countdown timer
+          feature: press the “s” or “m” key to pop up a simple dialog for
+          entering the number of seconds or minutes for the countdown,
+          respectively. Once the countdown expires, the pop up in <span>Figure 11-23</span> appears and
+          fills the entire screen on Windows. I sometimes use this in classes
+          I teach to remind myself and my students when it’s time to move on
+          (the effect is more striking when this pop up is projected onto an
+          entire wall!).</p><div class="epub__figure"><a id="pyclock_countdown_timer_expired"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e46695"></a><img alt="PyClock countdown timer expired" src="Images/getfile_002-30.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 11-23. PyClock countdown timer expired</p>
+</div>
+<p>Finally, like PyEdit, PyClock can be run either standalone or
+          attached to and embedded in other GUIs that need to display the
+          current time. When standalone, the <code class="epub__literal">windows</code> module from the preceding chapter
+          (Example 10-16) is
+          reused here to get a window icon, title, and quit pop up for free.
+          To make it easy to start preconfigured clocks, a utility module
+          called <code class="epub__literal">clockStyles</code> provides a set
+          of clock configuration objects you can import, subclass to extend,
+          and pass to the clock constructor; Figure 11-24 shows a few of
+          the preconfigured clock styles and sizes in action, ticking away in
+          sync.</p><div class="epub__figure"><a id="a_few_canned_clock_styles_colon_clocksty"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e46715"></a><img alt="A few canned clock styles: clockstyles.py" src="Images/getfile_003-23.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 11-24. A few canned clock styles: clockstyles.py</p>
+</div>
+<p>Run <em class="epub__filename">clockstyles.py</em> (or
+          select PyClock from PyDemos, which does the same) to recreate this
+          timely scene on your computer. Each of these clocks uses <code class="epub__literal">after</code> events to check for system-time
+          rollover 10 times per second. When run as top-level windows in the
+          same process, all receive a timer event from the same event loop.
+          When started as independent programs, each has an event loop of its
+          own. Either way, their second hands sweep in unison each <a id="I_indexterm5_d1e46728"></a>second.</p>
+</div>
+<div class="epub__sect2" title="PyClock Source Code"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="pyclock_source_code"></a>PyClock Source Code</h2>
+</div>
+</div>
+</div>
+<p>All of the PyClock <a id="py11.6.3"></a>source code lives in one file, except for the precoded
+          configuration style objects. If you study the code at the bottom of
+          the file shown in Example 11-12, you’ll notice
+          that you can either make a clock object with a configuration object
+          passed in or specify configuration options by command-line arguments
+          such as the following (in which case, the script simply builds a
+          configuration object for you):</p><a id="I_programlisting5_d1e46744"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Gui\Clock&gt; <strong class="epub__userinput"><code>clock.py -bg gold -sh brown -size 300</code></strong></pre>
+<p>More generally, you can run this file directly to start a
+          clock with or without arguments, import and make its objects with
+          configuration objects to get a more custom display, or import and
+          attach its objects to other GUIs. For instance, PyGadgets in Chapter 10 runs this file with command-line
+          options to tailor the display.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id146"></a>
+<p class="epub__title">Example 11-12. PP4E\Gui\Clock\clock.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+###############################################################################
+PyClock 2.1: a clock GUI in Python/tkinter.
+
+With both analog and digital display modes, a pop-up date label, clock face
+images, general resizing, etc.  May be run both standalone, or embedded
+(attached) in other GUIs that need a clock.
+
+New in 2.0: s/m keys set seconds/minutes timer for pop-up msg; window icon.
+New in 2.1: updated to run under Python 3.X (2.X no longer supported)
+###############################################################################
+"""
+
+from tkinter import *
+from tkinter.simpledialog import askinteger
+import math, time, sys
+
+
+###############################################################################
+# Option configuration classes
+###############################################################################
+
+
+class ClockConfig:
+    # defaults--override in instance or subclass
+    size = 200                                        # width=height
+    bg, fg = 'beige', 'brown'                         # face, tick colors
+    hh, mh, sh, cog = 'black', 'navy', 'blue', 'red'  # clock hands, center
+    picture = None                                    # face photo file
+
+class PhotoClockConfig(ClockConfig):
+    # sample configuration
+    size    = 320
+    picture = '../gifs/ora-pp.gif'
+    bg, hh, mh = 'white', 'blue', 'orange'
+
+
+###############################################################################
+# Digital display object
+###############################################################################
+
+class DigitalDisplay(Frame):
+    def __init__(self, parent, cfg):
+        Frame.__init__(self, parent)
+        self.hour = Label(self)
+        self.mins = Label(self)
+        self.secs = Label(self)
+        self.ampm = Label(self)
+        for label in self.hour, self.mins, self.secs, self.ampm:
+            label.config(bd=4, relief=SUNKEN, bg=cfg.bg, fg=cfg.fg)
+            label.pack(side=LEFT)  # TBD: could expand, and scale font on resize
+
+    def onUpdate(self, hour, mins, secs, ampm, cfg):
+        mins = str(mins).zfill(2)                          # or '%02d' % x
+        self.hour.config(text=str(hour), width=4)
+        self.mins.config(text=str(mins), width=4)
+        self.secs.config(text=str(secs), width=4)
+        self.ampm.config(text=str(ampm), width=4)
+
+    def onResize(self, newWidth, newHeight, cfg):
+        pass  # nothing to redraw here
+
+
+###############################################################################
+# Analog display object
+###############################################################################
+
+class AnalogDisplay(Canvas):
+    def __init__(self, parent, cfg):
+        Canvas.__init__(self, parent,
+                        width=cfg.size, height=cfg.size, bg=cfg.bg)
+        self.drawClockface(cfg)
+        self.hourHand = self.minsHand = self.secsHand = self.cog = None
+
+    def drawClockface(self, cfg):                         # on start and resize
+        if cfg.picture:                                   # draw ovals, picture
+            try:
+                self.image = PhotoImage(file=cfg.picture)          # bkground
+            except:
+                self.image = BitmapImage(file=cfg.picture)         # save ref
+            imgx = (cfg.size - self.image.width())  // 2           # center it
+            imgy = (cfg.size - self.image.height()) // 2           # 3.x // div
+            self.create_image(imgx+1, imgy+1,  anchor=NW, image=self.image)
+        originX = originY = radius = cfg.size // 2                 # 3.x // div
+        for i in range(60):
+            x, y = self.point(i, 60, radius-6, originX, originY)
+            self.create_rectangle(x-1, y-1, x+1, y+1, fill=cfg.fg)   # mins
+        for i in range(12):
+            x, y = self.point(i, 12, radius-6, originX, originY)
+            self.create_rectangle(x-3, y-3, x+3, y+3, fill=cfg.fg)   # hours
+        self.ampm = self.create_text(3, 3, anchor=NW, fill=cfg.fg)
+
+    def point(self, tick, units, radius, originX, originY):
+        angle = tick * (360.0 / units)
+        radiansPerDegree = math.pi / 180
+        pointX = int( round( radius * math.sin(angle * radiansPerDegree) ))
+        pointY = int( round( radius * math.cos(angle * radiansPerDegree) ))
+        return (pointX + originX+1), (originY+1 - pointY)
+
+    def onUpdate(self, hour, mins, secs, ampm, cfg):        # on timer callback
+        if self.cog:                                        # redraw hands, cog
+            self.delete(self.cog)
+            self.delete(self.hourHand)
+            self.delete(self.minsHand)
+            self.delete(self.secsHand)
+        originX = originY = radius = cfg.size // 2          # 3.x div
+        hour = hour + (mins / 60.0)
+        hx, hy = self.point(hour, 12, (radius * .80), originX, originY)
+        mx, my = self.point(mins, 60, (radius * .90), originX, originY)
+        sx, sy = self.point(secs, 60, (radius * .95), originX, originY)
+        self.hourHand = self.create_line(originX, originY, hx, hy,
+                             width=(cfg.size * .04),
+                             arrow='last', arrowshape=(25,25,15), fill=cfg.hh)
+        self.minsHand = self.create_line(originX, originY, mx, my,
+                             width=(cfg.size * .03),
+                             arrow='last', arrowshape=(20,20,10), fill=cfg.mh)
+        self.secsHand = self.create_line(originX, originY, sx, sy,
+                             width=1,
+                             arrow='last', arrowshape=(5,10,5), fill=cfg.sh)
+        cogsz = cfg.size * .01
+        self.cog = self.create_oval(originX-cogsz, originY+cogsz,
+                                    originX+cogsz, originY-cogsz, fill=cfg.cog)
+        self.dchars(self.ampm, 0, END)
+        self.insert(self.ampm, END, ampm)
+
+    def onResize(self, newWidth, newHeight, cfg):
+        newSize = min(newWidth, newHeight)
+        #print('analog onResize', cfg.size+4, newSize)
+        if newSize != cfg.size+4:
+            cfg.size = newSize-4
+            self.delete('all')
+            self.drawClockface(cfg)  # onUpdate called next
+
+
+###############################################################################
+# Clock composite object
+###############################################################################
+
+ChecksPerSec = 10  # second change timer
+
+class Clock(Frame):
+    def __init__(self, config=ClockConfig, parent=None):
+        Frame.__init__(self, parent)
+        self.cfg = config
+        self.makeWidgets(parent)                     # children are packed but
+        self.labelOn = 0                             # clients pack or grid me
+        self.display = self.digitalDisplay
+        self.lastSec = self.lastMin = −1
+        self.countdownSeconds = 0
+        self.onSwitchMode(None)
+        self.onTimer()
+
+    def makeWidgets(self, parent):
+        self.digitalDisplay = DigitalDisplay(self, self.cfg)
+        self.analogDisplay  = AnalogDisplay(self,  self.cfg)
+        self.dateLabel      = Label(self, bd=3, bg='red', fg='blue')
+        parent.bind('&lt;ButtonPress-1&gt;', self.onSwitchMode)
+        parent.bind('&lt;ButtonPress-3&gt;', self.onToggleLabel)
+        parent.bind('&lt;Configure&gt;',     self.onResize)
+        parent.bind('&lt;KeyPress-s&gt;',    self.onCountdownSec)
+        parent.bind('&lt;KeyPress-m&gt;',    self.onCountdownMin)
+
+    def onSwitchMode(self, event):
+        self.display.pack_forget()
+        if self.display == self.analogDisplay:
+            self.display = self.digitalDisplay
+        else:
+            self.display = self.analogDisplay
+        self.display.pack(side=TOP, expand=YES, fill=BOTH)
+
+    def onToggleLabel(self, event):
+        self.labelOn += 1
+        if self.labelOn % 2:
+            self.dateLabel.pack(side=BOTTOM, fill=X)
+        else:
+            self.dateLabel.pack_forget()
+        self.update()
+
+    def onResize(self, event):
+        if event.widget == self.display:
+            self.display.onResize(event.width, event.height, self.cfg)
+
+    def onTimer(self):
+        secsSinceEpoch = time.time()
+        timeTuple      = time.localtime(secsSinceEpoch)
+        hour, min, sec = timeTuple[3:6]
+        if sec != self.lastSec:
+            self.lastSec = sec
+            ampm = ((hour &gt;= 12) and 'PM') or 'AM'               # 0...23
+            hour = (hour % 12) or 12                             # 12..11
+            self.display.onUpdate(hour, min, sec, ampm, self.cfg)
+            self.dateLabel.config(text=time.ctime(secsSinceEpoch))
+            self.countdownSeconds -= 1
+            if self.countdownSeconds == 0:
+                self.onCountdownExpire()                # countdown timer
+        self.after(1000 // ChecksPerSec, self.onTimer)  # run N times per second
+                                                        # 3.x // trunc int div
+    def onCountdownSec(self, event):
+        secs = askinteger('Countdown', 'Seconds?')
+        if secs: self.countdownSeconds = secs
+
+    def onCountdownMin(self, event):
+        secs = askinteger('Countdown', 'Minutes')
+        if secs: self.countdownSeconds = secs * 60
+
+    def onCountdownExpire(self):
+        # caveat: only one active, no progress indicator
+        win = Toplevel()
+        msg = Button(win, text='Timer Expired!', command=win.destroy)
+        msg.config(font=('courier', 80, 'normal'), fg='white', bg='navy')
+        msg.config(padx=10, pady=10)
+        msg.pack(expand=YES, fill=BOTH)
+        win.lift()                             # raise above siblings
+        if sys.platform[:3] == 'win':          # full screen on Windows
+            win.state('zoomed')
+
+
+###############################################################################
+# Standalone clocks
+###############################################################################
+
+appname = 'PyClock 2.1'
+
+
+# use new custom Tk, Toplevel for icons, etc.
+from PP4E.Gui.Tools.windows import PopupWindow, MainWindow
+
+class ClockPopup(PopupWindow):
+    def __init__(self, config=ClockConfig, name=''):
+        PopupWindow.__init__(self, appname, name)
+        clock = Clock(config, self)
+        clock.pack(expand=YES, fill=BOTH)
+
+class ClockMain(MainWindow):
+    def __init__(self, config=ClockConfig, name=''):
+        MainWindow.__init__(self, appname, name)
+        clock = Clock(config, self)
+        clock.pack(expand=YES, fill=BOTH)
+
+
+# b/w compat: manual window borders, passed-in parent
+
+class ClockWindow(Clock):
+    def __init__(self, config=ClockConfig, parent=None, name=''):
+        Clock.__init__(self, config, parent)
+        self.pack(expand=YES, fill=BOTH)
+        title = appname
+        if name: title = appname + ' - ' + name
+        self.master.title(title)                # master=parent or default
+        self.master.protocol('WM_DELETE_WINDOW', self.quit)
+
+
+###############################################################################
+# Program run
+###############################################################################
+
+if __name__ == '__main__':
+    def getOptions(config, argv):
+        for attr in dir(ClockConfig):              # fill default config obj,
+            try:                                   # from "-attr val" cmd args
+                ix = argv.index('-' + attr)        # will skip __x__ internals
+            except:
+                continue
+            else:
+                if ix in range(1, len(argv)-1):
+                    if type(getattr(ClockConfig, attr)) == int:
+                        setattr(config, attr, int(argv[ix+1]))
+                    else:
+                        setattr(config, attr, argv[ix+1])
+
+   #config = PhotoClockConfig()
+    config = ClockConfig()
+    if len(sys.argv) &gt;= 2:
+        getOptions(config, sys.argv)         # clock.py -size n -bg 'blue'...
+   #myclock = ClockWindow(config, Tk())      # parent is Tk root if standalone
+   #myclock = ClockPopup(ClockConfig(), 'popup')
+    myclock = ClockMain(config)
+    myclock.mainloop()</pre>
+</div>
+</div>
+<p>And finally, Example 11-13 shows the module
+          that is actually run from the PyDemos launcher script—it predefines
+          a handful of clock styles and runs seven of them at once, attached
+          to new top-level windows for a demo effect (though one clock per
+          screen is usually enough in practice, even for me!).</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id147"></a>
+<p class="epub__title">Example 11-13. PP4E\Gui\Clock\clockStyles.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># precoded clock configuration styles
+
+from clock import *
+from tkinter import mainloop
+
+gifdir = '../gifs/'
+if __name__ == '__main__':
+    from sys import argv
+    if len(argv) &gt; 1:
+        gifdir = argv[1] + '/'
+
+class PPClockBig(PhotoClockConfig):
+    picture, bg, fg = gifdir + 'ora-pp.gif', 'navy', 'green'
+
+class PPClockSmall(ClockConfig):
+    size    = 175
+    picture = gifdir + 'ora-pp.gif'
+    bg, fg, hh, mh = 'white', 'red', 'blue', 'orange'
+
+class GilliganClock(ClockConfig):
+    size    = 550
+    picture = gifdir + 'gilligan.gif'
+    bg, fg, hh, mh = 'black', 'white', 'green', 'yellow'
+
+class LP4EClock(GilliganClock):
+    size = 700
+    picture = gifdir + 'ora-lp4e.gif'
+    bg = 'navy'
+
+class LP4EClockSmall(LP4EClock):
+    size, fg = 350, 'orange'
+
+class Pyref4EClock(ClockConfig):
+    size, picture = 400, gifdir + 'ora-pyref4e.gif'
+    bg, fg, hh    = 'black', 'gold', 'brown'
+
+class GreyClock(ClockConfig):
+    bg, fg, hh, mh, sh = 'grey', 'black', 'black', 'black', 'white'
+
+class PinkClock(ClockConfig):
+    bg, fg, hh, mh, sh = 'pink', 'yellow', 'purple', 'orange', 'yellow'
+
+class PythonPoweredClock(ClockConfig):
+    bg, size, picture = 'white', 175, gifdir + 'pythonPowered.gif'
+
+if __name__ == '__main__':
+    root = Tk()
+    for configClass in [
+        ClockConfig,
+        PPClockBig,
+        #PPClockSmall,
+        LP4EClockSmall,
+        #GilliganClock,
+        Pyref4EClock,
+        GreyClock,
+        PinkClock,
+        PythonPoweredClock
+    ]:
+        ClockPopup(configClass, configClass.__name__)
+    Button(root, text='Quit Clocks', command=root.quit).pack()
+    root.mainloop()</pre>
+</div>
+</div>
+<p>Running this script creates the multiple clock display of
+          Figure 11-24. Its
+          configurations support numerous options; judging from the seven
+          clocks on the display, though, it’s time to move on to our last
+          <a id="I_indexterm5_d1e46770"></a>example.</p>
+</div><div class="epub__footnotes"><br/><hr/><div class="epub__footnote">
+<p><sup>[40] </sup>Lest that make software engineers seem too doltish, I
+              should also note that I have been called on repeatedly to teach
+              Python programming to physicists, all of whom had mathematical
+              training well in advance of my own, and many of whom were still
+              happily abusing FORTRAN common blocks and go-tos. Specialization
+              in modern society can make novices of us all.</p>
+</div><div class="epub__footnote">
+<p><sup>[41] </sup>The PyDemos script of the preceding chapter, for instance,
+              launches seven clocks that run in the same process, and all
+              update smoothly on my (relatively slow) Windows 7 netbook
+              laptop. They together consume a low single-digit percentage of
+              the CPU’s bandwidth, and often less than the Task
+              Manager.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

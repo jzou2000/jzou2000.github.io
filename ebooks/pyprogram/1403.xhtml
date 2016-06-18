@@ -1,0 +1,3011 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>PyMailGUI Implementation</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="PyMailGUI Implementation"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="pymailgui_implementation"></a>PyMailGUI Implementation</h1>
+</div>
+</div>
+</div>
+<p>Last but not least, we get to the <a id="py14.4"></a>code. PyMailGUI consists of the new modules listed near
+        the start of this chapter, along with a handful of peripheral files
+        described there. The source code for these modules is listed in this
+        section. Before we get started, here are two quick reminders to help
+        you study:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Code reuse</em></span></span></dt><dd>
+<p>Besides the code here, PyMailGUI also gets a lot of
+              mileage out of reusing modules we wrote earlier and won’t repeat
+              here: <code class="epub__literal">mailtools</code> for mail
+              loads, composition, parsing, and delete operations; <code class="epub__literal">threadtools</code> for managing server and
+              local file access threads; the GUI section’s <code class="epub__literal">TextEditor</code> for displaying and editing
+              mail message text; and so on. See the example numbers list
+              earlier in this chapter.</p>
+<p>In addition, standard Python modules and packages such as
+              <code class="epub__literal">poplib</code>, <code class="epub__literal">smtplib</code>, and <code class="epub__literal">email</code> hide most of the details of
+              pushing bytes around the Net and extracting and building message
+              components. As usual, the <code class="epub__literal">tkinter</code> standard library module also
+              implements GUI components in a portable fashion.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Code structure</em></span></span></dt><dd>
+<p>As mentioned earlier, PyMailGUI applies code factoring and
+              OOP to leverage code reuse. For instance, list view windows are
+              implemented as a common superclass that codes most actions,
+              along with one subclass for the server inbox list window and one
+              for local save-file list windows. The subclasses customize the
+              common superclass for their specific mail media.</p>
+<p>This design reflects the operation of the GUI
+              itself—server list windows load mail over POP, and save-file
+              list windows load from local files. The basic operation of list
+              window layout and actions, though, is similar for both and is
+              shared in the common superclass to avoid redundancy and simplify
+              the code. Message view windows are similarly factored: a common
+              view window superclass is reused and customized for write,
+              reply, and forward view windows.</p>
+<p>To make the code easier to follow, it is divided into two
+              main modules that reflect the structure of the GUI—one for the
+              implementation of list window actions and one for view window
+              actions. If you are looking for the implementation of a button
+              that appears in a mail view or edit window, for instance, see
+              the view window module and search for a method whose name begins
+              with the word <span class="epub__emphasis"><em>on</em></span>—the convention used for
+              callback handler methods. A specific button’s text can also be
+              located in name/callback tables used to build the windows.
+              Actions initiated on list windows are coded in the list window
+              module instead.</p>
+<p>In addition, the message cache is split off into an object
+              and module of its own, and potentially reusable tools are coded
+              in importable modules (e.g., line wrapping and utility pop ups).
+              PyMailGUI also includes a main module that defines startup
+              window classes, a simple HTML to plain-text parser, a module
+              that contains the help text as a string, the <code class="epub__literal">mailconfig</code> user settings module (a
+              version specific to PyMailGUI is used here), and a small handful
+              of related files.</p></dd></dl>
+</div>
+<p>The following subsections present each of PyMailGUI’s source
+        code files for you to study. As you read, refer back to the demo
+        earlier in this chapter and run the program live to map its behavior
+        back to its code.</p>
+<p>One accounting note up-front: the only one of PyMailGUI’s 18 new
+        source files not listed in this section is its <code class="epub__literal">__init__.py</code> package initialization file.
+        This file is mostly empty except for a comment string and is unused in
+        the system today. It exists only for future expansion, in case
+        PyMailGUI is ever used as a package in the future—some of its modules
+        may be useful in other programs. As is, though, same-directory
+        internal imports here are not package-relative, so they assume this
+        system is either run as a top-level program (to import from “<code class="epub__literal">.</code>”) or is listed on <code class="epub__literal">sys.path</code> directly (to use absolute imports).
+        In Python 3.X, a package’s directory is not included on <code class="epub__literal">sys.path</code> automatically, so future use as a
+        package would require changes to internal imports (e.g., moving the
+        main script up one level and using <code class="epub__literal">from .
+        import module</code> throughout). See resources such as the book
+        <span class="epub__emphasis"><em>Learning
+        Python</em></span> for more on packages and package <a id="I_indexterm3_d1e62644"></a>imports.</p>
+<div class="epub__sect2" title="PyMailGUI: The Main Module"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="pymailgui_colon_the_main_module"></a>PyMailGUI: The Main Module</h2>
+</div>
+</div>
+</div>
+<p>Example 14-1
+<a id="py14.4.1"></a>defines the file run to start PyMailGUI. It implements
+          top-level list windows in the system—combinations of PyMailGUI’s
+          application logic and the window protocol superclasses we wrote
+          earlier in the text. The latter of these define window titles,
+          icons, and close behavior.</p>
+<p>The main internal, nonuser documentation is also in this
+          module, as well as command-line logic—the program accepts the names
+          of one or more save-mail files on the <span>command</span> line, and automatically opens
+          them when the GUI starts up. This is used by the PyDemos launcher of
+          Chapter 10, for example.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id51"></a>
+<p class="epub__title">Example 14-1. PP4E\Internet\Email\PyMailGui\PyMailGui.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+##################################################################################
+PyMailGui 3.0 - A Python/tkinter email client.
+A client-side tkinter-based GUI interface for sending and receiving email.
+
+See the help string in PyMailGuiHelp.py for usage details, and a list of
+enhancements in this version.
+
+Version 2.0 was a major, complete rewrite.  The changes from 2.0 (July '05)
+to 2.1 (Jan '06) were quick-access part buttons on View windows, threaded
+loads and deletes of local save-mail files, and checks for and recovery from
+message numbers out-of-synch with mail server inbox on deletes, index loads,
+and message loads.
+
+Version 3.0 (4E) is a port to Python 3.X; uses grids instead of packed column
+frames for better form layout of headers in view windows; runs update() after
+inserting into a new text editor for accurate line positioning (see PyEdit
+loadFirst changes in Chapter 11); provides an HTML-based version of its help
+text; extracts plain-text from HTML main/only parts for display and quoting;
+supports separators in toolbars; addresses both message content and header
+Unicode/I18N encodings for fetched, sent, and saved mails (see Ch13 and Ch14);
+and much more (see Ch14 for the full rundown on 3.0 upgrades); fetched message
+decoding happens deep in the mailtools package, on mail cache load operations
+here; mailtools also fixes a few email package bugs (see Ch13);
+
+This file implements the top-level windows and interface.  PyMailGui uses a
+number of modules that know nothing about this GUI, but perform related tasks,
+some of which are developed in other sections of the book.  The mailconfig
+module is expanded for this program.
+
+==Modules defined elsewhere and reused here:==
+
+mailtools (package)
+    client-side scripting chapter
+    server sends and receives, parsing, construction     (Example 13-21+)
+threadtools.py
+    GUI tools chapter
+    thread queue manangement for GUI callbacks           (Example 10-20)
+windows.py
+    GUI tools chapter
+    border configuration for top-level windows           (Example 10-16)
+textEditor.py
+    GUI programs chapter
+    text widget used in mail view windows, some pop ups  (Example 11-4)
+
+==Generally useful modules defined here:==
+
+popuputil.py
+    help and busy windows, for general use
+messagecache.py
+    a cache that keeps track of mail already loaded
+wraplines.py
+    utility for wrapping long lines of messages
+html2text.py
+    rudimentary HTML parser for extracting plain text
+mailconfig.py
+    user configuration parameters: server names, fonts, etc.
+
+==Program-specific modules defined here:==
+
+SharedNames.py
+    objects shared between window classes and main file
+ViewWindows.py
+    implementation of view, write, reply, forward windows
+ListWindows.py
+    implementation of mail-server and local-file list windows
+PyMailGuiHelp.py (see also PyMailGuiHelp.html)
+    user-visible help text, opened by main window bar
+PyMailGui.py
+    main, top-level file (run this), with main window types
+##################################################################################
+"""
+
+import mailconfig, sys
+from SharedNames import appname, windows
+from ListWindows import PyMailServer, PyMailFile
+
+
+###############################################################################
+# top-level window classes
+#
+# View, Write, Reply, Forward, Help, BusyBox all inherit from PopupWindow
+# directly: only usage;  askpassword calls PopupWindow and attaches;  the
+# order matters here!--PyMail classes redef some method defaults in the
+# Window classes, like destroy and okayToExit: must be leftmost;  to use
+# PyMailFileWindow standalone, imitate logic in PyMailCommon.onOpenMailFile;
+###############################################################################
+
+# uses icon file in cwd or default in tools dir
+srvrname = mailconfig.popservername or 'Server'
+
+class PyMailServerWindow(PyMailServer, windows.MainWindow):
+    "a Tk, with extra protocol and mixed-in methods"
+    def __init__(self):
+        windows.MainWindow.__init__(self, appname, srvrname)
+        PyMailServer.__init__(self)
+
+class PyMailServerPopup(PyMailServer, windows.PopupWindow):
+    "a Toplevel, with extra protocol and mixed-in methods"
+    def __init__(self):
+        windows.PopupWindow.__init__(self, appname, srvrnane)
+        PyMailServer.__init__(self)
+
+class PyMailServerComponent(PyMailServer, windows.ComponentWindow):
+    "a Frame, with extra protocol and mixed-in methods"
+    def __init__(self):
+        windows.ComponentWindow.__init__(self)
+        PyMailServer.__init__(self)
+
+class PyMailFileWindow(PyMailFile, windows.PopupWindow):
+    "a Toplevel, with extra protocol and mixed-in methods"
+    def __init__(self, filename):
+        windows.PopupWindow.__init__(self, appname, filename)
+        PyMailFile.__init__(self, filename)
+
+
+###############################################################################
+# when run as a top-level program: create main mail-server list window
+###############################################################################
+
+if __name__ == '__main__':
+    rootwin = PyMailServerWindow()              # open server window
+    if len(sys.argv) &gt; 1:                       # 3.0: fix to add len()
+        for savename in sys.argv[1:]:
+            rootwin.onOpenMailFile(savename)    # open save file windows (demo)
+        rootwin.lift()                          # save files loaded in threads
+    rootwin.mainloop()</pre>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="SharedNames: Program-Wide Globals"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="sharednames_colon_program-wide_globals"></a>SharedNames: Program-Wide Globals</h2>
+</div>
+</div>
+</div>
+<p>The <a id="I_indexterm3_d1e62678"></a><a id="I_indexterm3_d1e62680"></a>module in Example 14-2 implements a shared,
+          system-wide namespace that collects resources used in most modules
+          in the system and defines global objects that span files. This
+          allows other files to avoid redundantly repeating common imports and
+          encapsulates the locations of package imports; it is the only file
+          that must be updated if paths change in the future. Using globals
+          can make programs more difficult to understand in general (the
+          source of some names is not as clear), but it is reasonable if all
+          such names are collected in a single expected module such as this
+          one, because there is only one place to search for unknown
+          names.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id52"></a>
+<p class="epub__title">Example 14-2. PP4E\Internet\Email\PyMailGui\SharedNames.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+##############################################################################
+objects shared by all window classes and main file: program-wide globals
+##############################################################################
+"""
+
+# used in all window, icon titles
+appname  = 'PyMailGUI 3.0'
+
+# used for list save, open, delete; also for sent messages file
+saveMailSeparator = 'PyMailGUI' + ('-'*60) + 'PyMailGUI\n'
+
+# currently viewed mail save files; also for sent-mail file
+openSaveFiles = {}                     # 1 window per file,{name:win}
+
+# standard library services
+import sys, os, email.utils, email.message, webbrowser, mimetypes
+from tkinter import *
+from tkinter.simpledialog import askstring
+from tkinter.filedialog   import SaveAs, Open, Directory
+from tkinter.messagebox   import showinfo, showerror, askyesno
+
+# reuse book examples
+from PP4E.Gui.Tools      import windows      # window border, exit protocols
+from PP4E.Gui.Tools      import threadtools  # thread callback queue checker
+from PP4E.Internet.Email import mailtools    # load,send,parse,build utilities
+from PP4E.Gui.TextEditor import textEditor   # component and pop up
+
+# modules defined here
+import mailconfig                            # user params: servers, fonts, etc.
+import popuputil                             # help, busy, passwd pop-up windows
+import wraplines                             # wrap long message lines
+import messagecache                          # remember already loaded mail
+import html2text                             # simplistic html-&gt;plaintext extract
+import PyMailGuiHelp                         # user documentation
+
+def printStack(exc_info):
+    """
+    debugging: show exception and stack traceback on stdout;
+    3.0: change to print stack trace to a real log file if print
+    to sys.stdout fails: it does when launched from another program
+    on Windows;  without this workaround, PMailGUI aborts and exits
+    altogether, as this is called from the main thread on spawned
+    thread failures;  likely a Python 3.1 bug: it doesn't occur in
+    2.5 or 2.6, and the traceback object works fine if print to file;
+    oddly, the print() calls here work (but go nowhere) if spawned;
+    """
+    print(exc_info[0])
+    print(exc_info[1])
+    import traceback
+    try:
+        traceback.print_tb(exc_info[2], file=sys.stdout)   # ok unless spawned!
+    except:
+        log = open('_pymailerrlog.txt', 'a')               # use a real file
+        log.write('-'*80)                                  # else gui may exit
+        traceback.print_tb(exc_info[2], file=log)          # in 3.X, not 2.5/6
+
+# thread busy counters for threads run by this GUI
+# sendingBusy shared by all send windows, used by main window quit
+
+loadingHdrsBusy = threadtools.ThreadCounter()   # only 1
+deletingBusy    = threadtools.ThreadCounter()   # only 1
+loadingMsgsBusy = threadtools.ThreadCounter()   # poss many
+sendingBusy     = threadtools.ThreadCounter()   # poss many</pre>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="ListWindows: Message List Windows"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="listwindows_colon_message_list_windows"></a>ListWindows: Message List Windows</h2>
+</div>
+</div>
+</div>
+<p>The code in Example 14-3 implements
+          <a id="py14.4.3"></a>mail index list windows—for the server inbox window
+          and for one or more local save-mail file windows. These two types of
+          windows look and behave largely the same, and in fact share most of
+          their code in common in a superclass. The window subclasses mostly
+          just customize the superclass to map mail Load and Delete calls to
+          the server or a local file.</p>
+<p>List windows are created on program startup (the initial
+          server window, and possible save-file windows for command-line
+          options), as well as in response to Open button actions in existing
+          list windows (for opening new save-file list windows). See the Open
+          button’s callback in this example for initiation code.</p>
+<p>Notice that the basic mail processing operations in the
+          <code class="epub__literal">mailtools</code> package from Chapter 13 are mixed into PyMailGUI in a
+          variety of ways. The list window classes in Example 14-3 inherit from the
+          <code class="epub__literal">mailtools</code> mail parser class, but
+          the server list window class embeds an instance of the message cache
+          object, which in turn inherits from the <code class="epub__literal">mailtools</code> mail fetcher. The <code class="epub__literal">mailtools</code> mail sender class is inherited
+          by message view write windows, not list windows; view windows also
+          inherit from the mail parser.</p>
+<p>This is a fairly large file; in principle it could be split
+          into three files, one for each class, but these classes are so
+          closely related that it is handy to have their code in a single file
+          for edits. Really, this is one class, with two minor
+          extensions.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id53"></a>
+<p class="epub__title">Example 14-3. PP4E\Internet\Email\PyMailGui\ListWindows.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+###############################################################################
+Implementation of mail-server and save-file message list main windows:
+one class per kind.  Code is factored here for reuse: server and file
+list windows are customized versions of the PyMailCommon list window class;
+the server window maps actions to mail transferred from a server, and the
+file window applies actions to a local file.
+
+List windows create View, Write, Reply, and Forward windows on user actions.
+The server list window is the main window opened on program startup by the
+top-level file;  file list windows are opened on demand via server and file
+list window "Open".  Msgnums may be temporarily out of sync with server if
+POP inbox changes (triggers full reload here).
+
+Changes here in 2.1:
+-now checks on deletes and loads to see if msg nums in sync with server
+-added up to N attachment direct-access buttons on view windows
+-threaded save-mail file loads, to avoid N-second pause for big files
+-also threads save-mail file deletes so file write doesn't pause GUI
+
+TBD:
+-save-mail file saves still not threaded: may pause GUI briefly, but
+ uncommon - unlike load and delete, save/send only appends the local file.
+-implementation of local save-mail files as text files with separators
+ is mostly a prototype: it loads all full mails into memory, and so limits
+ the practical size of these files; better alternative: use 2 DBM keyed
+ access files for hdrs and fulltext, plus a list to map keys to position;
+ in this scheme save-mail files become directories, no longer readable.
+###############################################################################
+"""
+
+from SharedNames import *     # program-wide global objects
+from ViewWindows import ViewWindow, WriteWindow, ReplyWindow, ForwardWindow
+
+
+###############################################################################
+# main frame - general structure for both file and server message lists
+###############################################################################
+
+
+class PyMailCommon(mailtools.MailParser):
+    """
+    an abstract widget package, with main mail listbox;
+    mixed in with a Tk, Toplevel, or Frame by top-level window classes;
+    must be customized in mode-specific subclass with actions() and other;
+    creates view and write windows on demand: they serve as MailSenders;
+    """
+    # class attrs shared by all list windows
+    threadLoopStarted = False                     # started by first window
+    queueChecksPerSecond = 20                     # tweak if CPU use too high
+    queueDelay = 1000 // queueChecksPerSecond     # min msecs between timer events
+    queueBatch = 5                                # max callbacks per timer event
+
+    # all windows use same dialogs: remember last dirs
+    openDialog = Open(title=appname + ': Open Mail File')
+    saveDialog = SaveAs(title=appname + ': Append Mail File')
+
+    # 3.0: avoid downloading (fetching) same message in parallel
+    beingFetched = set()
+
+    def __init__(self):
+        self.makeWidgets()                        # draw my contents: list,tools
+        if not PyMailCommon.threadLoopStarted:
+
+            # start thread exit check loop
+            # a timer event loop that dispatches queued GUI callbacks;
+            # just one loop for all windows: server,file,views can all thread;
+            # self is a Tk, Toplevel,or Frame: any widget type will suffice;
+            # 3.0/4E: added queue delay/batch for progress speedup: ~100x/sec;
+
+            PyMailCommon.threadLoopStarted = True
+            threadtools.threadChecker(self, self.queueDelay, self.queueBatch)
+
+    def makeWidgets(self):
+        # add all/none checkbtn at bottom
+        tools = Frame(self, relief=SUNKEN, bd=2, cursor='hand2')    # 3.0: configs
+        tools.pack(side=BOTTOM, fill=X)
+        self.allModeVar = IntVar()
+        chk = Checkbutton(tools, text="All")
+        chk.config(variable=self.allModeVar, command=self.onCheckAll)
+        chk.pack(side=RIGHT)
+
+        # add main buttons at bottom toolbar
+        for (title, callback) in self.actions():
+            if not callback:
+                sep = Label(tools, text=title)                # 3.0: separator
+                sep.pack(side=LEFT, expand=YES, fill=BOTH)    # expands with window
+            else:
+                Button(tools, text=title, command=callback).pack(side=LEFT)
+
+        # add multiselect listbox with scrollbars
+        listwide = mailconfig.listWidth  or 74    # 3.0: config start size
+        listhigh = mailconfig.listHeight or 15    # wide=chars, high=lines
+        mails    = Frame(self)
+        vscroll  = Scrollbar(mails)
+        hscroll  = Scrollbar(mails, orient='horizontal')
+        fontsz   = (sys.platform[:3] == 'win' and 8) or 10      # defaults
+        listbg   = mailconfig.listbg   or 'white'
+        listfg   = mailconfig.listfg   or 'black'
+        listfont = mailconfig.listfont or ('courier', fontsz, 'normal')
+        listbox  = Listbox(mails, bg=listbg, fg=listfg, font=listfont)
+        listbox.config(selectmode=EXTENDED)
+        listbox.config(width=listwide, height=listhigh) # 3.0: init wider
+        listbox.bind('&lt;Double-1&gt;', (lambda event: self.onViewRawMail()))
+
+        # crosslink listbox and scrollbars
+        vscroll.config(command=listbox.yview, relief=SUNKEN)
+        hscroll.config(command=listbox.xview, relief=SUNKEN)
+        listbox.config(yscrollcommand=vscroll.set, relief=SUNKEN)
+        listbox.config(xscrollcommand=hscroll.set)
+
+        # pack last = clip first
+        mails.pack(side=TOP, expand=YES, fill=BOTH)
+        vscroll.pack(side=RIGHT,  fill=BOTH)
+        hscroll.pack(side=BOTTOM, fill=BOTH)
+        listbox.pack(side=LEFT, expand=YES, fill=BOTH)
+        self.listBox = listbox
+
+    #################
+    # event handlers
+    #################
+
+    def onCheckAll(self):
+        # all or none click
+        if self.allModeVar.get():
+            self.listBox.select_set(0, END)
+        else:
+            self.listBox.select_clear(0, END)
+
+    def onViewRawMail(self):
+        # possibly threaded: view selected messages - raw text headers, body
+        msgnums = self.verifySelectedMsgs()
+        if msgnums:
+            self.getMessages(msgnums, after=lambda: self.contViewRaw(msgnums))
+
+    def contViewRaw(self, msgnums, pyedit=True):     # do we need full TextEditor?
+        for msgnum in msgnums:                       # could be a nested def
+            fulltext = self.getMessage(msgnum)       # fulltext is Unicode decoded
+            if not pyedit:
+                # display in a scrolledtext
+                from tkinter.scrolledtext import ScrolledText
+                window  = windows.QuietPopupWindow(appname, 'raw message viewer')
+                browser = ScrolledText(window)
+                browser.insert('0.0', fulltext)
+                browser.pack(expand=YES, fill=BOTH)
+            else:
+                # 3.0/4E: more useful PyEdit text editor
+                wintitle = ' - raw message text'
+                browser = textEditor.TextEditorMainPopup(self, winTitle=wintitle)
+                browser.update()
+                browser.setAllText(fulltext)
+                browser.clearModified()
+
+    def onViewFormatMail(self):
+        """
+        possibly threaded: view selected messages - pop up formatted display
+        not threaded if in savefile list, or messages are already loaded
+        the after action runs only if getMessages prefetch allowed and worked
+        """
+        msgnums = self.verifySelectedMsgs()
+        if msgnums:
+            self.getMessages(msgnums, after=lambda: self.contViewFmt(msgnums))
+
+    def contViewFmt(self, msgnums):
+        """
+        finish View: extract main text, popup view window(s) to display;
+        extracts plain text from html text if required, wraps text lines;
+        html mails: show extracted text, then save in temp file and open
+        in web browser;  part can also be opened manually from view window
+        Split or part button;  if non-multipart, other: part must be opened
+        manually with Split or part button;  verify html open per mailconfig;
+
+        3.0: for html-only mails, main text is str here, but save its raw
+        bytes in binary mode to finesse encodings;  worth the effort because
+        many mails are just html today;  this first tried N encoding guesses
+        (utf-8, latin-1, platform dflt), but now gets and saves raw bytes to
+        minimize any fidelity loss;  if a part is later opened on demand, it
+        is saved in a binary file as raw bytes in the same way;
+
+        caveat: the spawned web browser won't have any original email headers:
+        it may still have to guess or be told the encoding, unless the html
+        already has its own encoding headers (these take the form of &lt;meta&gt;
+        html tags within &lt;head&gt; sections if present; none are inserted in the
+        html here, as some well-formed html parts have them);  IE seems to
+        handle most html part files anyhow;  always encoding html parts to
+        utf-8 may suffice too: this encoding can handle most types of text;
+        """
+        for msgnum in msgnums:
+            fulltext = self.getMessage(msgnum)             # 3.0: str for parser
+            message  = self.parseMessage(fulltext)
+            type, content = self.findMainText(message)     # 3.0: Unicode decoded
+            if type in ['text/html', 'text/xml']:          # 3.0: get plain text
+                content = html2text.html2text(content)
+            content  = wraplines.wrapText1(content, mailconfig.wrapsz)
+            ViewWindow(headermap   = message,
+                       showtext    = content,
+                       origmessage = message)              # 3.0: decodes headers
+
+            # non-multipart, content-type text/HTML (rude but true!)
+            if type == 'text/html':
+                if ((not mailconfig.verifyHTMLTextOpen) or
+                    askyesno(appname, 'Open message text in browser?')):
+
+                    # 3.0: get post mime decode, pre unicode decode bytes
+                    type, asbytes = self.findMainText(message, asStr=False)
+                    try:
+                        from tempfile import gettempdir # or a Tk HTML viewer?
+                        tempname = os.path.join(gettempdir(), 'pymailgui.html')
+                        tmp = open(tempname, 'wb')      # already encoded
+                        tmp.write(asbytes); tmp.close() # flush output now
+                        webbrowser.open_new('file://' + tempname)
+                    except:
+                        showerror(appname, 'Cannot open in browser')
+
+    def onWriteMail(self):
+        """
+        compose a new email from scratch, without fetching others;
+        nothing to quote here, but adds sig, and prefills Bcc with the
+        sender's address if this optional header enabled in mailconfig;
+        From may be i18N encoded in mailconfig: view window will decode;
+        """
+        starttext = '\n'                         # use auto signature text
+        if mailconfig.mysignature:
+            starttext += '%s\n' % mailconfig.mysignature
+        From  = mailconfig.myaddress
+        WriteWindow(starttext = starttext,
+                    headermap = dict(From=From, Bcc=From))    # 3.0: prefill bcc
+
+    def onReplyMail(self):
+        # possibly threaded: reply to selected emails
+        msgnums = self.verifySelectedMsgs()
+        if msgnums:
+            self.getMessages(msgnums, after=lambda: self.contReply(msgnums))
+
+    def contReply(self, msgnums):
+        """
+        finish Reply: drop attachments, quote with '&gt;', add signature;
+        presets initial to/from values from mail or config module;
+        don't use original To for From: may be many or a listname;
+        To keeps name+&lt;addr&gt; format even if ',' separator in name;
+        Uses original From for To, ignores reply-to header is any;
+        3.0: replies also copy to all original recipients by default;
+
+        3.0: now uses getaddresses/parseaddr full parsing to separate
+        addrs on commas, and handle any commas that appear nested in
+        email name parts;  multiple addresses are separated by comma
+        in GUI, we copy comma separators when displaying headers, and
+        we use getaddresses to split addrs as needed;  ',' is required
+        by servers for separator;  no longer uses parseaddr to get 1st
+        name/addr pair of getaddresses result: use full From for To;
+
+        3.0: we decode the Subject header here because we need its text,
+        but the view window superclass of edit windows performs decoding
+        on all displayed headers (the extra Subject decode is a no-op);
+        on sends, all non-ASCII hdrs and hdr email names are in decoded
+        form in the GUI, but are encoded within the mailtools package;
+        quoteOrigText also decodes the initial headers it inserts into
+        the quoted text block, and index lists decode for display;
+        """
+        for msgnum in msgnums:
+            fulltext = self.getMessage(msgnum)
+            message  = self.parseMessage(fulltext)         # may fail: error obj
+            maintext = self.formatQuotedMainText(message)  # same as forward
+
+            # from and to are decoded by view window
+            From = mailconfig.myaddress                    # not original To
+            To   = message.get('From', '')                 # 3.0: ',' sept
+            Cc   = self.replyCopyTo(message)               # 3.0: cc all recipients?
+            Subj = message.get('Subject', '(no subject)')
+            Subj = self.decodeHeader(Subj)                 # deocde for str
+            if Subj[:4].lower() != 're: ':                 # 3.0: unify case
+                Subj = 'Re: ' + Subj
+            ReplyWindow(starttext = maintext,
+                        headermap =
+                            dict(From=From, To=To, Cc=Cc, Subject=Subj, Bcc=From))
+
+    def onFwdMail(self):
+        # possibly threaded: forward selected emails
+        msgnums = self.verifySelectedMsgs()
+        if msgnums:
+            self.getMessages(msgnums, after=lambda: self.contFwd(msgnums))
+
+    def contFwd(self, msgnums):
+        """
+        finish Forward: drop attachments, quote with '&gt;', add signature;
+        see notes about headers decoding in the Reply action methods;
+        view window superclass will decode the From header we pass here;
+        """
+        for msgnum in msgnums:
+            fulltext = self.getMessage(msgnum)
+            message  = self.parseMessage(fulltext)
+            maintext = self.formatQuotedMainText(message)  # same as reply
+
+            # initial From value from config, not mail
+            From = mailconfig.myaddress                    # encoded or not
+            Subj = message.get('Subject', '(no subject)')
+            Subj = self.decodeHeader(Subj)                 # 3.0: send encodes
+            if Subj[:5].lower() != 'fwd: ':                # 3.0: unify case
+                Subj = 'Fwd: ' + Subj
+            ForwardWindow(starttext = maintext,
+                          headermap = dict(From=From, Subject=Subj, Bcc=From))
+
+    def onSaveMailFile(self):
+        """
+        save selected emails to file for offline viewing;
+        disabled if target file load/delete is in progress;
+        disabled by getMessages if self is a busy file too;
+        contSave not threaded: disables all other actions;
+        """
+        msgnums = self.selectedMsgs()
+        if not msgnums:
+            showerror(appname, 'No message selected')
+        else:
+            # caveat: dialog warns about replacing file
+            filename = self.saveDialog.show()             # shared class attr
+            if filename:                                  # don't verify num msgs
+                filename = os.path.abspath(filename)      # normalize / to \
+                self.getMessages(msgnums,
+                        after=lambda: self.contSave(msgnums, filename))
+
+    def contSave(self, msgnums, filename):
+        # test busy now, after poss srvr msgs load
+        if (filename in openSaveFiles.keys() and           # viewing this file?
+            openSaveFiles[filename].openFileBusy):         # load/del occurring?
+            showerror(appname, 'Target file busy - cannot save')
+        else:
+            try:                                           # caveat:not threaded
+                fulltextlist = []                          # 3.0: use encoding
+                mailfile = open(filename, 'a', encoding=mailconfig.fetchEncoding)
+                for msgnum in msgnums:                     # &lt; 1sec for N megs
+                    fulltext = self.getMessage(msgnum)     # but poss many msgs
+                    if fulltext[-1] != '\n': fulltext += '\n'
+                    mailfile.write(saveMailSeparator)
+                    mailfile.write(fulltext)
+                    fulltextlist.append(fulltext)
+                mailfile.close()
+            except:
+                showerror(appname, 'Error during save')
+                printStack(sys.exc_info())
+            else:                                          # why .keys(): EIBTI
+                if filename in openSaveFiles.keys():       # viewing this file?
+                    window = openSaveFiles[filename]       # update list, raise
+                    window.addSavedMails(fulltextlist)     # avoid file reload
+                    #window.loadMailFileThread()           # this was very slow
+
+    def onOpenMailFile(self, filename=None):
+        # process saved mail offline
+        filename = filename or self.openDialog.show()      # shared class attr
+        if filename:
+            filename = os.path.abspath(filename)           # match on full name
+            if filename in openSaveFiles.keys():           # only 1 win per file
+                openSaveFiles[filename].lift()             # raise file's window
+                showinfo(appname, 'File already open')     # else deletes odd
+            else:
+                from PyMailGui import PyMailFileWindow     # avoid duplicate win
+                popup = PyMailFileWindow(filename)         # new list window
+                openSaveFiles[filename] = popup            # removed in quit
+                popup.loadMailFileThread()                 # try load in thread
+
+    def onDeleteMail(self):
+        # delete selected mails from server or file
+        msgnums = self.selectedMsgs()                      # subclass: fillIndex
+        if not msgnums:                                    # always verify here
+            showerror(appname, 'No message selected')
+        else:
+            if askyesno(appname, 'Verify delete %d mails?' % len(msgnums)):
+                self.doDelete(msgnums)
+
+    ##################
+    # utility methods
+    ##################
+
+    def selectedMsgs(self):
+        # get messages selected in main listbox
+        selections = self.listBox.curselection()  # tuple of digit strs, 0..N-1
+        return [int(x)+1 for x in selections]     # convert to ints, make 1..N
+
+    warningLimit = 15
+    def verifySelectedMsgs(self):
+        msgnums = self.selectedMsgs()
+        if not msgnums:
+            showerror(appname, 'No message selected')
+        else:
+            numselects = len(msgnums)
+            if numselects &gt; self.warningLimit:
+                if not askyesno(appname, 'Open %d selections?' % numselects):
+                    msgnums = []
+        return msgnums
+
+    def fillIndex(self, maxhdrsize=25):
+        """
+        fill all of main listbox from message header mappings;
+        3.0: decode headers per email/mime/unicode here if encoded;
+        3.0: caveat: large chinese characters can break '|' alignment;
+        """
+        hdrmaps  = self.headersMaps()                   # may be empty
+        showhdrs = ('Subject', 'From', 'Date', 'To')    # default hdrs to show
+        if hasattr(mailconfig, 'listheaders'):          # mailconfig customizes
+            showhdrs = mailconfig.listheaders or showhdrs
+        addrhdrs = ('From', 'To', 'Cc', 'Bcc')    # 3.0: decode i18n specially
+
+        # compute max field sizes &lt;= hdrsize
+        maxsize = {}
+        for key in showhdrs:
+            allLens = []                                # too big for a list comp!
+            for msg in hdrmaps:
+                keyval = msg.get(key, ' ')
+                if key not in addrhdrs:
+                    allLens.append(len(self.decodeHeader(keyval)))
+                else:
+                    allLens.append(len(self.decodeAddrHeader(keyval)))
+            if not allLens: allLens = [1]
+            maxsize[key] = min(maxhdrsize, max(allLens))
+
+        # populate listbox with fixed-width left-justified fields
+        self.listBox.delete(0, END)                     # show multiparts with *
+        for (ix, msg) in enumerate(hdrmaps):            # via content-type hdr
+            msgtype = msg.get_content_maintype()        # no is_multipart yet
+            msgline = (msgtype == 'multipart' and '*') or ' '
+            msgline += '%03d' % (ix+1)
+            for key in showhdrs:
+                mysize  = maxsize[key]
+                if key not in addrhdrs:
+                    keytext = self.decodeHeader(msg.get(key, ' '))
+                else:
+                    keytext = self.decodeAddrHeader(msg.get(key, ' '))
+                msgline += ' | %-*s' % (mysize, keytext[:mysize])
+            msgline += '| %.1fK' % (self.mailSize(ix+1) / 1024)   # 3.0: .0 optional
+            self.listBox.insert(END, msgline)
+        self.listBox.see(END)         # show most recent mail=last line
+
+    def replyCopyTo(self, message):
+        """
+        3.0: replies copy all original recipients, by prefilling
+        Cc header with all addreses in original To and Cc after
+        removing duplicates and new sender;  could decode i18n addrs
+        here, but the view window will decode to display (and send
+        will reencode) and the unique set filtering here will work
+        either way, though a sender's i18n address is assumed to be
+        in encoded form in mailconfig (else it is not removed here);
+        empty To or Cc headers are okay: split returns empty lists;
+        """
+        if not mailconfig.repliesCopyToAll:
+            # reply to sender only
+            Cc = ''
+        else:
+            # copy all original recipients (3.0)
+            allRecipients = (self.splitAddresses(message.get('To', '')) +
+                             self.splitAddresses(message.get('Cc', '')))
+            uniqueOthers  = set(allRecipients) - set([mailconfig.myaddress])
+            Cc = ', '.join(uniqueOthers)
+        return Cc or '?'
+
+    def formatQuotedMainText(self, message):
+        """
+        3.0: factor out common code shared by Reply and Forward:
+        fetch decoded text, extract text if html, line wrap, add &gt; quote
+        """
+        type, maintext = self.findMainText(message)       # 3.0: decoded str
+        if type in ['text/html', 'text/xml']:             # 3.0: get plain text
+            maintext = html2text.html2text(maintext)
+        maintext = wraplines.wrapText1(maintext, mailconfig.wrapsz-2) # 2 = '&gt; '
+        maintext = self.quoteOrigText(maintext, message)              # add hdrs, &gt;
+        if mailconfig.mysignature:
+            maintext = ('\n%s\n' % mailconfig.mysignature) + maintext
+        return maintext
+
+    def quoteOrigText(self, maintext, message):
+        """
+        3.0: we need to decode any i18n (internationalizd) headers here too,
+        or they show up in email+MIME encoded form in the quoted text block;
+        decodeAddrHeader works on one addr or all in a comma-separated list;
+        this may trigger full text encoding on sends, but the main text is
+        also already in fully decoded form: could be in any Unicode scheme;
+        """
+        quoted = '\n-----Original Message-----\n'
+        for hdr in ('From', 'To', 'Subject', 'Date'):
+            rawhdr = message.get(hdr, '?')
+            if hdr not in ('From', 'To'):
+                dechdr = self.decodeHeader(rawhdr)       # full value
+            else:
+                dechdr = self.decodeAddrHeader(rawhdr)   # name parts only
+            quoted += '%s: %s\n' % (hdr, dechdr)
+        quoted += '\n' + maintext
+        quoted  = '\n' + quoted.replace('\n', '\n&gt; ')
+        return quoted
+
+    ########################
+    # subclass requirements
+    ########################
+
+    def getMessages(self, msgnums, after):        # used by view,save,reply,fwd
+        after()                                   # redef if cache, thread test
+
+    # plus okayToQuit?, any unique actions
+    def getMessage(self, msgnum): assert False    # used by many: full mail text
+    def headersMaps(self): assert False           # fillIndex: hdr mappings list
+    def mailSize(self, msgnum): assert False      # fillIndex: size of msgnum
+    def doDelete(self): assert False              # onDeleteMail: delete button
+
+
+###############################################################################
+# main window - when viewing messages in local save file (or sent-mail file)
+###############################################################################
+
+
+class PyMailFile(PyMailCommon):
+    """
+    customize PyMailCommon for viewing saved-mail file offline;
+    mixed with a Tk, Toplevel, or Frame, adds main mail listbox;
+    maps load, fetch, delete actions to local text file storage;
+    file opens and deletes here run in threads for large files;
+
+    save and send not threaded, because only append to file; save
+    is disabled if source or target file busy with load/delete;
+    save disables load, delete, save just because it is not run
+    in a thread (blocks GUI);
+
+    TBD: may need thread and O/S file locks if saves ever do run in
+    threads: saves could disable other threads with openFileBusy, but
+    file may not be open in GUI;  file locks not sufficient, because
+    GUI updated too;  TBD: appends to sent-mail file may require O/S
+    locks: as is, user gets error pop up if sent during load/del;
+
+    3.0: mail save files are now Unicode text, encoded per an encoding
+    name setting in the mailconfig module; this may not support worst
+    case scenarios of unusual or mixed encodings, but most full mail
+    text is ascii, and the Python 3.1 email package is partly broken;
+    """
+    def actions(self):
+        return [ ('Open',   self.onOpenMailFile),
+                 ('Write',  self.onWriteMail),
+                 ('  ',     None),                           # 3.0:  separators
+                 ('View',   self.onViewFormatMail),
+                 ('Reply',  self.onReplyMail),
+                 ('Fwd',    self.onFwdMail),
+                 ('Save',   self.onSaveMailFile),
+                 ('Delete', self.onDeleteMail),
+                 ('  ',     None),
+                 ('Quit',   self.quit) ]
+
+    def __init__(self, filename):
+        # caller: do loadMailFileThread next
+        PyMailCommon.__init__(self)
+        self.filename = filename
+        self.openFileBusy = threadtools.ThreadCounter()      # one per window
+
+    def loadMailFileThread(self):
+        """
+        load or reload file and update window index list;
+        called on Open, startup, and possibly on Send if
+        sent-mail file appended is currently open;  there
+        is always a bogus first item after the text split;
+        alt: [self.parseHeaders(m) for m in self.msglist];
+        could pop up a busy dialog, but quick for small files;
+
+        2.1: this is now threaded--else runs &lt; 1sec for N meg
+        files, but can pause GUI N seconds if very large file;
+        Save now uses addSavedMails to append msg lists for
+        speed, not this reload;  still called from Send just
+        because msg text unavailable - requires refactoring;
+        delete threaded too: prevent open and delete overlap;
+        """
+        if self.openFileBusy:
+            # don't allow parallel open/delete changes
+            errmsg = 'Cannot load, file is busy:\n"%s"' % self.filename
+            showerror(appname, errmsg)
+        else:
+            #self.listBox.insert(END, 'loading...')      # error if user clicks
+            savetitle = self.title()                     # set by window class
+            self.title(appname + ' - ' + 'Loading...')
+            self.openFileBusy.incr()
+            threadtools.startThread(
+                action   = self.loadMailFile,
+                args     = (),
+                context  = (savetitle,),
+                onExit   = self.onLoadMailFileExit,
+                onFail   = self.onLoadMailFileFail)
+
+    def loadMailFile(self):
+        # run in a thread while GUI is active
+        # open, read, parser may all raise excs: caught in thread utility
+        file = open(self.filename, 'r', encoding=mailconfig.fetchEncoding)   # 3.0
+        allmsgs = file.read()
+        self.msglist  = allmsgs.split(saveMailSeparator)[1:]       # full text
+        self.hdrlist  = list(map(self.parseHeaders, self.msglist)) # msg objects
+
+    def onLoadMailFileExit(self, savetitle):
+        # on thread success
+        self.title(savetitle)         # reset window title to filename
+        self.fillIndex()              # updates GUI: do in main thread
+        self.lift()                   # raise my window
+        self.openFileBusy.decr()
+
+    def onLoadMailFileFail(self, exc_info, savetitle):
+        # on thread exception
+        showerror(appname, 'Error opening "%s"\n%s\n%s' %
+                           ((self.filename,) +  exc_info[:2]))
+        printStack(exc_info)
+        self.destroy()                # always close my window?
+        self.openFileBusy.decr()      # not needed if destroy
+
+    def addSavedMails(self, fulltextlist):
+        """
+        optimization: extend loaded file lists for mails
+        newly saved to this window's file; in past called
+        loadMailThread to reload entire file on save - slow;
+        must be called in main GUI thread only: updates GUI;
+        sends still reloads sent file if open: no msg text;
+        """
+        self.msglist.extend(fulltextlist)
+        self.hdrlist.extend(map(self.parseHeaders, fulltextlist))  # 3.x iter ok
+        self.fillIndex()
+        self.lift()
+
+    def doDelete(self, msgnums):
+        """
+        simple-minded, but sufficient: rewrite all
+        nondeleted mails to file; can't just delete
+        from self.msglist in-place: changes item indexes;
+        Py2.3 enumerate(L) same as zip(range(len(L)), L)
+        2.1: now threaded, else N sec pause for large files
+        """
+        if self.openFileBusy:
+            # dont allow parallel open/delete changes
+            errmsg = 'Cannot delete, file is busy:\n"%s"' % self.filename
+            showerror(appname, errmsg)
+        else:
+            savetitle = self.title()
+            self.title(appname + ' - ' + 'Deleting...')
+            self.openFileBusy.incr()
+            threadtools.startThread(
+                action   = self.deleteMailFile,
+                args     = (msgnums,),
+                context  = (savetitle,),
+                onExit   = self.onDeleteMailFileExit,
+                onFail   = self.onDeleteMailFileFail)
+
+    def deleteMailFile(self, msgnums):
+        # run in a thread while GUI active
+        indexed = enumerate(self.msglist)
+        keepers = [msg for (ix, msg) in indexed if ix+1 not in msgnums]
+        allmsgs = saveMailSeparator.join([''] + keepers)
+        file = open(self.filename, 'w', encoding=mailconfig.fetchEncoding)   # 3.0
+        file.write(allmsgs)
+        self.msglist = keepers
+        self.hdrlist = list(map(self.parseHeaders, self.msglist))
+
+    def onDeleteMailFileExit(self, savetitle):
+        self.title(savetitle)
+        self.fillIndex()              # updates GUI: do in main thread
+        self.lift()                   # reset my title, raise my window
+        self.openFileBusy.decr()
+
+    def onDeleteMailFileFail(self, exc_info, savetitle):
+        showerror(appname, 'Error deleting "%s"\n%s\n%s' %
+                           ((self.filename,) +  exc_info[:2]))
+        printStack(exc_info)
+        self.destroy()                # always close my window?
+        self.openFileBusy.decr()      # not needed if destroy
+
+    def getMessages(self, msgnums, after):
+        """
+        used by view,save,reply,fwd: file load and delete
+        threads may change the msg and hdr lists, so disable
+        all other operations that depend on them to be safe;
+        this test is for self: saves also test target file;
+        """
+        if self.openFileBusy:
+            errmsg = 'Cannot fetch, file is busy:\n"%s"' % self.filename
+            showerror(appname, errmsg)
+        else:
+            after()                      # mail already loaded
+
+    def getMessage(self, msgnum):
+        return self.msglist[msgnum-1]    # full text of 1 mail
+
+    def headersMaps(self):
+        return self.hdrlist              # email.message.Message objects
+
+    def mailSize(self, msgnum):
+        return len(self.msglist[msgnum-1])
+
+    def quit(self):
+        # don't destroy during update: fillIndex next
+        if self.openFileBusy:
+            showerror(appname, 'Cannot quit during load or delete')
+        else:
+            if askyesno(appname, 'Verify Quit Window?'):
+                # delete file from open list
+                del openSaveFiles[self.filename]
+                Toplevel.destroy(self)
+
+
+###############################################################################
+# main window - when viewing messages on the mail server
+###############################################################################
+
+
+class PyMailServer(PyMailCommon):
+    """
+    customize PyMailCommon for viewing mail still on server;
+    mixed with a Tk, Toplevel, or Frame, adds main mail listbox;
+    maps load, fetch, delete actions to email server inbox;
+    embeds a MessageCache, which is a mailtools MailFetcher;
+    """
+    def actions(self):
+        return [ ('Load',   self.onLoadServer),
+                 ('Open',   self.onOpenMailFile),
+                 ('Write',  self.onWriteMail),
+                 ('  ',     None),                           # 3.0:  separators
+                 ('View',   self.onViewFormatMail),
+                 ('Reply',  self.onReplyMail),
+                 ('Fwd',    self.onFwdMail),
+                 ('Save',   self.onSaveMailFile),
+                 ('Delete', self.onDeleteMail),
+                 ('  ',     None),
+                 ('Quit',   self.quit) ]
+
+    def __init__(self):
+        PyMailCommon.__init__(self)
+        self.cache = messagecache.GuiMessageCache()    # embedded, not inherited
+       #self.listBox.insert(END, 'Press Load to fetch mail')
+
+    def makeWidgets(self):                             # help bar: main win only
+        self.addHelpBar()
+        PyMailCommon.makeWidgets(self)
+
+    def addHelpBar(self):
+        msg = 'PyMailGUI - a Python/tkinter email client  (help)'
+        title = Button(self, text=msg)
+        title.config(bg='steelblue', fg='white', relief=RIDGE)
+        title.config(command=self.onShowHelp)
+        title.pack(fill=X)
+
+    def onShowHelp(self):
+        """
+        load,show text block string
+        3.0: now uses HTML and webbrowser module here too
+        user setting in mailconfig selects text, HTML, or both
+        always displays one or the other: html if both false
+        """
+        if mailconfig.showHelpAsText:
+            from PyMailGuiHelp import helptext
+            popuputil.HelpPopup(appname, helptext, showsource=self.onShowMySource)
+
+        if mailconfig.showHelpAsHTML or (not mailconfig.showHelpAsText):
+            from PyMailGuiHelp import showHtmlHelp
+            showHtmlHelp()    # 3.0: HTML version without source file links
+
+    def onShowMySource(self, showAsMail=False):
+        """
+        display my sourcecode file, plus imported modules here &amp; elsewhere
+        """
+        import PyMailGui, ListWindows, ViewWindows, SharedNames, textConfig
+        from PP4E.Internet.Email.mailtools import (    # mailtools now a pkg
+             mailSender, mailFetcher, mailParser)      # can't use * in def
+        mymods = (
+            PyMailGui, ListWindows, ViewWindows, SharedNames,
+            PyMailGuiHelp, popuputil, messagecache, wraplines, html2text,
+            mailtools, mailFetcher, mailSender, mailParser,
+            mailconfig, textConfig, threadtools, windows, textEditor)
+        for mod in mymods:
+            source = mod.__file__
+            if source.endswith('.pyc'):
+                source = source[:-4] + '.py'       # assume a .py in same dir
+            if showAsMail:
+                # this is a bit cheesey...
+                code   = open(source).read()       # 3.0: platform encoding
+                user   = mailconfig.myaddress
+                hdrmap = {'From': appname, 'To': user, 'Subject': mod.__name__}
+                ViewWindow(showtext=code,
+                           headermap=hdrmap,
+                           origmessage=email.message.Message())
+            else:
+                # more useful PyEdit text editor
+                # 4E: assume in UTF8 Unicode encoding (else PeEdit may ask!)
+                wintitle = ' - ' + mod.__name__
+                textEditor.TextEditorMainPopup(self, source, wintitle, 'utf-8')
+
+    def onLoadServer(self, forceReload=False):
+        """
+        threaded: load or reload mail headers list on request;
+        Exit,Fail,Progress run by threadChecker after callback via queue;
+        load may overlap with sends, but disables all but send;
+        could overlap with loadingMsgs, but may change msg cache list;
+        forceReload on delete/synch fail, else loads recent arrivals only;
+        2.1: cache.loadHeaders may do quick check to see if msgnums
+        in synch with server, if we are loading just newly arrived hdrs;
+        """
+        if loadingHdrsBusy or deletingBusy or loadingMsgsBusy:
+            showerror(appname, 'Cannot load headers during load or delete')
+        else:
+            loadingHdrsBusy.incr()
+            self.cache.setPopPassword(appname) # don't update GUI in the thread!
+            popup = popuputil.BusyBoxNowait(appname, 'Loading message headers')
+            threadtools.startThread(
+                action     = self.cache.loadHeaders,
+                args       = (forceReload,),
+                context    = (popup,),
+                onExit     = self.onLoadHdrsExit,
+                onFail     = self.onLoadHdrsFail,
+                onProgress = self.onLoadHdrsProgress)
+
+    def onLoadHdrsExit(self, popup):
+        self.fillIndex()
+        popup.quit()
+        self.lift()
+        loadingHdrsBusy.decr()                     # allow other actions to run
+
+    def onLoadHdrsFail(self, exc_info, popup):
+        popup.quit()
+        showerror(appname, 'Load failed: \n%s\n%s' % exc_info[:2])
+        printStack(exc_info)                       # send stack trace to stdout
+        loadingHdrsBusy.decr()
+        if exc_info[0] == mailtools.MessageSynchError:    # synch inbox/index
+            self.onLoadServer(forceReload=True)           # new thread: reload
+        else:
+            self.cache.popPassword = None          # force re-input next time
+
+    def onLoadHdrsProgress(self, i, n, popup):
+        popup.changeText('%d of %d' % (i, n))
+
+    def doDelete(self, msgnumlist):
+        """
+        threaded: delete from server now - changes msg nums;
+        may overlap with sends only, disables all except sends;
+        2.1: cache.deleteMessages now checks TOP result to see
+        if headers match selected mails, in case msgnums out of
+        synch with mail server: poss if mail deleted by other client,
+        or server deletes inbox mail automatically - some ISPs may
+        move a mail from inbox to undeliverable on load failure;
+        """
+        if loadingHdrsBusy or deletingBusy or loadingMsgsBusy:
+            showerror(appname, 'Cannot delete during load or delete')
+        else:
+            deletingBusy.incr()
+            popup = popuputil.BusyBoxNowait(appname, 'Deleting selected mails')
+            threadtools.startThread(
+                action     = self.cache.deleteMessages,
+                args       = (msgnumlist,),
+                context    = (popup,),
+                onExit     = self.onDeleteExit,
+                onFail     = self.onDeleteFail,
+                onProgress = self.onDeleteProgress)
+
+    def onDeleteExit(self, popup):
+        self.fillIndex()                     # no need to reload from server
+        popup.quit()                         # refill index with updated cache
+        self.lift()                          # raise index window, release lock
+        deletingBusy.decr()
+
+    def onDeleteFail(self, exc_info, popup):
+        popup.quit()
+        showerror(appname, 'Delete failed: \n%s\n%s' % exc_info[:2])
+        printStack(exc_info)
+        deletingBusy.decr()                  # delete or synch check failure
+        self.onLoadServer(forceReload=True)  # new thread: some msgnums changed
+
+    def onDeleteProgress(self, i, n, popup):
+        popup.changeText('%d of %d' % (i, n))
+
+    def getMessages(self, msgnums, after):
+        """
+        threaded: prefetch all selected messages into cache now;
+        used by save, view, reply, and forward to prefill cache;
+        may overlap with other loadmsgs and sends, disables delete,load;
+        only runs "after" action if the fetch allowed and successful;
+        2.1: cache.getMessages tests if index in synch with server,
+        but we only test if we have to go to server, not if cached;
+
+        3.0: see messagecache note: now avoids potential fetch of mail
+        currently being fetched, if user clicks again while in progress;
+        any message being fetched by any other request in progress must
+        disable entire toLoad batch: else, need to wait for N other loads;
+        fetches are still allowed to overlap in time, as long as disjoint;
+        """
+        if loadingHdrsBusy or deletingBusy:
+            showerror(appname, 'Cannot fetch message during load or delete')
+        else:
+            toLoad = [num for num in msgnums if not self.cache.isLoaded(num)]
+            if not toLoad:
+                after()         # all already loaded
+                return          # process now, no wait pop up
+            else:
+                if set(toLoad) &amp; self.beingFetched:   # 3.0: any in progress?
+                    showerror(appname, 'Cannot fetch any message being fetched')
+                else:
+                    self.beingFetched |= set(toLoad)
+                    loadingMsgsBusy.incr()
+                    from popuputil import BusyBoxNowait
+                    popup = BusyBoxNowait(appname, 'Fetching message contents')
+                    threadtools.startThread(
+                        action     = self.cache.getMessages,
+                        args       = (toLoad,),
+                        context    = (after, popup, toLoad),
+                        onExit     = self.onLoadMsgsExit,
+                        onFail     = self.onLoadMsgsFail,
+                        onProgress = self.onLoadMsgsProgress)
+
+    def onLoadMsgsExit(self, after, popup, toLoad):
+        self.beingFetched -= set(toLoad)
+        popup.quit()
+        after()
+        loadingMsgsBusy.decr()    # allow other actions after onExit done
+
+    def onLoadMsgsFail(self, exc_info, after, popup, toLoad):
+        self.beingFetched -= set(toLoad)
+        popup.quit()
+        showerror(appname, 'Fetch failed: \n%s\n%s' % exc_info[:2])
+        printStack(exc_info)
+        loadingMsgsBusy.decr()
+        if exc_info[0] == mailtools.MessageSynchError:      # synch inbox/index
+            self.onLoadServer(forceReload=True)             # new thread: reload
+
+    def onLoadMsgsProgress(self, i, n, after, popup, toLoad):
+        popup.changeText('%d of %d' % (i, n))
+
+    def getMessage(self, msgnum):
+        return self.cache.getMessage(msgnum)                # full mail text
+
+    def headersMaps(self):
+        # list of email.message.Message objects, 3.x requires list() if map()
+        # return [self.parseHeaders(h) for h in self.cache.allHdrs()]
+        return list(map(self.parseHeaders, self.cache.allHdrs()))
+
+    def mailSize(self, msgnum):
+        return self.cache.getSize(msgnum)
+
+    def okayToQuit(self):
+        # any threads still running?
+        filesbusy = [win for win in openSaveFiles.values() if win.openFileBusy]
+        busy = loadingHdrsBusy or deletingBusy or sendingBusy or loadingMsgsBusy
+        busy = busy or filesbusy
+        return not busy</pre>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="ViewWindows: Message View Windows"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="viewwindows_colon_message_view_windows"></a>ViewWindows: Message View Windows</h2>
+</div>
+</div>
+</div>
+<p>Example 14-4 lists
+          <a id="I_indexterm3_d1e62744"></a><a id="py14.4.4"></a>the implementation of mail view and edit windows.
+          These windows are created in response to actions in list
+          windows—View, Write, Reply, and Forward buttons. See the callbacks
+          for these actions in the list window module of Example 14-3 for view window
+          initiation calls.</p>
+<p>As in the prior module (Example 14-3), this file is
+          really one common class and a handful of customizations. The mail
+          view window is nearly identical to the mail edit window, used for
+          Write, Reply, and Forward requests. Consequently, this example
+          defines the common appearance and behavior in the view window
+          superclass, and extends it by subclassing for edit windows.</p>
+<p>Replies and forwards are hardly different from the write
+          window here, because their details (e.g., From and To addresses and
+          quoted message text) are worked out in the list window
+          implementation before an edit window is created.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id54"></a>
+<p class="epub__title">Example 14-4. PP4E\Internet\Email\PyMailGui\ViewWindows.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+###############################################################################
+Implementation of View, Write, Reply, Forward windows: one class per kind.
+Code is factored here for reuse: a Write window is a customized View window,
+and Reply and Forward are custom Write windows.  Windows defined in this
+file are created by the list windows, in response to user actions.
+
+Caveat:'split' pop ups for opening parts/attachments feel nonintuitive.
+2.1: this caveat was addressed, by adding quick-access attachment buttons.
+New in 3.0: platform-neutral grid() for mail headers, not packed col frames.
+New in 3.0: supports Unicode encodings for main text + text attachments sent.
+New in 3.0: PyEdit supports arbitrary Unicode for message parts viewed.
+New in 3.0: supports Unicode/mail encodings for headers in  mails sent.
+
+TBD: could avoid verifying quits unless text area modified (like PyEdit2.0),
+but these windows are larger, and would not catch headers already changed.
+TBD: should Open dialog in write windows be program-wide? (per-window now).
+###############################################################################
+"""
+
+from SharedNames import *     # program-wide global objects
+
+
+###############################################################################
+# message view window - also a superclass of write, reply, forward
+###############################################################################
+
+
+class ViewWindow(windows.PopupWindow, mailtools.MailParser):
+    """
+    a Toplevel, with extra protocol and embedded TextEditor;
+    inherits saveParts,partsList from mailtools.MailParser;
+    mixes in custom subclass logic by direct inheritance here;
+    """
+    # class attributes
+    modelabel       = 'View'                   # used in window titles
+    from mailconfig import okayToOpenParts     # open any attachments at all?
+    from mailconfig import verifyPartOpens     # ask before open each part?
+    from mailconfig import maxPartButtons      # show up to this many + '...'
+    from mailconfig import skipTextOnHtmlPart  # 3.0: just browser, not PyEdit?
+    tempPartDir     = 'TempParts'              # where 1 selected part saved
+
+    # all view windows use same dialog: remembers last dir
+    partsDialog = Directory(title=appname + ': Select parts save directory')
+
+    def __init__(self, headermap, showtext, origmessage=None):
+        """
+        header map is origmessage, or custom hdr dict for writing;
+        showtext is main text part of the message: parsed or custom;
+        origmessage is parsed email.message.Message for view mail windows
+        """
+        windows.PopupWindow.__init__(self, appname, self.modelabel)
+        self.origMessage = origmessage
+        self.makeWidgets(headermap, showtext)
+
+    def makeWidgets(self, headermap, showtext):
+        """
+        add headers, actions, attachments, text editor
+        3.0: showtext is assumed to be decoded Unicode str here;
+        it will be encoded on sends and saves as directed/needed;
+        """
+        actionsframe = self.makeHeaders(headermap)
+        if self.origMessage and self.okayToOpenParts:
+            self.makePartButtons()
+        self.editor  = textEditor.TextEditorComponentMinimal(self)
+        myactions    = self.actionButtons()
+        for (label, callback) in myactions:
+            b = Button(actionsframe, text=label, command=callback)
+            b.config(bg='beige', relief=RIDGE, bd=2)
+            b.pack(side=TOP, expand=YES, fill=BOTH)
+
+        # body text, pack last=clip first
+        self.editor.pack(side=BOTTOM)               # may be multiple editors
+        self.update()                               # 3.0: else may be @ line2
+        self.editor.setAllText(showtext)            # each has own content
+        lines = len(showtext.splitlines())
+        lines = min(lines + 3, mailconfig.viewheight or 20)
+        self.editor.setHeight(lines)                # else height=24, width=80
+        self.editor.setWidth(80)                    # or from PyEdit textConfig
+        if mailconfig.viewbg:
+            self.editor.setBg(mailconfig.viewbg)    # colors, font in mailconfig
+        if mailconfig.viewfg:
+            self.editor.setFg(mailconfig.viewfg)
+        if mailconfig.viewfont:                     # also via editor Tools menu
+            self.editor.setFont(mailconfig.viewfont)
+
+    def makeHeaders(self, headermap):
+        """
+        add header entry fields, return action buttons frame;
+        3.0: uses grid for platform-neutral layout of label/entry rows;
+        packed row frames with fixed-width labels would work well too;
+
+        3.0: decoding of i18n headers (and email names in address headers)
+        is performed here if still required as they are added to the GUI;
+        some may have been decoded already for reply/forward windows that
+        need to use decoded text, but the extra decode here is harmless for
+        these, and is required for other headers and cases such as fetched
+        mail views;  always, headers are in decoded form when displayed in
+        the GUI, and will be encoded within mailtools on Sends if they are
+        non-ASCII (see Write);  i18n header decoding also occurs in list
+        window mail indexes, and for headers added to quoted mail text;
+        text payloads in the mail body are also decoded for display and
+        encoded for sends elsewhere in the system (list windows, Write);
+
+        3.0: creators of edit windows prefill Bcc header with sender email
+        address to be picked up here, as a convenience for common usages if
+        this header is enabled in mailconfig;  Reply also now prefills the
+        Cc header with all unique original recipients less From, if enabled;
+        """
+        top    = Frame(self); top.pack   (side=TOP,   fill=X)
+        left   = Frame(top);  left.pack  (side=LEFT,  expand=NO,  fill=BOTH)
+        middle = Frame(top);  middle.pack(side=LEFT,  expand=YES, fill=X)
+
+        # headers set may be extended in mailconfig (Bcc, others?)
+        self.userHdrs = ()
+        showhdrs = ('From', 'To', 'Cc', 'Subject')
+        if hasattr(mailconfig, 'viewheaders') and mailconfig.viewheaders:
+            self.userHdrs = mailconfig.viewheaders
+            showhdrs += self.userHdrs
+        addrhdrs = ('From', 'To', 'Cc', 'Bcc')    # 3.0: decode i18n specially
+
+        self.hdrFields = []
+        for (i, header) in enumerate(showhdrs):
+            lab = Label(middle, text=header+':', justify=LEFT)
+            ent = Entry(middle)
+            lab.grid(row=i, column=0, sticky=EW)
+            ent.grid(row=i, column=1, sticky=EW)
+            middle.rowconfigure(i, weight=1)
+            hdrvalue = headermap.get(header, '?')    # might be empty
+            # 3.0: if encoded, decode per email+mime+unicode
+            if header not in addrhdrs:
+                hdrvalue = self.decodeHeader(hdrvalue)
+            else:
+                hdrvalue = self.decodeAddrHeader(hdrvalue)
+            ent.insert('0', hdrvalue)
+            self.hdrFields.append(ent)               # order matters in onSend
+        middle.columnconfigure(1, weight=1)
+        return left
+
+    def actionButtons(self):                         # must be method for self
+        return [('Cancel', self.destroy),            # close view window silently
+                ('Parts',  self.onParts),            # multiparts list or the body
+                ('Split',  self.onSplit)]
+
+    def makePartButtons(self):
+        """
+        add up to N buttons that open attachments/parts
+        when clicked; alternative to Parts/Split (2.1);
+        okay that temp dir is shared by all open messages:
+        part file not saved till later selected and opened;
+        partname=partname is required in lambda in Py2.4;
+        caveat: we could try to skip the main text part;
+        """
+        def makeButton(parent, text, callback):
+            link = Button(parent, text=text, command=callback, relief=SUNKEN)
+            if mailconfig.partfg: link.config(fg=mailconfig.partfg)
+            if mailconfig.partbg: link.config(bg=mailconfig.partbg)
+            link.pack(side=LEFT, fill=X, expand=YES)
+
+        parts = Frame(self)
+        parts.pack(side=TOP, expand=NO, fill=X)
+        for (count, partname) in enumerate(self.partsList(self.origMessage)):
+            if count == self.maxPartButtons:
+                makeButton(parts, '...', self.onSplit)
+                break
+            openpart = (lambda partname=partname: self.onOnePart(partname))
+            makeButton(parts, partname, openpart)
+
+    def onOnePart(self, partname):
+        """
+        locate selected part for button and save and open;
+        okay if multiple mails open: resaves each time selected;
+        we could probably just use web browser directly here;
+        caveat: tempPartDir is relative to cwd - poss anywhere;
+        caveat: tempPartDir is never cleaned up: might be large,
+        could use tempfile module (just like the HTML main text
+        part display code in onView of the list window class);
+        """
+        try:
+            savedir  = self.tempPartDir
+            message  = self.origMessage
+            (contype, savepath) = self.saveOnePart(savedir, partname, message)
+        except:
+            showerror(appname, 'Error while writing part file')
+            printStack(sys.exc_info())
+        else:
+            self.openParts([(contype, os.path.abspath(savepath))])   # reuse
+
+    def onParts(self):
+        """
+        show message part/attachments in pop-up window;
+        uses same file naming scheme as save on Split;
+        if non-multipart, single part = full body text
+        """
+        partnames = self.partsList(self.origMessage)
+        msg = '\n'.join(['Message parts:\n'] + partnames)
+        showinfo(appname, msg)
+
+    def onSplit(self):
+        """
+        pop up save dir dialog and save all parts/attachments there;
+        if desired, pop up HTML and multimedia parts in web browser,
+        text in TextEditor, and well-known doc types on windows;
+        could show parts in View windows where embedded text editor
+        would provide a save button, but most are not readable text;
+        """
+        savedir = self.partsDialog.show()          # class attr: at prior dir
+        if savedir:                                # tk dir chooser, not file
+            try:
+                partfiles = self.saveParts(savedir, self.origMessage)
+            except:
+                showerror(appname, 'Error while writing part files')
+                printStack(sys.exc_info())
+            else:
+                if self.okayToOpenParts: self.openParts(partfiles)
+
+    def askOpen(self, appname, prompt):
+        if not self.verifyPartOpens:
+            return True
+        else:
+            return askyesno(appname, prompt)   # pop-up dialog
+
+    def openParts(self, partfiles):
+        """
+        auto-open well known and safe file types, but only if verified
+        by the user in a pop up; other types must be opened manually
+        from save dir;  at this point, the named parts have been already
+        MIME-decoded and saved as raw bytes in binary-mode files, but text
+        parts may be in any Unicode encoding;  PyEdit needs to know the
+        encoding to decode, webbrowsers may have to guess or be told;
+
+        caveat: punts for type application/octet-stream even if it has
+        safe filename extension such as .html; caveat: image/audio/video
+        could be opened with the book's playfile.py; could also do that
+        if text viewer fails: would start notepad on Windows via startfile;
+        webbrowser may handle most cases here too, but specific is better;
+        """
+
+        def textPartEncoding(fullfilename):
+            """
+            3.0: map a text part filename back to charset param in content-type
+            header of part's Message, so we can pass this on to the PyEdit
+            constructor for proper text display;  we could return the charset
+            along with content-type from mailtools for text parts, but fewer
+            changes are needed if this is handled as a special case here;
+
+            part content is saved in binary mode files by mailtools to avoid
+            encoding issues, but here the original part Message is not directly
+            available; we need this mapping step to extract a Unicode encoding
+            name if present; 4E's PyEdit now allows an explicit encoding name for
+            file opens, and resolves encoding on saves; see Chapter 11 for PyEdit
+            policies: it may ask user for an encoding if charset absent or fails;
+            caveat: move to mailtools.mailParser to reuse for &lt;meta&gt; in PyMailCGI?
+            """
+            partname = os.path.basename(fullfilename)
+            for (filename, contype, part) in self.walkNamedParts(self.origMessage):
+                if filename == partname:
+                    return part.get_content_charset()     # None if not in header
+            assert False, 'Text part not found'           # should never happen
+
+        for (contype, fullfilename) in partfiles:
+            maintype  = contype.split('/')[0]                      # left side
+            extension = os.path.splitext(fullfilename)[1]          # not [-4:]
+            basename  = os.path.basename(fullfilename)             # strip dir
+
+            # HTML and XML text, web pages, some media
+            if contype  in ['text/html', 'text/xml']:
+                browserOpened = False
+                if self.askOpen(appname, 'Open "%s" in browser?' % basename):
+                    try:
+                        webbrowser.open_new('file://' + fullfilename)
+                        browserOpened = True
+                    except:
+                        showerror(appname, 'Browser failed: trying editor')
+                if not browserOpened or not self.skipTextOnHtmlPart:
+                    try:
+                        # try PyEdit to see encoding name and effect
+                        encoding = textPartEncoding(fullfilename)
+                        textEditor.TextEditorMainPopup(parent=self,
+                                   winTitle=' - %s email part' % (encoding or '?'),
+                                   loadFirst=fullfilename, loadEncode=encoding)
+                    except:
+                        showerror(appname, 'Error opening text viewer')
+
+            # text/plain, text/x-python, etc.; 4E: encoding, may fail
+            elif maintype == 'text':
+                if self.askOpen(appname, 'Open text part "%s"?' % basename):
+                    try:
+                        encoding = textPartEncoding(fullfilename)
+                        textEditor.TextEditorMainPopup(parent=self,
+                                   winTitle=' - %s email part' % (encoding or '?'),
+                                   loadFirst=fullfilename, loadEncode=encoding)
+                    except:
+                        showerror(appname, 'Error opening text viewer')
+
+            # multimedia types: Windows opens mediaplayer, imageviewer, etc.
+            elif maintype in ['image', 'audio', 'video']:
+                if self.askOpen(appname, 'Open media part "%s"?' % basename):
+                    try:
+                        webbrowser.open_new('file://' + fullfilename)
+                    except:
+                        showerror(appname, 'Error opening browser')
+
+            # common Windows documents: Word, Excel, Adobe, archives, etc.
+            elif (sys.platform[:3] == 'win' and
+                  maintype == 'application' and                      # 3.0: +x types
+                  extension in ['.doc', '.docx', '.xls', '.xlsx',    # generalize me
+                                '.pdf', '.zip',  '.tar', '.wmv']):
+                    if self.askOpen(appname, 'Open part "%s"?' % basename):
+                        os.startfile(fullfilename)
+
+            else:  # punt!
+                msg = 'Cannot open part: "%s"\nOpen manually in: "%s"'
+                msg = msg % (basename, os.path.dirname(fullfilename))
+                showinfo(appname, msg)
+
+
+###############################################################################
+# message edit windows - write, reply, forward
+###############################################################################
+
+
+if mailconfig.smtpuser:                              # user set in mailconfig?
+    MailSenderClass = mailtools.MailSenderAuth       # login/password required
+else:
+    MailSenderClass = mailtools.MailSender
+
+
+class WriteWindow(ViewWindow, MailSenderClass):
+    """
+    customize view display for composing new mail
+    inherits sendMessage from mailtools.MailSender
+    """
+    modelabel = 'Write'
+
+    def __init__(self, headermap, starttext):
+        ViewWindow.__init__(self, headermap, starttext)
+        MailSenderClass.__init__(self)
+        self.attaches   = []                     # each win has own open dialog
+        self.openDialog = None                   # dialog remembers last dir
+
+    def actionButtons(self):
+        return [('Cancel', self.quit),           # need method to use self
+                ('Parts',  self.onParts),        # PopupWindow verifies cancel
+                ('Attach', self.onAttach),
+                ('Send',   self.onSend)]         # 4E: don't pad: centered
+
+    def onParts(self):
+        # caveat: deletes not currently supported
+        if not self.attaches:
+            showinfo(appname, 'Nothing attached')
+        else:
+            msg = '\n'.join(['Already attached:\n'] + self.attaches)
+            showinfo(appname, msg)
+
+    def onAttach(self):
+        """
+        attach a file to the mail: name added here will be
+        added as a part on Send, inside the mailtools pkg;
+        4E: could ask Unicode type here instead of on send
+        """
+        if not self.openDialog:
+            self.openDialog = Open(title=appname + ': Select Attachment File')
+        filename = self.openDialog.show()        # remember prior dir
+        if filename:
+            self.attaches.append(filename)       # to be opened in send method
+
+    def resolveUnicodeEncodings(self):
+        """
+        3.0/4E: to prepare for send, resolve Unicode encoding for text parts:
+        both main text part, and any text part attachments;  the main text part
+        may have had a known encoding if this is a reply or forward, but not for
+        a write, and it may require a different encoding after editing anyhow;
+        smtplib in 3.1 requires that full message text be encodable per ASCII
+        when sent (if it's a str), so it's crucial to get this right here; else
+        fails if reply/fwd to UTF8 text when config=ascii if any non-ascii chars;
+        try user setting and reply but fall back on general UTF8 as a last resort;
+        """
+
+        def isTextKind(filename):
+            contype, encoding = mimetypes.guess_type(filename)
+            if contype is None or encoding is not None:    # 4E utility
+                return False                               # no guess, compressed?
+            maintype, subtype = contype.split('/', 1)      # check for text/?
+            return maintype == 'text'
+
+        # resolve many body text encoding
+        bodytextEncoding = mailconfig.mainTextEncoding
+        if bodytextEncoding == None:
+            asknow = askstring('PyMailGUI', 'Enter main text Unicode encoding name')
+            bodytextEncoding = asknow or 'latin-1'    # or sys.getdefaultencoding()?
+
+        # last chance: use utf-8 if can't encode per prior selections
+        if bodytextEncoding != 'utf-8':
+            try:
+                bodytext = self.editor.getAllText()
+                bodytext.encode(bodytextEncoding)
+            except (UnicodeError, LookupError):       # lookup: bad encoding name
+                bodytextEncoding = 'utf-8'            # general code point scheme
+
+        # resolve any text part attachment encodings
+        attachesEncodings = []
+        config = mailconfig.attachmentTextEncoding
+        for filename in self.attaches:
+            if not isTextKind(filename):
+                attachesEncodings.append(None)        # skip non-text: don't ask
+            elif config != None:
+                attachesEncodings.append(config)      # for all text parts if set
+            else:
+                prompt = 'Enter Unicode encoding name for %' % filename
+                asknow = askstring('PyMailGUI', prompt)
+                attachesEncodings.append(asknow or 'latin-1')
+
+            # last chance: use utf-8 if can't decode per prior selections
+            choice = attachesEncodings[-1]
+            if choice != None and choice != 'utf-8':
+                try:
+                    attachbytes = open(filename, 'rb').read()
+                    attachbytes.decode(choice)
+                except (UnicodeError, LookupError, IOError):
+                    attachesEncodings[-1] = 'utf-8'
+        return bodytextEncoding, attachesEncodings
+
+    def onSend(self):
+        """
+        threaded: mail edit window Send button press;
+        may overlap with any other thread, disables none but quit;
+        Exit,Fail run by threadChecker via queue in after callback;
+        caveat: no progress here, because send mail call is atomic;
+        assumes multiple recipient addrs are separated with ',';
+        mailtools module handles encodings, attachments, Date, etc;
+        mailtools module also saves sent message text in a local file
+
+        3.0: now fully parses To,Cc,Bcc (in mailtools) instead of
+        splitting on the separator naively;  could also use multiline
+        input widgets instead of simple entry;  Bcc added to envelope,
+        not headers;
+
+        3.0: Unicode encodings of text parts is resolved here, because
+        it may require GUI prompts;  mailtools performs the actual
+        encoding for parts as needed and requested;
+
+        3.0: i18n headers are already decoded in the GUI fields here;
+        encoding of any non-ASCII i18n headers is performed in mailtools,
+        not here, because no GUI interaction is required;
+        """
+
+        # resolve Unicode encoding for text parts;
+        bodytextEncoding, attachesEncodings = self.resolveUnicodeEncodings()
+
+        # get components from GUI; 3.0: i18n headers are decoded
+        fieldvalues = [entry.get() for entry in self.hdrFields]
+        From, To, Cc, Subj = fieldvalues[:4]
+        extraHdrs = [('Cc', Cc), ('X-Mailer', appname + ' (Python)')]
+        extraHdrs += list(zip(self.userHdrs, fieldvalues[4:]))
+        bodytext = self.editor.getAllText()
+
+        # split multiple recipient lists on ',', fix empty fields
+        Tos = self.splitAddresses(To)
+        for (ix, (name, value)) in enumerate(extraHdrs):
+            if value:                                           # ignored if ''
+                if value == '?':                                # ? not replaced
+                    extraHdrs[ix] = (name, '')
+                elif name.lower() in ['cc', 'bcc']:             # split on ','
+                    extraHdrs[ix] = (name, self.splitAddresses(value))
+
+        # withdraw to disallow send during send
+        # caveat: might not be foolproof - user may deiconify if icon visible
+        self.withdraw()
+        self.getPassword()      # if needed; don't run pop up in send thread!
+        popup = popuputil.BusyBoxNowait(appname, 'Sending message')
+        sendingBusy.incr()
+        threadtools.startThread(
+            action  = self.sendMessage,
+            args    = (From, Tos, Subj, extraHdrs, bodytext, self.attaches,
+                                         saveMailSeparator,
+                                         bodytextEncoding,
+                                         attachesEncodings),
+            context = (popup,),
+            onExit  = self.onSendExit,
+            onFail  = self.onSendFail)
+
+    def onSendExit(self, popup):
+        """
+        erase wait window, erase view window, decr send count;
+        sendMessage call auto saves sent message in local file;
+        can't use window.addSavedMails: mail text unavailable;
+        """
+        popup.quit()
+        self.destroy()
+        sendingBusy.decr()
+
+        # poss \ when opened, / in mailconfig
+        sentname = os.path.abspath(mailconfig.sentmailfile)  # also expands '.'
+        if sentname in openSaveFiles.keys():                 # sent file open?
+            window = openSaveFiles[sentname]                 # update list,raise
+            window.loadMailFileThread()
+
+    def onSendFail(self, exc_info, popup):
+        # pop-up error, keep msg window to save or retry, redraw actions frame
+        popup.quit()
+        self.deiconify()
+        self.lift()
+        showerror(appname, 'Send failed: \n%s\n%s' % exc_info[:2])
+        printStack(exc_info)
+        MailSenderClass.smtpPassword = None        # try again; 3.0/4E: not on self
+        sendingBusy.decr()
+
+    def askSmtpPassword(self):
+        """
+        get password if needed from GUI here, in main thread;
+        caveat: may try this again in thread if no input first
+        time, so goes into a loop until input is provided; see
+        pop paswd input logic for a nonlooping alternative
+        """
+        password = ''
+        while not password:
+            prompt = ('Password for %s on %s?' %
+                     (self.smtpUser, self.smtpServerName))
+            password = popuputil.askPasswordWindow(appname, prompt)
+        return password
+
+
+class ReplyWindow(WriteWindow):
+    """
+    customize write display for replying
+    text and headers set up by list window
+    """
+    modelabel = 'Reply'
+
+
+class ForwardWindow(WriteWindow):
+    """
+    customize reply display for forwarding
+    text and headers set up by list window
+    """
+    modelabel = 'Forward'</pre>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="messagecache: Message Cache Manager"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="messagecache_colon_message_cache_manager"></a>messagecache: Message Cache Manager</h2>
+</div>
+</div>
+</div>
+<p>The <a id="I_indexterm3_d1e62772"></a><a id="py14.4.5"></a>class in Example 14-5 implements a cache
+          for already loaded messages. Its logic is split off into this file
+          in order to avoid further complicating list window implementations.
+          The server list window creates and embeds an instance of this class
+          to interface with the mail server and to keep track of already
+          loaded mail headers and full text. In this version, the server list
+          window also keeps track of mail fetches in progress, to avoid
+          attempting to load the same mail more than once in parallel. This
+          task isn’t performed here, because it may require GUI
+          operations.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id55"></a>
+<p class="epub__title">Example 14-5. PP4E\Internet\Email\PyMailGui\messagecache.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+##############################################################################
+manage message and header loads and context, but not GUI;
+a MailFetcher, with a list of already loaded headers and messages;
+the caller must handle any required threading or GUI interfaces;
+
+3.0 change: use full message text  Unicode encoding name in local
+mailconfig module; decoding happens deep in mailtools, when a message
+is fetched - mail text is always Unicode str from that point on;
+this may change in a future Python/email: see Chapter 13 for details;
+
+3.0 change: inherits the new mailconfig.fetchlimit feature of mailtools,
+which can be used to limit the maximum number of most recent headers or
+full mails (if no TOP) fetched on each load request; note that this
+feature is independent of the loadfrom used here to limit loads to
+newly-arrived mails only, though it is applied at the same time: at
+most fetchlimit newly-arrived mails are loaded;
+
+3.0 change: though unlikely, it's not impossible that a user may trigger a
+new fetch of a message that is currently being fetched in a thread, simply
+by clicking the same message again (msg fetches, but not full index loads,
+may overlap with other fetches and sends); this seems to be thread safe here,
+but can lead to redundant and possibly parallel downloads of the same mail
+which are pointless and seem odd (selecting all mails and pressing View
+twice downloads most messages twice!); fixed by keeping track of fetches in
+progress in the main GUI thread so that this overlap is no longer possible:
+a message being fetched disables any fetch request which it is part of, and
+parallel fetches are still allowed as long as their targets do not intersect;
+##############################################################################
+"""
+
+from PP4E.Internet.Email import mailtools
+from popuputil import askPasswordWindow
+
+
+class MessageInfo:
+    """
+    an item in the mail cache list
+    """
+    def __init__(self, hdrtext, size):
+        self.hdrtext  = hdrtext            # fulltext is cached msg
+        self.fullsize = size               # hdrtext is just the hdrs
+        self.fulltext = None               # fulltext=hdrtext if no TOP
+
+
+class MessageCache(mailtools.MailFetcher):
+    """
+    keep track of already loaded headers and messages;
+    inherits server transfer methods from MailFetcher;
+    useful in other apps: no GUI or thread assumptions;
+
+    3.0: raw mail text bytes are decoded to str to be
+    parsed with Py3.1's email pkg and saved to files;
+    uses the local mailconfig module's encoding setting;
+    decoding happens automatically in mailtools on fetch;
+    """
+    def __init__(self):
+        mailtools.MailFetcher.__init__(self)   # 3.0: inherits fetchEncoding
+        self.msglist = []                      # 3.0: inherits fetchlimit
+
+    def loadHeaders(self, forceReloads, progress=None):
+        """
+        three cases to handle here: the initial full load,
+        load newly arrived, and forced reload after delete;
+        don't refetch viewed msgs if hdrs list same or extended;
+        retains cached msgs after a delete unless delete fails;
+        2.1: does quick check to see if msgnums still in sync
+        3.0: this is now subject to mailconfig.fetchlimit max;
+        """
+        if forceReloads:
+            loadfrom = 1
+            self.msglist = []                         # msg nums have changed
+        else:
+            loadfrom = len(self.msglist)+1            # continue from last load
+
+        # only if loading newly arrived
+        if loadfrom != 1:
+            self.checkSynchError(self.allHdrs())      # raises except if bad
+
+        # get all or newly arrived msgs
+        reply = self.downloadAllHeaders(progress, loadfrom)
+        headersList, msgSizes, loadedFull = reply
+
+        for (hdrs, size) in zip(headersList, msgSizes):
+            newmsg = MessageInfo(hdrs, size)
+            if loadedFull:                            # zip result may be empty
+                newmsg.fulltext = hdrs                # got full msg if no 'top'
+            self.msglist.append(newmsg)
+
+    def getMessage(self, msgnum):                     # get raw msg text
+        cacheobj = self.msglist[msgnum-1]             # add to cache if fetched
+        if not cacheobj.fulltext:                     # harmless if threaded
+            fulltext = self.downloadMessage(msgnum)   # 3.0: simpler coding
+            cacheobj.fulltext = fulltext
+        return cacheobj.fulltext
+
+    def getMessages(self, msgnums, progress=None):
+        """
+        prefetch full raw text of multiple messages, in thread;
+        2.1: does quick check to see if msgnums still in sync;
+        we can't get here unless the index list already loaded;
+        """
+        self.checkSynchError(self.allHdrs())          # raises except if bad
+        nummsgs = len(msgnums)                        # adds messages to cache
+        for (ix, msgnum) in enumerate(msgnums):       # some poss already there
+             if progress: progress(ix+1, nummsgs)     # only connects if needed
+             self.getMessage(msgnum)                  # but may connect &gt; once
+
+    def getSize(self, msgnum):                        # encapsulate cache struct
+        return self.msglist[msgnum-1].fullsize        # it changed once already!
+
+    def isLoaded(self, msgnum):
+        return self.msglist[msgnum-1].fulltext
+
+    def allHdrs(self):
+        return [msg.hdrtext for msg in self.msglist]
+
+    def deleteMessages(self, msgnums, progress=None):
+        """
+        if delete of all msgnums works, remove deleted entries
+        from mail cache, but don't reload either the headers list
+        or already viewed mails text: cache list will reflect the
+        changed msg nums on server;  if delete fails for any reason,
+        caller should forceably reload all hdrs next, because _some_
+        server msg nums may have changed, in unpredictable ways;
+        2.1: this now checks msg hdrs to detect out of synch msg
+        numbers, if TOP supported by mail server; runs in thread
+        """
+        try:
+            self.deleteMessagesSafely(msgnums, self.allHdrs(), progress)
+        except mailtools.TopNotSupported:
+            mailtools.MailFetcher.deleteMessages(self, msgnums, progress)
+
+        # no errors: update index list
+        indexed = enumerate(self.msglist)
+        self.msglist = [msg for (ix, msg) in indexed if ix+1 not in msgnums]
+
+
+class GuiMessageCache(MessageCache):
+    """
+    add any GUI-specific calls here so cache usable in non-GUI apps
+    """
+
+    def setPopPassword(self, appname):
+        """
+        get password from GUI here, in main thread
+        forceably called from GUI to avoid pop ups in threads
+        """
+        if not self.popPassword:
+            prompt = 'Password for %s on %s?' % (self.popUser, self.popServer)
+            self.popPassword = askPasswordWindow(appname, prompt)
+
+    def askPopPassword(self):
+        """
+        but don't use GUI pop up here: I am run in a thread!
+        when tried pop up in thread, caused GUI to hang;
+        may be called by MailFetcher superclass, but only
+        if passwd is still empty string due to dialog close
+        """
+        return self.popPassword</pre>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="popuputil: General-Purpose GUI Pop Ups"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="popuputil_colon_general-purpose_gui_pop"></a>popuputil: General-Purpose GUI Pop Ups</h2>
+</div>
+</div>
+</div>
+<p>Example 14-6
+          implements <a id="I_indexterm3_d1e62795"></a><a id="py14.4.6"></a>a handful of utility pop-up windows in a module, in
+          case they ever prove useful in other programs. Note that the same
+          windows utility module is imported here, to give a common
+          look-and-feel to the pop ups (icons, titles, and <span>so on</span>).</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id56"></a>
+<p class="epub__title">Example 14-6. PP4E\Internet\Email\PyMailGui\popuputil.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+#############################################################################
+utility windows - may be useful in other programs
+#############################################################################
+"""
+
+from tkinter import *
+from PP4E.Gui.Tools.windows import PopupWindow
+
+
+class HelpPopup(PopupWindow):
+    """
+    custom Toplevel that shows help text as scrolled text
+    source button runs a passed-in callback handler
+    3.0 alternative: use HTML file and webbrowser module
+    """
+    myfont = 'system'  # customizable
+    mywidth = 78       # 3.0: start width
+
+    def __init__(self, appname, helptext, iconfile=None, showsource=lambda:0):
+        PopupWindow.__init__(self, appname, 'Help', iconfile)
+        from tkinter.scrolledtext import ScrolledText    # a nonmodal dialog
+        bar  = Frame(self)                               # pack first=clip last
+        bar.pack(side=BOTTOM, fill=X)
+        code = Button(bar, bg='beige', text="Source", command=showsource)
+        quit = Button(bar, bg='beige', text="Cancel", command=self.destroy)
+        code.pack(pady=1, side=LEFT)
+        quit.pack(pady=1, side=LEFT)
+        text = ScrolledText(self)                   # add Text + scrollbar
+        text.config(font=self.myfont)
+        text.config(width=self.mywidth)             # too big for showinfo
+        text.config(bg='steelblue', fg='white')     # erase on btn or return
+        text.insert('0.0', helptext)
+        text.pack(expand=YES, fill=BOTH)
+        self.bind("&lt;Return&gt;", (lambda event: self.destroy()))
+
+
+def askPasswordWindow(appname, prompt):
+    """
+    modal dialog to input password string
+    getpass.getpass uses stdin, not GUI
+    tkSimpleDialog.askstring echos input
+    """
+    win = PopupWindow(appname, 'Prompt')               # a configured Toplevel
+    Label(win, text=prompt).pack(side=LEFT)
+    entvar = StringVar(win)
+    ent = Entry(win, textvariable=entvar, show='*')    # display * for input
+    ent.pack(side=RIGHT, expand=YES, fill=X)
+    ent.bind('&lt;Return&gt;', lambda event: win.destroy())
+    ent.focus_set(); win.grab_set(); win.wait_window()
+    win.update()                                       # update forces redraw
+    return entvar.get()                                # ent widget is now gone
+
+
+class BusyBoxWait(PopupWindow):
+    """
+    pop up blocking wait message box: thread waits
+    main GUI event thread stays alive during wait
+    but GUI is inoperable during this wait state;
+    uses quit redef here because lower, not leftmost;
+    """
+    def __init__(self, appname, message):
+        PopupWindow.__init__(self, appname, 'Busy')
+        self.protocol('WM_DELETE_WINDOW', lambda:0)        # ignore deletes
+        label = Label(self, text=message + '...')          # win.quit() to erase
+        label.config(height=10, width=40, cursor='watch')  # busy cursor
+        label.pack()
+        self.makeModal()
+        self.message, self.label = message, label
+    def makeModal(self):
+        self.focus_set()                                   # grab application
+        self.grab_set()                                    # wait for threadexit
+    def changeText(self, newtext):
+        self.label.config(text=self.message + ': ' + newtext)
+    def quit(self):
+        self.destroy()                                     # don't verify quit
+
+class BusyBoxNowait(BusyBoxWait):
+    """
+    pop up nonblocking wait window
+    call changeText to show progress, quit to close
+    """
+    def makeModal(self):
+        pass
+
+if __name__ == '__main__':
+    HelpPopup('spam', 'See figure 1...\n')
+    print(askPasswordWindow('spam', 'enter password'))
+    input('Enter to exit')  # pause if clicked</pre>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="wraplines: Line Split Tools"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="wraplines_colon_line_split_tools"></a>wraplines: Line Split Tools</h2>
+</div>
+</div>
+</div>
+<p>The <a id="I_indexterm3_d1e62820"></a><a id="py14.4.7"></a>module in Example 14-7 implements general
+          tools for wrapping long lines, at either a fixed column or the first
+          delimiter at or before a fixed column. PyMailGUI uses this file’s
+          <code class="epub__literal">wrapText1</code> function for text in
+          view, reply, and forward windows, but this code is potentially
+          useful in other programs. Run the file as a script to watch its
+          self-test code at work, and study its functions to see its
+          text-processing logic.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id57"></a>
+<p class="epub__title">Example 14-7. PP4E\Internet\Email\PyMailGui\wraplines.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+###############################################################################
+split lines on fixed columns or at delimiters before a column;
+see also: related but different textwrap standard library module (2.3+);
+4E caveat: this assumes str; supporting bytes might help avoid some decodes;
+###############################################################################
+"""
+
+defaultsize = 80
+
+def wrapLinesSimple(lineslist, size=defaultsize):
+    "split at fixed position size"
+    wraplines = []
+    for line in lineslist:
+        while True:
+            wraplines.append(line[:size])         # OK if len &lt; size
+            line = line[size:]                    # split without analysis
+            if not line: break
+    return wraplines
+
+def wrapLinesSmart(lineslist, size=defaultsize, delimiters='.,:\t '):
+    "wrap at first delimiter left of size"
+    wraplines = []
+    for line in lineslist:
+        while True:
+            if len(line) &lt;= size:
+                wraplines += [line]
+                break
+            else:
+                for look in range(size-1, size // 2, −1):       # 3.0: need // not /
+                    if line[look] in delimiters:
+                        front, line = line[:look+1], line[look+1:]
+                        break
+                else:
+                    front, line = line[:size], line[size:]
+                wraplines += [front]
+    return wraplines
+
+###############################################################################
+# common use case utilities
+###############################################################################
+
+def wrapText1(text, size=defaultsize):         # better for line-based txt: mail
+    "when text read all at once"               # keeps original line brks struct
+    lines = text.split('\n')                   # split on newlines
+    lines = wrapLinesSmart(lines, size)        # wrap lines on delimiters
+    return '\n'.join(lines)                    # put back together
+
+def wrapText2(text, size=defaultsize):         # more uniform across lines
+    "same, but treat as one long line"         # but loses original line struct
+    text  = text.replace('\n', ' ')            # drop newlines if any
+    lines = wrapLinesSmart([text], size)       # wrap single line on delimiters
+    return lines                               # caller puts back together
+
+def wrapText3(text, size=defaultsize):
+    "same, but put back together"
+    lines = wrapText2(text, size)              # wrap as single long line
+    return '\n'.join(lines) + '\n'             # make one string with newlines
+
+def wrapLines1(lines, size=defaultsize):
+    "when newline included at end"
+    lines = [line[:-1] for line in lines]      # strip off newlines (or .rstrip)
+    lines = wrapLinesSmart(lines, size)        # wrap on delimiters
+    return [(line + '\n') for line in lines]   # put them back
+
+def wrapLines2(lines, size=defaultsize):       # more uniform across lines
+    "same, but concat as one long line"        # but loses original structure
+    text  = ''.join(lines)                     # put together as 1 line
+    lines = wrapText2(text)                    # wrap on delimiters
+    return [(line + '\n') for line in lines]   # put newlines on ends
+
+###############################################################################
+# self-test
+###############################################################################
+
+if __name__ == '__main__':
+    lines = ['spam ham ' * 20 + 'spam,ni' * 20,
+             'spam ham ' * 20,
+             'spam,ni'   * 20,
+             'spam ham.ni' * 20,
+             '',
+             'spam'*80,
+             ' ',
+             'spam ham eggs']
+
+    sep = '-' * 30
+    print('all', sep)
+    for line in lines: print(repr(line))
+    print('simple', sep)
+    for line in wrapLinesSimple(lines): print(repr(line))
+    print('smart', sep)
+    for line in wrapLinesSmart(lines): print(repr(line))
+
+    print('single1', sep)
+    for line in wrapLinesSimple([lines[0]], 60): print(repr(line))
+    print('single2', sep)
+    for line in wrapLinesSmart([lines[0]], 60): print(repr(line))
+    print('combined text', sep)
+    for line in wrapLines2(lines): print(repr(line))
+    print('combined lines', sep)
+    print(wrapText1('\n'.join(lines)))
+
+    assert ''.join(lines) == ''.join(wrapLinesSimple(lines, 60))
+    assert ''.join(lines) == ''.join(wrapLinesSmart(lines, 60))
+    print(len(''.join(lines)), end=' ')
+    print(len(''.join(wrapLinesSimple(lines))), end=' ')
+    print(len(''.join(wrapLinesSmart(lines))), end=' ')
+    print(len(''.join(wrapLinesSmart(lines, 60))), end=' ')
+    input('Press enter')   # pause if clicked</pre>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="html2text: Extracting Text from HTML (Prototype, Preview)"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="html2text_colon_extracting_text_from_htm"></a>html2text: Extracting Text from HTML (Prototype,
+          Preview)</h2>
+</div>
+</div>
+</div>
+<p>Example 14-8 lists
+          <a id="I_indexterm3_d1e62846"></a><a id="py14.4.8"></a>the code of the simple-minded HTML parser that
+          PyMailGUI uses to extract plain text from mails whose main (or only)
+          text part is in HTML form. This extracted text is used both for
+          display and for the initial text in replies and forwards. Its
+          original HTML form is also displayed in its full glory in a
+          popped-up web browser as before.</p>
+<p>This is a <span class="epub__emphasis"><em>prototype</em></span>. Because PyMailGUI is
+          oriented toward plain text today, this parser is intended as a
+          temporary workaround until a HTML viewer/editor widget solution is
+          found. Because of that, this is at best a first cut which has not
+          been polished to any significant extent. Robustly parsing HTML in
+          its entirety is a task well beyond the scope of this chapter and
+          book. When this parser fails to render good plain text (and it
+          will!), users can still view and cut-and-paste the properly
+          formatted text from the web browser.</p>
+<p>This is also a <span class="epub__emphasis"><em>preview</em></span>. HTML parsing is
+          not covered until Chapter 19 of this book,
+          so you’ll have to take this on faith until we refer back to it in
+          that later chapter. Unfortunately, this feature was added to
+          PyMailGUI late in the book project, and avoiding this forward
+          reference didn’t seem to justify omitting the improvement
+          altogether. For more details on HTML parsing, stay tuned for (or
+          flip head to) Chapter 19.</p>
+<p>In short, the class here provides handler methods that receive
+          callbacks from an HTML parser, as tags and their content is
+          recognized; we use this model here to save text we’re interested in
+          along the way. Besides the parser class, we could also use Python’s
+          <code class="epub__literal">html.entities</code> module to map more
+          entity types than are hardcoded here—another tool we will meet in
+          Chapter 19.</p>
+<p>Despite its limitations, this example serves as a rough guide
+          to help get you started, and any result it produces is certainly an
+          improvement upon the prior edition’s display and quoting of raw
+          HTML.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id58"></a>
+<p class="epub__title">Example 14-8. PP4E\Internet\Email\PyMailGui\html2text.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+################################################################
+*VERY* preliminary html-to-text extractor, for text to be
+quoted in replies and forwards, and displayed in the main
+text display component.  Only used when the main text part
+is HTML (i.e., no alternative or other text parts to show).
+We also need to know if this is HTML or not, but findMainText
+already returns the main text's content type.
+
+This is mostly provided as a first cut, to help get you started
+on a more complete solution.  It hasn't been polished, because
+any result is better than displaying raw HTML, and it's probably
+a better idea to migrate to an HTML viewer/editor widget in the
+future anyhow.  As is, PyMailGUI is still plain-text biased.
+
+If (really, when) this parser fails to render well, users can
+instead view and cut-and-paste from the web browser popped up
+to display the HTML.  See Chapter 19 for more on HTML parsing.
+################################################################
+"""
+from html.parser import HTMLParser     # Python std lib parser (sax-like model)
+
+class Parser(HTMLParser):              # subclass parser, define callback methods
+    def __init__(self):                # text assumed to be str, any encoding ok
+        HTMLParser.__init__(self)
+        self.text = '[Extracted HTML text]'
+        self.save = 0
+        self.last = ''
+
+    def addtext(self, new):
+        if self.save &gt; 0:
+            self.text += new
+            self.last = new
+
+    def addeoln(self, force=False):
+        if force or self.last != '\n':
+            self.addtext('\n')
+
+    def handle_starttag(self, tag, attrs):    # + others imply content start?
+        if tag in ('p', 'div', 'table', 'h1', 'h2', 'li'):
+            self.save += 1
+            self.addeoln()
+        elif tag == 'td':
+            self.addeoln()
+        elif tag == 'style':                  # + others imply end of prior?
+            self.save -= 1
+        elif tag == 'br':
+            self.addeoln(True)
+        elif tag == 'a':
+            alts = [pair for pair in attrs if pair[0] == 'alt']
+            if alts:
+                name, value = alts[0]
+                self.addtext('[' + value.replace('\n', '') + ']')
+
+    def handle_endtag(self, tag):
+        if tag in ('p', 'div', 'table', 'h1', 'h2', 'li'):
+            self.save -= 1
+            self.addeoln()
+        elif tag == 'style':
+            self.save += 1
+
+    def handle_data(self, data):
+        data = data.replace('\n', '')          # what about &lt;PRE&gt;?
+        data = data.replace('\t', ' ')
+        if data != ' ' * len(data):
+            self.addtext(data)
+
+    def handle_entityref(self, name):
+        xlate = dict(lt='&lt;', gt='&gt;', amp='&amp;', nbsp='').get(name, '?')
+        if xlate:
+            self.addtext(xlate)     # plus many others: show ? as is
+
+def html2text(text):
+    try:
+        hp = Parser()
+        hp.feed(text)
+        return(hp.text)
+    except:
+        return text
+
+if __name__ == '__main__':
+
+    # to test me: html2text.py media\html2text-test\htmlmail1.html
+    # parse file name in commandline, display result in tkinter Text
+    # file assumed to be in Unicode platform default, but text need not be
+
+    import sys, tkinter
+    text = open(sys.argv[1], 'r').read()
+    text = html2text(text)
+    t = tkinter.Text()
+    t.insert('1.0', text)
+    t.pack()
+    t.mainloop()</pre>
+</div>
+</div><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p>After this example and chapter had been written and
+            finalized, I did a search for HTML-to-text translators on the Web
+            to try to find better options, and I discovered a Python-coded
+            solution which is much more complete and robust than the simple
+            prototype script here. Regrettably, I also discovered that this
+            system is named the same as the script <span>listed here</span>!</p>
+<p>This was unintentional and unforeseen (alas, developers are
+            predisposed to think alike). For details on this more widely
+            tested and much better alternative, search the Web for
+            <span class="epub__emphasis"><em>html2text</em></span>. It’s open source, but follows the
+            GPL license, and is available only for Python 2.X at this writing
+            (e.g., it uses the 2.X <code class="epub__literal">sgmllib</code>
+            which has been removed in favor of the new <code class="epub__literal">html.parser</code> in 3.X). Unfortunately, its
+            GPL license may raise copyright concerns if shipped with PyMailGUI
+            in this book’s example package or otherwise; worse, its 2.X status
+            means it cannot be used at all with this book’s 3.X examples
+            today.</p>
+<p>There are additional plain-text extractor options on the Web
+            worth checking out, including BeautifulSoup and yet another named
+            <span class="epub__emphasis"><em>html2text.py</em></span> (no, really!). They also appear
+            to be available for just 2.X today, though naturally, this story
+            may change by the time you read this note. There’s no reason to
+            reinvent the wheel, unless existing wheels don’t fit your
+            cart!</p>
+</div>
+</div>
+<div class="epub__sect2" title="mailconfig: User Configurations"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="mailconfig_colon_user_configurations"></a>mailconfig: User Configurations</h2>
+</div>
+</div>
+</div>
+<p>In Example 14-9,
+          PyMailGUI’s <code class="epub__literal">mailconfig</code> user
+          <a id="I_indexterm3_d1e62916"></a><a id="I_indexterm3_d1e62919"></a><a id="py14.4.9"></a>settings module is listed. This program has its own
+          version of this module because many of its settings are unique for
+          PyMailGUI. To use the program for reading your own email, set its
+          initial variables to reflect your POP and SMTP server names and
+          login parameters. The variables in this module also allow the user
+          to tailor the appearance and operation of the program without
+          finding and editing actual program logic.</p>
+<p>As is, this is a single-account configuration. We could
+          generalize this module’s code to allow for multiple email accounts,
+          selected by input at the console when first imported; in an upcoming
+          section we’ll see a different approach that allows this module to be
+          extended externally.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id59"></a>
+<p class="epub__title">Example 14-9. PP4E\Internet\Email\PyMailGui\mailconfig.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+################################################################################
+PyMailGUI user configuration settings.
+
+Email scripts get their server names and other email config options from
+this module: change me to reflect your machine names, sig, and preferences.
+This module also specifies some widget style preferences applied to the GUI,
+as well as message Unicode encoding policy and more in version 3.0.  See
+also: local textConfig.py, for customizing PyEdit pop-ups made by PyMailGUI.
+
+Warning: PyMailGUI won't run without most variables here: make a backup copy!
+Caveat: somewhere along the way this started using mixed case inconsistently...;
+TBD: we could get some user settings from the command line too, and a configure
+dialog GUI would be better, but this common module file suffices for now.
+################################################################################
+"""
+
+#-------------------------------------------------------------------------------
+# (required for load, delete) POP3 email server machine, user;
+#-------------------------------------------------------------------------------
+
+#popservername = '?Please set your mailconfig.py attributes?'
+
+popservername = 'pop.secureserver.net'             # see altconfigs/ for others
+popusername   = 'PP4E@learning-python.com'
+
+#-------------------------------------------------------------------------------
+# (required for send) SMTP email server machine name;
+# see Python smtpd module for a SMTP server class to run locally ('localhost');
+# note: your ISP may require that you be directly connected to their system:
+# I once could email through Earthlink on dial up, but not via Comcast cable;
+#-------------------------------------------------------------------------------
+
+smtpservername = 'smtpout.secureserver.net'
+
+#-------------------------------------------------------------------------------
+# (optional) personal information used by PyMailGUI to fill in edit forms;
+# if not set, does not fill in initial form values;
+# signature  -- can be a triple-quoted block, ignored if empty string;
+# address    -- used for initial value of "From" field if not empty,
+# no longer tries to guess From for replies--varying success;
+#-------------------------------------------------------------------------------
+
+myaddress   = 'PP4E@learning-python.com'
+mysignature = ('Thanks,\n'
+               '--Mark Lutz  (http://learning-python.com, http://rmi.net/~lutz)')
+
+#-------------------------------------------------------------------------------
+# (may be required for send) SMTP user/password if authenticated;
+# set user to None or '' if no login/authentication is required, and set
+# pswd to name of a file holding your SMTP password, or an empty string to
+# force programs to ask (in a console, or GUI)
+#-------------------------------------------------------------------------------
+
+smtpuser  = None                           # per your ISP
+smtppasswdfile  = ''                       # set to '' to be asked
+
+#smtpuser = popusername
+
+#-------------------------------------------------------------------------------
+# (optional) PyMailGUI: name of local one-line text file with your POP
+# password; if empty or file cannot be read, pswd is requested when first
+# connecting; pswd not encrypted: leave this empty on shared machines;
+# PyMailCGI always asks for pswd (runs on a possibly remote server);
+#-------------------------------------------------------------------------------
+
+poppasswdfile  = r'c:\temp\pymailgui.txt'      # set to '' to be asked
+
+#-------------------------------------------------------------------------------
+# (required) local file where sent messages are always saved;
+# PyMailGUI 'Open' button allows this file to be opened and viewed;
+# don't use '.' form if may be run from another dir: e.g., pp4e demos
+#-------------------------------------------------------------------------------
+
+#sentmailfile = r'.\sentmail.txt'             # . means in current working dir
+
+#sourcedir    = r'C:\...\PP4E\Internet\Email\PyMailGui\'
+#sentmailfile = sourcedir + 'sentmail.txt'
+
+# determine automatically from one of my source files
+import wraplines, os
+mysourcedir   = os.path.dirname(os.path.abspath(wraplines.__file__))
+sentmailfile  = os.path.join(mysourcedir, 'sentmail.txt')
+
+#-------------------------------------------------------------------------------
+# (defunct) local file where pymail saves POP mail (full text);
+# PyMailGUI instead asks for a name in GUI with a pop-up dialog;
+# Also asks for Split directory, and part buttons save in ./TempParts;
+#-------------------------------------------------------------------------------
+
+#savemailfile = r'c:\temp\savemail.txt'       # not used in PyMailGUI: dialog
+
+#-------------------------------------------------------------------------------
+# (optional) customize headers displayed in PyMailGUI list and view windows;
+# listheaders replaces default, viewheaders extends it; both must be tuple of
+# strings, or None to use default hdrs;
+#-------------------------------------------------------------------------------
+
+listheaders = ('Subject', 'From', 'Date', 'To', 'X-Mailer')
+viewheaders = ('Bcc',)
+
+#-------------------------------------------------------------------------------
+# (optional) PyMailGUI fonts and colors for text server/file message list
+# windows, message content view windows, and view window attachment buttons;
+# use ('family', size, 'style') for font; 'colorname' or hexstr '#RRGGBB' for
+# color (background, foreground);  None means use defaults;  font/color of
+# view windows can also be set interactively with texteditor's Tools menu;
+# see also the setcolor.py example in the GUI part (ch8) for custom colors;
+#-------------------------------------------------------------------------------
+
+listbg   = 'indianred'                  # None, 'white', '#RRGGBB'
+listfg   = 'black'
+listfont = ('courier', 9, 'bold')       # None, ('courier', 12, 'bold italic')
+                                        # use fixed-width font for list columns
+viewbg     = 'light blue'               # was '#dbbedc'
+viewfg     = 'black'
+viewfont   = ('courier', 10, 'bold')
+viewheight = 18                         # max lines for height when opened (20)
+
+partfg   = None
+partbg   = None
+
+# see Tk color names: aquamarine paleturquoise powderblue goldenrod burgundy ....
+#listbg = listfg = listfont = None
+#viewbg = viewfg = viewfont = viewheight = None      # to use defaults
+#partbg = partfg = None
+
+#-------------------------------------------------------------------------------
+# (optional) column at which mail's original text should be wrapped for view,
+# reply, and forward;  wraps at first delimiter to left of this position;
+# composed text is not auto-wrapped: user or recipient's mail tool must wrap
+# new text if desired; to disable wrapping, set this to a high value (1024?);
+#-------------------------------------------------------------------------------
+
+wrapsz = 90
+
+#-------------------------------------------------------------------------------
+# (optional) control how PyMailGUI opens mail parts in the GUI;
+# for view window Split actions and attachment quick-access buttons;
+# if not okayToOpenParts, quick-access part buttons will not appear in
+# the GUI, and Split saves parts in a directory but does not open them;
+# verifyPartOpens used by both Split action and quick-access buttons:
+# all known-type parts open automatically on Split if this set to False;
+# verifyHTMLTextOpen used by web browser open of HTML main text part:
+#-------------------------------------------------------------------------------
+
+okayToOpenParts    = True      # open any parts/attachments at all?
+verifyPartOpens    = False     # ask permission before opening each part?
+verifyHTMLTextOpen = False     # if main text part is HTML, ask before open?
+
+#-------------------------------------------------------------------------------
+# (optional) the maximum number of quick-access mail part buttons to show
+# in the middle of view windows; after this many, a "..." button will be
+# displayed, which runs the "Split" action to extract additional parts;
+#-------------------------------------------------------------------------------
+
+maxPartButtons = 8             # how many part buttons in view windows
+
+
+# *** 3.0 additions follow ***
+#-------------------------------------------------------------------------------
+# (required, for fetch) the Unicode encoding used to decode fetched full message
+# bytes, and to encode and decode message text stored in text-mode save files; see
+# the book's Chapter 13 for details: this is a limited and temporary approach to
+# Unicode encodings until a new bytes-friendly email package parser is provided
+# which can handle Unicode encodings more accurately on a message-level basis;
+# note: 'latin1' (an 8-bit encoding which is a superset of 7-bit ascii) was
+# required to decode message in some old email save files I had, not 'utf8';
+#-------------------------------------------------------------------------------
+
+fetchEncoding = 'latin-1'    # how to decode and store full message text (ascii?)
+
+#-------------------------------------------------------------------------------
+# (optional, for send) Unicode encodings for composed mail's main text plus all
+# text attachments; set these to None to be prompted for encodings on mail send,
+# else uses values here across entire session; default='latin-1' if GUI Cancel;
+# in all cases, falls back on UTF-8 if your encoding setting or input does not
+# work for the text being sent (e.g., ascii chosen for reply to non-ascii text,
+# or non-ascii attachments); the email package is pickier than Python about
+# names: latin-1 is known (uses qp MIME), but latin1 isn't (uses base64 MIME);
+# set these to sys.getdefaultencoding() result to choose the platform default;
+# encodings of text parts of fetched email are automatic via message headers;
+#-------------------------------------------------------------------------------
+
+mainTextEncoding       = 'ascii'   # main mail body text part sent (None=ask)
+attachmentTextEncoding = 'ascii'   # all text part attachments sent (utf-8, latin-1)
+
+#-------------------------------------------------------------------------------
+# (optional, for send) set this to a Unicode encoding name to be applied to
+# non-ASCII headers, as well as non-ASCII names in email addresses in headers,
+# in composed messages when they are sent;  None means use the UTF-8 default,
+# which should work for most use cases; email names that fail to decode are
+# dropped (the address part is used);  note that header decoding is performed
+# automatically for display, according to header content, not user setting;
+#-------------------------------------------------------------------------------
+
+headersEncodeTo = None     # how to encode non-ASCII headers sent (None=UTF-8)
+
+#-------------------------------------------------------------------------------
+# (optional) select text, HTML, or both versions of the help document;
+# always shows one or the other: displays HTML if both of these are turned off
+#-------------------------------------------------------------------------------
+
+showHelpAsText = True      # scrolled text, with button for opening source files
+showHelpAsHTML = True      # HTML in a web browser, without source file links
+
+#-------------------------------------------------------------------------------
+# (optional) if True, don't show a selected HTML text message part in a PyEdit
+# popup too if it is being displayed in a web browser; if False show both, to
+# see Unicode encoding name and effect in a  text widget (browser may not know);
+#-------------------------------------------------------------------------------
+
+skipTextOnHtmlPart = False       # don't show html part in PyEdit popup too
+
+#-------------------------------------------------------------------------------
+# (optional) the maximum number of mail headers or messages that will be
+# downloaded on each load request; given this setting N, PyMailGUI fetches at
+# most N of the most recently arrived mails; older mails outside this set are
+# not fetched from the server, but are displayed as empty/dummy emails; if this
+# is assigned to None (or 0), loads will have no such limit; use this if you
+# have very many mails in your inbox, and your Internet or mail server speed
+# makes full loads too slow to be practical; PyMailGUI also loads only
+# newly-arrived headers, but this setting is independent of that feature;
+#-------------------------------------------------------------------------------
+
+fetchlimit = 50            # maximum number headers/emails to fetch on loads
+
+#-------------------------------------------------------------------------------
+# (optional) initial width, height of mail index lists (chars x lines);  just
+# a convenience, since the window can be resized/expanded freely once opened;
+#-------------------------------------------------------------------------------
+
+listWidth = None           # None = use default 74
+listHeight = None          # None = use default 15
+
+#-------------------------------------------------------------------------------
+# (optional, for reply) if True, the Reply operation prefills the reply's Cc
+# with all original mail recipients, after removing duplicates and the new sender;
+# if False, no CC prefill occurs, and the reply is configured to reply to the
+# original sender only; the Cc line may always be edited later, in either case.
+#-------------------------------------------------------------------------------
+
+repliesCopyToAll = True   # True=reply to sender + all recipients, else sender
+
+#end</pre>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="textConfig: Customizing Pop-Up PyEdit Windows"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="textconfig_colon_customizing_pop-up_pyed"></a>textConfig: Customizing Pop-Up PyEdit Windows</h2>
+</div>
+</div>
+</div>
+<p>The prior <a id="I_indexterm3_d1e62941"></a><a id="I_indexterm3_d1e62943"></a>section’s <code class="epub__literal">mailconfig</code> module provides user settings
+          for tailoring the PyEdit component used to view and edit main mail
+          text, but PyMailGUI also uses PyEdit to display other kinds of
+          pop-up text, including raw mail text, some text attachments, and
+          source code in its help system. To customize display for these pop
+          ups, PyMailGUI relies on PyEdit’s own utility, which attempts to
+          load a module like that in Example 14-10 from the client
+          application’s own directory. By contrast, PyEdit’s Unicode settings
+          are loaded from the single <code class="epub__literal">textConfig</code> module in its own package’s
+          directory since they are not expected to vary across a platform (see
+          Chapter 11 for more details).</p><div class="epub__example"><a id="pp4e_solidus_internet_solidus_email"></a>
+<p class="epub__title">Example 14-10. PP4E\Internet\Email\PyMailGui\textConfig.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+customize PyEdit pop-up windows other than the main mail text component;
+this module (not its package) is assumed to be on the path for these settings;
+PyEdit Unicode settings come from its own package's textConfig.py, not this;
+"""
+
+bg = 'beige'                        # absent=white; colorname or RGB hexstr
+fg = 'black'                        # absent=black;  e.g., 'beige', '#690f96'
+
+# etc -- see PP4E\Gui\TextEditor\textConfig.py
+# font = ('courier', 9, 'normal')
+# height = 20                       # Tk default: 24 lines
+# width  = 80                       # Tk default: 80 characters</pre>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="PyMailGUIHelp: User Help Text and Display"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="pymailguihelp_colon_user_help_text_and_d"></a>PyMailGUIHelp: User Help Text and Display</h2>
+</div>
+</div>
+</div>
+<p>Finally, Example 14-11
+          lists the <a id="py14.4.11a"></a><a id="py14.4.11b"></a>module that defines the text displayed in PyMailGUI’s
+          help pop up as one triple-quoted string, as well as a function for
+          displaying the HTML rendition of this text. The HTML version of help
+          itself is in a separate file not listed in full here but included in
+          the book’s examples package.</p>
+<p>In fact, I’ve omitted most of the help text string, too, to
+          conserve space here (it spanned 11 pages in the prior edition, and
+          would be longer in this one!). For the full story, see this module
+          in the examples package, or run PyMailGUI live and click the help
+          bar at the top of its main server list window to learn more about
+          how PyMailGUI’s interface operates. If fact, you probably should;
+          the help display may explain some properties of PyMailGUI not
+          introduced by the demo and other material earlier in this
+          chapter.</p>
+<p>The HTML rendition of help includes section links, and is
+          popped up in a web browser. Because the text version also is able to
+          pop up source files and minimizes external dependencies (HTML fails
+          if no browser can be located), both the text and HTML versions are
+          provided and selected by users in the <code class="epub__literal">mailconfig</code> module. Other schemes are
+          possible (e.g., converting HTML to text by parsing as a fallback
+          option), but they are left as suggested improvements.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id60"></a>
+<p class="epub__title">Example 14-11. PP4E\Internet\PyMailGui\PyMailGuiHelp.py (partial)</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+##########################################################################
+PyMailGUI help text string and HTML display function;
+
+History: this display began as an info box pop up which had to be
+narrow for Linux; it later grew to use scrolledtext with buttons
+instead; it now also displays an HTML rendition in a web browser;
+
+2.1/3E: the help string is stored in this separate module to avoid
+distracting from executable code.  As coded, we throw up this text
+in a simple scrollable text box; in the future, we might instead
+use an HTML file opened with a browser (use webbrowser module, or
+run a "browser help.html" or DOS "start help.html" with os.system);
+
+3.0/4E: the help text is now also popped up in a web browser in HTML
+form, with lists, section links, and separators; see the HTML file
+PyMailGuiHelp.html in the examples package for the simple HTML
+translation of the help text string here, popped up in a browser;
+both the scrolled text widget and HTML browser forms are currently
+supported: change mailconfig.py to use the flavor(s) you prefer;
+##########################################################################
+"""
+
+
+# new HTML help for 3.0/4E
+helpfile = 'PyMailGuiHelp.html'     # see book examples package
+
+def showHtmlHelp(helpfile=helpfile):
+    """
+    3.0: popup HTML version of help file in a local web browser via webbrowser;
+    this module is importable, but html file might not be in current working dir
+    """
+    import os, webbrowser
+    mydir = os.path.dirname(__file__)       # dir of this module's filename
+    mydir = os.path.abspath(mydir)          # make absolute: may be .., etc
+    webbrowser.open_new('file://' + os.path.join(mydir, helpfile))
+
+
+##########################################################################
+# string for older text display: client responsible for GUI construction
+##########################################################################
+
+helptext = """PyMailGUI, version 3.0
+May, 2010 (2.1 January, 2006)
+Programming Python, 4th Edition
+Mark Lutz, for O'Reilly Media, Inc.
+
+PyMailGUI is a multiwindow interface for processing email, both online and
+offline.  Its main interfaces include one list window for the mail server,
+zero or more list windows for mail save files, and multiple view windows for
+composing or viewing emails selected in a list window.  On startup, the main
+(server) list window appears first, but no mail server connection is attempted
+until a Load or message send request.  All PyMailGUI windows may be resized,
+which is especially useful in list windows to see additional columns.
+
+Note: To use PyMailGUI to read and write email of your own, you must change
+the POP and SMTP server names and login details in the file mailconfig.py,
+located in PyMailGUI's source-code directory.  See section 11 for details.
+
+Contents:
+0)  VERSION ENHANCEMENTS
+1)  LIST WINDOW ACTIONS
+2)  VIEW WINDOW ACTIONS
+3)  OFFLINE PROCESSING
+4)  VIEWING TEXT AND ATTACHMENTS
+5)  SENDING TEXT AND ATTACHMENTS
+6)  MAIL TRANSFER OVERLAP
+7)  MAIL DELETION
+8)  INBOX MESSAGE NUMBER SYNCHRONIZATION
+9)  LOADING EMAIL
+10) UNICODE AND INTERNATIONALIZATION SUPPORT
+11) THE mailconfig CONFIGURATION MODULE
+12) DEPENDENCIES
+13) MISCELLANEOUS HINTS ("Cheat Sheet")
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">...rest of file omitted...</span></em>
+
+13) MISCELLANEOUS HINTS ("Cheat Sheet")
+
+- Use ',' between multiple addresses in To, Cc, and Bcc headers.
+- Addresses may be given in the full '"name" &lt;addr&gt;' form.
+- Payloads and headers are decoded on fetches and encoded on sends.
+- HTML mails show extracted plain text plus HTML in a web browser.
+- To, Cc, and Bcc receive composed mail, but no Bcc header is sent.
+- If enabled in mailconfig, Bcc is prefilled with sender address.
+
+- Reply and Fwd automatically quote the original mail text.
+- If enabled, replies prefill Cc with all original recipients.
+- Attachments may be added for sends and are encoded as required.
+- Attachments may be opened after View via Split or part buttons.
+- Double-click a mail in the list index to view its raw text.
+- Select multiple mails to process as a set: Ctrl|Shift + click, or All.
+
+- Sent mails are saved to a file named in mailconfig: use Open to view.
+- Save pops up a dialog for selecting a file to hold saved mails.
+- Save always appends to the chosen save file, rather than erasing it.
+- Split asks for a save directory; part buttons save in ./TempParts.
+- Open and save dialogs always remember the prior directory.
+- Use text editor's Save to save a draft of email text being composed.
+
+- Passwords are requested if/when needed, and not stored by PyMailGUI.
+- You may list your password in a file named in mailconfig.py.
+- To print emails, "Save" to a text file and print with other tools.
+- See the altconfigs directory for using with multiple email accounts.
+
+- Emails are never deleted from the mail server automatically.
+- Delete does not reload message headers, unless it fails.
+- Delete checks your inbox to make sure it deletes the correct mail.
+- Fetches detect inbox changes and may automatically reload the index.
+- Any number of sends and disjoint fetches may overlap in time.
+
+- Click this window's Source button to view PyMailGUI source-code files.
+- Watch http://www.rmi.net/~lutz for updates and patches
+- This is an Open Source system: change its code as you like.
+"""
+
+if __name__ == '__main__':
+    print(helptext)                   # to stdout if run alone
+    input('Press Enter key')          # pause in DOS console pop ups</pre>
+</div>
+</div>
+<p>See the examples package for the HTML help file, the first few
+          lines of which are shown in Example 14-12; it’s a simple
+          translation of the module’s help text string (adding a bit more
+          pizzazz to this page is left in the suggested exercise
+          column).</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id61"></a>
+<p class="epub__title">Example 14-12. PP4E\Internet\PyMailGui\PyMailGuiHelp.html
+            (partial)</p><div class="epub__example-contents">
+<pre class="epub__programlisting">&lt;HTML&gt;
+&lt;TITLE&gt;PyMailGUI 3.0 Help&lt;/TITLE&gt;
+&lt;!-- TO DO: add pictures, screen shots, and such --!&gt;
+&lt;BODY&gt;
+
+&lt;H1 align=center&gt;PyMailGUI, Version 3.0&lt;/H1&gt;
+&lt;P align=center&gt;
+&lt;B&gt;&lt;I&gt;May, 2010 (2.1 January, 2006)&lt;/I&gt;&lt;/B&gt;&lt;BR&gt;
+&lt;B&gt;&lt;I&gt;Programming Python, 4th Edition&lt;/I&gt;&lt;/B&gt;&lt;BR&gt;
+&lt;B&gt;&lt;I&gt;Mark Lutz, for O'Reilly Media, Inc.&lt;/I&gt;&lt;/B&gt;
+
+&lt;P&gt;
+&lt;I&gt;PyMailGUI&lt;/I&gt; is a multiwindow interface for processing email, both online and
+<em class="epub__lineannotation"><span class="epub__lineannotation">...rest of file omitted...</span></em></pre>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="altconfigs: Configuring for Multiple Accounts"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="altconfigs_colon_configuring_for_multipl"></a>altconfigs: Configuring for Multiple Accounts</h2>
+</div>
+</div>
+</div>
+<p>Though <a id="I_indexterm3_d1e63017"></a><a id="I_indexterm3_d1e63019"></a><a id="py14.4.12"></a>not an “official” part of the system, I use a few
+          additional short files to launch and test it. If you have multiple
+          email accounts, it can be inconvenient to change a configuration
+          file every time you want to open one in particular. Moreover, if you
+          open multiple PyMailGUI sessions for your accounts at the same time,
+          it would be better if they could use custom appearance and behavior
+          schemes to make them distinct.</p>
+<p>To address this, the <code class="epub__literal">altconfigs</code> directory in the examples
+          source directory provides a simple way to select an account and
+          configurations for it at start-up time. It defines a new top-level
+          script which tailors the module import search path, along with a
+          <code class="epub__literal">mailconfig</code> that prompts for and
+          loads a custom configuration module whose suffix is named by console
+          input. A launcher script is also provided to run without module
+          search path configurations—from PyGadgets or a desktop shortcut, for
+          example, without requiring PYTHONPATH settings for the PP4E root.
+          Examples 14-13 through 14-17 list the files involved.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id62"></a>
+<p class="epub__title">Example 14-13. PP4E\Internet\PyMailGui\altconfigs\PyMailGui.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">import sys                             # ..\PyMailGui.py or 'book' for book configs
+sys.path.insert(1, '..')               # add visibility for real dir
+exec(open('../PyMailGui.py').read())   # do this, but get mailconfig here</pre>
+</div>
+</div><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id63"></a>
+<p class="epub__title">Example 14-14. PP4E\Internet\PyMailGui\altconfigs\mailconfig.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">above = open('../mailconfig.py').read()       # copy version above here (hack?)
+open('mailconfig_book.py', 'w').write(above)  # used for 'book' and as others' base
+acct = input('Account name?')                 # book, rmi, train
+exec('from mailconfig_%s import *' % acct)    # . is first on sys.path</pre>
+</div>
+</div><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id64"></a>
+<p class="epub__title">Example 14-15. PP4E\Internet\PyMailGui\altconfigs\mailconfig_rmi.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">from mailconfig_book import *                 # get base in . (copied from ..)
+popservername = 'pop.rmi.net'                 # this is a big inbox: 4800 emails!
+popusername   = 'lutz'
+myaddress     = 'lutz@rmi.net'
+listbg = 'navy'
+listfg = 'white'
+listHeight = 20         # higher initially
+viewbg = '#dbbedc'
+viewfg = 'black'
+wrapsz = 80             # wrap at 80 cols
+fetchlimit = 300        # load more headers</pre>
+</div>
+</div><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id65"></a>
+<p class="epub__title">Example 14-16. PP4E\Internet\PyMailGui\altconfigs\mailconfig_train.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">from mailconfig_book import *                 # get base in . (copied from ..)
+popusername = 'lutz@learning-python.com'
+myaddress   = 'lutz@learning-python.com'
+listbg = 'wheat'                              # goldenrod, dark green, beige
+listfg = 'navy'                               # chocolate, brown,...
+viewbg = 'aquamarine'
+viewfg = 'black'
+wrapsz = 80
+viewheaders = None      # no Bcc
+fetchlimit = 100        # load more headers</pre>
+</div>
+</div><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id66"></a>
+<p class="epub__title">Example 14-17. PP4E\Internet\PyMailGui\altconfigs\launch_PyMailGui.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># to run without PYTHONPATH setup (e.g., desktop)
+import os                                         # Launcher.py is overkill
+os.environ['PYTHONPATH'] = r'..\..\..\..\..'      # hmm; generalize me
+os.system('PyMailGui.py')                         # inherits path env var</pre>
+</div>
+</div>
+<p>Account files like those in Examples 14-15 and 14-16 can import the base “book” module
+          (to extend it) or not (to replace it entirely). To use these
+          alternative account configurations, run a command line like the
+          following or run the <span>self</span>-<span>configuring</span> launcher script in Example 14-17 from any location.
+          Either way, you can open these account’s windows to view the
+          included saved mails, but be sure to change configurations for your
+          own email accounts and preferences first if you wish to fetch or
+          send mail from these clients:</p><a id="I_programlisting3_d1e63080"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Email\PyMailGui\altconfigs&gt; <strong class="epub__userinput"><code>PyMailGui.py</code></strong>
+Account name?<strong class="epub__userinput"><code>rmi</code></strong></pre>
+<p>Add a “start” to the beginning of this command to keep your
+          console alive on Windows so you can open multiple accounts (try a
+          “&amp;” at the end on Unix). Figure 14-45 earlier shows the
+          scene with all three of my accounts open in PyMailGUI. I keep them
+          open perpetually on my desktop, since a Load fetches just newly
+          arrived headers no matter how long the GUI may have sat dormant, and
+          a Send requires nothing to be loaded at all. While they’re open, the
+          alternative color schemes make the accounts’ windows distinct. A
+          desktop shortcut to the launcher script makes opening my accounts
+          even easier.</p>
+<p>As is, account names are only requested when this special
+          <em class="epub__filename">PyMailGui.py</em> file is run
+          directly, and not when the original file is run directly or by
+          program launchers (in which case there may be no <code class="epub__literal">stdin</code> to read). Extending a module like
+          <code class="epub__literal">mailconfig</code> which might be
+          imported in multiple places this way turns out to be an interesting
+          task (which is largely why I don’t consider its quick solution here
+          to be an official end-user feature). For instance, there are other
+          ways to allow for multiple accounts, including:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Changing the single <code class="epub__literal">mailconfig</code> module in-place</p></li><li class="epub__listitem">
+<p>Importing alternative modules and storing them as key
+              “mailconfig” in <code class="epub__literal">sys.modules</code></p></li><li class="epub__listitem">
+<p>Copying alternative module variables to <code class="epub__literal">mailconfig</code> attributes using <code class="epub__literal">__dict__</code> and <code class="epub__literal">setattr</code></p></li><li class="epub__listitem">
+<p>Using a class for configuration to better support
+              customization in subclasses</p></li><li class="epub__listitem">
+<p>Issuing a pop-up in the GUI to prompt for an account name
+              after or before the main window appears</p></li></ul>
+</div>
+<p>And so on. The separate subdirectory scheme used here was
+          chosen to minimize impacts on existing code in general; to avoid
+          changes to the existing <code class="epub__literal">mailconfig</code> module specifically (which
+          works fine for the single account case); to avoid requiring extra
+          user input of any kind in single account cases; and to allow for the
+          fact that an “import module1 as module2” statement doesn’t prevent
+          “module1” from being imported directly later. This last point is
+          more fraught with peril than you might expect—importing a customized
+          version of a module is not merely a matter of using the “as”
+          renaming extension:</p><a id="I_programlisting3_d1e63137"></a>
+<pre class="epub__programlisting">import m1 as m2      # custom import: load m1 as m2 alternative
+print(m2.attr)       # prints attr in m1.py
+
+import m2            # later imports: loads m2.py anyhow!
+print(m2.attr)       # prints attr in m2.py</pre>
+<p>In other words, this is a quick-and-dirty solution that I
+          originally wrote for testing purposes, and it seems a prime
+          candidate for improvement—along with the other ideas in the next
+          section’s chapter <a id="I_indexterm3_d1e63141"></a>wrap up.</p>
+</div>
+</div>
+</div>
+</body>
+</html>

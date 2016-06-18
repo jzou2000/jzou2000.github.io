@@ -1,0 +1,1170 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Real-World Build System Scenarios</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+<h3>Real-World Build System Scenarios</h3>
+
+<p class="docText">As discussed in the introduction to Part II,
+ “The Build Tools,” it’s important to compare how each of the available 
+build tools can be used in realistic scenarios. After all, not until you
+ actually solve a technical problem do you get a true sense of whether 
+the tool is easy to use. From now on, this chapter focuses less on the 
+syntax of GNU Make and more on how everything fits together.</p>
+
+
+<h4>Scenario 1: Source Code in a Single Directory</h4>
+
+<p class="docText">In the simple case in which
+ you have a C program stored entirely within a single directory, you 
+have three solutions. The first is a repeat of what you saw earlier in 
+the chapter. The second shows how to improve upon that solution, and the
+ third uses an external scanner tool to find dependencies.</p>
+
+<p class="docText">Consider the solution you’ve already seen:</p>
+
+<div class="docText">
+  <pre> 1  SRCS = add.c calc.c mult.c sub.c
+ 2  PROG = calculator
+ 3  CC = gcc
+ 4  CFLAGS = -g
+ 5  OBJS = $(SRCS:.c=.o)
+ 6
+ 7  $(PROG): $(OBJS)
+ 8      $(CC) $(CFLAGS) -o $@ $^
+ 9
+10  $(OBJS): numbers.h</pre>
+</div>
+<br/>
+<p class="docText">This type of makefile is 
+common for projects that start small. When developers first write their 
+code, they often don’t put much effort into planning their build system,
+ given that a simple makefile will suffice. They can add new source 
+files by appending to the <tt>SRCS</tt> variable, and everything continues to work perfectly—at least, for a while.</p>
+
+<p class="docText">Focus on line 10, stating that all source files have a dependency on the <tt>numbers.h</tt> header file. What would happen if a newly added source file didn’t actually include <tt>numbers.h</tt>?
+ What if additional header files were added, but you forgot to list them
+ in the makefile? In both cases, a lot of manual work is required to 
+keep the makefile consistent with the source files; otherwise, you’d end
+ up with an incorrect executable program.</p>
+
+<p class="docText">The second approach is to 
+automate the detection of header files. The following solution scans the
+ source files and computes the correct set of dependencies.</p>
+
+<div class="docText">
+  <pre> 1  SRCS = add.c calc.c mult.c sub.c
+ 2  PROG = calculator
+ 3  CC = gcc
+ 4  CFLAGS = -g
+ 5  OBJS = $(SRCS:.c=.o)
+ 6
+ 7  $(PROG): $(OBJS)
+ 8      $(CC) $(CFLAGS) -o $@ $^
+ 9
+10  -include $(SRCS:.c=.d)
+11
+12  %.d: %.c
+13      @$(CC) -MM $(CPPFLAGS) $&lt; | sed 's#\(.*\)\.o: #\1.o
+        \1\.d: #g' &gt; $@</pre>
+</div>
+<br/>
+<p class="docText">This code looks rather complex 
+(and it is), so let’s break it down in detail. The approach is to 
+automatically generate a new dependency information file (with <tt>.d</tt> suffix), corresponding to each C source file. In this case, you generate <tt>add.d</tt>, <tt>calc.d</tt>, <tt>mult.d</tt>, and <tt>sub.d</tt>. Here’s what these dependency files look like (in this case, it’s <tt>add.d</tt>):</p>
+
+<div class="docText">
+  <pre>add.o add.d: add.c numbers.h</pre>
+</div>
+<br/>
+<p class="docText">On line 10 of the makefile, you explicitly include all these <tt>.d</tt>
+ files, ensuring that everything is added to the same dependency graph. 
+On line 12, a new rule informs GNU Make how to generate these <tt>.d</tt> files if they’re missing or if the corresponding <tt>.c</tt> or <tt>.h</tt> files have changed.</p>
+
+<p class="docText">Line 13 works a bit of magic to obtain the dependency information in the first place. Most of the work is done by passing the <tt>–MM</tt> option to the GCC compiler. This asks the compiler to generate the list of <tt>.c</tt> and <tt>.h</tt> files that it reads in but to stop immediately after doing so (instead of doing any real compile work). Finally, the cryptic <tt>sed</tt> command adds the name of the <tt>.d</tt> file on the left side of the rule, because GCC won’t put it there by itself.</p>
+
+<p class="docText">To fully understand this example, you need to know that GNU Make determines when makefile fragments (such as <tt>.d</tt>
+ files) have changed and restarts the entire parsing process as a 
+result. That’s more detail than you’ll want to get into, but hopefully 
+you can see what’s involved in automatically detecting header file 
+dependencies.</p>
+
+<p class="docText">A third solution uses the <tt>makedepend</tt> command. This tool is similar in nature to <tt>gcc -MM</tt>, although it provides its own scanner for analyzing C source files instead of relying on the compiler itself. Chapter 19, “Faster Builds,” discusses build system performance and covers <tt>makedepend</tt> in more detail.</p>
+
+<p class="docText">Let’s continue by addressing scalability and see how to write a makefile for multidirectory programs.</p>
+
+
+
+
+<h4>Scenario 2(a): Source Code in Multiple Directories</h4>
+
+<p class="docText">Constructing a multidirectory
+ build system is not as simple as the single directory case, so next 
+you’ll see three different attempts to achieve what you need. In these 
+cases, the source code files are no longer colocated in the same 
+directory, but are instead spread across a larger source tree. As a 
+reminder, Figure 6.1 shows the tree for the example software described at the start of Part II.</p>
+
+<p/>
+<center>
+
+<h5>Figure 6.1. The source tree for the multidirectory calculator example.</h5>
+
+<p class="docText">
+<img id="" src="Images/getfile_003.jpeg" alt="" border="0" height="294" width="156"/></p>
+
+</center>
+<p/>
+<br/>
+<p class="docText">For the first attempt, you use a similar makefile to the single-directory program, but the <tt>SRCS</tt> variable now contains the full path to each file.</p>
+
+<div class="docText">
+  <pre>1  SRCS = libmath/clock.c libmath/letter.c libmath/number.c \
+2     libprint/banner.c libprint/center.c libprint/normal.c \
+3     calc/calc.c
+4  ...</pre>
+</div>
+<br/>
+<p class="docText">Although this is easy to 
+understand and it works properly for simple programs, this approach 
+doesn’t work in a large-scale build environment, for several reasons:</p>
+
+
+
+
+
+<table class="docText" border="0">
+  <tbody>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>1. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText"><span class="docEmphStrong">Harder dependency generation:</span> With automatic generation of <tt>.d</tt>
+ files, the dependency rules are no longer created properly. Instead, 
+you end up with a rule that doesn’t contain the correct pathname on the 
+left side (it’s missing the directory component).<br/><br/><div class="docText"><pre>clock.o: libmath/clock.c libmath/math.h</pre></div><br/>
+Of course, this can be fixed by adding more complexity to the rule that generates <tt>.d</tt> files, but let’s not look into that approach yet.<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>2. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText"><span class="docEmphStrong">Developer contention on the single makefile:</span> The <tt>SRCS</tt>
+ variable is already spread over three lines in the makefile. What would
+ happen if you had a hundred files or a thousand files? This single 
+makefile would be unmanageable, becoming a point of contention when all 
+software engineers (perhaps hundreds of them) needed to modify the same 
+file at the same time.<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>3. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText"><span class="docEmphStrong">Inability to subdivide the program:</span> This makefile solution doesn’t enable the use of libraries, such as <tt>libmath.a</tt> or <tt>libprint.a</tt>.
+ For large programs, it’s convenient to subdivide the code into 
+libraries that help delineate areas of code, making it possible to reuse
+ code across different executable programs.<br/><br/></div>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<p class="docText">For these reasons, it’s 
+uncommon to find a large build system that uses a single makefile. A 
+more common solution is to divide the build description across more than
+ one makefile. That leads to the next solution.</p>
+
+
+
+<h4>Scenario 2(b): Recursive Make over Multiple Directories</h4>
+
+<p class="docText">The second approach, known as <span class="docEmphStrong">recursive Make</span>,
+ is a common solution in the software industry. The basic approach is to
+ have a different makefile in each source directory, with the high-level
+ makefile (in the high-level directories) recursively invoking each 
+lower-level makefile. Figure 6.2 shows the revised directory tree, with each directory having its own makefile.</p>
+
+<p/>
+<center>
+
+<h5>Figure 6.2. Multidirectory example, showing the location of makefiles and library files.</h5>
+
+<p class="docText">
+<img id="" src="Images/getfile.jpeg" alt="" border="0" height="441" width="156"/></p>
+
+</center>
+<p/>
+<br/>
+<p class="docText">Observe that the build tree now has four different files named <tt>Makefile</tt>: one at the top level and one within each of the <tt>libmath</tt>, <tt>libprint</tt>, and <tt>calc</tt> subdirectories. Going a step further, two static libraries, <tt>libmath.a</tt> and <tt>libprint.a</tt>, were added, each archiving the object files from their specific directories.</p>
+
+<p class="docText">The advantage of 
+recursive Make is that each makefile needs to list only the files in the
+ current source directory. When necessary, a makefile can recursively 
+call upon another makefile if there’s a requirement to build other parts
+ of the source tree. Listing long pathnames in the makefile is 
+unnecessary because all file references are relative to the directory 
+itself. Less contention also arises between different developers who 
+need to make changes to a makefile. The odds of two developers changing 
+the same small makefile are significantly less than with a single large 
+makefile.</p>
+
+<p class="docText">Now look at the content of each makefile, starting with <tt>libmath/Makefile</tt>:</p>
+
+<div class="docText">
+  <pre> 1  SRCS = clock.c letter.c number.c
+ 2  LIB = libmath.a
+ 3  CC = gcc
+ 4  CFLAGS = -g
+ 5  OBJS = $(SRCS:.c=.o)
+ 6
+ 7  $(LIB): $(OBJS)
+ 8      $(AR) cr $(LIB) $(OBJS)
+ 9
+10  $(OBJS): math.h</pre>
+</div>
+<br/>
+<p class="docText">The code looks similar to 
+the makefile used in the single-directory case, which, of course, is a 
+major reason for using recursive Make. The files listed in the <tt>SRCS</tt>
+ variable are all relative to the current directory, and you can use GNU
+ Make’s built-in rule for compiling C source files. Notice that the code
+ is a bit lazy here: Line 10 contains an explicit dependency for the <tt>math.h</tt> header file instead of automatically detecting it.</p>
+
+<p class="docText">The big difference is in 
+lines 7 and 8, where, instead of linking together a final executable 
+program, a static library is created by archiving the files listed in <tt>$(OBJS)</tt> into <tt>libmath.a</tt>. In another makefile that you’ll see shortly, this archive is linked into the executable program.</p>
+
+<p class="docText">The next makefile, in the <tt>libprint</tt> subdirectory, is essentially the same.</p>
+
+<div class="docText">
+  <pre> 1  SRCS = banner.c center.c normal.c
+ 2  LIB = libprint.a
+ 3  CC = gcc
+ 4  CFLAGS = -g
+ 5  OBJS = $(SRCS:.c=.o)
+ 6
+ 7  $(LIB): $(OBJS)
+ 8      $(AR) cr $(LIB) $(OBJS)
+ 9
+10  $(OBJS): printers.h</pre>
+</div>
+<br/>
+<p class="docText">This makefile is so similar to <tt>libmath/Makefile</tt>
+ that you might wonder whether you could factor out the common code. 
+This is certainly the case, and many build systems extract the common 
+code into a framework makefile. Each individual makefile uses the <tt>include</tt> directive to incorporate the shared functionality. For example, you could rewrite <tt>libprint/Makefile</tt> as follows:</p>
+
+<div class="docText">
+  <pre>1  SRCS = banner.c center.c normal.c
+2  LIB = libprint.a
+3  include lib.mk
+4  $(OBJS): printers.h</pre>
+</div>
+<br/>
+<p class="docText">The third makefile, in the <tt>calc</tt> directory, is different from the other two, in that it creates the final executable program by combining <tt>libprint.a</tt> and <tt>libmath.a</tt>, along with a small main program.</p>
+
+<div class="docText">
+  <pre>1  SRCS = calc.c
+2  PROG = calculator
+3  LIBS = ../libmath/libmath.a ../libprint/libprint.a
+4  CC = gcc
+5  CFLAGS = -g
+6  OBJS = $(SRCS:.c=.o)
+7
+8  $(PROG): $(OBJS) $(LIBS)
+9      $(CC) -o $@ $^</pre>
+</div>
+<br/>
+<p class="docText">Note the use of relative paths on line 3 to access the static libraries from the <tt>libmath</tt> and <tt>libprint</tt> directories. An assumption is clearly being made that <tt>calc/Makefile</tt>
+ is executed only after the two libraries have already been brought 
+up-to-date. If the ordering of the steps was incorrect, you’d end up 
+with a broken build, or worse, would build an executable program with 
+outdated libraries.</p>
+
+<p class="docText">To make sure everything is built properly, the top-level makefile recursively calls every other makefile in the correct order.</p>
+
+<div class="docText">
+  <pre>1  .PHONY: all
+2  all:
+3      $(MAKE) -C libmath
+4      $(MAKE) -C libprint
+5      $(MAKE) -C calc</pre>
+</div>
+<br/>
+<p class="docText">This top-level makefile uses 
+only the most basic features of GNU Make and doesn’t have much of a 
+dependency graph. Each of the shell commands is executed in the 
+specified order, and there’s no choice about whether they’ll be 
+executed. The <tt>all</tt> target has no prerequisites, so each of the recursive calls to <tt>$(MAKE)</tt> happens every time the developer executes the makefile.</p>
+
+<p class="docText">Although recursive Make is 
+simple to understand, it isn’t the most efficient solution available. It
+ might be commonly used in the software industry, but it still has a 
+number of flaws that tend to cause slow or incorrect builds. Even though
+ recursive Make enables developers to keep each makefile small and 
+self-contained, with operations being done in an explicit sequence, 
+those are the exact reasons the solution sometimes fails.</p>
+
+<p class="docText">The example had only three directories to think about: <tt>libmath</tt>, <tt>libprint</tt>, and <tt>calc</tt>. The relationship between these directories was clearly defined, so the explicit sequence of <tt>$(MAKE)</tt>
+ calls was easy to determine. On the other hand, what if you had a 
+hundred directories with a complex network of dependencies between them?
+ Trying to build everything in the correct order becomes an impossible 
+task, especially if developers create more interdirectory dependencies 
+as they write new code. After a while, you’d start wishing you’d used 
+GNU Make’s dependency-analysis system to figure out the correct ordering
+ for you.</p>
+
+<p class="docText">As an example, what would happen if the source code in the <tt>libmath</tt> directory started to use the <tt>libprint.a</tt> library. In the current system, <tt>libmath</tt> is compiled first and, therefore, runs the risk of using an outdated version of the <tt>libprint.a</tt> library or simply failing if the library didn’t yet exist. The easiest solution is to modify the top-level makefile to build <tt>libprint</tt> first, but that solution doesn’t scale to hundreds of directories with complex ordering requirements.</p>
+
+<p class="docText">A similar problem occurs if 
+you want to build only part of the program. Imagine if you tried to cut 
+corners and not build the calculator example from the top-level 
+makefile. If you started in the <tt>calc</tt> subdirectory and typed <tt>gmake</tt>, you’d simply be recompiling the <tt>calc.c</tt> source file (if required). Because <tt>calc/Makefile</tt> doesn’t know how to build <tt>libprint.a</tt>, it doesn’t attempt to rebuild any of those files even if they are out-of-date.</p>
+
+<p class="docText">To phrase these problems in more technical terms, each makefile is executed by a separate instance of the <tt>$(MAKE)</tt>
+ process and, therefore, has a completely different dependency graph. In
+ no place in the build system is the entire dependency graph available, 
+which, of course, is the root cause of invalid builds. If GNU Make isn’t
+ provided with full dependency information, it can’t compile the correct
+ set of files in the correct order.</p>
+
+<p class="docText">In most large-scale recursive
+ Make systems, developers end up seeing a lot of redundancy. To avoid 
+risking the chance of building an executable program using outdated 
+libraries, each makefile rebuilds the same libraries many times, just to
+ make sure no dependencies were missed. For example, you might choose to
+ build <tt>libmath.a</tt>, followed by <tt>libprint.a</tt>, and then repeat the compilation of <tt>libmath.a,</tt> just in case something in the <tt>libprint</tt>
+ directory changed since the first time it was compiled. This type of 
+paranoia is common when developers don’t trust the build system to do 
+the right thing.</p>
+
+<p class="docText">This sequencing technique clearly results in building <tt>libmath.a</tt> twice, although because the library is already up-to-date, there’s probably no extra work to do the second time—well, <span class="docEmphasis">almost</span>
+ no work. In reality, there’s still the overhead of starting a new GNU 
+Make process, parsing the makefile to build the dependency graph, and 
+then reading the file time stamps to see if anything has changed. 
+Unfortunately, this overhead isn’t free: It could slow the build by 
+anything from a few seconds to a few minutes, depending on the size of <tt>libmath.a</tt>.</p>
+
+<p class="docText">These problems and several others are detailed in a classic research paper titled “Recursive Make Considered Harmful” [44]. This paper also discusses solutions to the recursive Make problem, including the next solution you’ll evaluate.</p>
+
+
+
+<h4>Scenario 2(c): Inclusive Make over Multiple Directories</h4>
+
+<p class="docText">The third 
+multidirectory solution adopts the good practices of the recursive Make 
+approach, while ensuring that only one instance of the GNU Make process 
+is ever executed. As a result, you benefit from the full power of GNU 
+Make’s dependency system so that important dependencies aren’t missed. 
+In contrast to the previous method, this new solution is called <span class="docEmphStrong">inclusive Make</span>.</p>
+
+<p class="docText">Consider the benefits:</p>
+
+<ul>
+  <li>
+    <p class="docList">Only one instance of 
+GNU Make is running, with a lower start-up time. This contrasts with 
+starting hundreds of processes over the lifetime of the build.</p>
+  </li>
+  <li>
+    <p class="docList">You
+ still have a single makefile per directory to describe all the files in
+ that directory. This makes it possible to encapsulate each directory’s 
+build description, and it reduces contention between developers when 
+they modify each makefile.</p>
+  </li>
+  <li>
+    <p class="docList">All
+ source filenames are specified by their filename component only, so 
+there’s no need to include the full path to each file (as in the first 
+example).</p>
+  </li>
+  <li>
+    <p class="docList">A single dependency graph contains all dependencies in the entire build system, reducing the chance of incorrect builds.</p>
+  </li>
+  <li>
+    <p class="docList">Because there’s no recursion, you don’t need to explicitly sequence all the recursive <tt>$(MAKE)</tt> calls and risk possibly getting it wrong. GNU Make executes the rules in the correct order.</p>
+  </li>
+</ul>
+<p class="docText">Although this sounds like
+ an excellent solution, the major downside is the additional complexity.
+ If you’re new to GNU Make, the solution you’re about to see will 
+stretch your knowledge of how the tool works. In most production build 
+systems, an experienced GNU Make guru would create the inclusive build 
+system in the first place, with junior GNU Make programmers scratching 
+their heads to understand how everything works. This example just covers
+ the basic framework and doesn’t go into much detail.</p>
+
+<p class="docText">Figure 6.3
+ illustrates the inclusive Make build tree. This is a larger example 
+because a two-level directory structure doesn’t show the full extent of 
+this solution.</p>
+
+<p/>
+<center>
+
+<h5>Figure 6.3. A larger source tree, illustrating the inclusive Make system.</h5>
+
+<p class="docText">
+<img id="" src="Images/getfile_002.jpeg" alt="" border="0" height="637" width="199"/></p>
+
+</center>
+<p/>
+<br/>
+<p class="docText">This example has one main makefile, at the top of the source tree. You can also see the <tt>make/framework.mk</tt>
+ file, which contains most of the complexity of the build system. 
+Finally, each source directory contains a short makefile fragment, named
+ <tt>Files.mk</tt>, for describing the source files in that particular directory.</p>
+
+<p class="docText">Because of the 
+complexity of the inclusive Make framework, this separation of files is 
+important. Software developers are only encouraged to view and edit <tt>Files.mk</tt>
+ files where they can find the list of source files, the list of 
+subdirectories to traverse, and the list of compiler flags. On the other
+ hand, the GNU Make complexity is deliberately hidden inside the <tt>make/framework.mk</tt> file so that nonguru software engineers don’t attempt to change the build mechanism by mistake.</p>
+
+<p class="docText">Start by examining a few of the <tt>Files.mk</tt>
+ files. These are designed to be readable and editable by software 
+developers, and they contain only variables that developers care about:</p>
+
+<ul>
+  <li>
+    <p class="docList"><tt>src/Files.mk</tt>:</p>
+    <div class="docText">
+      <pre>1  SUBDIRS := libraries application
+2  SRC := main.c
+3  CFLAGS := -g</pre>
+    </div>
+  </li>
+  <li>
+    <p class="docList"><tt>src/libraries/Files.mk</tt>:</p>
+    <div class="docText">
+      <pre>1  SUBDIRS := math protocols sql widgets</pre>
+    </div>
+  </li>
+  <li>
+    <p class="docList"><tt>src/libraries/math/Files.mk</tt>:</p>
+    <div class="docText">
+      <pre>1  SRC := add.c mult.c sub.c
+2  CFLAGS := -DBIG_MATH</pre>
+    </div>
+  </li>
+</ul>
+<p class="docText">First consider the <tt>SUBDIRS</tt> variable definitions. For directories (such as <tt>src</tt> and <tt>src/libraries</tt>) that contain subdirectories of their own, the <tt>SUBDIRS</tt> variable lists the directories to be included in the build process. As you can see, <tt>src/libraries/Files.mk</tt> includes the <tt>math</tt> subdirectory, so the inclusive framework must incorporate <tt>src/libraries/math/Files.mk</tt> into the build process. On the other hand, <tt>src/libraries/math/Files.mk</tt> doesn’t contain a definition for <tt>SUDIRS</tt>, so the build system won’t search any lower in the build tree.</p>
+
+<p class="docText">Next, the <tt>SRC</tt> variable within each <tt>Files.mk</tt> fragment informs the build system about the C source files that should be included from that directory. Given that <tt>src/libraries/Files.mk</tt> doesn’t include the <tt>SRC</tt> variable, none of the source files from that directory (if there were any) would be included.</p>
+
+<p class="docText">Finally, the <tt>CFLAGS</tt> 
+variable states which C compiler flags should be used for all the source
+ files in this directory. Each directory can have a different set of C 
+flags instead of using a global set of flags for all files in the build 
+tree.</p>
+
+<p class="docText">In the inclusive Make example, these <tt>Files.mk</tt>
+ fragments are all that an average software developer is interested in 
+seeing. The question remains of how GNU make interprets these <tt>Files.mk</tt> files and how the <tt>SRC</tt>, <tt>SUBDIRS</tt>, and <tt>CFLAGS</tt> variables are used.</p>
+
+<p class="docText">Continue by examining <tt>src/Makefile</tt>,
+ which is the main entry point to the GNU Make program. As a reminder, 
+only build gurus would be interested in reading or modifying this file.</p>
+
+<div class="docText">
+  <pre> 1  _subdirs :=
+ 2  _curdir :=
+ 3  FRAMEWORK := $(CURDIR)/make/framework.mk
+ 4  include Files.mk
+ 5  include $(FRAMEWORK)
+ 6
+ 7  VARS := $(sort $(filter srcs-% cflags-%, $(.VARIABLES)))
+ 8  $(foreach var, $(VARS), $(info $(var) = $($(var))))
+ 9
+10  .PHONY: all
+11  all:
+12      @# do nothing</pre>
+</div>
+<br/>
+<p class="docText">Again a detailed explanation is in order. The inclusive Make solution is complex, so now examine each line in detail.</p>
+
+<p class="docText">On line 1, the <tt>_subdirs</tt>
+ variable is initialized to the empty string. This variable is used as a
+ space-separated list of subdirectories to be traversed. Within each of 
+these directories, you can expect to find a <tt>Files.mk</tt> file, which itself could potentially include a definition for the <tt>SUBDIRS</tt> variable. Each time you find another <tt>SUBDIRS</tt> definition, you append the new subdirectories onto <tt>_subdirs</tt>, effectively creating a queue of directories to visit.</p>
+
+<p class="docText">For example, after you’ve visited <tt>src/Files.mk</tt>, the <tt>_subdirs</tt> variable contains the following:</p>
+
+<div class="docText">
+  <pre>libraries applications</pre>
+</div>
+<br/>
+<p class="docText">In the next step, you pop the <tt>libraries</tt> path off the front of the queue and parse <tt>src/libraries/Files.mk</tt>. After discovering the new definition for <tt>SUBDIRS</tt> in that file, the <tt>_subdirs</tt> variable changes to this:</p>
+
+<div class="docText">
+  <pre>applications libraries/math libraries/protocols libraries/sql \
+    libraries/widgets</pre>
+</div>
+<br/>
+<p class="docText">Following this process repeatedly, you end up traversing the entire build tree and reading every <tt>Files.mk</tt> file. Note that the <tt>src</tt>
+ directory name isn’t included in these pathnames because that’s the 
+current working directory. Everything is already relative to the <tt>src</tt> directory.</p>
+
+<p class="docText">Line 2 of <tt>src/Makefile</tt> initializes <tt>_curdir</tt>
+ to the empty string. This variable represents the current directory 
+you’re traversing. It starts empty because you’re at the top level of 
+the build tree (inside the <tt>src</tt> directory). As you traverse the build tree, by popping entries off the start of the <tt>_subdirs</tt> queue, the value of <tt>_curdir</tt> reflects the current point of traversal.</p>
+
+<p class="docText">Line 3 defines <tt>FRAMEWORK</tt>
+ to be the path of the framework makefile. You’ll be calling upon this 
+makefile often, so it’s convenient to have a variable referring to it.</p>
+
+<p class="docText">Line 4 starts everything in motion by including the <tt>src/Files.mk</tt> file. From this, you get the top-level definition of <tt>SRC</tt>, <tt>SUBDIRS</tt>, and <tt>CFLAGS</tt>. Note the distinction here between including a file with the <tt>include</tt> directive and calling upon another makefile using <tt>$(MAKE)</tt>. Because you’re using <tt>include</tt>, the same Make instance is used, and you’ll be adding to the same dependency graph each time (instead of creating a new one).</p>
+
+<p class="docText">Line 5 calls the inclusive Make framework to process the content of the <tt>SRC</tt>, <tt>SUBDIRS</tt>, and <tt>CFLAGS</tt>
+ variables; the framework then continues traversing the remainder of the
+ source tree. By the time you return from this particular <tt>include</tt> directive, all the <tt>Files.mk</tt> files will have been processed.</p>
+
+<p class="docText">Lines 7 and 8 are executed after the entire tree of <tt>Files.mk</tt>
+ fragments has been processed. This code takes the complete list of 
+variables that GNU Make knows about (automatically stored in <tt>$(.VARIABLES)</tt>) and filters all variables names that start with <tt>srcs-</tt> or <tt>cflags-</tt>.
+ It then displays each one on the program’s output so that you can see 
+the computed values. You haven’t seen it yet, but the framework file 
+defines the <tt>srcs-*</tt> and <tt>cflags-*</tt> variables as it traverses the build tree.</p>
+
+<p class="docText">This mechanism isn’t 
+normally part of the build system, but it’s used as a means of debugging
+ the inclusive Make algorithm to ensure that everything is working 
+correctly. You’ll take a look at the output shortly.</p>
+
+<p class="docText">Now examine the content of <tt>make/framework.mk,</tt> which is the main algorithm for traversing the build tree and collecting the values from each <tt>Files.mk</tt> fragment:</p>
+
+<div class="docText">
+  <pre> 1  srcs-$(_curdir) := $(addprefix $(_curdir),$(SRC))
+ 2  cflags-$(_curdir) := $(CFLAGS)
+ 3  _subdirs := $(_subdirs) $(addprefix $(_curdir), $(SUBDIRS))
+ 4
+ 5  ifneq ($(words $(_subdirs)),0)
+ 6      _curdir := $(firstword $(_subdirs))/
+ 7      _subdirs := $(wordlist 2, $(words $(_subdirs)),
+        $(_subdirs))
+ 8      SUBDIRS :=
+ 9      SRC :=
+10      CFLAGS :=
+11      include $(_curdir)Files.mk
+12      include $(FRAMEWORK)
+13  endif</pre>
+</div>
+<br/>
+<p class="docText">As with the previous 
+file, this makefile framework requires detailed explanation. Recall that
+ this file is included immediately after one of the <tt>Files.mk</tt> files has been parsed. Therefore the <tt>SRC</tt>, <tt>SUBDIRS</tt>, and <tt>CFLAGS</tt> variables have just been set to the appropriate value for the directory you’re currently processing.</p>
+
+<p class="docText">Line 1 records the set of 
+source files for the current directory. The variable name on the left 
+side of the assignment also contains a variable, so you’ll be creating a
+ different GNU Make variable for each directory you visit. This syntax 
+seems odd at first, but having the capability to dynamically construct 
+variable names is equivalent to defining arrays or hashes in other 
+languages. That is, the <tt>srcs-</tt> variable has many subelements, each indexed by the name of the directory.</p>
+
+<p class="docText">On the right side of line 1, you take the current definition of the <tt>SRC</tt> variable and add the current directory as a prefix to each element in that list. For example, if <tt>_curdir</tt> is set to <tt>libraries/math/</tt>, then you’ve just finished parsing the <tt>src/libraries/math/Files.mk</tt> file. Line 1 of the framework makefile is therefore equivalent to this:</p>
+
+<div class="docText">
+  <pre>srcs-libraries/math/ := libraries/math/add.c \
+   libraries/math/mult.c libraries/math/sub.c</pre>
+</div>
+<br/>
+<p class="docText">Although it might seem odd, it’s perfectly acceptable to have punctuation within variable names.</p>
+
+<p class="docText">Line 2 is similar and stores the current directory’s <tt>CFLAGS</tt> definition inside a directory-specific <tt>cflags-*</tt>
+ variable. In the simple inclusive framework, you won’t be doing 
+anything with these variables aside from displaying them for debugging 
+purposes.</p>
+
+<p class="docText">Line 3 is responsible for queuing up any additional <tt>SUBDIRS</tt> values that the current <tt>Files.mk</tt> fragment might contain. Again, you prefix the elements in <tt>SUBDIRS</tt> with the current directory, but this time you append these values to the end of the existing <tt>$(_subdirs)</tt> value.</p>
+
+<p class="docText">Lines 5–13 are where the 
+tree traversal takes place. Assuming that there are more entries in the 
+queue of pending subdirectories, you’ll extract the first of them and 
+visit the <tt>Files.mk</tt> file in the corresponding source code directory.</p>
+
+<p class="docText">Lines 6 and 7 remove the first queue element. Line 6 sets the first item in the <tt>_subdirs</tt> list as the current directory (<tt>_curdir</tt>). Line 7 deletes this first element from the queue by reassigning <tt>_subdirs</tt> with all the words from position 2 to the end of the current <tt>_subdirs</tt> value.</p>
+
+<p class="docText">Line 11 now includes the <tt>Files.mk</tt> fragment that resides within the current directory. Given that <tt>Files.mk</tt> isn’t required to contain all the variable definitions (<tt>SRC</tt>, <tt>SUBDIRS</tt>, <tt>CFLAGS</tt>),
+ you first set them to the empty string (lines 8–10) to make sure that 
+the values from the previous directory don’t “leak through” to the 
+current directory.</p>
+
+<p class="docText">Finally, Line 12 repeats the whole framework file, which stores the values of <tt>SRC</tt> and <tt>CFLAGS</tt> and then traverses any additional directories listed in <tt>SUBDIRS</tt>.</p>
+
+<p class="docText">That’s the end of the 
+example. For completeness, let’s see the output of executing the 
+makefile on the example build tree. The values for the <tt>srcs-</tt> and <tt>cflags-</tt> variable should match the original diagram.</p>
+
+<div class="docText">
+  <pre class="preFixedHeight">cflags- = -g
+cflags-application/ =
+cflags-application/database/ =
+cflags-application/database/load/ =
+cflags-application/database/save/ =
+cflags-application/graphics/ =
+cflags-libraries/ =
+cflags-libraries/math/ = -DBIG_MATH
+cflags-libraries/protocols/ = -DFAST_SEND
+cflags-libraries/sql/ = -O2
+cflags-libraries/widgets/ = -DCOLOR="red"
+srcs- = main.c
+srcs-application/ =
+srcs-application/database/ = application/database/persistence.c
+   application/database/backup.c application/database/optimize.c
+srcs-application/database/load/ = application/database/load/loading.c
+srcs-application/database/save/ = application/database/save/saving.c
+srcs-application/graphics/ = application/graphics/line-drawing.c
+   application/graphics/vector-size.c application/
+graphics/3d.c
+srcs-libraries/ =
+srcs-libraries/math/ = libraries/math/add.c libraries/math/mult.c
+   libraries/math/sub.c
+srcs-libraries/protocols/ = libraries/protocols/tcp.d
+   libraries/protocols/udp.c libraries/protocols/ip.c
+srcs-libraries/sql/ = libraries/sql/select.c libraries/sql/
+view.c
+   libraries/sql/create.c libraries/sql/drop.c
+srcs-libraries/widgets/ = libraries/widgets/button.c
+   libraries/widgets/list.c libraries/widgets/window.c
+   libraries/widgets/tree.c
+
+					  </pre>
+</div>
+<br/>
+<p class="docText">At this point, it should be 
+clear that you haven’t built a complete inclusive Make system, but you 
+should have a basic idea of how it could be done. The important factors 
+are that each directory has its own <tt>Files.mk</tt>
+ files (with paths specified relative to that directory) and that using 
+one instance of the GNU Make process enables you to have a single 
+unified dependency graph.</p>
+
+<p class="docText">To make a fully functional build system, you need to add the following features:</p>
+
+<ul>
+  <li>
+    <p class="docList">GNU Make code to 
+define the dependencies between object files, source files, and header 
+files (using automatic dependency analysis).</p>
+  </li>
+  <li>
+    <p class="docList">Rules for compiling the code (You’d need to override the built-in rules for C compilation.)</p>
+  </li>
+  <li>
+    <p class="docList">Code to link object files into static libraries.</p>
+  </li>
+  <li>
+    <p class="docList">Code to link together the final executable programs (possibly more than one program could be compiled).</p>
+  </li>
+  <li>
+    <p class="docList">The capability to start the GNU Make process from a subdirectory (Currently, the only makefile is in the top-level <tt>src</tt> directory.)</p>
+  </li>
+  <li>
+    <p class="docList">Support for compiling on multiple CPU architectures.</p>
+  </li>
+  <li>
+    <p class="docList">C compiler flags on a per-file basis instead of just on a per-directory basis.</p>
+  </li>
+  <li>
+    <p class="docList">Inheritance of compiler flags from parent directories to child directories.</p>
+  </li>
+</ul>
+<p class="docText">Certainly, the list goes on.
+ In summary, an inclusive Make build system is not an easy system to 
+create. Definitely budget plenty of time if you decide to create your 
+own. Luckily, several experts [42][44] have provided systems you can use as a starting point.</p>
+
+
+
+<h4>Scenario 3: Defining New Compilation Tools</h4>
+
+<p class="docText">The next real-world 
+scenario looks at adding a new type of compilation tool into the 
+makefile. So far, this chapter has focused exclusively on compiling 
+C-language source files, but the same concepts extend nicely to other 
+languages. In fact, this GNU Make code will appear simple compared to 
+some you’ve seen so far.</p>
+
+<p class="docText">To make use of the <tt>mathcomp</tt> compiler (discussed in the introduction to Part II), you need to add the following:</p>
+
+
+
+
+
+<table class="docText" border="0">
+  <tbody>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>1. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">A list of source files that are in <tt>.math</tt> file format, to be read by the <tt>mathcomp</tt> compiler<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>2. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">A GNU Make rule that describes how to compile <tt>.math</tt> files into <tt>.c</tt> files<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>3. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">A new type of dependency file (with <tt>.d1</tt> suffix) to record the relationship between <tt>.math</tt> files and the <tt>.mathinc</tt> files they depend upon<br/><br/></div>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<p class="docText">Now jump right into the final solution, which isn’t too different from what you’ve already seen.</p>
+
+<div class="docText">
+  <pre class="preFixedHeight"> 1  MATHCOMP := /tools/bin/mathcomp
+ 2  CC := gcc
+ 3  MATHSRC := equations.math
+ 4  CSRC := calculator.c
+ 5  PROG := calculator
+ 6  OBJS := $(CSRC:.c=.o) $(MATHSRC:.math=.o)
+ 7
+ 8  $(PROG): $(OBJS)
+ 9      $(CC) -o $@ $^
+10
+11  %.c: %.math
+12      $(MATHCOMP) -c $&lt;
+13
+14  -include $(CSRC:.c=.d)
+15  -include $(MATHSRC:.math=.d1)
+16
+17  %.d: %.c
+18      @$(CC) -MM $(CPPFLAGS) $&lt; | sed 's#\(.*\)\.o: #\1.o
+        \1.d: #g' &gt; $@
+19
+20  %.d1: %.math
+21      echo -n "$@ $(*F).c: " &gt; $@; \
+22      $(MATHCOMP) -d $&lt; &gt;&gt; $@
+
+					  </pre>
+</div>
+<br/>
+<p class="docText">Here’s a line-by-line explanation, but only for the new portions of the makefile. Everything else should look familiar.</p>
+
+<p class="docText">Line 1 defines the path of the <tt>mathcomp</tt> compiler. An absolute path is used for the tool here instead of relying on users to have their <tt>$PATH</tt> variable set correctly.</p>
+
+<p class="docText">Line 3 defines the list of source files (<tt>MATHSRC</tt>) in the <tt>.math</tt> file format, just as line 4 defines the list (<tt>CSRC</tt>) of C-language source files. Line 6 forms a list of object files by replacing <tt>.c</tt> and <tt>.math</tt> file extensions with the <tt>.o</tt> extension.</p>
+
+<p class="docText">Lines 11 and 12 define a dependency rule to generate <tt>.c</tt> files from their corresponding <tt>.math</tt> files. For example, to generate <tt>equations.o</tt> (required by line 8), you first need to generate <tt>equations.c</tt> (defined by the built-in C compilation rule). To do this, GNU Make triggers the rule on line 11 to generate <tt>equations.c</tt> from <tt>equations.math</tt>.</p>
+
+<p class="docText">Lines 15 and 20–22 perform
+ the magic necessary for autodetecting makefile dependencies. Similarly 
+to the C compiler, you pass the <tt>–d</tt> option to the <tt>mathcomp</tt> compiler and have it generate the list of source files it includes (namely, <tt>.mathinc</tt> files). The additional <tt>echo</tt> command on line 21 adds a small amount of extra information that <tt>mathcomp</tt> doesn’t provide by default. The resulting <tt>equations.d1</tt> file looks like this:</p>
+
+<div class="docText">
+  <pre>equations.d1 equations.c: equations.math equ1.mathinc \
+    equ2.mathinc</pre>
+</div>
+<br/>
+<p class="docText">With those key points
+ covered and all the previous examples you’ve seen, the rest of the 
+makefile should be easy to understand. In summary, adding a new 
+compilation tool in GNU Make is not too difficult, except perhaps when 
+it comes to automatically detecting dependencies.</p>
+
+
+
+<h4>Scenario 4: Building with Multiple Variants</h4>
+
+<p class="docText">GNU Make is the most 
+common means of compiling C and C++ code, and both of these languages 
+usually compile to native machine code. Clearly, you need a way to 
+select which CPU type to use. This example allows the software developer
+ to compile for the Intel x86 series, the PowerPC series, or the Alpha 
+CPUs. In fact, you allow them to compile for all three architectures 
+within the same build tree at the same time.</p>
+
+<p class="docText">To select a target architecture, developers should provide a value for the <tt>PLATFORM</tt> variable. If they don’t provide a value, the compilation defaults to using the x86 architecture. For example:</p>
+
+<div class="docText">
+  <pre>$ gmake PLATFORM=powerpc      # build for PowerPC CPUs
+$ gmake                       # build for i386 CPUs
+$ gmake PLATFORM=xbox         # OOPS! Not allowed.
+Makefile:8: *** Invalid PLATFORM: xbox. Stop.</pre>
+</div>
+<br/>
+<p class="docText">Here’s the necessary GNU Make code for compiling platform-specific code:</p>
+
+<div class="docText">
+  <pre class="preFixedHeight"> 1  SRCS = add.c calc.c mult.c sub.c
+ 2  PROG = calculator
+ 3  CFLAGS = -g
+ 4  PLATFORM ?= i386
+ 5  VALID_PLATFORMS = i386 powerpc alpha
+ 6
+ 7  ifeq ($(filter $(PLATFORM), $(VALID_PLATFORMS)),)
+ 8      $(error Invalid PLATFORM: $(PLATFORM))
+ 9  endif
+10
+11  OBJDIR=obj/$(PLATFORM)
+12  $(shell mkdir -p $(OBJDIR))
+13
+14  CC := gcc-$(PLATFORM)
+15  OBJS = $(addprefix $(OBJDIR)/, $(SRCS:.c=.o))
+16
+17  $(OBJDIR)/$(PROG): $(OBJS)
+18      $(CC) $(CFLAGS) -o $@ $^
+19
+20  $(OBJDIR)/%.o: %.c
+21      $(CC) -c -o $@ $&lt;
+22
+23  $(OBJS): numbers.h
+
+					  </pre>
+</div>
+<br/>
+<p class="docText">This makefile example includes a few new concepts. Line 4 provides the default value for the <tt>PLATFORM</tt> variable. If the user doesn’t set the variable on the command line, it defaults to <tt>i386</tt>. You don’t technically need to use the <tt>?=</tt> operator here; any variable defined on the command line automatically overrides the default value provided in the makefile.</p>
+
+<p class="docText">Lines 7–9 tests whether <tt>$(PLATFORM)</tt> is one of the acceptable values. The <tt>$(filter)</tt> function returns the empty string if it’s unable to find <tt>$(PLATFORM)</tt> in the list of valid platforms. The <tt>ifeq</tt> directive tests for this empty string and displays an appropriate error message.</p>
+
+<p class="docText">Lines 11 and 12 determine 
+the directory in which the object files will be placed. All the examples
+ so far have stored the object files in the same directory as the source
+ files because that’s the default behavior. However, with object files 
+from three different architectures, you need to explicitly store them in
+ an architecture-specific location (<tt>obj/i386</tt>, <tt>obj/powerpc</tt>, or <tt>obj/alpha</tt>). Line 12 ensures that the selected object directory already exists.</p>
+
+<p class="docText">Line 14 selects the appropriate C compiler to use and assigns the name to the <tt>CC</tt>
+ variable. Assume that each CPU architecture requires a different 
+version of GCC, as opposed to a single compiler instance supporting 
+multiple targets.</p>
+
+<p class="docText">Line 15 computes the list of 
+object files to be compiled. Given that each CPU’s object files are 
+stored in a different object directory, you need to explicitly state 
+which object files are to be built. In this case, you prefix each 
+element in the object file list with <tt>$(OBJDIR)</tt>.</p>
+
+<p class="docText">Finally, lines 17–21 rewrite the rules you’ve seen many times before. The only difference is that here you’ve added <tt>$(OBJDIR)</tt>
+ on the left side of each rule, whereas in the past you’ve assumed that 
+object files are placed in the source directory. This code uses an 
+interesting feature of GNU Make that permits the source and object files
+ to be located in different places.</p>
+
+<p class="docText">With this 
+additional functionality, you now can support multiple CPU 
+architectures. To help clarify how this build system works, examine the 
+output:</p>
+
+<div class="docText">
+  <pre>$ gmake
+gcc-i386 -c -o obj/i386/add.o add.c
+gcc-i386 -c -o obj/i386/calc.o calc.c
+gcc-i386 -c -o obj/i386/mult.o mult.c
+gcc-i386 -c -o obj/i386/sub.o sub.c
+gcc-i386 -g -o obj/i386/calculator obj/i386/add.o obj/i386/
+calc.o
+      obj/i386/mult.o obj/i386/sub.o
+
+$ gmake PLATFORM=powerpc
+gcc-powerpc -c -o obj/powerpc/add.o add.c
+gcc-powerpc -c -o obj/powerpc/calc.o calc.c
+gcc-powerpc -c -o obj/powerpc/mult.o mult.c
+gcc-powerpc -c -o obj/powerpc/sub.o sub.c
+gcc-powerpc -g -o obj/powerpc/calculator obj/powerpc/add.o
+      obj/powerpc/calc.o obj/powerpc/mult.o obj/powerpc/sub.o</pre>
+</div>
+<br/>
+<p class="docText">Of course, in a realistic 
+environment, you’d integrate this code into a recursive Make or 
+inclusive Make solution; otherwise, you’re limited to compiling files in
+ a single source directory.</p>
+
+
+
+<h4>Scenario 5: Cleaning a Build Tree</h4>
+
+<p class="docText">The next real-world scenario 
+involves cleaning a build tree by removing all the generated files. 
+Sometimes you want this functionality on a per-directory basis, but in 
+other cases, you’re happy to remove all objects files from the build 
+tree. In either case, it’s important that your cleaning operation remove
+ the exact set of object files your build process created in the first 
+place.</p>
+
+<p class="docText">The way a build system 
+cleans a build tree depends entirely on how your build system was 
+constructed. For recursive Make systems, each makefile is responsible 
+for generating the object files in its own directory; therefore, it 
+should be responsible for removing them, too.</p>
+
+<p class="docText">For example, in the top-level makefile, you’d have a rule that recursively cleans the subdirectories.</p>
+
+<div class="docText">
+  <pre>.PHONY: clean
+clean:
+      $(MAKE) -C libmath clean
+      $(MAKE) -C libprint clean
+      $(MAKE) -C calc clean</pre>
+</div>
+<br/>
+<p class="docText">And in each of the subdirectories, you’d have a rule to actually remove the files.</p>
+
+<div class="docText">
+  <pre>.PHONY: clean
+clean:
+     rm -f $(OBJS) $(LIB)</pre>
+</div>
+<br/>
+<p class="docText">One advantage of this system is that developers can easily clean the content of any subdirectory by simply issuing the <tt>gmake clean</tt> command at that level.</p>
+
+<p class="docText">For inclusive Make systems, you
+ can take advantage of the fact that the entire dependency graph is 
+available within the single GNU Make process. Because you have a 
+complete list of source files being compiled, you also know the complete
+ set of object files. Things get a little more complicated when you have
+ other generated files (such as <tt>equations.c</tt> being generated from <tt>equations.math</tt>),
+ but this simply requires additional logic to record the relevant 
+filenames. Cleaning specific subdirectories is also possible by 
+filtering each file based on its pathname.</p>
+
+<p class="docText">The tricky part about cleaning a
+ build tree is that you’re not always aware of which files are 
+generated. Sometimes this is a sign that your interfile dependencies are
+ not well understand, but sometimes a compilation tool creates 
+extraneous files that you don’t really care about. Although these files 
+are never used and are never included in the dependency graph, they 
+still need to be deleted from the build tree.</p>
+
+<p class="docText">One good practice for testing your <tt>clean</tt>
+ target is to fully build a source tree and then fully clean that same 
+tree. Next, compare the list of disk files against a completely fresh 
+source tree and see if any discrepancies arise. If any files are left 
+over, you can explicitly add them to the clean target to make sure 
+they’re properly deleted. On the other hand, you might wonder why those 
+files weren’t already accounted for in <tt>$(OBJS)</tt> and, therefore, already deleted.</p>
+
+<p class="docText">Finally, one advantage of 
+storing all generated files in a special object directory instead of the
+ source code tree is that a single delete command (such as <tt>rm –rf</tt> in UNIX) is guaranteed to remove all generated files.</p>
+
+
+
+<h4>Scenario 6: Debugging Incorrect Builds</h4>
+
+<p class="docText">Locating bugs in your GNU 
+Make build system is often challenging. Given the nature of the 
+pattern-matching algorithm, GNU Make doesn’t use the line-by-line 
+sequencing that most programmers are comfortable with. Rules from any 
+part of the makefile system can be triggered at any time.</p>
+
+<p class="docText">In a real-world development project, you’ll likely experience the following makefile problems:</p>
+
+<ul>
+  <li>
+    <p class="docList">A target file isn’t 
+being generated when it should be. In this case, there’s probably a 
+missing link in the dependency graph, and you need to add an additional 
+rule.</p>
+  </li>
+  <li>
+    <p class="docList">A file is 
+being generated when it shouldn’t be, which makes you wonder if an 
+incorrect dependency is causing too much work to be performed.</p>
+  </li>
+  <li>
+    <p class="docList">The
+ content of the target file is incorrect, which suggests that a 
+compilation tool is being invoked with the wrong command-line options.</p>
+  </li>
+  <li>
+    <p class="docList">GNU
+ Make is reporting that no rule is available to create a specific 
+target. You need to add the missing rule or determine why an existing 
+rule isn’t triggering when it should.</p>
+  </li>
+  <li>
+    <p class="docList">Rules
+ are being triggered in the wrong order, most likely when you’re trying 
+to build multiple jobs in parallel. This is also because you have links 
+missing in the dependency graph.</p>
+  </li>
+</ul>
+<p class="docText">You can resolve each 
+of these problems by first determining which compilation tool has the 
+incorrect behavior and then working backward to determine where the 
+associated rules and variables are defined. The steps are as follows:</p>
+
+
+
+
+
+
+<table class="docText" border="0">
+  <tbody>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>1. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">Examine
+ the build output log to determine which of the compilation tools is 
+doing the wrong thing. This might involve scanning through hundreds or 
+thousands of lines of output to find the offending command.<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>2. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">Locate
+ the makefile rule that’s responsible for generating the bad command 
+line. Given that rules (including the built-in rules) can be spread 
+across a number of different makefiles in a build system, finding where 
+everything is defined can take time.<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>3. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">Check
+ that the command-line options in this rule are valid. If necessary, 
+double-check the variable definitions used in the rule. This can be 
+challenging if some of the variables use deferred evaluation, making use
+ of subvariables that are defined in other parts of the build system.<br/><br/></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top" width="25">
+        <div class="docText">
+          <b>4. </b>
+        </div>
+      </td>
+      <td>
+        <div class="docText">Examine
+ the dependencies in the rule to make sure they’re correct. This might 
+involve searching for related rules to ensure that prerequisite files 
+are also being created.<br/><br/></div>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<p class="docText">To help with this debugging effort, GNU Make provides a number of command-line options:</p>
+
+<ul>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>gmake –n</tt>:</span>
+ Displays the list of shell commands to be executed, without actually 
+executing them. This saves you a lot of time when trying to find an 
+offending compilation tool, without waiting for a long build to 
+complete.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>gmake –p</tt>:</span>
+ Displays the content of GNU Make’s internal database. This contains the
+ complete list of rules and variables defined in each makefile, as well 
+as GNU Make’s built-in rules. Line number information is recorded so you
+ can easily track down where something is defined.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphRoman"><tt>gmake –d</tt>:</span>
+ Displays a trace log of GNU Make’s pattern-matching algorithm as it 
+parses and executes a makefile. The output can be extremely verbose, but
+ it provides everything you need to know.</p>
+  </li>
+</ul>
+<p class="docText">In addition to these command-line options, you can use the <span class="docEmphStrong">print debugging</span>
+ approach to display useful messages on the program’s output. The exact 
+sequence in which these messages appear helps the developer understand 
+how the makefile is executing. The <tt>$(warning)</tt> function displays a text message, along with information on where in the makefile the function was called.</p>
+
+<div class="docText">
+  <pre>$(warning CFLAGS is set to $(CFLAGS))</pre>
+</div>
+<br/>
+<p class="docText">This function doesn’t return a 
+value, so it can be inserted at any point in the makefile where a 
+function is permitted. Another clever trick is to use <tt>$(warning)</tt> within the definition of variables. Whenever the variable is accessed, a suitable message is displayed.</p>
+
+<div class="docText">
+  <pre>CFLAGS = $(warning Accessing CFLAGS) -g</pre>
+</div>
+<br/>
+<p class="docText">Also, if you redefine the <tt>$(SHELL)</tt> variable to include a <tt>$(warning)</tt> directive, you display a message on the program’s output whenever a rule is triggered.</p>
+
+<div class="docText">
+  <pre>SHELL = $(warning Target is $@) /bin/sh</pre>
+</div>
+<br/>
+<p class="docText">Now see how all this fits together. Going back to the first <tt>calculator</tt>
+ program, you now get a much better view of when variables are accessed,
+ what they’re defined as, and when the rules are being triggered.</p>
+
+<div class="docText">
+  <pre>Makefile:8: Accessing CFLAGS
+Makefile:8: CFLAGS is set to  -g
+Makefile:13: Accessing CFLAGS
+Makefile:13: Target is add.o
+gcc  -g -c -o add.o add.c
+Makefile:13: Accessing CFLAGS
+Makefile:13: Target is calc.o
+gcc  -g -c -o calc.o calc.c
+Makefile:13: Accessing CFLAGS
+Makefile:13: Target is mult.o
+gcc  -g -c -o mult.o mult.c
+Makefile:13: Accessing CFLAGS
+Makefile:13: Target is sub.o
+gcc  -g -c -o sub.o sub.c
+Makefile:16: Accessing CFLAGS
+Makefile:16: Target is calculator
+gcc  -g -o calculator add.o calc.o mult.o sub.o</pre>
+</div>
+<br/>
+<p class="docText">Finally, to make life much easier, the third-party GNU Make debugger tool [45]
+ uses these underlying tricks to provide a more traditional debugging 
+environment. You can interactively print the value of variables, find 
+out how they’re defined, and set breakpoints on specific makefile rules.
+ Consider using this tool when debugging a nontrivial makefile.</p>
+
+
+
+
+</body>
+</html>

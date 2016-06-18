@@ -1,0 +1,453 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Example: Applying Decorators to Methods</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div><h1 class="epub__title"><a id="example_colon_applying_decorators_to_me"></a>Example: Applying Decorators to Methods</h1>
+<p>As <a id="ch396mtclsssappdectomethex"></a>we saw in the prior section, because they are both run
+        at the end of a <code class="epub__literal">class</code> statement,
+        metaclasses and decorators can often be used
+        <span class="epub__emphasis"><em>interchangeably</em></span>, albeit with different syntax.
+        The choice between the two is arbitrary in many contexts. It’s also
+        possible to use them in <span class="epub__emphasis"><em>combination</em></span>, as
+        complementary tools. In this section, we’ll explore an example of just
+        such a combination—applying a function decorator to all the methods of
+        a class.</p>
+<div class="epub__sect2" title="Tracing with Decoration Manually"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="tracing_with_decoration_manually"></a>Tracing with Decoration Manually</h2>
+</div>
+</div>
+</div>
+<p>In <a id="I_indexterm4_d1e103158"></a>the prior chapter we coded two function decorators,
+          one that traced and counted all calls made to a decorated function
+          and another that timed such calls. They took various forms there,
+          some of which were applicable to both functions and methods and some
+          of which were not. The following collects both decorators’ final
+          forms into a module file for reuse and reference here:</p><a id="I_programlisting4_d1e103166"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># File mytools.py: assorted decorator tools</span></em>
+
+def tracer(func):                         <em class="epub__lineannotation"><span class="epub__lineannotation"># Use function, not class with __call__</span></em>
+    calls = 0                             <em class="epub__lineannotation"><span class="epub__lineannotation"># Else self is decorator instance only</span></em>
+    def onCall(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        print('call %s to %s' % (calls, func.__name__))
+        return func(*args, **kwargs)
+    return onCall
+
+import time
+def timer(label='', trace=True):                <em class="epub__lineannotation"><span class="epub__lineannotation"># On decorator args: retain args</span></em>
+    def onDecorator(func):                      <em class="epub__lineannotation"><span class="epub__lineannotation"># On @: retain decorated func</span></em>
+        def onCall(*args, **kargs):             <em class="epub__lineannotation"><span class="epub__lineannotation"># On calls: call original</span></em>
+            start   = time.clock()              <em class="epub__lineannotation"><span class="epub__lineannotation"># State is scopes + func attr</span></em>
+            result  = func(*args, **kargs)
+            elapsed = time.clock() - start
+            onCall.alltime += elapsed
+            if trace:
+                format = '%s%s: %.5f, %.5f'
+                values = (label, func.__name__, elapsed, onCall.alltime)
+                print(format % values)
+            return result
+        onCall.alltime = 0
+        return onCall
+    return onDecorator</pre>
+<p>As we learned in the prior chapter, to use these decorators
+          manually, we simply import them from the module and code the
+          decoration <code class="epub__literal">@</code> syntax before each
+          method we wish to trace or time:</p><a id="I_programlisting4_d1e103194"></a>
+<pre class="epub__programlisting">from mytools import tracer
+
+class Person:
+    @tracer
+    def __init__(self, name, pay):
+        self.name = name
+        self.pay  = pay
+
+    @tracer
+    def giveRaise(self, percent):         <em class="epub__lineannotation"><span class="epub__lineannotation"># giveRaise = tracer(giverRaise)</span></em>
+        self.pay *= (1.0 + percent)       <em class="epub__lineannotation"><span class="epub__lineannotation"># onCall remembers giveRaise</span></em>
+
+    @tracer
+    def lastName(self):                   <em class="epub__lineannotation"><span class="epub__lineannotation"># lastName = tracer(lastName)</span></em>
+        return self.name.split()[-1]
+
+bob = Person('Bob Smith', 50000)
+sue = Person('Sue Jones', 100000)
+print(bob.name, sue.name)
+sue.giveRaise(.10)                        <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs onCall(sue, .10)</span></em>
+print(sue.pay)
+print(bob.lastName(), sue.lastName())     <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs onCall(bob), remembers lastName</span></em></pre>
+<p>When this code is run, we get the following output—calls to
+          decorated methods are routed to logic that intercepts and then
+          delegates the call, because the original method names have been
+          bound to the decorator:</p><a id="I_programlisting4_d1e103212"></a>
+<pre class="epub__programlisting">call 1 to __init__
+call 2 to __init__
+Bob Smith Sue Jones
+call 1 to giveRaise
+110000.0
+call 1 to lastName
+call 2 to lastName
+Smith Jones</pre>
+</div>
+<div class="epub__sect2" title="Tracing with Metaclasses and Decorators"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="tracing_with_metaclasses_and_decorators"></a>Tracing with Metaclasses and Decorators</h2>
+</div>
+</div>
+</div>
+<p>The <a id="I_indexterm4_d1e103219"></a>manual decoration scheme of the prior section works,
+          but it requires us to add decoration syntax before
+          <span class="epub__emphasis"><em>each</em></span> method we wish to trace and to later
+          remove that syntax when we no longer desire tracing. If we want to
+          trace every method of a class, this can become tedious in larger
+          programs. It would be better if we could somehow apply the tracer
+          decorator to all of a class’s methods automatically.</p>
+<p>With metaclasses, we can do exactly that—because they are run
+          when a class is constructed, they are a natural place to add
+          decoration wrappers to a class’s methods. By scanning the class’s
+          attribute dictionary and testing for function objects there, we can
+          automatically run methods through the decorator and rebind the
+          original names to the results. The effect is the same as the
+          automatic method name rebinding of decorators, but we can apply it
+          more globally:</p><a id="I_programlisting4_d1e103232"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># Metaclass that adds tracing decorator to every method of a client class</span></em>
+
+from types import FunctionType
+from mytools import tracer
+
+class MetaTrace(type):
+    def __new__(meta, classname, supers, classdict):
+        for attr, attrval in classdict.items():
+            if type(attrval) is FunctionType:                      <em class="epub__lineannotation"><span class="epub__lineannotation"># Method?</span></em>
+                classdict[attr] = tracer(attrval)                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Decorate it</span></em>
+        return type.__new__(meta, classname, supers, classdict)    <em class="epub__lineannotation"><span class="epub__lineannotation"># Make class</span></em>
+
+class Person(metaclass=MetaTrace):
+    def __init__(self, name, pay):
+        self.name = name
+        self.pay  = pay
+    def giveRaise(self, percent):
+        self.pay *= (1.0 + percent)
+    def lastName(self):
+        return self.name.split()[-1]
+
+bob = Person('Bob Smith', 50000)
+sue = Person('Sue Jones', 100000)
+print(bob.name, sue.name)
+sue.giveRaise(.10)
+print(sue.pay)
+print(bob.lastName(), sue.lastName())</pre>
+<p>When this code is run, the results are the same as
+          before—calls to methods are routed to the tracing decorator first
+          for tracing, and then propagated on to the original method:</p><a id="I_programlisting4_d1e103247"></a>
+<pre class="epub__programlisting">call 1 to __init__
+call 2 to __init__
+Bob Smith Sue Jones
+call 1 to giveRaise
+110000.0
+call 1 to lastName
+call 2 to lastName
+Smith Jones</pre>
+<p>The result you see here is a combination of decorator and
+          metaclass work—the metaclass automatically applies the function
+          decorator to every method at class creation time, and the function
+          decorator automatically intercepts method calls in order to print
+          the trace messages in this output. The combination “just works,”
+          thanks to the generality of both tools.</p>
+</div>
+<div class="epub__sect2" title="Applying Any Decorator to Methods"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="applying_any_decorator_to_methods"></a>Applying Any Decorator to Methods</h2>
+</div>
+</div>
+</div>
+<p>The <a id="I_indexterm4_d1e103256"></a>prior metaclass example works for just one specific
+          function decorator—tracing. However, it’s trivial to generalize this
+          to apply <span class="epub__emphasis"><em>any</em></span> decorator to all the methods of a
+          class. All we have to do is add an outer scope layer to retain the
+          desired decorator, much like we did for decorators in the prior
+          chapter. The following, for example, codes such a generalization and
+          then uses it to apply the tracer decorator again:</p><a id="I_programlisting4_d1e103267"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># Metaclass factory: apply any decorator to all methods of a class</span></em>
+
+from types import FunctionType
+from mytools import tracer, timer
+
+def decorateAll(decorator):
+    class MetaDecorate(type):
+        def __new__(meta, classname, supers, classdict):
+            for attr, attrval in classdict.items():
+                if type(attrval) is FunctionType:
+                    classdict[attr] = decorator(attrval)
+            return type.__new__(meta, classname, supers, classdict)
+    return MetaDecorate
+
+class Person(metaclass=decorateAll(tracer)):       <em class="epub__lineannotation"><span class="epub__lineannotation"># Apply a decorator to all</span></em>
+    def __init__(self, name, pay):
+        self.name = name
+        self.pay  = pay
+    def giveRaise(self, percent):
+        self.pay *= (1.0 + percent)
+    def lastName(self):
+        return self.name.split()[-1]
+
+bob = Person('Bob Smith', 50000)
+sue = Person('Sue Jones', 100000)
+print(bob.name, sue.name)
+sue.giveRaise(.10)
+print(sue.pay)
+print(bob.lastName(), sue.lastName())</pre>
+<p>When this code is run as it is, the output is again the same
+          as that of the previous examples—we’re still ultimately decorating
+          every method in a client class with the tracer function decorator,
+          but we’re doing so in a more generic fashion:</p><a id="I_programlisting4_d1e103276"></a>
+<pre class="epub__programlisting">call 1 to __init__
+call 2 to __init__
+Bob Smith Sue Jones
+call 1 to giveRaise
+110000.0
+call 1 to lastName
+call 2 to lastName
+Smith Jones</pre>
+<p>Now, to apply a different decorator to the methods, we can
+          simply replace the decorator name in the <code class="epub__literal">class</code> header line. To use the timer
+          function decorator shown earlier, for example, we could use either
+          of the last two header lines in the following when defining our
+          class—the first accepts the timer’s default arguments, and the
+          second specifies label text:</p><a id="I_programlisting4_d1e103283"></a>
+<pre class="epub__programlisting">class Person(metaclass=decorateAll(tracer)):               <em class="epub__lineannotation"><span class="epub__lineannotation"># Apply tracer</span></em>
+
+class Person(metaclass=decorateAll(timer())):              <em class="epub__lineannotation"><span class="epub__lineannotation"># Apply timer, defaults</span></em>
+
+class Person(metaclass=decorateAll(timer(label='**'))):    <em class="epub__lineannotation"><span class="epub__lineannotation"># Decorator arguments</span></em></pre>
+<p>Notice that this scheme cannot support nondefault decorator
+          arguments differing per method, but it can pass in decorator
+          arguments that apply to all methods, as done here. To test, use the
+          last of these metaclass declarations to apply the timer, and add the
+          following lines at the end of the script:</p><a id="I_programlisting4_d1e103295"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># If using timer: total time per method</span></em>
+
+print('-'*40)
+print('%.5f' % Person.__init__.alltime)
+print('%.5f' % Person.giveRaise.alltime)
+print('%.5f' % Person.lastName.alltime)</pre>
+<p>The new output is as follows—the metaclass wraps methods in
+          timer decorators now, so we can tell how long each and every call
+          takes, for every method of the class:</p><a id="I_programlisting4_d1e103301"></a>
+<pre class="epub__programlisting">**__init__: 0.00001, 0.00001
+**__init__: 0.00001, 0.00002
+Bob Smith Sue Jones
+**giveRaise: 0.00001, 0.00001
+110000.0
+**lastName: 0.00001, 0.00001
+**lastName: 0.00001, 0.00002
+Smith Jones
+----------------------------------------
+0.00002
+0.00001
+0.00002</pre>
+</div>
+<div class="epub__sect2" title="Metaclasses Versus Class Decorators: Round 3"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="metaclasses_versus_class_decorators"></a>Metaclasses Versus Class Decorators: Round 3</h2>
+</div>
+</div>
+</div>
+<p>Class <a id="I_indexterm4_d1e103308"></a><a id="I_indexterm4_d1e103313"></a>decorators intersect with metaclasses here, too. The
+          following version replaces the preceding example’s metaclass with a
+          class decorator. It defines and uses a <span class="epub__emphasis"><em>class decorator
+          that applies a function decorator</em></span> to all methods of a
+          class. Although the prior sentence may sound more like a Zen
+          statement than a technical description, this all works quite naturally—Python’s
+          decorators support arbitrary nesting and combinations:</p><a id="I_programlisting4_d1e103328"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># Class decorator factory: apply any decorator to all methods of a class</span></em>
+
+from types import FunctionType
+from mytools import tracer, timer
+
+def decorateAll(decorator):
+    def DecoDecorate(aClass):
+        for attr, attrval in aClass.__dict__.items():
+            if type(attrval) is FunctionType:
+                setattr(aClass, attr, decorator(attrval))        <em class="epub__lineannotation"><span class="epub__lineannotation"># Not __dict__</span></em>
+        return aClass
+    return DecoDecorate
+
+@decorateAll(tracer)                          <em class="epub__lineannotation"><span class="epub__lineannotation"># Use a class decorator</span></em>
+class Person:                                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Applies func decorator to methods</span></em>
+    def __init__(self, name, pay):            <em class="epub__lineannotation"><span class="epub__lineannotation"># Person = decorateAll(..)(Person)</span></em>
+        self.name = name                      <em class="epub__lineannotation"><span class="epub__lineannotation"># Person = DecoDecorate(Person)</span></em>
+        self.pay  = pay
+    def giveRaise(self, percent):
+        self.pay *= (1.0 + percent)
+    def lastName(self):
+        return self.name.split()[-1]
+
+bob = Person('Bob Smith', 50000)
+sue = Person('Sue Jones', 100000)
+print(bob.name, sue.name)
+sue.giveRaise(.10)
+print(sue.pay)
+print(bob.lastName(), sue.lastName())</pre>
+<p>When this code is run as it is, the class decorator applies
+          the tracer function decorator to every method and produces a trace
+          message on calls (the output is the same as that of the preceding
+          metaclass version of this example):</p><a id="I_programlisting4_d1e103349"></a>
+<pre class="epub__programlisting">call 1 to __init__
+call 2 to __init__
+Bob Smith Sue Jones
+call 1 to giveRaise
+110000.0
+call 1 to lastName
+call 2 to lastName
+Smith Jones</pre>
+<p>Notice that the class decorator returns the original,
+          augmented class, not a wrapper layer for it (as is common when
+          wrapping instance objects instead). As for the metaclass version, we
+          retain the type of the original class—an instance of <code class="epub__literal">Person</code> is an instance of <code class="epub__literal">Person</code>, not of some wrapper class. In
+          fact, this class decorator deals with class creation only; instance
+          creation calls are not intercepted at all.</p>
+<p>This distinction can matter in programs that require type
+          testing for instances to yield the original class, not a wrapper.
+          When augmenting a class instead of an instance, class decorators can
+          retain the original class type. The class’s methods are not their
+          original functions because they are rebound to decorators, but this
+          is less important in practice, and it’s true in the metaclass
+          alternative as well.</p>
+<p>Also note that, like the metaclass version, this structure
+          cannot support function decorator arguments that differ per method,
+          but it can handle such arguments if they apply to all methods. To
+          use this scheme to apply the timer decorator, for example, either of
+          the last two decoration lines in the following will suffice if coded
+          just before our class definition—the first uses decorator argument
+          defaults, and the second provides one explicitly:</p><a id="I_programlisting4_d1e103363"></a>
+<pre class="epub__programlisting">@decorateAll(tracer)                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Decorate all with tracer</span></em>
+
+@decorateAll(timer())                <em class="epub__lineannotation"><span class="epub__lineannotation"># Decorate all with timer, defaults</span></em>
+
+@decorateAll(timer(label='@@'))      <em class="epub__lineannotation"><span class="epub__lineannotation"># Same but pass a decorator argument</span></em></pre>
+<p>As before, let’s use the last of these decorator lines and add
+          the following at the end of the script to test our example with a
+          different decorator:</p><a id="I_programlisting4_d1e103375"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># If using timer: total time per method</span></em>
+
+print('-'*40)
+print('%.5f' % Person.__init__.alltime)
+print('%.5f' % Person.giveRaise.alltime)
+print('%.5f' % Person.lastName.alltime)</pre>
+<p>The same sort of output appears—for every method we get timing
+          data for each and all calls, but we’ve passed a different label
+          argument to the timer decorator:</p><a id="I_programlisting4_d1e103382"></a>
+<pre class="epub__programlisting">@@__init__: 0.00001, 0.00001
+@@__init__: 0.00001, 0.00002
+Bob Smith Sue Jones
+@@giveRaise: 0.00001, 0.00001
+110000.0
+@@lastName: 0.00001, 0.00001
+@@lastName: 0.00001, 0.00002
+Smith Jones
+----------------------------------------
+0.00002
+0.00001
+0.00002</pre>
+<p>As you can see, metaclasses and class decorators are not only
+          often interchangeable, but also commonly complementary. Both provide
+          advanced but powerful ways to customize and manage both class and
+          instance objects, because both ultimately allow you to insert code
+          into the class creation process. Although some more advanced
+          applications may be better coded with one or the other, the way you
+          choose or combine these two tools in many cases is largely up to
+          you.</p><div class="epub__sidebar"><a id="quotation_mark_optional_quotation_mark"></a>
+<p class="epub__title">“Optional” Language Features</p>
+<p>I <a id="I_indexterm4_d1e103391"></a>included a quote near the start of this chapter
+            about metaclasses not being of interest to 99% of Python
+            programmers, to underscore their relative obscurity. That
+            statement is not quite accurate, though, and not just numerically
+            so.</p>
+<p>The quote’s author is a friend of mine from the early days
+            of Python, and I don’t mean to pick on anyone unfairly. Moreover,
+            I’ve often made such statements about language feature obscurity
+            myself—in this very book, in fact.</p>
+<p>The problem, though, is that such statements really only
+            apply to people who work alone and only ever use code that they’ve
+            written themselves. As soon as an “optional” advanced language
+            feature is used by <span class="epub__emphasis"><em>anyone</em></span> in an organization,
+            it is no longer optional—it
+            is effectively imposed on <span class="epub__emphasis"><em>everyone</em></span> in the
+            organization. The same holds true for externally developed
+            software you use in your systems—if the software’s author uses an
+            advanced language feature, it’s no longer entirely optional for
+            you, because you have to understand the feature to use or change
+            the code.</p>
+<p>This observation applies to all the advanced tools listed
+            near the beginning of this chapter—decorators, properties,
+            descriptors, metaclasses, and so on. If any person or program you
+            need to work with uses them, they automatically become part of
+            your required knowledge base too. That is, <span class="epub__emphasis"><em>nothing is
+            truly “optional” if nothing is truly optional</em></span>. Most of
+            us don’t get to pick and choose.</p>
+<p>This is why some Python old-timers (myself included)
+            sometimes lament that Python seems to have grown larger and more
+            complex over time. New features added by veterans seem to have
+            raised the intellectual bar for newcomers. Although Python’s core
+            ideas, like dynamic typing and built-in types, have remained
+            essentially the same, its advanced additions can become required
+            reading for any Python programmer. I chose to cover these topics
+            here for this reason, despite the omission of most in prior
+            editions. It’s not possible to skip the advanced stuff if it’s in
+            code you have to understand.</p>
+<p>On the other hand, Python is still much simpler than most of
+            its contemporaries and perhaps only as complex as its many roles
+            require, and many new learners can pick up advanced topics as
+            needed. And frankly, application programmers tend to spend most of
+            their time dealing with <span class="epub__emphasis"><em>libraries and
+            extensions</em></span>, not advanced and sometimes arcane language
+            features. For instance, the book <em class="epub__citetitle">Programming
+            Python</em>, a follow-up to this one, deals mostly
+            with the marriage of Python to application libraries for tasks
+            such as GUIs, databases, and the Web, not with esoteric language
+            tools.</p>
+<p>The flipside of this growth is that Python has become more
+            <span class="epub__emphasis"><em>powerful</em></span>. When used well, tools like
+            decorators and metaclasses are not only arguably “cool,” but allow
+            creative programmers to build more flexible and useful APIs for
+            other programmers to use. As we’ve seen, they can also provide
+            good solutions to problems of encapsulation and
+            maintenance.</p>
+<p>Whether this justifies the potential expansion of required
+            Python knowledge is up to you to decide. Unfortunately, a person’s
+            skill level often decides this issue by default—more advanced programmers
+            like more advanced tools and tend to forget about their impact on
+            other camps. Fortunately, though, this isn’t an absolute; good
+            programmers also understand that <span class="epub__emphasis"><em>simplicity is good
+            engineering</em></span>, and advanced tools should be used only
+            when warranted. This is true in any programming language, but
+            especially in a language like Python that is frequently exposed to
+            new or novice programmers as an extension tool.</p>
+<p>If you’re still not buying this, keep in mind that there are
+            very many Python users who are not comfortable with even basic OOP
+            and classes. Trust me on this; I’ve met thousands of them.
+            Python-based systems that require their users to master the
+            nuances of metaclasses, decorators, and the like should probably
+            scale their market expectations <a id="I_indexterm4_d1e103441"></a>accordingly.</p>
+</div>
+</div>
+<div class="epub__sect1" title="Chapter Summary"><div class="epub__titlepage"><div>
+<div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

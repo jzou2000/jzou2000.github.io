@@ -1,0 +1,978 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>__getattr__ and __getattribute__</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div><h1 class="epub__title"><a id="_underscore_underscore_getattr_undersco"></a>__getattr__ and __getattribute__</h1>
+<p>So <a id="ch37mngdattribgetattrgetattrib"></a>far, <a id="ch37getattrmethod"></a>we’ve <a id="ch37getattributemethod"></a>studied properties and descriptors—tools for managing
+        specific attributes. The <code class="epub__literal">__getattr__</code> and <code class="epub__literal">__getattribute__</code> operator overloading
+        methods provide still other ways to intercept attribute fetches for
+        class instances. Like properties and descriptors, they allow us to
+        insert code to be run automatically when attributes are accessed; as
+        we’ll see, though, these two methods can be used in more general
+        ways.</p>
+<p>Attribute fetch interception comes in two flavors, coded with
+        two different methods:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p><code class="epub__literal">__getattr__</code> is run for
+            <span class="epub__emphasis"><em>undefined</em></span> attributes—that is, attributes not
+            stored on an instance or inherited from one of its classes.</p></li><li class="epub__listitem">
+<p><code class="epub__literal">__getattribute__</code> is run
+            for <span class="epub__emphasis"><em>every</em></span> attribute, so when using it you
+            must be cautious to avoid recursive loops by passing attribute
+            accesses to a superclass.</p></li></ul>
+</div>
+<p>We met the former of these in Chapter 29; it’s available for all Python
+        versions. The latter of these is available for new-style classes in
+        2.6, and for all (implicitly new-style) classes in 3.0. These two
+        methods are representatives of a set of attribute interception methods
+        that also includes<a id="I_indexterm2_d1e94611"></a> <code class="epub__literal">__setattr__</code> and
+        <code class="epub__literal"><a id="I_indexterm2_d1e94619"></a>__delattr__</code>. Because these methods have
+        similar roles, we will generally treat them as a single topic
+        here.</p>
+<p>Unlike properties and descriptors, these methods are part of
+        Python’s <span class="epub__emphasis"><em>operator overloading</em></span> protocol—specially
+        named methods of a class, inherited by subclasses, and run
+        automatically when instances are used in the implied built-in
+        operation. Like all methods of a class, they each receive a first
+        <code class="epub__literal">self</code> argument when called, giving
+        access to any required instance state information or other methods of
+        the class.</p>
+<p>The <code class="epub__literal">__getattr__</code> and <code class="epub__literal">__getattribute__</code> methods are also more
+        <span class="epub__emphasis"><em>generic</em></span> than properties and descriptors—they can
+        be used to intercept access to any (or even all) instance attribute
+        fetches, not just the specific name to which they are assigned.
+        Because of this, these two methods are well suited to general
+        <span class="epub__emphasis"><em>delegation</em></span>-based coding patterns—they can be used
+        to implement wrapper objects that manage all attribute accesses for an
+        embedded object. By contrast, we must define one property or
+        descriptor for every attribute we wish to intercept.</p>
+<p>Finally, these two methods are more <span class="epub__emphasis"><em>narrowly
+        focused</em></span> than the alternatives we considered earlier: they
+        intercept attribute fetches only, not assignments. To also catch
+        attribute changes by assignment, we must code a <code class="epub__literal">__setattr__</code> method—an operator overloading
+        method run for every attribute fetch, which must take care to avoid
+        recursive loops by routing attribute assignments through the instance
+        namespace dictionary.</p>
+<p>Although much less common, we can also code a <code class="epub__literal">__delattr__</code> overloading method (which must
+        avoid looping in the same way) to intercept attribute deletions. By
+        contrast, properties and descriptors catch get, set,
+        <span class="epub__emphasis"><em>and</em></span> delete operations by design.</p>
+<p>Most of these operator overloading methods were introduced
+        earlier in the book; here, we’ll expand on their usage and study their
+        roles in larger contexts.</p>
+<div class="epub__sect2" title="The Basics"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="the_basics-id7"></a>The Basics</h2>
+</div>
+</div>
+</div>
+<p><code class="epub__literal">__getattr__</code> and <code class="epub__literal">__setattr__</code> were introduced in Chapters
+          29 and 31, and <code class="epub__literal">__getattribute__</code> was mentioned
+          briefly in Chapter 31. In short, if a
+          class defines or inherits the following methods, they will be run
+          automatically when an instance is used in the context described by
+          the comments to the right:</p><a id="I_programlisting2_d1e94683"></a>
+<pre class="epub__programlisting">def __getattr__(self, name):        <em class="epub__lineannotation"><span class="epub__lineannotation"># On undefined attribute fetch [obj.name]</span></em>
+def __getattribute__(self, name):   <em class="epub__lineannotation"><span class="epub__lineannotation"># On all attribute fetch [obj.name]</span></em>
+def __setattr__(self, name, value): <em class="epub__lineannotation"><span class="epub__lineannotation"># On all attribute assignment [obj.name=value]</span></em>
+def __delattr__(self, name):        <em class="epub__lineannotation"><span class="epub__lineannotation"># On all attribute deletion [del obj.name]</span></em></pre>
+<p>In all of these, <code class="epub__literal">self</code> is
+          the subject instance object as usual, <code class="epub__literal">name</code> is the string name of the attribute being accessed, and
+          <code class="epub__literal">value</code> is the object being
+          assigned to the attribute. The two get methods normally return an
+          attribute’s value, and the other two return nothing (<code class="epub__literal">None</code>). For example, to catch every
+          attribute fetch, we can use either of the first two methods above,
+          and to catch every attribute assignment we can use the third:</p><a id="I_programlisting2_d1e94713"></a>
+<pre class="epub__programlisting">class Catcher:
+    def __getattr__(self, name):
+        print('Get:', name)
+    def __setattr__(self, name, value):
+        print('Set:', name, value)
+
+X = Catcher()
+X.job                               <em class="epub__lineannotation"><span class="epub__lineannotation"># Prints "Get: job"</span></em>
+X.pay                               <em class="epub__lineannotation"><span class="epub__lineannotation"># Prints "Get: pay"</span></em>
+X.pay = 99                          <em class="epub__lineannotation"><span class="epub__lineannotation"># Prints "Set: pay 99"</span></em></pre>
+<p>Such a coding structure can be used to implement the
+          <span class="epub__emphasis"><em><a id="I_indexterm2_d1e94726"></a>delegation</em></span> design pattern we met earlier,
+          in Chapter 30. Because all attribute
+          are routed to our interception methods generically, we can validate
+          and pass them along to embedded, managed objects. The following
+          class (borrowed from Chapter 30), for
+          example, traces <span class="epub__emphasis"><em>every</em></span> attribute fetch made to
+          another object passed to the wrapper class:</p><a id="I_programlisting2_d1e94742"></a>
+<pre class="epub__programlisting">class Wrapper:
+    def __init__(self, object):
+        self.wrapped = object                    <em class="epub__lineannotation"><span class="epub__lineannotation"># Save object</span></em>
+    def __getattr__(self, attrname):
+        print('Trace:', attrname)                <em class="epub__lineannotation"><span class="epub__lineannotation"># Trace fetch</span></em>
+        return getattr(self.wrapped, attrname)   <em class="epub__lineannotation"><span class="epub__lineannotation"># Delegate fetch</span></em></pre>
+<p>There is no such analog for properties and descriptors, short
+          of coding accessors for every possible attribute in every possibly
+          wrapped object.</p>
+<div class="epub__sect3" title="Avoiding loops in attribute interception methods"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="avoiding_loops_in_attribute_interceptio"></a>Avoiding loops in attribute interception methods</h3>
+</div>
+</div>
+</div>
+<p>These <a id="I_indexterm2_d1e94759"></a>methods <a id="I_indexterm2_d1e94767"></a>are <a id="I_indexterm2_d1e94773"></a>generally straightforward to use; their only complex
+            part is the potential for <span class="epub__emphasis"><em>looping</em></span> (a.k.a.
+            recursing). Because <code class="epub__literal">__getattr__</code>
+            is called for undefined attributes only, it can freely fetch other
+            attributes within its own code. However, because <code class="epub__literal">__getattribute__</code> and <code class="epub__literal">__setattr__</code> are run for all attributes,
+            their code needs to be careful when accessing other attributes to
+            avoid calling themselves again and triggering a recursive
+            loop.</p>
+<p>For example, another attribute fetch run inside a <code class="epub__literal">__getattribute__</code> method’s code will
+            trigger <code class="epub__literal">__getattribute__</code> again,
+            and the code will loop until memory is exhausted:</p><a id="I_programlisting2_d1e94800"></a>
+<pre class="epub__programlisting">    def __getattribute__(self, name):
+        x = self.other                                <em class="epub__lineannotation"><span class="epub__lineannotation"># LOOPS!</span></em></pre>
+<p>To work around this, route the fetch through a higher
+            superclass instead to skip this level’s version—the <code class="epub__literal">object</code> class is always a superclass, and
+            it serves well in this role:</p><a id="I_programlisting2_d1e94809"></a>
+<pre class="epub__programlisting">    def __getattribute__(self, name):
+        x = object.__getattribute__(self, 'other')    <em class="epub__lineannotation"><span class="epub__lineannotation"># Force higher to avoid me</span></em></pre>
+<p>For <code class="epub__literal">__setattr__</code>, the
+            situation is similar; assigning any attribute inside this method
+            triggers <code class="epub__literal">__setattr__</code> again and
+            creates a similar loop:</p><a id="I_programlisting2_d1e94821"></a>
+<pre class="epub__programlisting">    def __setattr__(self, name, value):
+        self.other = value                            <em class="epub__lineannotation"><span class="epub__lineannotation"># LOOPS!</span></em></pre>
+<p>To work around this problem, assign the attribute as a key
+            in the instance’s <code class="epub__literal">__dict__</code>
+            namespace dictionary instead. This avoids direct attribute
+            assignment:</p><a id="I_programlisting2_d1e94830"></a>
+<pre class="epub__programlisting">    def __setattr__(self, name, value):
+        self.__dict__['other'] = value                <em class="epub__lineannotation"><span class="epub__lineannotation"># Use atttr dict to avoid me</span></em></pre>
+<p>Although it’s a less common approach, <code class="epub__literal">__setattr__</code> can also pass its own
+            attribute assignments to a higher superclass to avoid looping,
+            just like <code class="epub__literal">__getattribute__</code>:</p><a id="I_programlisting2_d1e94843"></a>
+<pre class="epub__programlisting">    def __setattr__(self, name, value):
+        object.__setattr__(self, 'other', value)      <em class="epub__lineannotation"><span class="epub__lineannotation"># Force higher to avoid me</span></em></pre>
+<p>By contrast, though, we <span class="epub__emphasis"><em>cannot</em></span> use the
+            <code class="epub__literal">__dict__</code> trick to avoid loops
+            in <code class="epub__literal">__getattribute__</code>:</p><a id="I_programlisting2_d1e94858"></a>
+<pre class="epub__programlisting">    def __getattribute__(self, name):
+        x = self.__dict__['other']                    <em class="epub__lineannotation"><span class="epub__lineannotation"># LOOPS!</span></em></pre>
+<p>Fetching the <code class="epub__literal">__dict__</code>
+            attribute itself triggers <code class="epub__literal">__getattribute__</code> again, causing a
+            recursive loop. Strange but true!</p>
+<p>The <code class="epub__literal">__delattr__</code> method is
+            rarely used in practice, but when it is, it is called for every
+            attribute deletion (just as <code class="epub__literal">__setattr__</code> is called for every
+            attribute assignment). Therefore, you must take care to avoid
+            loops when deleting attributes, by using the same techniques:
+            namespace dictionaries or superclass method calls.</p>
+</div>
+</div>
+<div class="epub__sect2" title="A First Example"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="a_first_example-id3"></a>A First Example</h2>
+</div>
+</div>
+</div>
+<p>All this <a id="I_indexterm2_d1e94884"></a>is not nearly<a id="I_indexterm2_d1e94892"></a> as <a id="I_indexterm2_d1e94898"></a>complicated as the prior section may have implied. To
+          see how to put these ideas to work, here is the same first example
+          we used for properties and descriptors in action again, this time
+          implemented with attribute operator overloading methods. Because
+          these methods are so generic, we test attribute names here to know
+          when a managed attribute is being accessed; others are allowed to
+          pass normally:</p><a id="I_programlisting2_d1e94904"></a>
+<pre class="epub__programlisting">class Person:
+    def __init__(self, name):               <em class="epub__lineannotation"><span class="epub__lineannotation"># On [Person()]</span></em>
+        self._name = name                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Triggers __setattr__!</span></em>
+
+    def __getattr__(self, attr):            <em class="epub__lineannotation"><span class="epub__lineannotation"># On [obj.undefined]</span></em>
+        if attr == 'name':                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Intercept name: not stored</span></em>
+            print('fetch...')
+            return self._name               <em class="epub__lineannotation"><span class="epub__lineannotation"># Does not loop: real attr</span></em>
+        else:                               <em class="epub__lineannotation"><span class="epub__lineannotation"># Others are errors</span></em>
+            raise AttributeError(attr)
+
+    def __setattr__(self, attr, value):     <em class="epub__lineannotation"><span class="epub__lineannotation"># On [obj.any = value]</span></em>
+        if attr == 'name':
+            print('change...')
+            attr = '_name'                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Set internal name</span></em>
+        self.__dict__[attr] = value         <em class="epub__lineannotation"><span class="epub__lineannotation"># Avoid looping here</span></em>
+
+    def __delattr__(self, attr):            <em class="epub__lineannotation"><span class="epub__lineannotation"># On [del obj.any]</span></em>
+        if attr == 'name':
+            print('remove...')
+            attr = '_name'                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Avoid looping here too</span></em>
+        del self.__dict__[attr]             <em class="epub__lineannotation"><span class="epub__lineannotation"># but much less common</span></em>
+
+bob = Person('Bob Smith')           <em class="epub__lineannotation"><span class="epub__lineannotation"># bob has a managed attribute</span></em>
+print(bob.name)                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs __getattr__</span></em>
+bob.name = 'Robert Smith'           <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs __setattr__</span></em>
+print(bob.name)
+del bob.name                        <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs __delattr__</span></em>
+
+print('-'*20)
+sue = Person('Sue Jones')           <em class="epub__lineannotation"><span class="epub__lineannotation"># sue inherits property too</span></em>
+print(sue.name)
+#print(Person.name.__doc__)         <em class="epub__lineannotation"><span class="epub__lineannotation"># No equivalent here</span></em></pre>
+<p>Notice that the attribute assignment in the <code class="epub__literal">__init__</code> constructor triggers <code class="epub__literal">__setattr__</code> too—this method catches every
+          attribute assignment, even those within the class itself. When this
+          code is run, the same output is produced, but this time it’s the
+          result of Python’s normal operator overloading mechanism and our
+          attribute interception methods:</p><a id="I_programlisting2_d1e94973"></a>
+<pre class="epub__programlisting">fetch...
+Bob Smith
+change...
+fetch...
+Robert Smith
+remove...
+--------------------
+fetch...
+Sue Jones</pre>
+<p>Also note that, unlike with properties and descriptors,
+          there’s no direct notion of specifying
+          <span class="epub__emphasis"><em>documentation</em></span> for our attribute here; managed
+          attributes exist within the code of our interception methods, not as
+          distinct objects.</p>
+<p>To achieve exactly the same results with <code class="epub__literal">__getattribute__</code>, replace <code class="epub__literal">__getattr__</code> in the example with the
+          following; because it catches all attribute fetches, this version
+          must be careful to avoid looping by passing new fetches to a
+          superclass, and it can’t generally assume unknown names are
+          errors:</p><a id="I_programlisting2_d1e94988"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># Replace __getattr__ with this</span></em>
+
+    def __getattribute__(self, attr):                 <em class="epub__lineannotation"><span class="epub__lineannotation"># On [obj.any]</span></em>
+        if attr == 'name':                            <em class="epub__lineannotation"><span class="epub__lineannotation"># Intercept all names</span></em>
+            print('fetch...')
+            attr = '_name'                            <em class="epub__lineannotation"><span class="epub__lineannotation"># Map to internal name</span></em>
+        return object.__getattribute__(self, attr)    <em class="epub__lineannotation"><span class="epub__lineannotation"># Avoid looping here</span></em></pre>
+<p>This example is equivalent to that coded for properties and
+          descriptors, but it’s a bit artificial, and it doesn’t really
+          highlight these tools in practice. Because they are generic,
+          <code class="epub__literal">__getattr__</code> and <code class="epub__literal">__getattribute__</code> are probably more
+          commonly used in delegation-base code (as sketched earlier), where
+          attribute access is validated and routed to an embedded object.
+          Where just a <span class="epub__emphasis"><em>single</em></span> attribute must be managed,
+          properties and descriptors might do as well or better.</p>
+</div>
+<div class="epub__sect2" title="Computed Attributes"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="computed_attributes-id2"></a>Computed Attributes</h2>
+</div>
+</div>
+</div>
+<p>As <a id="I_indexterm2_d1e95019"></a>before, <a id="I_indexterm2_d1e95027"></a><a id="I_indexterm2_d1e95032"></a>our prior example doesn’t really do anything but trace
+          attribute fetches; it’s not much more work to compute an attribute’s
+          value when fetched. As for properties and descriptors, the following
+          creates a virtual attribute <code class="epub__literal">X</code>
+          that runs a calculation when fetched:</p><a id="I_programlisting2_d1e95041"></a>
+<pre class="epub__programlisting">class AttrSquare:
+    def __init__(self, start):
+        self.value = start                            <em class="epub__lineannotation"><span class="epub__lineannotation"># Triggers __setattr__!</span></em>
+
+    def __getattr__(self, attr):                      <em class="epub__lineannotation"><span class="epub__lineannotation"># On undefined attr fetch</span></em>
+        if attr == 'X':
+            return self.value ** 2                    <em class="epub__lineannotation"><span class="epub__lineannotation"># value is not undefined</span></em>
+        else:
+            raise AttributeError(attr)
+
+    def __setattr__(self, attr, value):               <em class="epub__lineannotation"><span class="epub__lineannotation"># On all attr assignments</span></em>
+        if attr == 'X':
+            attr = 'value'
+        self.__dict__[attr] = value
+
+A = AttrSquare(3)       <em class="epub__lineannotation"><span class="epub__lineannotation"># 2 instances of class with overloading</span></em>
+B = AttrSquare(32)      <em class="epub__lineannotation"><span class="epub__lineannotation"># Each has different state information</span></em>
+
+print(A.X)              <em class="epub__lineannotation"><span class="epub__lineannotation"># 3 ** 2</span></em>
+A.X = 4
+print(A.X)              <em class="epub__lineannotation"><span class="epub__lineannotation"># 4 ** 2</span></em>
+print(B.X)              <em class="epub__lineannotation"><span class="epub__lineannotation"># 32 ** 2</span></em></pre>
+<p>Running this code results in the same output that we got
+          earlier when using properties and descriptors, but this script’s
+          mechanics are based on generic attribute interception
+          methods:</p><a id="I_programlisting2_d1e95072"></a>
+<pre class="epub__programlisting">9
+16
+1024</pre>
+<p>As before, we can achieve the same effect with <code class="epub__literal">__getattribute__</code> instead of <code class="epub__literal">__getattr__</code>; the following
+          replaces the fetch method with a <code class="epub__literal">__getattribute__</code> and changes the <code class="epub__literal">__setattr__</code> assignment method to avoid
+          looping by using direct superclass method calls instead of <code class="epub__literal">__dict__</code> keys:</p><a id="I_programlisting2_d1e95092"></a>
+<pre class="epub__programlisting">class AttrSquare:
+    def __init__(self, start):
+        self.value = start                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Triggers __setattr__!</span></em>
+
+    def __getattribute__(self, attr):       <em class="epub__lineannotation"><span class="epub__lineannotation"># On all attr fetches</span></em>
+        if attr == 'X':
+            return self.value ** 2          <em class="epub__lineannotation"><span class="epub__lineannotation"># Triggers __getattribute__ again!</span></em>
+        else:
+            return object.__getattribute__(self, attr)
+
+    def __setattr__(self, attr, value):     <em class="epub__lineannotation"><span class="epub__lineannotation"># On all attr assignments</span></em>
+        if attr == 'X':
+            attr = 'value'
+        object.__setattr__(self, attr, value)</pre>
+<p>When this version is run, the results are the same again.
+          Notice the implicit routing going on in inside this class’s
+          methods:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p><code class="epub__literal">self.value=start</code> inside
+              the constructor triggers <code class="epub__literal">__setattr__</code></p></li><li class="epub__listitem">
+<p><code class="epub__literal">self.value</code> inside
+              <code class="epub__literal">__getattribute__</code> triggers
+              <code class="epub__literal">__getattribute__</code> again</p></li></ul>
+</div>
+<p>In fact, <code class="epub__literal">__getattribute__</code>
+          is run <span class="epub__emphasis"><em>twice</em></span> each time we fetch attribute
+          <code class="epub__literal">X</code>. This doesn’t happen in the
+          <code class="epub__literal">__getattr__</code> version, because the
+          <code class="epub__literal">value</code> attribute is not undefined.
+          If you care about speed and want to avoid this, change <code class="epub__literal">__getattribute__</code> to use the superclass to
+          fetch <code class="epub__literal">value</code> as well:</p><a id="I_programlisting2_d1e95151"></a>
+<pre class="epub__programlisting">    def __getattribute__(self, attr):
+        if attr == 'X':
+            return object.__getattribute__(self, 'value') ** 2</pre>
+<p>Of course, this still incurs a call to the superclass method,
+          but not an additional recursive call before we get there. Add
+          <code class="epub__literal">print</code> calls to these methods to
+          trace how and when they run.</p>
+</div>
+<div class="epub__sect2" title="__getattr__ and __getattribute__ Compared"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="underscore_underscore_getattr_undersco"></a>__getattr__ and __getattribute__ Compared</h2>
+</div>
+</div>
+</div>
+<p>To <a id="I_indexterm2_d1e95164"></a>summarize <a id="I_indexterm2_d1e95172"></a><a id="I_indexterm2_d1e95177"></a>the coding differences between <code class="epub__literal">__getattr__</code> and <code class="epub__literal">__getattribute__</code>, the following example
+          uses both to implement three attributes—<code class="epub__literal">attr1</code> is a class attribute, <code class="epub__literal">attr2</code> is an instance attribute, and
+          <code class="epub__literal">attr3</code> is a virtual managed
+          attribute computed when fetched:</p><a id="I_programlisting2_d1e95199"></a>
+<pre class="epub__programlisting">class GetAttr:
+    attr1 = 1
+    def __init__(self):
+        self.attr2 = 2
+    def __getattr__(self, attr):            <em class="epub__lineannotation"><span class="epub__lineannotation"># On undefined attrs only</span></em>
+        print('get: ' + attr)               <em class="epub__lineannotation"><span class="epub__lineannotation"># Not attr1: inherited from class</span></em>
+        return 3                            <em class="epub__lineannotation"><span class="epub__lineannotation"># Not attr2: stored on instance</span></em>
+
+X = GetAttr()
+print(X.attr1)
+print(X.attr2)
+print(X.attr3)
+
+print('-'*40)
+
+class GetAttribute(object):                 <em class="epub__lineannotation"><span class="epub__lineannotation"># (object) needed in 2.6 only</span></em>
+    attr1 = 1
+    def __init__(self):
+        self.attr2 = 2
+    def __getattribute__(self, attr):       <em class="epub__lineannotation"><span class="epub__lineannotation"># On all attr fetches</span></em>
+        print('get: ' + attr)               <em class="epub__lineannotation"><span class="epub__lineannotation"># Use superclass to avoid looping here</span></em>
+        if attr == 'attr3':
+            return 3
+        else:
+            return object.__getattribute__(self, attr)
+
+X = GetAttribute()
+print(X.attr1)
+print(X.attr2)
+print(X.attr3)</pre>
+<p>When run, the <code class="epub__literal">__getattr__</code>
+          version intercepts only <code class="epub__literal">attr3</code>
+          accesses, because it is undefined. The <code class="epub__literal">__getattribute__</code> version, on the other
+          hand, intercepts all attribute fetches and must route those it does
+          not manage to the superclass fetcher to avoid loops:</p><a id="I_programlisting2_d1e95231"></a>
+<pre class="epub__programlisting">1
+2
+get: attr3
+3
+----------------------------------------
+get: attr1
+1
+get: attr2
+2
+get: attr3
+3</pre>
+<p>Although <code class="epub__literal">__getattribute__</code>
+          can catch more attribute fetches than <code class="epub__literal">__getattr__</code>, in practice they are often
+          just variations on a theme—if attributes are not physically stored,
+          the two have the same effect.</p>
+</div>
+<div class="epub__sect2" title="Management Techniques Compared"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="management_techniques_compared"></a>Management Techniques Compared</h2>
+</div>
+</div>
+</div>
+<p>To <a id="I_indexterm2_d1e95246"></a>summarize the coding differences in all four attribute
+          management schemes we’ve seen in this chapter, let’s quickly step
+          through a more comprehensive computed-attribute example using each
+          technique. The following version uses properties to intercept and
+          calculate attributes named <code class="epub__literal">square</code>
+          and <code class="epub__literal">cube</code>. Notice how their base
+          values are stored in names that begin with an underscore, so they
+          don’t clash with the names of the properties themselves:</p><a id="I_programlisting2_d1e95261"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># 2 dynamically computed attributes with properties</span></em>
+
+class Powers:
+    def __init__(self, square, cube):
+        self._square = square                      <em class="epub__lineannotation"><span class="epub__lineannotation"># _square is the base value</span></em>
+        self._cube   = cube                        <em class="epub__lineannotation"><span class="epub__lineannotation"># square is the property name</span></em>
+
+    def getSquare(self):
+        return self._square ** 2
+    def setSquare(self, value):
+        self._square = value
+    square = property(getSquare, setSquare)
+
+    def getCube(self):
+        return self._cube ** 3
+    cube = property(getCube)
+
+X = Powers(3, 4)
+print(X.square)      <em class="epub__lineannotation"><span class="epub__lineannotation"># 3 ** 2 = 9</span></em>
+print(X.cube)        <em class="epub__lineannotation"><span class="epub__lineannotation"># 4 ** 3 = 64</span></em>
+X.square = 5
+print(X.square)      <em class="epub__lineannotation"><span class="epub__lineannotation"># 5 ** 2 = 25</span></em></pre>
+<p>To do the same with descriptors, we define the attributes with
+          complete classes. Note that these descriptors store base values as
+          instance state, so they must use leading underscores again so as not
+          to clash with the names of descriptors (as we’ll see in the final
+          example of this chapter, we could avoid this renaming requirement by
+          storing base values as descriptor state instead):</p><a id="I_programlisting2_d1e95281"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># Same, but with descriptors</span></em>
+
+class DescSquare:
+    def __get__(self, instance, owner):
+        return instance._square ** 2
+    def __set__(self, instance, value):
+        instance._square = value
+
+class DescCube:
+    def __get__(self, instance, owner):
+        return instance._cube ** 3
+
+class Powers:                                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Use (object) in 2.6</span></em>
+    square = DescSquare()
+    cube   = DescCube()
+    def __init__(self, square, cube):
+        self._square = square                  <em class="epub__lineannotation"><span class="epub__lineannotation"># "self.square = square" works too,</span></em>
+        self._cube   = cube                    <em class="epub__lineannotation"><span class="epub__lineannotation"># because it triggers desc __set__!</span></em>
+
+X = Powers(3, 4)
+print(X.square)      <em class="epub__lineannotation"><span class="epub__lineannotation"># 3 ** 2 = 9</span></em>
+print(X.cube)        <em class="epub__lineannotation"><span class="epub__lineannotation"># 4 ** 3 = 64</span></em>
+X.square = 5
+print(X.square)      <em class="epub__lineannotation"><span class="epub__lineannotation"># 5 ** 2 = 25</span></em></pre>
+<p>To achieve the same result with <code class="epub__literal">__getattr__</code> fetch interception, we again
+          store base values with underscore-prefixed names so that accesses to
+          managed names are undefined and thus invoke our method; we also need
+          to code a <code class="epub__literal">__setattrr__</code> to
+          intercept assignments, and take care to avoid its potential for
+          looping:</p><a id="I_programlisting2_d1e95311"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># Same, but with generic __getattr__ undefined attribute interception</span></em>
+
+class Powers:
+    def __init__(self, square, cube):
+        self._square = square
+        self._cube   = cube
+
+    def __getattr__(self, name):
+        if name == 'square':
+            return self._square ** 2
+        elif name == 'cube':
+            return self._cube ** 3
+        else:
+            raise TypeError('unknown attr:' + name)
+
+    def __setattr__(self, name, value):
+        if name == 'square':
+            self.__dict__['_square'] = value
+        else:
+            self.__dict__[name] = value
+
+X = Powers(3, 4)
+print(X.square)      <em class="epub__lineannotation"><span class="epub__lineannotation"># 3 ** 2 = 9</span></em>
+print(X.cube)        <em class="epub__lineannotation"><span class="epub__lineannotation"># 4 ** 3 = 64</span></em>
+X.square = 5
+print(X.square)      <em class="epub__lineannotation"><span class="epub__lineannotation"># 5 ** 2 = 25</span></em></pre>
+<p>The final option, coding this with <code class="epub__literal">__getattribute__</code>, is similar to the prior
+          version. Because we catch every attribute now, though, we must route
+          base value fetches to a superclass to avoid looping:</p><a id="I_programlisting2_d1e95328"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># Same, but with generic __getattribute__ all attribute interception</span></em>
+
+class Powers:
+    def __init__(self, square, cube):
+        self._square = square
+        self._cube   = cube
+    def __getattribute__(self, name):
+        if name == 'square':
+            return object.__getattribute__(self, '_square') ** 2
+        elif name == 'cube':
+            return object.__getattribute__(self, '_cube') ** 3
+        else:
+            return object.__getattribute__(self, name)
+    def __setattr__(self, name, value):
+        if name == 'square':
+            self.__dict__['_square'] = value
+        else:
+            self.__dict__[name] = value
+
+X = Powers(3, 4)
+print(X.square)      <em class="epub__lineannotation"><span class="epub__lineannotation"># 3 ** 2 = 9</span></em>
+print(X.cube)        <em class="epub__lineannotation"><span class="epub__lineannotation"># 4 ** 3 = 64</span></em>
+X.square = 5
+print(X.square)      <em class="epub__lineannotation"><span class="epub__lineannotation"># 5 ** 2 = 25</span></em></pre>
+<p>As you can see, each technique takes a different form in code,
+          but all four produce the same result when run:</p><a id="I_programlisting2_d1e95342"></a>
+<pre class="epub__programlisting">9
+64
+25</pre>
+<p>For more on how these alternatives compare, and other coding
+          options, stay tuned for a more realistic application of them in the
+          attribute validation example in the section Example: Attribute Validations. First, though, we
+          need to study a pitfall associated with two of these tools.</p>
+</div>
+<div class="epub__sect2" title="Intercepting Built-in Operation Attributes"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="intercepting_built-in_operation_attribu"></a>Intercepting Built-in Operation Attributes</h2>
+</div>
+</div>
+</div>
+<p>When<a id="ch37mngdattrbtsgetatsintblt"></a> <a id="I_indexterm2_d1e95362"></a><a id="I_indexterm2_d1e95367"></a>I introduced <code class="epub__literal">__getattr__</code> and <code class="epub__literal">__getattribute__</code>, I stated that they
+          intercept undefined and all attribute fetches, respectively, which
+          makes them ideal for delegation-based coding patterns. While this is
+          true for normally named attributes, their behavior needs some
+          additional clarification: for method-name attributes implicitly
+          fetched by built-in operations, these methods may <span class="epub__emphasis"><em>not be
+          run at all</em></span>. This means that operator overloading method
+          calls cannot be delegated to wrapped objects unless wrapper classes
+          somehow redefine these methods themselves.</p>
+<p>For example, attribute fetches for the <code class="epub__literal">__str__</code>, <code class="epub__literal">__add__</code>, and <code class="epub__literal">__getitem__</code> methods run implicitly by
+          printing, <code class="epub__literal">+</code> expressions, and
+          indexing, respectively, are not routed to the generic attribute
+          interception methods in 3.0. Specifically:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p>In Python 3.0, <span class="epub__emphasis"><em>neither</em></span> <code class="epub__literal">__getattr__</code> nor <code class="epub__literal">__getattribute__</code> is run for such
+              attributes.</p></li><li class="epub__listitem">
+<p>In Python 2.6, <code class="epub__literal">__getattr__</code> <span class="epub__emphasis"><em>is</em></span>
+              run for such attributes if they are undefined in the
+              class.</p></li><li class="epub__listitem">
+<p>In Python 2.6, <code class="epub__literal">__getattribute__</code> is available for
+              new-style classes only and works as it does in 3.0.</p></li></ul>
+</div>
+<p>In other words, in Python 3.0 classes (and 2.6 new-style
+          classes), there is no direct way to generically intercept built-in
+          operations like printing and addition. In Python 2.X, the methods
+          such operations invoke are looked up at runtime in instances, like
+          all other attributes; in Python 3.0 such methods are looked up in
+          <span class="epub__emphasis"><em>classes</em></span> instead.</p>
+<p>This change makes delegation-based coding patterns more
+          complex in 3.0, since they cannot generically intercept operator
+          overloading method calls and route them to an embedded object. This
+          is not a showstopper—wrapper classes can work around this constraint
+          by redefining all relevant operator overloading methods in the
+          wrapper itself, in order to delegate calls. These extra methods can
+          be added either manually, with tools, or by definition in and
+          inheritance from common superclasses. This does, however, make
+          wrappers more work than they used to be when operator overloading
+          methods are a part of a wrapped object’s interface.</p>
+<p>Keep in mind that this issue applies only to <code class="epub__literal">__getattr__</code> and <code class="epub__literal">__getattribute__</code>. Because properties and
+          descriptors are defined for specific attributes only, they don’t
+          really apply to delegation-based classes at all—a single property or
+          descriptor cannot be used to intercept arbitrary attributes.
+          Moreover, a class that defines <span class="epub__emphasis"><em>both</em></span> operator
+          overloading methods and attribute interception will work correctly,
+          regardless of the type of attribute interception defined. Our
+          concern here is only with classes that do not have operator
+          overloading methods defined, but try to intercept them
+          generically.</p>
+<p>Consider the following example, the file <em class="epub__filename">getattr.py</em>, which tests various attribute
+          types and built-in operations
+          on instances of classes containing <code class="epub__literal">__getattr__</code> and <code class="epub__literal">__getattribute__</code> methods:</p><a id="I_programlisting2_d1e95456"></a>
+<pre class="epub__programlisting">class GetAttr:
+    eggs = 88             <em class="epub__lineannotation"><span class="epub__lineannotation"># eggs stored on class, spam on instance</span></em>
+    def __init__(self):
+       self.spam = 77
+    def __len__(self):    <em class="epub__lineannotation"><span class="epub__lineannotation"># len here, else __getattr__ called with __len__</span></em>
+        print('__len__: 42')
+        return 42
+    def __getattr__(self, attr):     <em class="epub__lineannotation"><span class="epub__lineannotation"># Provide __str__ if asked, else dummy func</span></em>
+        print('getattr: ' + attr)
+        if attr == '__str__':
+            return lambda *args: '[Getattr str]'
+        else:
+            return lambda *args: None
+
+class GetAttribute(object):          <em class="epub__lineannotation"><span class="epub__lineannotation"># object required in 2.6, implied in 3.0</span></em>
+    eggs = 88                        <em class="epub__lineannotation"><span class="epub__lineannotation"># In 2.6 all are isinstance(object) auto</span></em>
+    def __init__(self):              <em class="epub__lineannotation"><span class="epub__lineannotation"># But must derive to get new-style tools,</span></em>
+        self.spam = 77               <em class="epub__lineannotation"><span class="epub__lineannotation"># incl __getattribute__, some __X__ defaults</span></em>
+    def __len__(self):
+        print('__len__: 42')
+        return 42
+    def __getattribute__(self, attr):
+        print('getattribute: ' + attr)
+        if attr == '__str__':
+            return lambda *args: '[GetAttribute str]'
+        else:
+            return lambda *args: None
+
+for Class in GetAttr, GetAttribute:
+    print('\n' + Class.__name__.ljust(50, '='))
+
+    X = Class()
+    X.eggs               <em class="epub__lineannotation"><span class="epub__lineannotation"># Class attr</span></em>
+    X.spam               <em class="epub__lineannotation"><span class="epub__lineannotation"># Instance attr</span></em>
+    X.other              <em class="epub__lineannotation"><span class="epub__lineannotation"># Missing attr</span></em>
+    len(X)               <em class="epub__lineannotation"><span class="epub__lineannotation"># __len__ defined explicitly</span></em>
+
+    try:                 <em class="epub__lineannotation"><span class="epub__lineannotation"># New-styles must support [], +, call directly: redefine</span></em>
+        X[0]             <em class="epub__lineannotation"><span class="epub__lineannotation"># __getitem__?</span></em>
+    except:
+        print('fail []')
+
+    try:
+        X + 99           <em class="epub__lineannotation"><span class="epub__lineannotation"># __add__?</span></em>
+    except:
+        print('fail +')
+
+    try:
+        X()              <em class="epub__lineannotation"><span class="epub__lineannotation"># __call__?  (implicit via built-in)</span></em>
+    except:
+        print('fail ()')
+    X.__call__()         <em class="epub__lineannotation"><span class="epub__lineannotation"># __call__?  (explicit, not inherited)</span></em>
+
+    print(X.__str__())   <em class="epub__lineannotation"><span class="epub__lineannotation"># __str__?   (explicit, inherited from type)</span></em>
+    print(X)             <em class="epub__lineannotation"><span class="epub__lineannotation"># __str__?   (implicit via built-in)</span></em></pre>
+<p>When run under Python 2.6, <code class="epub__literal">__getattr__</code> <span class="epub__emphasis"><em>does</em></span>
+          receive a variety of implicit attribute fetches for built-in
+          operations, because Python looks up such attributes in instances
+          normally. Conversely, <code class="epub__literal">__getattribute__</code> is
+          <span class="epub__emphasis"><em>not</em></span> run for any of the operator overloading
+          names, because such names are looked up in classes only:</p><a id="I_programlisting2_d1e95528"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python26\python getattr.py</code></strong>
+
+GetAttr===========================================
+getattr: other
+__len__: 42
+getattr: __getitem__
+getattr: __coerce__
+getattr: __add__
+getattr: __call__
+getattr: __call__
+getattr: __str__
+[Getattr str]
+getattr: __str__
+[Getattr str]
+
+GetAttribute======================================
+getattribute: eggs
+getattribute: spam
+getattribute: other
+__len__: 42
+fail []
+fail +
+fail ()
+getattribute: __call__
+getattribute: __str__
+[GetAttribute str]
+&lt;__main__.GetAttribute object at 0x025EA1D0&gt;</pre>
+<p>Note how <code class="epub__literal">__getattr__</code>
+          intercepts both implicit and explicit fetches of <code class="epub__literal">__call__</code> and <code class="epub__literal">__str__</code> in 2.6 here. By contrast, <code class="epub__literal">__getattribute__</code> fails to catch implicit
+          fetches of either attribute name for built-in operations.</p>
+<p>Really, the <code class="epub__literal">__getattribute__</code> case is the same in 2.6
+          as it is in 3.0, because in 2.6 classes must be made new-style by
+          deriving from <code class="epub__literal">object</code> to use this
+          method. This code’s <code class="epub__literal">object</code>
+          derivation is optional in 3.0 because all classes are
+          new-style.</p>
+<p>When run under Python 3.0, though, results for <code class="epub__literal">__getattr__</code>
+          differ—<span class="epub__emphasis"><em>none</em></span> of the implicitly run operator
+          overloading methods trigger <span class="epub__emphasis"><em>either</em></span> attribute
+          interception method when their attributes are fetched by built-in
+          operations. Python 3.0 skips the normal instance lookup mechanism
+          when resolving such names:</p><a id="I_programlisting2_d1e95570"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python getattr.py</code></strong>
+
+GetAttr===========================================
+getattr: other
+__len__: 42
+fail []
+fail +
+fail ()
+getattr: __call__
+&lt;__main__.GetAttr object at 0x025D17F0&gt;
+&lt;__main__.GetAttr object at 0x025D17F0&gt;
+
+GetAttribute======================================
+getattribute: eggs
+getattribute: spam
+getattribute: other
+__len__: 42
+fail []
+fail +
+fail ()
+getattribute: __call__
+getattribute: __str__
+[GetAttribute str]
+&lt;__main__.GetAttribute object at 0x025D1870&gt;</pre>
+<p>We can trace these outputs back to <code class="epub__literal">print</code>s in the script to see how this
+          works:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p><code class="epub__literal">__str__</code> access fails to
+              be caught twice by <code class="epub__literal">__getattr__</code> in 3.0: once for the
+              built-in print, and once for explicit fetches because a default
+              is inherited from the class (really, from the built-in <code class="epub__literal">object</code>, which is a superclass to every
+              class).</p></li><li class="epub__listitem">
+<p><code class="epub__literal">__str__</code> fails to be
+              caught only once by the <code class="epub__literal">__getattribute__</code> catchall, during the
+              built-in print operation; explicit fetches bypass the inherited
+              version.</p></li><li class="epub__listitem">
+<p><code class="epub__literal">__call__</code> fails to be
+              caught in both schemes in 3.0 for built-in call expressions, but
+              it is intercepted by both when fetched explicitly; unlike with
+              <code class="epub__literal">__str__</code>, there is no
+              inherited <code class="epub__literal">__call__</code> default to
+              defeat <code class="epub__literal">__getattr__</code>.</p></li><li class="epub__listitem">
+<p><code class="epub__literal">__len__</code> is caught by
+              both classes, simply because it is an explicitly defined method
+              in the classes themselves—its name it is not routed to either
+              <code class="epub__literal">__getattr__</code> or <code class="epub__literal">__getattribute__</code> in 3.0 if we delete
+              the class’s <code class="epub__literal">__len__</code>
+              methods.</p></li><li class="epub__listitem">
+<p>All other built-in operations fail to be intercepted by
+              both schemes in 3.0.</p></li></ul>
+</div>
+<p>Again, the net effect is that operator overloading methods
+          implicitly run by built-in operations are never routed through
+          either attribute interception method in 3.0: Python 3.0 searches for
+          such attributes in <span class="epub__emphasis"><em>classes</em></span> and skips instance
+          lookup entirely.</p>
+<p>This makes delegation-based wrapper classes more difficult to
+          code in 3.0—if wrapped classes may contain operator overloading
+          methods, those methods must be redefined redundantly in the wrapper
+          class in order to delegate to the wrapped object. In general
+          delegation tools, this can add many extra methods.</p>
+<p>Of course, the addition of such methods can be partly
+          automated by tools that augment classes with new methods (the class
+          decorators and metaclasses of the next two chapters might help
+          here). Moreover, a superclass might be able to define all these
+          extra methods once, for inheritance in delegation-based classes.
+          Still, delegation coding patterns require extra work in 3.0.</p>
+<p>For a more realistic illustration of this phenomenon as well
+          as its workaround, see the <code class="epub__literal">Private</code> decorator example in the following
+          chapter. There, we’ll see that it’s also possible to insert a <code class="epub__literal">__getattribute__</code> in the client class to
+          retain its original type, although this method still won’t be called
+          for operator overloading methods; printing still runs a <code class="epub__literal">__str__</code> defined in such a class directly,
+          for example, instead of routing the request through <code class="epub__literal">__getattribute__</code>.</p>
+<p>As another example, the next section resurrects our class
+          tutorial example. Now that you understand how attribute interception
+          works, I’ll be able to explain one of its stranger bits.</p><div class="epub__note" title="Note">
+<h3 class="epub__title">Note</h3>
+<p>For an example of this 3.0 change at work in Python itself,
+            see the discussion of the 3.0 <code class="epub__literal">os.popen</code> object in Chapter 14. Because it
+            is implemented with a wrapper that uses <code class="epub__literal">__getattr__</code> to delegate attribute
+            fetches to an embedded object, it does not intercept the <code class="epub__literal">next(X)</code> built-in iterator function in
+            Python 3.0, which is defined to run <code class="epub__literal">__next__</code>. It does, however, intercept
+            and delegate explicit <code class="epub__literal">X.__next__()</code> calls, because these are
+            not routed through the built-in and are not inherited from a
+            superclass like <code class="epub__literal">__str__</code>
+            is.</p>
+<p>This is equivalent to <code class="epub__literal">__call__</code> in our example—implicit calls
+            for built-ins do not trigger <code class="epub__literal">__getattr__</code>, but explicit calls to names
+            not inherited from the class type do. In other words, this change
+            impacts not only our delegators, but also those in the Python
+            standard library! Given the scope of this change, it’s possible
+            that this behavior may evolve in the future, so be sure to verify
+            this issue in later releases.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Delegation-Based Managers Revisited"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="delegation-based_managers_revisited"></a>Delegation-Based Managers Revisited</h2>
+</div>
+</div>
+</div>
+<p>The <a id="I_indexterm2_d1e95697"></a><a id="I_indexterm2_d1e95702"></a>object-oriented tutorial of Chapter 27 presented a <code class="epub__literal">Manager</code> class that used object embedding
+          and method delegation to customize its superclass, rather than
+          inheritance. Here is the code again for reference, with some
+          irrelevant testing removed:</p><a id="I_programlisting2_d1e95713"></a>
+<pre class="epub__programlisting">class Person:
+    def __init__(self, name, job=None, pay=0):
+        self.name = name
+        self.job  = job
+        self.pay  = pay
+    def lastName(self):
+        return self.name.split()[-1]
+    def giveRaise(self, percent):
+        self.pay = int(self.pay * (1 + percent))
+    def __str__(self):
+        return '[Person: %s, %s]' % (self.name, self.pay)
+
+class Manager:
+    def __init__(self, name, pay):
+        self.person = Person(name, 'mgr', pay)      <em class="epub__lineannotation"><span class="epub__lineannotation"># Embed a Person object</span></em>
+    def giveRaise(self, percent, bonus=.10):
+        self.person.giveRaise(percent + bonus)      <em class="epub__lineannotation"><span class="epub__lineannotation"># Intercept and delegate</span></em>
+    def __getattr__(self, attr):
+        return getattr(self.person, attr)           <em class="epub__lineannotation"><span class="epub__lineannotation"># Delegate all other attrs</span></em>
+    def __str__(self):
+        return str(self.person)                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Must overload again (in 3.0)</span></em>
+
+if __name__ == '__main__':
+    sue = Person('Sue Jones', job='dev', pay=100000)
+    print(sue.lastName())
+    sue.giveRaise(.10)
+    print(sue)
+    tom = Manager('Tom Jones', 50000)    <em class="epub__lineannotation"><span class="epub__lineannotation"># Manager.__init__</span></em>
+    print(tom.lastName())                <em class="epub__lineannotation"><span class="epub__lineannotation"># Manager.__getattr__ -&gt; Person.lastName</span></em>
+    tom.giveRaise(.10)                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Manager.giveRaise -&gt; Person.giveRaise</span></em>
+    print(tom)                           <em class="epub__lineannotation"><span class="epub__lineannotation"># Manager.__str__ -&gt; Person.__str__</span></em></pre>
+<p>Comments at the end of this file show which methods are
+          invoked for a line’s operation. In particular, notice how <code class="epub__literal">lastName</code> calls are undefined in <code class="epub__literal">Manager</code>, and thus are routed into the
+          generic <code class="epub__literal">__getattr__</code> and from
+          there on to the embedded <code class="epub__literal">Person</code>
+          object. Here is the script’s output—Sue receives a 10% raise from
+          <code class="epub__literal">Person</code>, but Tom gets 20% because
+          <code class="epub__literal">giveRaise</code> is customized in
+          <code class="epub__literal">Manager</code>:</p><a id="I_programlisting2_d1e95763"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python person.py</code></strong>
+Jones
+[Person: Sue Jones, 110000]
+Jones
+[Person: Tom Jones, 60000]</pre>
+<p>By contrast, though, notice what occurs when we
+          <span class="epub__emphasis"><em>print</em></span> a <code class="epub__literal">Manager</code> at the end of the script: the
+          wrapper class’s <code class="epub__literal">__str__</code> is
+          invoked, and it delegates to the embedded <code class="epub__literal">Person</code> object’s <code class="epub__literal">__str__</code>. With that in mind, watch what
+          happens if we <span class="epub__emphasis"><em>delete</em></span> the <code class="epub__literal">Manager.__str__</code> method in this
+          code:</p><a id="I_programlisting2_d1e95792"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># Delete the Manager __str__ method</span></em>
+
+class Manager:
+    def __init__(self, name, pay):
+        self.person = Person(name, 'mgr', pay)      <em class="epub__lineannotation"><span class="epub__lineannotation"># Embed a Person object</span></em>
+    def giveRaise(self, percent, bonus=.10):
+        self.person.giveRaise(percent + bonus)      <em class="epub__lineannotation"><span class="epub__lineannotation"># Intercept and delegate</span></em>
+    def __getattr__(self, attr):
+        return getattr(self.person, attr)           <em class="epub__lineannotation"><span class="epub__lineannotation"># Delegate all other attrs</span></em></pre>
+<p>Now printing does <span class="epub__emphasis"><em>not</em></span> route its attribute
+          fetch through the generic <code class="epub__literal">__getattr__</code> interceptor under Python 3.0
+          for <code class="epub__literal">Manager</code> objects. Instead, a
+          default <code class="epub__literal">__str__</code> display method
+          inherited from the class’s implicit <code class="epub__literal">object</code> superclass is looked up and run
+          (<code class="epub__literal">sue</code> still prints correctly,
+          because <code class="epub__literal">Person</code> has an explicit
+          <code class="epub__literal">__str__</code>):</p><a id="I_programlisting2_d1e95831"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python person.py</code></strong>
+Jones
+[Person: Sue Jones, 110000]
+Jones
+&lt;__main__.Manager object at 0x02A5AE30&gt;</pre>
+<p>Curiously, running without a <code class="epub__literal">__str__</code> like this
+          <span class="epub__emphasis"><em>does</em></span> trigger <code class="epub__literal">__getattr__</code> in Python 2.6, because
+          operator overloading attributes are routed through this method, and
+          classes do not inherit a default for <code class="epub__literal">__str__</code>:</p><a id="I_programlisting2_d1e95850"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python26\python person.py</code></strong>
+Jones
+[Person: Sue Jones, 110000]
+Jones
+[Person: Tom Jones, 60000]</pre>
+<p>Switching to <code class="epub__literal">__getattribute__</code> won’t help 3.0 here
+          either—like <code class="epub__literal">__getattr__</code>, it is
+          <span class="epub__emphasis"><em>not</em></span> run for operator overloading attributes
+          implied by built-in operations in either Python 2.6 or 3.0:</p><a id="I_programlisting2_d1e95867"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># Replace __getattr_ with __getattribute__</span></em>
+
+class Manager:                                           <em class="epub__lineannotation"><span class="epub__lineannotation"># Use (object) in 2.6</span></em>
+    def __init__(self, name, pay):
+        self.person = Person(name, 'mgr', pay)           <em class="epub__lineannotation"><span class="epub__lineannotation"># Embed a Person object</span></em>
+    def giveRaise(self, percent, bonus=.10):
+        self.person.giveRaise(percent + bonus)           <em class="epub__lineannotation"><span class="epub__lineannotation"># Intercept and delegate</span></em>
+    def __getattribute__(self, attr):
+        print('**', attr)
+        if attr in ['person', 'giveRaise']:
+            return object.__getattribute__(self, attr)   <em class="epub__lineannotation"><span class="epub__lineannotation"># Fetch my attrs</span></em>
+        else:
+            return getattr(self.person, attr)            <em class="epub__lineannotation"><span class="epub__lineannotation"># Delegate all others</span></em></pre>
+<p>Regardless of which attribute interception method is used in
+          3.0, we still must include a redefined <code class="epub__literal">__str__</code> in <code class="epub__literal">Manager</code> (as shown above) in order to
+          intercept printing operations and route them to the embedded
+          <code class="epub__literal">Person</code> object:</p><a id="I_programlisting2_d1e95896"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python person.py</code></strong>
+Jones
+[Person: Sue Jones, 110000]
+** lastName
+** person
+Jones
+** giveRaise
+** person
+&lt;__main__.Manager object at 0x028E0590&gt;</pre>
+<p>Notice that <code class="epub__literal">__getattribute__</code> gets called
+          <span class="epub__emphasis"><em>twice</em></span> here for methods—once for the method
+          name, and again for the <code class="epub__literal">self.person</code> embedded object fetch. We
+          could avoid that with a different coding, but we would still have to
+          redefine <code class="epub__literal">__str__</code> to catch
+          printing, albeit differently here (<code class="epub__literal">self.person</code> would cause this <code class="epub__literal">__getattribute__</code> to fail):</p><a id="I_programlisting2_d1e95922"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># Code __getattribute__ differently to minimize extra calls</span></em>
+
+class Manager:
+    def __init__(self, name, pay):
+        self.person = Person(name, 'mgr', pay)
+    def __getattribute__(self, attr):
+        print('**', attr)
+        person = object.__getattribute__(self, 'person')
+        if attr == 'giveRaise':
+            return lambda percent: person.giveRaise(percent+.10)
+        else:
+            return getattr(person, attr)
+    def __str__(self):
+        person = object.__getattribute__(self, 'person')
+        return str(person)</pre>
+<p>When this alternative runs, our object prints properly, but
+          only because we’ve added an explicit <code class="epub__literal">__str__</code> in the wrapper—this attribute is
+          still not routed to our generic attribute interception
+          method:</p><a id="I_programlisting2_d1e95931"></a>
+<pre class="epub__programlisting">Jones
+[Person: Sue Jones, 110000]
+** lastName
+Jones
+** giveRaise
+[Person: Tom Jones, 60000]</pre>
+<p>That short story here is that delegation-based classes like
+          <code class="epub__literal">Manager</code> must redefine some
+          operator overloading methods (like <code class="epub__literal">__str__</code>) to route them to embedded objects
+          in Python 3.0, but not in Python 2.6 unless new-style classes are
+          used. Our only direct options seem to be using <code class="epub__literal">__getattr__</code> and Python 2.6, or redefining
+          operator overloading methods in wrapper classes redundantly in
+          3.0.</p>
+<p>Again, this isn’t an impossible task; many wrappers can
+          predict the set of operator overloading methods required, and tools
+          and superclasses can automate part of this task. Moreover, not all
+          classes use operator overloading methods (indeed, most application
+          classes usually should not). It is, however, something to keep in
+          mind for delegation coding models used in Python 3.0; when operator
+          overloading methods are part of an object’s interface, wrappers must
+          accommodate them portably by redefining them <a id="I_indexterm2_d1e95946"></a><a id="I_indexterm2_d1e95948"></a><a id="I_indexterm2_d1e95950"></a><a id="I_indexterm2_d1e95952"></a>locally.</p>
+</div>
+<div class="epub__sect1" title="Example: Attribute Validations"><div class="epub__titlepage"><div>
+<div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

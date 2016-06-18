@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Copying Directory Trees</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Copying Directory Trees"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="copying_directory_trees"></a>Copying Directory Trees</h1>
+</div>
+</div>
+</div>
+<p>My CD writer <a id="sys6.6"></a><a id="dir6.6"></a><a id="co6.6"></a>sometimes does weird things. In fact, copies of files
+        with odd names can be totally botched on the CD, even though other
+        files show up in one piece. That’s not necessarily a showstopper; if
+        just a few files are trashed in a big CD backup copy, I can always
+        copy the offending files elsewhere one at a time. Unfortunately,
+        drag-and-drop copies on some versions of Windows don’t play nicely
+        with such a CD: the copy operation stops and exits the moment the
+        first bad file is encountered. You get only as many files as were
+        copied up to the error, but no more.</p>
+<p>In fact, this is not limited to CD copies. I’ve run into similar
+        problems when trying to back up my laptop’s hard drive to another
+        drive—the drag-and-drop copy stops with an error as soon as it reaches
+        a file with a name that is too long or odd to copy (common in saved
+        web pages). The last 30 minutes spent copying is wasted time;
+        frustrating, to say the least!</p>
+<p>There may be some magical Windows setting to work around this
+        feature, but I gave up hunting for one as soon as I realized that it
+        would be easier to code a copier in Python. The
+        <span class="epub__emphasis"><em>cpall.py</em></span> script in Example 6-10 is one way to do it.
+        With this script, I control what happens when bad files are found—I
+        can skip over them with Python exception handlers, for instance.
+        Moreover, this tool works with the same interface and effect on other
+        platforms. It seems to me, at least, that a few minutes spent writing
+        a portable and reusable Python script to meet a need is a better
+        investment than looking for solutions that work on only one platform
+        (if at all).</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id59"></a>
+<p class="epub__title">Example 6-10. PP4E\System\Filetools\cpall.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+################################################################################
+Usage: "python cpall.py dirFrom dirTo".
+Recursive copy of a directory tree.  Works like a "cp -r dirFrom/* dirTo"
+Unix command, and assumes that dirFrom and dirTo are both directories.
+Was written to get around fatal error messages under Windows drag-and-drop
+copies (the first bad file ends the entire copy operation immediately),
+but also allows for coding more customized copy operations in Python.
+################################################################################
+"""
+
+import os, sys
+maxfileload = 1000000
+blksize = 1024 * 500
+
+def copyfile(pathFrom, pathTo, maxfileload=maxfileload):
+    """
+    Copy one file pathFrom to pathTo, byte for byte;
+    uses binary file modes to supress Unicde decode and endline transform
+    """
+    if os.path.getsize(pathFrom) &lt;= maxfileload:
+        bytesFrom = open(pathFrom, 'rb').read()   # read small file all at once
+        open(pathTo, 'wb').write(bytesFrom)
+    else:
+        fileFrom = open(pathFrom, 'rb')           # read big files in chunks
+        fileTo   = open(pathTo,   'wb')           # need b mode for both
+        while True:
+            bytesFrom = fileFrom.read(blksize)    # get one block, less at end
+            if not bytesFrom: break               # empty after last chunk
+            fileTo.write(bytesFrom)
+
+def copytree(dirFrom, dirTo, verbose=0):
+    """
+    Copy contents of dirFrom and below to dirTo, return (files, dirs) counts;
+    may need to use bytes for dirnames if undecodable on other platforms;
+    may need to do more file type checking on Unix: skip links, fifos, etc.
+    """
+    fcount = dcount = 0
+    for filename in os.listdir(dirFrom):                  # for files/dirs here
+        pathFrom = os.path.join(dirFrom, filename)
+        pathTo   = os.path.join(dirTo,   filename)        # extend both paths
+        if not os.path.isdir(pathFrom):                   # copy simple files
+            try:
+                if verbose &gt; 1: print('copying', pathFrom, 'to', pathTo)
+                copyfile(pathFrom, pathTo)
+                fcount += 1
+            except:
+                print('Error copying', pathFrom, 'to', pathTo, '--skipped')
+                print(sys.exc_info()[0], sys.exc_info()[1])
+        else:
+            if verbose: print('copying dir', pathFrom, 'to', pathTo)
+            try:
+                os.mkdir(pathTo)                          # make new subdir
+                below = copytree(pathFrom, pathTo)        # recur into subdirs
+                fcount += below[0]                        # add subdir  counts
+                dcount += below[1]
+                dcount += 1
+            except:
+                print('Error creating', pathTo, '--skipped')
+                print(sys.exc_info()[0], sys.exc_info()[1])
+    return (fcount, dcount)
+
+def getargs():
+    """
+    Get and verify directory name arguments, returns default None on errors
+    """
+    try:
+        dirFrom, dirTo = sys.argv[1:]
+    except:
+        print('Usage error: cpall.py dirFrom dirTo')
+    else:
+        if not os.path.isdir(dirFrom):
+            print('Error: dirFrom is not a directory')
+        elif not os.path.exists(dirTo):
+            os.mkdir(dirTo)
+            print('Note: dirTo was created')
+            return (dirFrom, dirTo)
+        else:
+            print('Warning: dirTo already exists')
+            if hasattr(os.path, 'samefile'):
+                same = os.path.samefile(dirFrom, dirTo)
+            else:
+                same = os.path.abspath(dirFrom) == os.path.abspath(dirTo)
+            if same:
+                print('Error: dirFrom same as dirTo')
+            else:
+                return (dirFrom, dirTo)
+
+if __name__ == '__main__':
+    import time
+    dirstuple = getargs()
+    if dirstuple:
+        print('Copying...')
+        start = time.clock()
+        fcount, dcount = copytree(*dirstuple)
+        print('Copied', fcount, 'files,', dcount, 'directories', end=' ')
+        print('in', time.clock() - start, 'seconds')</pre>
+</div>
+</div>
+<p>This script implements its own recursive tree traversal logic
+        and keeps track of both the “from” and “to” directory paths as it
+        goes. At every level, it copies over simple files, creates directories
+        in the “to” path, and recurs into subdirectories with “from” and “to”
+        paths extended by one level. There are other ways to code this task
+        (e.g., we might change the working directory along the way with
+        <code class="epub__literal">os.chdir</code> calls or there is probably
+        an <code class="epub__literal">os.walk</code> solution which replaces
+        from and to path prefixes as it walks), but extending paths on
+        recursive descent works well in this script.</p>
+<p>Notice this script’s reusable <code class="epub__literal">copyfile</code> function—just in case there are
+        multigigabyte files in the tree to be copied, it uses a file’s size to
+        decide whether it should be read all at once or in chunks (remember,
+        the file <code class="epub__literal">read</code> method without
+        arguments actually loads the entire file into an in-memory string). We
+        choose fairly large file and block sizes, because the more we read at
+        once in Python, the faster our scripts will typically run. This is
+        more efficient than it may sound; strings left behind by prior reads
+        will be garbage collected and reused as we go. We’re using binary file
+        modes here again, too, to suppress the Unicode encodings and
+        end-of-line translations of text files—trees may contain arbitrary
+        kinds of files.</p>
+<p>Also notice that this script creates the “to” directory if
+        needed, but it assumes that the directory is empty when a copy starts
+        up; for accuracy, be sure to remove the target directory before
+        copying a new tree to its name, or old files may linger in the target
+        tree (we could automatically remove the target first, but this may not
+        always be desired). This script also tries to determine if the source
+        and target are the same; on Unix-like platforms with oddities such as
+        links, <code class="epub__literal">os.path.samefile</code> does a more
+        accurate job than comparing absolute file names (different file names
+        may be the same file).</p>
+<p>Here is a copy of a big book examples tree (I use the tree from
+        the prior edition throughout this chapter) in action on Windows; pass
+        in the name of the “from” and “to” directories to kick off the
+        process, redirect the output to a file if there are too many error
+        messages to read all at once (e.g., <code class="epub__literal">&gt;
+        output.txt</code>), and run an <code class="epub__literal">rm
+        –r</code> or <code class="epub__literal">rmdir /S</code> shell
+        command (or similar platform-specific tool) to delete the target
+        directory first if needed:</p><a id="I_programlisting5_d1e22977"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>rmdir /S copytemp</code></strong>
+copytemp, Are you sure (Y/N)? <strong class="epub__userinput"><code>y</code></strong>
+
+C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>cpall.py C:\temp\PP3E\Examples copytemp</code></strong>
+Note: dirTo was created
+Copying...
+Copied 1430 files, 185 directories in 10.4470980971 seconds
+
+C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>fc /B copytemp\PP3E\Launcher.py</code></strong>
+                                    <strong class="epub__userinput"><code>C:\temp\PP3E\Examples\PP3E\Launcher.py</code></strong>
+Comparing files COPYTEMP\PP3E\Launcher.py and C:\TEMP\PP3E\EXAMPLES\PP3E\LAUNCHER.PY
+FC: no differences encountered</pre>
+<p>You can use the copy function’s <code class="epub__literal">verbose</code> argument to trace the process if you
+        wish. At the time I wrote this edition in 2010, this test run copied a
+        tree of 1,430 files and 185 directories in 10 seconds on my woefully
+        underpowered netbook machine (the built-in <code class="epub__literal">time.clock</code> call is used to query the system
+        time in seconds); it may run arbitrarily faster or slower for you.
+        Still, this is at least as fast as the best drag-and-drop I’ve timed
+        on this machine.</p>
+<p>So how does this script work around bad files on a CD backup?
+        The secret is that it catches and ignores file
+        <span class="epub__emphasis"><em>exceptions</em></span>, and it keeps walking. To copy all the
+        files that are good on a CD, I simply run a command line such as this
+        one:</p><a id="I_programlisting5_d1e23008"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>python cpall.py G:\Examples C:\PP3E\Examples</code></strong></pre>
+<p>Because the CD is addressed as “G:” on my Windows machine, this
+        is the command-line equivalent of drag-and-drop copying from an item
+        in the CD’s top-level folder, except that the Python script will
+        recover from errors on the CD and get the rest. On copy errors, it
+        prints a message to standard output and continues; for big copies,
+        you’ll probably want to redirect the script’s output to a file for
+        later inspection.</p>
+<p>In general, <code class="epub__literal">cpall</code> can be
+        passed any absolute directory path on your machine, even those that
+        indicate devices such as CDs. To make this go on Linux, try a root
+        directory such as <span class="epub__emphasis"><em>/dev/cdrom</em></span> or something similar
+        to address your CD drive. Once you’ve copied a tree this way, you
+        still might want to verify; to see how, let’s move on to the next
+        <a id="I_indexterm5_d1e23022"></a><a id="I_indexterm5_d1e23024"></a><a id="I_indexterm5_d1e23026"></a>example.</p>
+</div>
+</div>
+</body>
+</html>

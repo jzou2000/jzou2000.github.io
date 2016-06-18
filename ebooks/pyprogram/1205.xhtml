@@ -1,0 +1,750 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Making Sockets Look Like Files and Streams</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Making Sockets Look Like Files and Streams"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="making_sockets_look_like_files_and_strea"></a>Making Sockets Look Like Files and Streams</h1>
+</div>
+</div>
+</div>
+<p>So far in this chapter, <a id="in12.6"></a><a id="soc12.6"></a><a id="file12.6"></a><a id="input12.6"></a><a id="net12.6"></a>we’ve focused on the role of sockets in the classic
+        client/server networking model. That’s one of their primary roles, but
+        they have other common use cases as well.</p>
+<p>In Chapter 5, for instance, we
+        saw sockets as a basic IPC device between processes and threads on a
+        single machine. And in Chapter 10’s
+        exploration of linking non-GUI scripts to GUIs, we wrote a utility
+        module (Example 10-23)
+        which connected a caller’s standard output stream to a socket, on
+        which a GUI could listen for output to be displayed. There, I promised
+        that we’d flesh out that module with additional transfer modes once we
+        had a chance to explore sockets in more depth. Now that we have, this
+        section takes a brief detour from the world of remote network servers
+        to tell the rest of this story.</p>
+<p>Although some programs can be written or rewritten to converse
+        over sockets explicitly, this isn’t always an option; it may be too
+        expensive an effort for existing scripts, and might preclude desirable
+        nonsocket usage modes for others. In some cases, it’s better to allow
+        a script to use standard stream tools such as the <code class="epub__literal">print</code> and <code class="epub__literal">input</code> built-in functions and <code class="epub__literal">sys</code> module file calls (e.g., <code class="epub__literal">sys.stdout.write</code>), and connect them to
+        sockets only when needed.</p>
+<p>Because such stream tools are designed to operate on text-mode
+        files, though, probably the biggest trick here is fooling them into
+        operating on the inherently binary mode and very different method
+        interface of sockets. Luckily, sockets come with a method that
+        achieves all the forgery we need.</p>
+<p>The <a id="I_indexterm1_d1e51152"></a>socket object <code class="epub__literal">makefile</code> method comes in handy anytime you
+        wish to process a socket with normal file object methods or need to
+        pass a socket to an existing interface or program that expects a file.
+        The socket wrapper object returned allows your scripts to transfer
+        data over the underlying socket with <code class="epub__literal">read</code> and <code class="epub__literal">write</code> calls, rather than <code class="epub__literal">recv</code> and <code class="epub__literal">send</code>. Since <code class="epub__literal">input</code> and <code class="epub__literal">print</code> built-in functions use the former
+        methods set, they will happily interact with sockets wrapped by this
+        call, too.</p>
+<p>The <code class="epub__literal">makefile</code> method also
+        allows us to treat normally binary socket data as text instead of byte
+        strings, and has additional arguments such as <code class="epub__literal">encoding</code> that let us specify nondefault
+        Unicode encodings for the transferred text—much like the built-in
+        <code class="epub__literal">open</code> and <code class="epub__literal">os.fdopen</code> calls we met in Chapter 4 do for file descriptors.
+        Although text can always be encoded and decoded with manual calls
+        after binary mode socket transfers, <code class="epub__literal">makefile</code> shifts the burden of text encodings
+        from your code to the file wrapper object.</p>
+<p>This equivalence to files comes in handy any time we want to use
+        software that supports file interfaces. For example, the Python
+        <code class="epub__literal">pickle</code> module’s <code class="epub__literal">load</code> and <code class="epub__literal">dump</code> methods expect an object with a
+        file-like interface (e.g., <code class="epub__literal">read</code> and
+        <code class="epub__literal">write</code> methods), but they don’t
+        require a physical file. Passing a TCP/IP socket wrapped with the
+        <code class="epub__literal">makefile</code> call to the pickler allows
+        us to ship serialized Python objects over the Internet, without having
+        to pickle to byte strings ourselves and call raw socket methods
+        manually. This is an alternative to using the <code class="epub__literal">pickle</code> module’s string-based calls (<code class="epub__literal">dumps</code>, <code class="epub__literal">loads</code>) with socket <code class="epub__literal">send</code> and <code class="epub__literal">recv</code> calls, and might offer more flexibility
+        for software that must support a variety of transport mechanisms. See
+        Chapter 17 for more details on
+        object serialization <span>interfaces</span>.</p>
+<p>More generally, any component that expects a file-like method
+        protocol will gladly accept a socket wrapped with a socket object
+        <code class="epub__literal">makefile</code> call. Such interfaces will
+        also accept strings wrapped with the built-in <code class="epub__literal">io.StringIO</code> class, and any other sort of
+        object that supports the same kinds of method calls as built-in file
+        objects. As always in Python, we code to protocols—object
+        interfaces—not to specific datatypes.</p>
+<div class="epub__sect2" title="A Stream Redirection Utility"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="a_stream_redirection_utility"></a>A Stream Redirection Utility</h2>
+</div>
+</div>
+</div>
+<p>To illustrate the <code class="epub__literal">makefile</code>
+          method’s <a id="in12.6.1"></a>operation, Example 12-10 implements a variety
+          of redirection schemes, which redirect the caller’s streams to a
+          socket that can be used by another process for communication. The
+          first of its functions connects output, and is what we used in Chapter 10; the others connect input, and
+          both input and output in three different modes.</p>
+<p>Naturally, the wrapper object returned by <code class="epub__literal">socket.makefile</code> can also be used with
+          direct file interface <code class="epub__literal">read</code> and
+          <code class="epub__literal">write</code> method calls and
+          independently of standard streams. This example uses those methods,
+          too, albeit in most cases indirectly and implicitly through the
+          <code class="epub__literal">print</code> and <code class="epub__literal">input</code> stream access built-ins, and
+          reflects a common use case for the tool.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id9"></a>
+<p class="epub__title">Example 12-10. PP4E\Internet\Sockets\socket_stream_redirect.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+###############################################################################
+Tools for connecting standard streams of non-GUI programs to sockets that
+a GUI (or other) program can use to interact with the non-GUI program.
+###############################################################################
+"""
+
+import sys
+from socket import *
+port = 50008            # pass in different port if multiple dialogs on machine
+host = 'localhost'      # pass in different host to connect to remote listeners
+
+def initListenerSocket(port=port):
+    """
+    initialize connected socket for callers that listen in server mode
+    """
+    sock = socket(AF_INET, SOCK_STREAM)
+    sock.bind(('', port))                     # listen on this port number
+    sock.listen(5)                            # set pending queue length
+    conn, addr = sock.accept()                # wait for client to connect
+    return conn                               # return connected socket
+
+def redirectOut(port=port, host=host):
+    """
+    connect caller's standard output stream to a socket for GUI to listen
+    start caller after listener started, else connect fails before accept
+    """
+    sock = socket(AF_INET, SOCK_STREAM)
+    sock.connect((host, port))                # caller operates in client mode
+    file = sock.makefile('w')                 # file interface: text, buffered
+    sys.stdout = file                         # make prints go to sock.send
+    return sock                               # if caller needs to access it raw
+
+def redirectIn(port=port, host=host):
+    """
+    connect caller's standard input stream to a socket for GUI to provide
+    """
+    sock = socket(AF_INET, SOCK_STREAM)
+    sock.connect((host, port))
+    file = sock.makefile('r')                 # file interface wrapper
+    sys.stdin = file                          # make input come from sock.recv
+    return sock                               # return value can be ignored
+
+def redirectBothAsClient(port=port, host=host):
+    """
+    connect caller's standard input and output stream to same socket
+    in this mode, caller is client to a server: sends msg, receives reply
+    """
+    sock = socket(AF_INET, SOCK_STREAM)
+    sock.connect((host, port))                # or open in 'rw' mode
+    ofile = sock.makefile('w')                # file interface: text, buffered
+    ifile = sock.makefile('r')                # two file objects wrap same socket
+    sys.stdout = ofile                        # make prints go to sock.send
+    sys.stdin  = ifile                        # make input come from sock.recv
+    return sock
+
+def redirectBothAsServer(port=port, host=host):
+    """
+    connect caller's standard input and output stream to same socket
+    in this mode, caller is server to a client: receives msg, send reply
+    """
+    sock = socket(AF_INET, SOCK_STREAM)
+    sock.bind((host, port))                   # caller is listener here
+    sock.listen(5)
+    conn, addr = sock.accept()
+    ofile = conn.makefile('w')                # file interface wrapper
+    ifile = conn.makefile('r')                # two file objects wrap same socket
+    sys.stdout = ofile                        # make prints go to sock.send
+    sys.stdin  = ifile                        # make input come from sock.recv
+    return conn</pre>
+</div>
+</div>
+<p>To test, the script in Example 12-11 defines five sets of
+          client/server functions. It runs the client’s code in process, but
+          deploys the Python <code class="epub__literal">multiprocessing</code> module we met in Chapter 5 to portably spawn the server
+          function’s side of the dialog in a separate process. In the end, the
+          client and server test functions run in different processes, but
+          converse over a socket that is connected to standard streams within
+          the test script’s process.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id10"></a>
+<p class="epub__title">Example 12-11. PP4E\Internet\Sockets\test-socket_stream_redirect.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+###############################################################################
+test the socket_stream_redirection.py modes
+###############################################################################
+"""
+
+import sys, os, multiprocessing
+from socket_stream_redirect import *
+
+###############################################################################
+# redirected client output
+###############################################################################
+
+def server1():
+    mypid = os.getpid()
+    conn  = initListenerSocket()                     # block till client connect
+    file  = conn.makefile('r')
+    for i in range(3):                               # read/recv client's prints
+        data = file.readline().rstrip()              # block till data ready
+        print('server %s got [%s]' % (mypid, data))  # print normally to terminal
+
+def client1():
+    mypid = os.getpid()
+    redirectOut()
+    for i in range(3):
+        print('client %s: %s' % (mypid, i))          # print to socket
+        sys.stdout.flush()                           # else buffered till exits!
+
+###############################################################################
+# redirected client input
+###############################################################################
+
+def server2():
+    mypid = os.getpid()                              # raw socket not buffered
+    conn  = initListenerSocket()                     # send to client's input
+    for i in range(3):
+        conn.send(('server %s: %s\n' % (mypid, i)).encode())
+
+def client2():
+    mypid = os.getpid()
+    redirectIn()
+    for i in range(3):
+        data = input()                               # input from socket
+        print('client %s got [%s]' % (mypid, data))  # print normally to terminal
+
+###############################################################################
+# redirect client input + output, client is socket client
+###############################################################################
+
+def server3():
+    mypid = os.getpid()
+    conn  = initListenerSocket()                     # wait for client connect
+    file  = conn.makefile('r')                       # recv print(), send input()
+    for i in range(3):                               # readline blocks till data
+        data = file.readline().rstrip()
+        conn.send(('server %s got [%s]\n' % (mypid, data)).encode())
+
+def client3():
+    mypid = os.getpid()
+    redirectBothAsClient()
+    for i in range(3):
+        print('client %s: %s' % (mypid, i))          # print to socket
+        data = input()                               # input from socket: flushes!
+        sys.stderr.write('client %s got [%s]\n' % (mypid, data))  # not redirected
+
+###############################################################################
+# redirect client input + output, client is socket server
+###############################################################################
+
+def server4():
+    mypid = os.getpid()
+    sock  = socket(AF_INET, SOCK_STREAM)
+    sock.connect((host, port))
+    file  = sock.makefile('r')
+    for i in range(3):
+        sock.send(('server %s: %s\n' % (mypid, i)).encode())   # send to input()
+        data = file.readline().rstrip()                        # recv from print()
+        print('server %s got [%s]' % (mypid, data))            # result to terminal
+
+def client4():
+    mypid = os.getpid()
+    redirectBothAsServer()         # I'm actually the socket server in this mode
+    for i in range(3):
+        data = input()                               # input from socket: flushes!
+        print('client %s got [%s]' % (mypid, data))  # print to socket
+        sys.stdout.flush()                           # else last buffered till exit!
+
+###############################################################################
+# redirect client input + output, client is socket client, server xfers first
+###############################################################################
+
+def server5():
+    mypid = os.getpid()                              # test 4, but server accepts
+    conn  = initListenerSocket()                     # wait for client connect
+    file  = conn.makefile('r')                       # send input(), recv print()
+    for i in range(3):
+        conn.send(('server %s: %s\n' % (mypid, i)).encode())
+        data = file.readline().rstrip()
+        print('server %s got [%s]' % (mypid, data))
+
+def client5():
+    mypid = os.getpid()
+    s = redirectBothAsClient()     # I'm the socket client in this mode
+    for i in range(3):
+        data = input()                               # input from socket: flushes!
+        print('client %s got [%s]' % (mypid, data))  # print to socket
+        sys.stdout.flush()                           # else last buffered till exit!
+
+###############################################################################
+# test by number on command-line
+###############################################################################
+
+if __name__ == '__main__':
+    server = eval('server' + sys.argv[1])
+    client = eval('client' + sys.argv[1])               # client in this process
+    multiprocessing.Process(target=server).start()      # server in new process
+    client()                                            # reset streams in client
+    #import time; time.sleep(5)                         # test effect of exit flush</pre>
+</div>
+</div>
+<p>Run the test script with a client and server number on the
+          command line to test the module’s tools; messages display process ID
+          numbers, and those within square brackets reflect a transfer across
+          streams connected to sockets (twice, when nested):</p><a id="I_programlisting1_d1e51306"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>test-socket_stream_redirect.py 1</code></strong>
+server 3844 got [client 1112: 0]
+server 3844 got [client 1112: 1]
+server 3844 got [client 1112: 2]
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>test-socket_stream_redirect.py 2</code></strong>
+client 5188 got [server 2020: 0]
+client 5188 got [server 2020: 1]
+client 5188 got [server 2020: 2]
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>test-socket_stream_redirect.py 3</code></strong>
+client 7796 got [server 2780 got [client 7796: 0]]
+client 7796 got [server 2780 got [client 7796: 1]]
+client 7796 got [server 2780 got [client 7796: 2]]
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>test-socket_stream_redirect.py 4</code></strong>
+server 4288 got [client 3852 got [server 4288: 0]]
+server 4288 got [client 3852 got [server 4288: 1]]
+server 4288 got [client 3852 got [server 4288: 2]]
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>test-socket_stream_redirect.py 5</code></strong>
+server 6040 got [client 7728 got [server 6040: 0]]
+server 6040 got [client 7728 got [server 6040: 1]]
+server 6040 got [client 7728 got [server 6040: 2]]</pre>
+<p>If you correlate this script’s output with its code to see how
+          messages are passed between client and server, you’ll find that
+          <code class="epub__literal">print</code> and <code class="epub__literal">input</code> calls in client functions are
+          ultimately routed over sockets to another process. To the client
+          functions, the socket linkage is largely invisible.</p>
+<div class="epub__sect3" title="Text-mode files and buffered output streams"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="text_mode_files_and_buffered_output_stre"></a>Text-mode files and buffered output streams</h3>
+</div>
+</div>
+</div>
+<p>Before we <a id="I_indexterm1_d1e51336"></a><a id="I_indexterm1_d1e51341"></a>move on, there are two remarkably subtle aspects of
+            the example’s code worth highlighting:</p><div class="epub__variablelist"><dl><dt><span class="epub__term">Binary to text translations</span></dt><dd>
+<p>Raw sockets transfer binary byte strings, but by
+                  opening the wrapper files in text mode, their content is
+                  automatically translated to text strings on input and
+                  output. Text-mode file wrappers are required if accessed
+                  through standard stream tools such as the <code class="epub__literal">print</code> built-in that writes text
+                  strings (as we’ve learned, binary mode files require byte
+                  strings instead). When dealing with the raw socket directly,
+                  though, text must still be manually encoded to byte strings,
+                  as shown in most of Example 12-11’s
+                  tests.</p></dd><dt><span class="epub__term">Buffered streams, program output, and deadlock</span></dt><dd>
+<p>As we learned in Chapters 5 and 10, standard streams are
+                  normally buffered, and printed text may need to be flushed
+                  so that it appears on a socket connected to a process’s
+                  output stream. Indeed, some of this example’s tests require
+                  explicit or implicit flush calls to work properly at all;
+                  otherwise their output is either incomplete or absent
+                  altogether until program exit. In pathological cases, this
+                  can lead to deadlock, with a process waiting for output from
+                  another that never appears. In other configurations, we may
+                  also get socket errors in a reader if a writer exits too
+                  soon, especially in two-way dialogs.</p>
+<p>For example, if <code class="epub__literal">client1</code> and <code class="epub__literal">client4</code> did not flush periodically
+                  as they do, the only reason that they would work is because
+                  output streams are automatically flushed when their process
+                  exits. Without manual flushes, <code class="epub__literal">client1</code> transfers no data until
+                  process exit (at which point all its output is sent at once
+                  in a single message), and <code class="epub__literal">client4</code>’s data is incomplete till
+                  exit (its last printed message is delayed).</p>
+<p>Even more subtly, both <code class="epub__literal">client3</code> and <code class="epub__literal">client4</code> rely on the fact that the
+                  <code class="epub__literal">input</code> built-in first
+                  automatically flushes <code class="epub__literal">sys.stdout</code> internally for its
+                  prompt option, thereby sending data from preceding <code class="epub__literal">print</code> calls. Without this implicit
+                  flush (or the addition of manual flushes), <code class="epub__literal">client3</code> would experience
+                  <span class="epub__emphasis"><em>deadlock</em></span> immediately, as would <code class="epub__literal">client4</code> if its manual flush call
+                  was removed (even with <code class="epub__literal">input</code>’s flush, removing <code class="epub__literal">client4</code>’s manual flush causes its
+                  final <code class="epub__literal">print</code> message to
+                  not be transferred until process exit). <code class="epub__literal">client5</code> has this same behavior as
+                  <code class="epub__literal">client4</code>, because it
+                  simply swaps which process binds and accepts and which
+                  connects.</p>
+<p>In the general case, if we wish to read a program’s
+                  output as it is produced, instead of all at once when it
+                  exits or as its buffers fill, the program must either call
+                  <code class="epub__literal">sys.stdout.flush</code>
+                  periodically, or be run with unbuffered streams by using
+                  <span>Python’s</span> <code class="epub__literal">-u</code> command-line argument of Chapter 5 if applicable.</p>
+<p>Although we can open socket wrapper files in
+                  <span class="epub__emphasis"><em>unbuffered mode</em></span><a name="second"></a> with a second <code class="epub__literal">makefile</code> argument of zero (like
+                  normal <code class="epub__literal">open</code>), this does
+                  not allow the wrapper to run in the text mode required for
+                  <code class="epub__literal">print</code> and desired for
+                  <code class="epub__literal">input</code>. In fact,
+                  attempting to make a socket wrapper file both text mode and
+                  unbuffered this way fails with an exception, because Python
+                  3.X no longer supports unbuffered mode for text files (it is
+                  allowed for binary mode only today). In other words, because
+                  <code class="epub__literal">print</code> requires text mode,
+                  buffered mode is also implied for output stream files.
+                  Moreover, attempting to open a socket file wrapper in
+                  <span class="epub__emphasis"><em>line-buffered</em></span> mode appears to not be
+                  supported in Python 3.X (more on this ahead).</p>
+<p>While some buffering behavior may be library and
+                  platform dependent, manual flush calls or direct socket
+                  access might sometimes still be required. Note that sockets
+                  can also be made nonblocking with the <code class="epub__literal">setblocking(0)</code> method, but this
+                  only avoids wait states for transfer calls and does not
+                  address the data producer’s failure to send buffered
+                  output.</p></dd></dl>
+</div>
+</div>
+<div class="epub__sect3" title="Stream requirements"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="stream_requirements"></a>Stream requirements</h3>
+</div>
+</div>
+</div>
+<p>To make some of this more concrete, Example 12-12 illustrates how
+            some of these complexities apply to redirected standard streams,
+            by attempting to connect them to both text and binary mode files
+            produced by <code class="epub__literal">open</code> and accessing
+            them with <code class="epub__literal">print</code> and <code class="epub__literal">input</code> built-ins much as redirected
+            script might.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id11"></a>
+<p class="epub__title">Example 12-12. PP4E\Internet\Sockets\test-stream-modes.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+test effect of connecting standard streams to text and binary mode files
+same holds true for socket.makefile: print requires text mode, but text
+mode precludes unbuffered mode -- use -u or sys.stdout.flush() calls
+"""
+
+import sys
+
+def reader(F):
+    tmp, sys.stdin = sys.stdin, F
+    line = input()
+    print(line)
+    sys.stdin = tmp
+
+reader( open('test-stream-modes.py') )         # works: input() returns text
+reader( open('test-stream-modes.py', 'rb') )   # works: but input() returns bytes
+
+def writer(F):
+    tmp, sys.stdout = sys.stdout, F
+    print(99, 'spam')
+    sys.stdout = tmp
+
+writer( open('temp', 'w') )             # works: print() passes text str to .write()
+print(open('temp').read())
+
+writer( open('temp', 'wb') )            # FAILS on print: binary mode requires bytes
+writer( open('temp', 'w', 0) )          # FAILS on open: text must be unbuffered</pre>
+</div>
+</div>
+<p>When run, the last two lines in this script both fail—the
+            second to last fails because <code class="epub__literal">print</code> passes text strings to a
+            binary-mode file (never allowed for files in general), and the
+            last fails because we cannot open text-mode files in unbuffered
+            mode in Python 3.X (text mode implies Unicode encodings). Here are
+            the errors we get when this script is run: the first run uses the
+            script as shown, and the second shows what happens if the second
+            to last line is commented out (I edited the exception text
+            slightly for <span>presentation</span>):</p><a id="I_programlisting1_d1e51497"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>test-stream-modes.py</code></strong>
+"""
+b'"""\r'
+99 spam
+
+Traceback (most recent call last):
+  File "C:\...\PP4E\Internet\Sockets\test-stream-modes.py", line 26, in &lt;module&gt;
+    writer( open('temp', 'wb') )            # FAILS on print: binary mode...
+  File "C:\...\PP4E\Internet\Sockets\test-stream-modes.py", line 20, in writer
+    print(99, 'spam')
+TypeError: must be bytes or buffer, not str
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>test-streams-binary.py</code></strong>
+"""
+b'"""\r'
+99 spam
+
+Traceback (most recent call last):
+  File "C:\...\PP4E\Internet\Sockets\test-stream-modes.py", line 27, in &lt;module&gt;
+    writer( open('temp', 'w', 0) )          # FAILS on open: text must be...
+ValueError: can't have unbuffered text I/O</pre>
+<p>The same rules apply to socket wrapper file objects created
+            with a socket’s <code class="epub__literal">makefile</code>
+            method—they must be opened in text mode for <code class="epub__literal">print</code> and should be opened in text mode
+            for <code class="epub__literal">input</code> if we wish to receive
+            text strings, but text mode prevents us from using fully
+            unbuffered file mode altogether:</p><a id="I_programlisting1_d1e51516"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from socket import *</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>s = socket()</code></strong>                       # defaults to tcp/ip (AF_INET, SOCK_STREAM)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>s.makefile('w', 0)</code></strong>                 # this used to work in Python 2.X
+Traceback (most recent call last):
+  File "C:\Python31\lib\socket.py", line 151, in makefile
+ValueError: unbuffered streams must be binary</pre>
+</div>
+<div class="epub__sect3" title="Line buffering"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="line_buffering"></a>Line buffering</h3>
+</div>
+</div>
+</div>
+<p>Text-mode socket wrappers <a id="line12.6.1.3"></a><a id="buff12.6.1.3"></a>also accept a buffering-mode argument of <code class="epub__literal">1</code> to specify
+            <span class="epub__emphasis"><em>line-buffering</em></span> instead of the default full
+            buffering:</p><a id="I_programlisting1_d1e51548"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from socket import *</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>s = socket()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>f = s.makefile('w', 1)</code></strong>    # same as buffering=1, but acts as fully buffered!</pre>
+<p>This appears to be no different than full buffering, and
+            still requires the resulting file to be flushed manually to
+            transfer lines as they are produced. Consider the simple socket
+            server and client scripts in Examples 12-13 and 12-14. The server simply reads three
+            messages using the raw socket interface.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id12"></a>
+<p class="epub__title">Example 12-13. PP4E\Internet\Sockets\socket-unbuff-server.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">from socket import *           # read three messages over a raw socket
+sock = socket()
+sock.bind(('', 60000))
+sock.listen(5)
+print('accepting...')
+conn, id = sock.accept()       # blocks till client connect
+
+for i in range(3):
+    print('receiving...')
+    msg = conn.recv(1024)      # blocks till data received
+    print(msg)                 # gets all print lines at once unless flushed</pre>
+</div>
+</div>
+<p>The client in Example 12-14 sends three
+            messages; the first two over a socket wrapper file, and the last
+            using the raw socket; the manual flush calls in this are commented
+            out but retained so you can experiment with turning them on, and
+            sleep calls make the server wait for data.</p><div class="epub__example"><a id="pp4_reverse_solidus_internet_reverse_sol"></a>
+<p class="epub__title">Example 12-14. PP4\Internet\Sockets\socket-unbuff-client.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">import time                            # send three msgs over wrapped and raw socket
+from socket import *
+sock = socket()                        # default=AF_INET, SOCK_STREAM (tcp/ip)
+sock.connect(('localhost', 60000))
+file = sock.makefile('w', buffering=1) # default=full buff, 0=error, 1 not linebuff!
+
+print('sending data1')
+file.write('spam\n')
+time.sleep(5)               # must follow with flush() to truly send now
+#file.flush()               # uncomment flush lines to see the difference
+
+print('sending data2')
+print('eggs', file=file)    # adding more file prints does not flush buffer either
+time.sleep(5)
+#file.flush()               # output appears at server recv only upon flush or exit
+
+print('sending data3')
+sock.send(b'ham\n')         # low-level byte string interface sends immediately
+time.sleep(5)               # received first if don't flush other two!</pre>
+</div>
+</div>
+<p>Run the server in one window first and the client in another
+            (or run the server first in the background in Unix-like
+            platforms). The output in the server window follows—the messages
+            sent with the socket wrapper are deferred until program exit, but
+            the raw socket call transfers data immediately:</p><a id="I_programlisting1_d1e51581"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>socket-unbuff-server.py</code></strong>
+accepting...
+receiving...
+b'ham\n'
+receiving...
+b'spam\r\neggs\r\n'
+receiving...
+b''</pre>
+<p><a name="seconds
+            apart"></a>The client window simply displays “sending” lines 5 seconds
+            apart; its third message appears at the server in 10 seconds, but
+            the first and second messages it sends using the wrapper file are
+            deferred until exit (for 15 seconds) because the socket wrapper is
+            still fully buffered. If the manual flush calls in the client are
+            uncommented, each of the three sent messages is delivered in
+            serial, 5 seconds apart (the third appears immediately after the
+            second):</p><a id="I_programlisting1_d1e51590"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>socket-unbuff-server.py</code></strong>
+accepting...
+receiving...
+b'spam\r\n'
+receiving...
+b'eggs\r\n'
+receiving...
+b'ham\n'</pre>
+<p>In other words, even when line buffering is requested,
+            socket wrapper file writes (and by association, prints) are
+            buffered until the program exits, manual flushes are requested, or
+            the buffer becomes <a id="I_indexterm1_d1e51597"></a><a id="I_indexterm1_d1e51599"></a>full.</p>
+</div>
+<div class="epub__sect3" title="Solutions"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="solutions"></a>Solutions</h3>
+</div>
+</div>
+</div>
+<p>The short story here is this: to avoid delayed outputs or
+            deadlock, scripts that might send data to waiting programs by
+            printing to wrapped sockets (or for that matter, by using <code class="epub__literal">print</code> or <code class="epub__literal">sys.stdout.write</code> in general) should do
+            one of the following:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Call <code class="epub__literal">sys.stdout.flush</code>
+                periodically to flush their printed output so it becomes
+                available as produced, as shown in Example 12-11.</p></li><li class="epub__listitem">
+<p>Be run with the <code class="epub__literal">-u</code>
+                Python command-line flag, if possible, to force the output
+                stream to be unbuffered. This works for unmodified programs
+                spawned by pipe tools such as <code class="epub__literal">os.popen</code>. It will
+                <span class="epub__emphasis"><em>not</em></span> help with the use case here, though,
+                because we manually reset the stream files to buffered text
+                socket wrappers after a process starts. To prove this,
+                uncomment Example 12-11’s manual flush
+                calls and the sleep call at its end, and run with <code class="epub__literal">-u</code>: the first test’s output is still
+                delayed for 5 seconds.</p></li><li class="epub__listitem">
+<p>Use <span class="epub__emphasis"><em>threads</em></span> to read from sockets to
+                avoid blocking, especially if the receiving program is a GUI
+                and it cannot depend upon the client to flush. See Chapter 10 for pointers. This doesn’t
+                really fix the problem—the spawned reader thread may be
+                blocked or deadlocked, too—but at least the GUI remains active
+                during waits.</p></li><li class="epub__listitem">
+<p>Implement their own <span class="epub__emphasis"><em>custom</em></span> socket
+                wrapper objects which intercept text <code class="epub__literal">write</code> calls, encode to binary, and
+                route to a socket with <code class="epub__literal">send</code>
+                calls; <code class="epub__literal">socket.makefile</code> is
+                really just a convenience tool, and we can always code a
+                wrapper of our own for more specific roles. For hints, see
+                Chapter 10’s <code class="epub__literal">GuiOutput</code> class, the stream
+                redirection class in Chapter 3, and the classes of the
+                <code class="epub__literal">io</code> standard library module
+                (upon which Python’s input/output tools are based, and which
+                you can mix in custom ways).</p></li><li class="epub__listitem">
+<p>Skip <code class="epub__literal">print</code> altogether
+                and communicate directly with the native interfaces of IPC
+                devices, such as socket objects’ raw <code class="epub__literal">send</code> and <code class="epub__literal">recv</code> methods—these transfer data
+                immediately and do not buffer data as file methods can. We can
+                either transfer simple byte strings this way or use the
+                <code class="epub__literal">pickle</code> module’s <code class="epub__literal">dumps</code> and <code class="epub__literal">loads</code> tools to convert Python
+                objects to and from byte strings for such direct socket
+                transfer (more on <code class="epub__literal">pickle</code> in
+                Chapter 17).</p></li></ul>
+</div>
+<p>The latter option may be more direct (and the redirection
+            utility module also returns the raw socket in support of such
+            usage), but it isn’t viable in all scenarios, especially for
+            existing or multimode scripts. In many cases, it may be most
+            straightforward to use manual flush calls in shell-oriented
+            programs whose streams might be linked to other programs through
+            sockets.</p>
+</div>
+<div class="epub__sect3" title="Buffering in other contexts: Command pipes revisited"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="buffering_in_other_contexts_colon_comman"></a>Buffering in other contexts: Command pipes
+            revisited</h3>
+</div>
+</div>
+</div>
+<p>Also keep in mind that <a id="I_indexterm1_d1e51707"></a><a id="I_indexterm1_d1e51712"></a><a id="I_indexterm1_d1e51717"></a>buffered streams and deadlock are general issues
+            that go beyond socket wrapper files. We explored this topic in
+            Chapter 5; as a quick review, the
+            nonsocket Example 12-15
+            does not fully buffer its output when it is connected to a
+            terminal (output is only line buffered when run from a shell
+            command prompt), but does if connected to something else
+            (including a socket or pipe).</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id13"></a>
+<p class="epub__title">Example 12-15. PP4E\Internet\Sockets\pipe-unbuff-writer.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># output line buffered (unbuffered) if stdout is a terminal, buffered by default for
+# other devices: use -u or sys.stdout.flush() to avoid delayed output on pipe/socket
+
+import time, sys
+for i in range(5):
+    print(time.asctime())                 # print transfers per stream buffering
+    sys.stdout.write('spam\n')            # ditto for direct stream file access
+    time.sleep(2)                         # unles sys.stdout reset to other file</pre>
+</div>
+</div>
+<p>Although text-mode files are required for Python 3.X’s
+            <code class="epub__literal">print</code> in general, the <code class="epub__literal">-u</code> flag still works in 3.X to suppress
+            full output stream buffering. In Example 12-16, using this flag
+            makes the spawned script’s printed output appear every 2 seconds,
+            as it is produced. Not using this flag defers all output for 10
+            seconds, until the spawned script exits, unless the spawned script
+            calls <code class="epub__literal">sys.stdout</code>.<code class="epub__literal">flush</code> on each iteration.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id14"></a>
+<p class="epub__title">Example 12-16. PP4E\Internet\Sockets\pipe-unbuff-reader.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># no output for 10 seconds unless Python -u flag used or sys.stdout.flush()
+# but writer's output appears here every 2 seconds when either option is used
+
+import os
+for line in os.popen('python -u pipe-unbuff-writer.py'):    # iterator reads lines
+    print(line, end='')                                     # blocks without -u!</pre>
+</div>
+</div>
+<p>Following is the reader script’s output; unlike the socket
+            examples, it spawns the writer automatically, so we don’t need
+            separate windows to test. Recall from Chapter 5 that <code class="epub__literal">os.popen</code> also accepts a buffering
+            argument much like <code class="epub__literal">socket.makefile</code>, but it does not apply
+            to the spawned program’s stream, and so would not prevent output
+            buffering in this case.</p><a id="I_programlisting1_d1e51763"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>pipe-unbuff-reader.py</code></strong>
+Wed Apr 07 09:32:28 2010
+spam
+Wed Apr 07 09:32:30 2010
+spam
+Wed Apr 07 09:32:32 2010
+spam
+Wed Apr 07 09:32:34 2010
+spam
+Wed Apr 07 09:32:36 2010
+spam</pre>
+<p>The net effect is that <code class="epub__literal">-u</code>
+            still works around the steam buffering issue for connected
+            programs in 3.X, as long as you don’t reset the streams to other
+            objects in the spawned program as we did for socket redirection in
+            Example 12-11. For socket
+            redirections, manual flush calls or replacement socket wrappers
+            may be required.</p>
+</div>
+<div class="epub__sect3" title="Sockets versus command pipes"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="sockets_versus_command_pipes"></a>Sockets versus command pipes</h3>
+</div>
+</div>
+</div>
+<p>So why use <a id="I_indexterm1_d1e51780"></a><a id="I_indexterm1_d1e51785"></a><a id="I_indexterm1_d1e51790"></a>sockets in this redirection role at all? In short,
+            for server independence and networked use cases. Notice how for
+            command pipes it’s not clear who should be called “server” and
+            “client,” since neither script runs perpetually. In fact, this is
+            one of the major downsides of using command pipes like this
+            instead of sockets—because the programs require a direct
+            <span class="epub__emphasis"><em>spawning relationship</em></span>, command pipes do not
+            support longer-lived or remotely running servers the way that
+            sockets do.</p>
+<p>With sockets, we can start client and server independently,
+            and the server may continue running perpetually to serve multiple
+            clients (albeit with some changes to our utility module’s listener
+            initialization code). Moreover, passing in remote machine names to
+            our socket redirection tools would allow a client to connect to a
+            server running on a completely different machine. As we learned in
+            Chapter 5, named pipes (fifos)
+            accessed with the <code class="epub__literal">open</code> call
+            support stronger independence of client and server, too, but
+            unlike sockets, they are usually limited to the local machine, and
+            are not supported on all platforms.</p>
+<p>Experiment with this code on your own for more insight. Also
+            try changing Example 12-11
+            to run the client function in a spawned process instead of or in
+            addition to the server, with and without flush calls and <code class="epub__literal">time.sleep</code> calls to defer exits; the
+            spawning structure might have some impact on the soundness of a
+            given socket dialog structure as well, which we’ll finesse here in
+            the interest of space.</p>
+<p>Despite the care that must be taken with text encodings and
+            stream buffering, the utility provided by Example 12-10 is still arguably
+            impressive—prints and input calls are routed over network or
+            local-machine socket connections in a largely automatic fashion,
+            and with minimal changes to the nonsocket code that uses the
+            module. In many cases, the technique can extend a script’s
+            applicability.</p>
+<p>In the next section, we’ll use the <code class="epub__literal">makefile</code> method again to wrap the socket
+            in a file-like object, so that it can be read by lines using
+            normal text-file method calls and techniques. This isn’t strictly
+            required in the example—we could read lines as byte strings with
+            the socket <code class="epub__literal">recv</code> call, too. In
+            general, though, the <code class="epub__literal">makefile</code>
+            method comes in handy any time you wish to treat sockets as though
+            they were simple files. To see this at work, let’s <a id="I_indexterm1_d1e51828"></a><a id="I_indexterm1_d1e51830"></a><a id="I_indexterm1_d1e51832"></a><a id="I_indexterm1_d1e51834"></a><a id="I_indexterm1_d1e51837"></a><a id="I_indexterm1_d1e51839"></a>move on.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

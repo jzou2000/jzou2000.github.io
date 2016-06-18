@@ -1,0 +1,392 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Transferring Directory Trees with ftplib</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Transferring Directory Trees with ftplib"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="transferring_directory_trees_with_ftplib"></a>Transferring Directory Trees with ftplib</h1>
+</div>
+</div>
+</div>
+<p>Perhaps the <a id="tran13.5"></a><a id="client13.5"></a><a id="dir13.5"></a><a id="ftp13.5"></a>biggest limitation of the website download and upload
+        scripts we just met is that they assume the site directory is flat
+        (hence their names). That is, the preceding scripts transfer simple
+        files only, and none of them handle nested subdirectories within the
+        web directory to be transferred.</p>
+<p>For my purposes, that’s often a reasonable constraint. I avoid
+        nested subdirectories to keep things simple, and I store my book
+        support home website as a simple directory of files. For other sites,
+        though, including one I keep at another machine, site transfer scripts
+        are easier to use if they also automatically transfer subdirectories
+        along the way.</p>
+<div class="epub__sect2" title="Uploading Local Trees"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="uploading_local_trees"></a>Uploading Local Trees</h2>
+</div>
+</div>
+</div>
+<p>It turns out that supporting directories on uploads is fairly
+          simple—we need to add only a bit of recursion and remote directory
+          creation calls. The upload script in Example 13-15 extends the
+          class-based version we just saw in Example 13-14, to handle uploading
+          all subdirectories <a id="nest13.5.1"></a>nested within the transferred directory. Furthermore,
+          it recursively transfers subdirectories within subdirectories—the
+          entire directory tree contained within the top-level transfer
+          directory is uploaded to the target directory at the remote
+          server.</p>
+<p>In terms of its code structure, Example 13-15 is just a
+          customization of the <code class="epub__literal">FtpTools</code>
+          class of the prior section—really, we’re just adding a method for
+          recursive uploads, by <a id="I_indexterm2_d1e54349"></a>subclassing. As one consequence, we get tools such as
+          parameter configuration, content type testing, and connection and
+          upload code for free here; with OOP, some of the work is done before
+          we start.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id34"></a>
+<p class="epub__title">Example 13-15. PP4E\Internet\Ftp\Mirror\uploadall.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/bin/env python
+"""
+############################################################################
+extend the FtpTools class to upload all files and subdirectories from a
+local dir tree to a remote site/dir; supports nested dirs too, but not
+the cleanall option (that requires parsing FTP listings to detect remote
+dirs: see cleanall.py); to upload subdirectories, uses os.path.isdir(path)
+to see if a local file is really a directory, FTP().mkd(path) to make dirs
+on the remote machine (wrapped in a try in case it already exists there),
+and recursion to upload all files/dirs inside the nested subdirectory.
+############################################################################
+"""
+
+import os, ftptools
+
+class UploadAll(ftptools.FtpTools):
+    """
+    upload an entire tree of subdirectories
+    assumes top remote directory exists
+    """
+    def __init__(self):
+        self.fcount = self.dcount = 0
+
+    def getcleanall(self):
+        return False  # don't even ask
+
+    def uploadDir(self, localdir):
+        """
+        for each directory in an entire tree
+        upload simple files, recur into subdirectories
+        """
+        localfiles = os.listdir(localdir)
+        for localname in localfiles:
+            localpath = os.path.join(localdir, localname)
+            print('uploading', localpath, 'to', localname, end=' ')
+            if not os.path.isdir(localpath):
+                self.uploadOne(localname, localpath, localname)
+                self.fcount += 1
+            else:
+                try:
+                    self.connection.mkd(localname)
+                    print('directory created')
+                except:
+                    print('directory not created')
+                self.connection.cwd(localname)             # change remote dir
+                self.uploadDir(localpath)                  # upload local subdir
+                self.connection.cwd('..')                  # change back up
+                self.dcount += 1
+                print('directory exited')
+
+if __name__ == '__main__':
+    ftp = UploadAll()
+    ftp.configTransfer(site='learning-python.com', rdir='training', user='lutz')
+    ftp.run(transferAct = lambda: ftp.uploadDir(ftp.localdir))
+    print('Done:', ftp.fcount, 'files and', ftp.dcount, 'directories uploaded.')</pre>
+</div>
+</div>
+<p>Like the flat upload script, this one can be run on any
+          machine with Python and sockets and upload to any machine running an
+          FTP server; I run it both on my laptop PC and on other servers by
+          Telnet or SSH to upload sites to my ISP.</p>
+<p>The crux of the matter in this script is the <code class="epub__literal">os.path.isdir</code> test near the top; if this
+          test detects a directory in the current local directory, we create
+          an identically named directory on the remote machine with <code class="epub__literal">connection.mkd</code> <a id="I_indexterm2_d1e54370"></a>and descend into it with <code class="epub__literal">connection.cwd</code>, <a id="I_indexterm2_d1e54379"></a>and recur into the subdirectory on the local machine
+          (we have to use recursive calls here, because the shape and depth of
+          the tree are arbitrary). Like all FTP object <a id="I_indexterm2_d1e54386"></a><a id="I_indexterm2_d1e54391"></a>methods, <code class="epub__literal">mkd</code> and
+          <code class="epub__literal">cwd</code> methods issue FTP commands to
+          the remote server. When we exit a local subdirectory, we run a
+          remote <code class="epub__literal">cwd('..')</code> to climb to the
+          remote parent directory and continue; the recursive call level’s
+          return restores the prior directory on the local machine. The rest
+          of the script is roughly the same as the original.</p>
+<p>In the interest of space, I’ll leave studying this variant in
+          more depth as a suggested exercise. For more context, try changing
+          this script so as not to assume that the top-level remote directory
+          already exists. As usual in software, there are a variety of
+          implementation and operation options here.</p>
+<p>Here is the sort of output displayed on the console when the
+          upload-all script is run, uploading a site with multiple
+          subdirectory levels which I maintain with site builder tools. It’s
+          similar to the flat upload (which you might expect, given that it is
+          reusing much of the same code by inheritance), but notice that it
+          traverses and uploads nested subdirectories along the way:</p><a id="I_programlisting2_d1e54410"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Ftp\Mirror&gt; <strong class="epub__userinput"><code>uploadall.py Website-Training</code></strong>
+Password for lutz on learning-python.com:
+connecting...
+uploading Website-Training\2009-public-classes.htm to 2009-public-classes.htm text
+uploading Website-Training\2010-public-classes.html to 2010-public-classes.html text
+uploading Website-Training\about.html to about.html text
+uploading Website-Training\books to books directory created
+uploading Website-Training\books\index.htm to index.htm text
+uploading Website-Training\books\index.html to index.html text
+uploading Website-Training\books\_vti_cnf to _vti_cnf directory created
+uploading Website-Training\books\_vti_cnf\index.htm to index.htm text
+uploading Website-Training\books\_vti_cnf\index.html to index.html text
+directory exited
+directory exited
+uploading Website-Training\calendar.html to calendar.html text
+uploading Website-Training\contacts.html to contacts.html text
+uploading Website-Training\estes-nov06.htm to estes-nov06.htm text
+uploading Website-Training\formalbio.html to formalbio.html text
+uploading Website-Training\fulloutline.html to fulloutline.html text
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+
+uploading Website-Training\_vti_pvt\writeto.cnf to writeto.cnf ?
+uploading Website-Training\_vti_pvt\_vti_cnf to _vti_cnf directory created
+uploading Website-Training\_vti_pvt\_vti_cnf\_x_todo.htm to _x_todo.htm text
+uploading Website-Training\_vti_pvt\_vti_cnf\_x_todoh.htm to _x_todoh.htm text
+directory exited
+uploading Website-Training\_vti_pvt\_x_todo.htm to _x_todo.htm text
+uploading Website-Training\_vti_pvt\_x_todoh.htm to _x_todoh.htm text
+directory exited
+Done: 366 files and 18 directories uploaded.</pre>
+<p>As is, the script of Example 13-15 handles only
+          directory tree <span class="epub__emphasis"><em>uploads</em></span>; recursive uploads are
+          generally more useful than recursive downloads if you maintain your
+          websites on your local PC and upload to a server periodically, as I
+          do. To also <span class="epub__emphasis"><em>download</em></span> (mirror) a website that
+          has subdirectories, a script must parse the output of a remote
+          listing command to detect remote directories. For the same reason,
+          the recursive upload script was not coded to support the remote
+          directory tree cleanup option of the original—such a feature would
+          require parsing remote listings as well. The next section shows
+          <a id="I_indexterm2_d1e54428"></a>how.</p>
+</div>
+<div class="epub__sect2" title="Deleting Remote Trees"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="deleting_remote_trees"></a>Deleting Remote Trees</h2>
+</div>
+</div>
+</div>
+<p>One last example of <a id="remote13.5.2"></a><a id="del13.5.2"></a>code reuse at work: when I initially tested the prior
+          section’s <span>upload</span>-all script,
+          it contained a bug that caused it to fall into an infinite recursion
+          loop, and keep copying the full site into new subdirectories, over
+          and over, until the FTP server kicked me off (not an intended
+          feature of the program!). In fact, the upload got 13 levels deep
+          before being killed by the server; it effectively locked my site
+          until the mess could be repaired.</p>
+<p>To get rid of all the files accidentally uploaded, I quickly
+          wrote the script in Example 13-16 in emergency
+          (really, panic) mode; it deletes all files and nested subdirectories
+          in an entire remote tree. Luckily, this was very easy to do given
+          all the reuse that Example 13-16 inherits from the
+          <code class="epub__literal">FtpTools</code> superclass. Here, we
+          just have to define the extension for recursive remote deletions.
+          Even in tactical mode like this, OOP can be a decided
+          advantage.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id35"></a>
+<p class="epub__title">Example 13-16. PP4E\Internet\Ftp\Mirror\cleanall.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/bin/env python
+"""
+##############################################################################
+extend the FtpTools class to delete files and subdirectories from a remote
+directory tree; supports nested directories too;  depends on the dir()
+command output format, which may vary on some servers! - see Python's
+Tools\Scripts\ftpmirror.py for hints;  extend me for remote tree downloads;
+##############################################################################
+"""
+
+from ftptools import FtpTools
+
+class CleanAll(FtpTools):
+    """
+    delete an entire remote tree of subdirectories
+    """
+    def __init__(self):
+        self.fcount = self.dcount = 0
+
+    def getlocaldir(self):
+        return None  # irrelevent here
+
+    def getcleanall(self):
+        return True  # implied here
+
+    def cleanDir(self):
+        """
+        for each item in current remote directory,
+        del simple files, recur into and then del subdirectories
+        the dir() ftp call passes each line to a func or method
+        """
+        lines = []                                   # each level has own lines
+        self.connection.dir(lines.append)            # list current remote dir
+        for line in lines:
+            parsed  = line.split()                   # split on whitespace
+            permiss = parsed[0]                      # assume 'drw... ... filename'
+            fname   = parsed[-1]
+            if fname in ('.', '..'):                 # some include cwd and parent
+                continue
+            elif permiss[0] != 'd':                  # simple file: delete
+                print('file', fname)
+                self.connection.delete(fname)
+                self.fcount += 1
+            else:                                    # directory: recur, del
+                print('directory', fname)
+                self.connection.cwd(fname)           # chdir into remote dir
+                self.cleanDir()                      # clean subdirectory
+                self.connection.cwd('..')            # chdir remote back up
+                self.connection.rmd(fname)           # delete empty remote dir
+                self.dcount += 1
+                print('directory exited')
+
+if __name__ == '__main__':
+    ftp = CleanAll()
+    ftp.configTransfer(site='learning-python.com', rdir='training', user='lutz')
+    ftp.run(cleanTarget=ftp.cleanDir)
+    print('Done:', ftp.fcount, 'files and', ftp.dcount, 'directories cleaned.')</pre>
+</div>
+</div>
+<p>Besides again being recursive in order to handle arbitrarily
+          shaped trees, the main trick employed here is to parse the output of
+          a remote directory listing. The FTP <code class="epub__literal">nlst</code> call used earlier gives us a simple
+          list of filenames; here, we use <code class="epub__literal">dir</code> to also get file detail lines like
+          these:</p><a id="I_programlisting2_d1e54470"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Ftp&gt; <strong class="epub__userinput"><code>ftp learning-python.com</code></strong>
+ftp&gt; <strong class="epub__userinput"><code>cd training</code></strong>
+ftp&gt; <strong class="epub__userinput"><code>dir</code></strong>
+drwxr-xr-x   11 5693094  450          4096 May  4 11:06 .
+drwx---r-x   19 5693094  450          8192 May  4 10:59 ..
+-rw----r--    1 5693094  450         15825 May  4 11:02 2009-public-classes.htm
+-rw----r--    1 5693094  450         18084 May  4 11:02 2010-public-classes.html
+drwx---r-x    3 5693094  450          4096 May  4 11:02 books
+-rw----r--    1 5693094  450          3783 May  4 11:02 calendar-save-aug09.html
+-rw----r--    1 5693094  450          3923 May  4 11:02 calendar.html
+drwx---r-x    2 5693094  450          4096 May  4 11:02 images
+-rw----r--    1 5693094  450          6143 May  4 11:02 index.html
+<em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em></pre>
+<p>This output format is potentially server-specific, so check
+          this on your own server before relying on this script. For this Unix
+          ISP, if the first character of the first item on the line is
+          character “d”, the filename at the end of the line names a remote
+          directory. To parse, the script simply splits on whitespace to
+          extract parts of a line.</p>
+<p>Notice how this script, like others before it, must skip the
+          symbolic “.” and “..” current and parent directory names in listings
+          to work properly for this server. Oddly this can vary per server as
+          well; one of the servers I used for this book’s examples, for
+          instance, does not include these special names in listings. We can
+          verify by running <code class="epub__literal">ftplib</code> at the
+          interactive prompt, as though it were a portable FTP client
+          interface:</p><a id="I_programlisting2_d1e54490"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Ftp&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from ftplib import FTP</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>f = FTP('ftp.rmi.net')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>f.login('lutz', 'xxxxxxxx')</code></strong>         # output lines omitted
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for x in f.nlst()[:3]: print(x)</code></strong>     # no . or .. in listings
+...
+2004-longmont-classes.html
+2005-longmont-classes.html
+2006-longmont-classes.html
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>L = []</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>f.dir(L.append)</code></strong>                     # ditto for detailed list
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for x in L[:3]: print(x)</code></strong>
+...
+-rw-r--r--   1 ftp      ftp          8173 Mar 19  2006 2004-longmont-classes.html
+-rw-r--r--   1 ftp      ftp          9739 Mar 19  2006 2005-longmont-classes.html
+-rw-r--r--   1 ftp      ftp           805 Jul  8  2006 2006-longmont-classes.html</pre>
+<p>On the other hand, the server I’m using in this section does
+          include the special dot names; to be robust, our scripts must skip
+          over these names in remote directory listings just in case they’re
+          run against a server that includes them (here, the test is required
+          to avoid falling into an infinite recursive loop!). We don’t need to
+          care about local directory listings because Python’s <code class="epub__literal">os.listdir</code> never includes “.” or “..” in
+          its result, but things are not quite so consistent in the “Wild
+          West” that is the Internet today:</p><a id="I_programlisting2_d1e54522"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>f = FTP('learning-python.com')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>f.login('lutz', 'xxxxxxxx')</code></strong>         # output lines omitted
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for x in f.nlst()[:5]: print(x)</code></strong>     # includes . and .. here
+...
+.
+..
+.hcc.thumbs
+2009-public-classes.htm
+2010-public-classes.html
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>L = []</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>f.dir(L.append)</code></strong>                     # ditto for detailed list
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for x in L[:5]: print(x)</code></strong>
+...
+drwx---r-x   19 5693094  450          8192 May  4 10:59 .
+drwx---r-x   19 5693094  450          8192 May  4 10:59 ..
+drwx------    2 5693094  450          4096 Feb 18 05:38 .hcc.thumbs
+-rw----r--    1 5693094  450         15824 May  1 14:39 2009-public-classes.htm
+-rw----r--    1 5693094  450         18083 May  4 09:05 2010-public-classes.html</pre>
+<p>The output of our clean-all script in action follows; it shows
+          up in the system console window where the script is run. You might
+          be able to achieve the same effect with a “rm –rf” Unix shell
+          command in a SSH or Telnet window on some servers, but the Python
+          script runs on the client and requires no other remote access than
+          basic FTP on the <a id="I_indexterm2_d1e54546"></a><a id="I_indexterm2_d1e54548"></a>client:</p><a id="I_programlisting2_d1e54551"></a>
+<pre class="epub__programlisting">C:\PP4E\Internet\Ftp\Mirror&gt; <strong class="epub__userinput"><code>cleanall.py</code></strong>
+Password for lutz on learning-python.com:
+connecting...
+file 2009-public-classes.htm
+file 2010-public-classes.html
+file Learning-Python-interview.doc
+file Python-registration-form-010.pdf
+file PythonPoweredSmall.gif
+directory _derived
+file 2009-public-classes.htm_cmp_DeepBlue100_vbtn.gif
+file 2009-public-classes.htm_cmp_DeepBlue100_vbtn_p.gif
+file 2010-public-classes.html_cmp_DeepBlue100_vbtn_p.gif
+file 2010-public-classes.html_cmp_deepblue100_vbtn.gif
+directory _vti_cnf
+file 2009-public-classes.htm_cmp_DeepBlue100_vbtn.gif
+file 2009-public-classes.htm_cmp_DeepBlue100_vbtn_p.gif
+file 2010-public-classes.html_cmp_DeepBlue100_vbtn_p.gif
+file 2010-public-classes.html_cmp_deepblue100_vbtn.gif
+directory exited
+directory exited
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+
+file priorclients.html
+file public_classes.htm
+file python_conf_ora.gif
+file topics.html
+Done: 366 files and 18 directories cleaned.</pre>
+</div>
+<div class="epub__sect2" title="Downloading Remote Trees"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="downloading_remote_trees"></a>Downloading Remote Trees</h2>
+</div>
+</div>
+</div>
+<p>It is possible to <a id="I_indexterm2_d1e54564"></a>extend this remote tree-cleaner to also download a
+          remote tree with subdirectories: rather than deleting, as you walk
+          the remote tree simply create a local directory to match a remote
+          one, and download nondirectory files. We’ll leave this final step as
+          a suggested exercise, though, partly because its dependence on the
+          format produced by server directory listings makes it complex to be
+          robust and partly because this use case is less common for me—in
+          practice, I am more likely to maintain a site on my PC and upload to
+          the server than to download a tree.</p>
+<p>If you do wish to experiment with a recursive download,
+          though, be sure to consult the script
+          <span class="epub__emphasis"><em>Tools\Scripts\ftpmirror.py</em></span> in Python’s install
+          or source tree for hints. That script attempts to download a remote
+          directory tree by FTP, and allows for various directory listing
+          formats which we’ll skip here in the interest of space. For our
+          purposes, it’s time to move on to the next protocol on our
+          tour—Internet <a id="I_indexterm2_d1e54575"></a><a id="I_indexterm2_d1e54577"></a><a id="I_indexterm2_d1e54579"></a><a id="I_indexterm2_d1e54581"></a>email.</p>
+</div>
+</div>
+</div>
+</body>
+</html>

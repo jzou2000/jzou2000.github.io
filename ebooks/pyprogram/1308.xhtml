@@ -1,0 +1,1512 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>email: Parsing and Composing Mail Content</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="email: Parsing and Composing Mail Content"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="email_colon_parsing_and_composing_mail_c"></a>email: Parsing and Composing Mail Content</h1>
+</div>
+</div>
+</div>
+<p>The second <a id="email13.9"></a><a id="client13.9"></a><a id="par13.9"></a>edition of this book used a handful of standard library
+        modules (<code class="epub__literal">rfc822</code>, <code class="epub__literal">StringIO</code>, and more) to parse the contents of
+        messages, and simple text processing to compose them. Additionally,
+        that edition included a section on extracting and decoding attached
+        parts of a message using modules such as <code class="epub__literal">mhlib</code>, <code class="epub__literal">mimetools</code>, and <code class="epub__literal">base64</code>.</p>
+<p>In the third edition, those tools were still available, but
+        were, frankly, a bit clumsy and error-prone. Parsing attachments from
+        messages, for example, was tricky, and composing even basic messages
+        was tedious (in fact, an early printing of the prior edition contained
+        a potential bug, because it omitted one <code class="epub__literal">\n</code> character in a string formatting
+        operation). Adding attachments to sent messages wasn’t even attempted,
+        due to the complexity of the formatting involved. Most of these tools
+        are gone completely in Python 3.X as I write this fourth edition,
+        partly because of their complexity, and partly because they’ve been
+        made obsolete.</p>
+<p>Luckily, things are much simpler today. After the second
+        edition, Python sprouted a new<a id="I_indexterm2_d1e55994"></a> <code class="epub__literal">email</code> package—a
+        powerful collection of tools that automate most of the work behind
+        parsing and composing email messages. This module gives us an
+        object-based message interface and handles all the textual message
+        structure details, both analyzing and creating it. Not only does this
+        eliminate a whole class of potential bugs, it also promotes more
+        advanced mail processing.</p>
+<p>Things like attachments, for instance, become accessible to mere
+        mortals (and authors with limited book real estate). In fact, an
+        entire original section on manual attachment parsing and decoding was
+        deleted in the third edition—it’s essentially automatic with <code class="epub__literal">email</code>. The new package parses and constructs
+        headers and attachments; generates correct email text; decodes and
+        encodes Base64, quoted-printable, and <span>uuencoded</span> data; and much more.</p>
+<p>We won’t cover the <code class="epub__literal">email</code>
+        package in its entirety in this book; it is well documented in
+        Python’s library manual. Our goal here is to explore some example
+        usage code, which you can study in conjunction with the manuals. But
+        to help get you started, let’s begin with a quick overview. In a
+        nutshell, the <code class="epub__literal">email</code> package is
+        based around the <code class="epub__literal">Message</code> object it
+        provides:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Parsing mail</em></span></span></dt><dd>
+<p>A mail’s full text, fetched from <code class="epub__literal">poplib</code> or <code class="epub__literal">imaplib</code>, is parsed into a new <code class="epub__literal">Message</code> object, with an API for
+              accessing its components. In the object, mail headers become
+              dictionary-like keys, and components become a “payload” that can
+              be walked with a generator interface (more on payloads in a
+              moment).</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Creating mail</em></span></span></dt><dd>
+<p>New mails are composed by creating a new <code class="epub__literal">Message</code> object, using an API to attach
+              headers and parts, and asking the object for its print
+              representation—a correctly formatted mail message text, ready to
+              be passed to the <code class="epub__literal">smtplib</code>
+              module for delivery. Headers are added by key assignment and
+              attachments by method calls.</p></dd></dl>
+</div>
+<p>In other words, the <code class="epub__literal">Message</code>
+        object is used both for accessing existing messages and for creating
+        new ones from scratch. In both cases, <code class="epub__literal">email</code> can automatically handle details like
+        content encodings (e.g., attached binary images can be treated as text
+        with Base64 encoding and decoding), content types, and more.</p>
+<div class="epub__sect2" title="Message Objects"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="message_objects"></a>Message Objects</h2>
+</div>
+</div>
+</div>
+<p>Since the <code class="epub__literal">email</code> module’s
+          <code class="epub__literal">Message</code> <a id="mes13.9.1"></a><a id="email13.9.1"></a>object is at the heart of its API, you need a cursory
+          understanding of its form to get started. In short, it is designed
+          to reflect the structure of a formatted email message. Each <code class="epub__literal">Message</code> consists of three main pieces of
+          <span>information</span>:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Type</em></span></span></dt><dd>
+<p>A content type (plain text, HTML text, JPEG image, and
+                so on), encoded as a MIME main type and a subtype. For
+                instance, “text/html” means the main type is text and the
+                subtype is HTML (a web page); “image/jpeg” means a JPEG photo.
+                A “multipart/mixed” type means there are nested parts within
+                the message.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Headers</em></span></span></dt><dd>
+<p>A dictionary-like mapping interface, with one key per
+                mail header (From, To, and so on). This interface supports
+                almost all of the usual dictionary operations, and headers may
+                be fetched or set by normal key indexing.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Content</em></span></span></dt><dd>
+<p>A “payload,” which represents the mail’s content. This
+                can be either a string (<code class="epub__literal">bytes</code> or <code class="epub__literal">str</code>) for simple messages, or a list
+                of additional <code class="epub__literal">Message</code>
+                objects for <span>multipart</span>
+                container messages with attached or alternative parts. For
+                some oddball types, the payload may be a Python <code class="epub__literal">None</code> object.</p></dd></dl>
+</div>
+<p>The MIME type of a Message is key to understanding its
+          content. For example, mails with attached images may have a main
+          top-level <code class="epub__literal">Message</code> (type <code class="epub__literal">multipart/mixed</code>), with three more <code class="epub__literal">Message</code> objects in its payload—one for its
+          main text (type <code class="epub__literal">text/plain</code>),
+          followed by two of type image for the photos (type <code class="epub__literal">image/jpeg</code>). The photo parts may be
+          encoded for transmission as text with Base64 or another scheme; the
+          encoding type, as well as the original image filename, are specified
+          in the part’s headers.</p>
+<p>Similarly, mails that include both simple text and an HTML
+          alternative will have two nested <code class="epub__literal">Message</code> objects in their payload, of type
+          plain text (<code class="epub__literal">text/plain</code>) and HTML
+          text (<code class="epub__literal">text/html</code>), along with a
+          main root <code class="epub__literal">Message</code> of type
+          <code class="epub__literal">multipart/alternative</code>. Your mail
+          client decides which part to display, often based on your
+          preferences.</p>
+<p>Simpler messages may have just a root <code class="epub__literal">Message</code> of type <code class="epub__literal">text/plain</code> or <code class="epub__literal">text/html</code>, representing the entire message
+          body. The payload for such mails is a simple string. They may also
+          have no explicitly given type at all, which generally defaults to
+          <code class="epub__literal">text/plain</code>. Some single-part
+          messages are <code class="epub__literal">text/html</code>, with no
+          <code class="epub__literal">text/plain</code> alternative—they
+          require a web browser or other HTML viewer (or a very keen-eyed
+          user).</p>
+<p>Other combinations are possible, including some types that are
+          not commonly seen in practice, such as <code class="epub__literal">message/delivery</code> status. Most messages
+          have a main text part, though it is not required, and may be nested
+          in a multipart or other construct.</p>
+<p>In all cases, an email message is a simple, linear string, but
+          these message structures are automatically detected when mail text
+          is parsed and are created by your method calls when new messages are
+          composed. For instance, when creating messages, the message <code class="epub__literal">attach</code> method adds parts for multipart
+          mails, and <code class="epub__literal">set_payload</code> sets the
+          entire payload to a string for simple mails.</p>
+<p><code class="epub__literal">Message</code> objects also have
+          assorted properties (e.g., the filename of an attachment), and they
+          provide a convenient <code class="epub__literal">walk</code>
+          generator method, which returns the next <code class="epub__literal">Message</code> in the payload each time through
+          in a <code class="epub__literal">for</code> loop or other iteration
+          context. Because the walker yields the root <code class="epub__literal">Message</code> object first (i.e., <code class="epub__literal">self</code>), single-part messages don’t have to
+          be handled as a special case; a nonmultipart message is effectively
+          a <code class="epub__literal">Message</code> with a single item in
+          its payload—itself.</p>
+<p>Ultimately, the <code class="epub__literal">Message</code>
+          object structure closely mirrors the way mails are formatted as
+          text. Special header lines in the mail’s text give its type (e.g.,
+          plain text or multipart), as well as the separator used between the
+          content of nested parts. Since the underlying textual details are
+          automated by the <code class="epub__literal">email</code>
+          package—both when parsing and when composing—we won’t go into
+          further formatting details here.</p>
+<p>If you are interested in seeing how this translates to real
+          emails, a great way to learn mail structure is by inspecting the
+          full raw text of messages displayed by email clients you already
+          use, as we’ll see with some we meet in this book. In fact, we’ve
+          already seen a few—see the raw text printed by our earlier POP email
+          scripts for simple mail text examples. For more on the <code class="epub__literal">Message</code> object, and <code class="epub__literal">email</code> in general, consult the <code class="epub__literal">email</code> package’s entry in Python’s library
+          manual. We’re skipping details such as its available encoders and
+          MIME object classes here in the interest of space.</p>
+<p>Beyond the <code class="epub__literal">email</code> package,
+          the Python library includes other tools for mail-related processing.
+          For instance, <code class="epub__literal">mimetypes</code> maps a
+          filename to and from a MIME type:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">mimetypes.guess_type(filename)</code></span></dt><dd>
+<p>Maps a <a id="I_indexterm2_d1e56252"></a>filename to a MIME type. Name
+                <span class="epub__emphasis"><em>spam.txt</em></span> maps to text/plan.</p></dd><dt><span class="epub__term"><code class="epub__literal">mimetypes.guess_extension(contype)</code></span></dt><dd>
+<p>Maps a MIME <a id="I_indexterm2_d1e56268"></a>type to a filename extension. Type text/html
+                maps to <span class="epub__emphasis"><em>.html</em></span>.</p></dd></dl>
+</div>
+<p>We also used the <code class="epub__literal">mimetypes</code>
+          module earlier in this chapter to guess FTP transfer modes from
+          filenames (see Example 13-10), as well as in
+          Chapter 6, where we used it to
+          guess a media player for a filename (see the examples there,
+          including <span class="epub__emphasis"><em>playfile.py</em></span>, Example 6-23). For email, these can
+          come in handy when attaching files to a new message (<code class="epub__literal">guess_type</code>) and saving parsed attachments
+          that do not provide a filename (<code class="epub__literal">guess_extension</code>). In fact, this module’s
+          source code is a fairly complete reference to MIME types. See the
+          library manual for more on these <a id="I_indexterm2_d1e56298"></a><a id="I_indexterm2_d1e56300"></a>tools.</p>
+</div>
+<div class="epub__sect2" title="Basic email Package Interfaces in Action"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="basic_email_package_interfaces_in_action"></a>Basic email Package Interfaces in Action</h2>
+</div>
+</div>
+</div>
+<p>Although we can’t <a id="email13.9.2"></a><a id="mes13.9.2"></a>provide an exhaustive reference here, let’s step
+          through a simple interactive session to illustrate the fundamentals
+          of email processing. To <span class="epub__emphasis"><em>compose</em></span> the full text
+          of a message—to be delivered with <code class="epub__literal">smtplib</code>, for instance—make a <code class="epub__literal">Message</code>, assign headers to its keys, and
+          set its payload to the message body. Converting to a string yields
+          the mail text. This process is substantially simpler and less
+          error-prone than the manual text operations we used earlier in Example 13-19 to build mail as
+          strings:</p><a id="I_programlisting2_d1e56330"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.message import Message</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = Message()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m['from'] = 'Jane Doe &lt;jane@doe.com&gt;'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m['to']   = 'PP4E@learning-python.com'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.set_payload('The owls are not what they seem...')</code></strong>
+&gt;&gt;&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>s = str(m)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(s)</code></strong>
+from: Jane Doe &lt;jane@doe.com&gt;
+to: PP4E@learning-python.com
+
+The owls are not what they seem...</pre>
+<p><span class="epub__emphasis"><em>Parsing</em></span> a message’s text—like the kind
+          you obtain with <code class="epub__literal">poplib</code>—is
+          similarly simple, and essentially the inverse: we get back a
+          <code class="epub__literal">Message</code> object from the text,
+          with keys for headers and a payload for the body:</p><a id="I_programlisting2_d1e56364"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>s</code></strong>    # same as in prior interaction
+'from: Jane Doe &lt;jane@doe.com&gt;\nto: PP4E@learning-python.com\n\nThe owls are not...'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.parser import Parser</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = Parser().parsestr(s)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x</code></strong>
+&lt;email.message.Message object at 0x015EA9F0&gt;
+&gt;&gt;&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x['From']</code></strong>
+'Jane Doe &lt;jane@doe.com&gt;'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.get_payload()</code></strong>
+'The owls are not what they seem...'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.items()</code></strong>
+[('from', 'Jane Doe &lt;jane@doe.com&gt;'), ('to', 'PP4E@learning-python.com')]</pre>
+<p>So far this isn’t much different from the older and
+          now-defunct<a id="I_indexterm2_d1e56390"></a> <code class="epub__literal">rfc822</code> module, but
+          as we’ll see in a moment, things get more interesting when there is
+          more than one part. For simple messages like this one, the message
+          <code class="epub__literal">walk</code> generator treats it as a
+          single-part mail, of type plain text:</p><a id="I_programlisting2_d1e56400"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>for part in x.walk():</code></strong>
+...     <strong class="epub__userinput"><code>print(x.get_content_type())</code></strong>
+...     <strong class="epub__userinput"><code>print(x.get_payload())</code></strong>
+...
+text/plain
+The owls are not what they seem...</pre>
+<div class="epub__sect3" title="Handling multipart messages"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="handling_multipart_messages"></a>Handling multipart messages</h3>
+</div>
+</div>
+</div>
+<p>Making a mail with <span class="epub__emphasis"><em>attachments</em></span> is a
+            little <a id="I_indexterm2_d1e56419"></a>more work, but not much: we just make a root
+            <code class="epub__literal">Message</code> and attach nested
+            <code class="epub__literal">Message</code> objects created from
+            the MIME type object that corresponds to the type of data we’re
+            attaching. The <code class="epub__literal">MIMEText</code> class,
+            for instance, is a subclass of <code class="epub__literal">Message</code>, which is tailored for text
+            parts, and knows how to generate the right types of header
+            information when printed. <code class="epub__literal">MIMEImage</code> and <code class="epub__literal">MIMEAudio</code> similarly customize Message
+            for images and audio, and also know how to apply Base64 and other
+            MIME encodings to binary data. The root message is where we store
+            the main headers of the mail, and we attach parts here, instead of
+            setting the entire payload—the payload is a list now, not a
+            string. <code class="epub__literal">MIMEMultipart</code> is a
+            <code class="epub__literal">Message</code> that provides the extra
+            header protocol we need for the root:</p><a id="I_programlisting2_d1e56450"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.mime.multipart import MIMEMultipart</code></strong>      # Message subclasses
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.mime.text import MIMEText</code></strong>                # with extra headers+logic
+&gt;&gt;&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>top = MIMEMultipart()</code></strong>                               # root Message object
+&gt;&gt;&gt; <strong class="epub__userinput"><code>top['from'] = 'Art &lt;arthur@camelot.org&gt;'</code></strong>            # subtype default=mixed
+&gt;&gt;&gt; <strong class="epub__userinput"><code>top['to']   = 'PP4E@learning-python.com'</code></strong>
+&gt;&gt;&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>sub1 = MIMEText('nice red uniforms...\n')</code></strong>           # part Message attachments
+&gt;&gt;&gt; <strong class="epub__userinput"><code>sub2 = MIMEText(open('data.txt').read())</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>sub2.add_header('Content-Disposition', 'attachment', filename='data.txt')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>top.attach(sub1)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>top.attach(sub2)</code></strong></pre>
+<p>When we ask for the text, a correctly formatted full mail
+            text is returned, separators and all, ready to be sent with
+            <code class="epub__literal">smtplib</code>—quite a trick, if
+            you’ve ever tried this by hand:</p><a id="I_programlisting2_d1e56487"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>text = top.as_string()</code></strong>    # or do: str(top) or print(top)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(text)</code></strong>
+Content-Type: multipart/mixed; boundary="===============1574823535=="
+MIME-Version: 1.0
+from: Art &lt;arthur@camelot.org&gt;
+to: PP4E@learning-python.com
+
+--===============1574823535==
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+
+nice red uniforms...
+
+--===============1574823535==
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename="data.txt"
+
+line1
+line2
+line3
+
+--===============1574823535==--</pre>
+<p>If we are sent this message and retrieve it via <code class="epub__literal">poplib</code>, parsing its full text yields a
+            <code class="epub__literal">Message</code>
+            object just like the one we built to send. The message <code class="epub__literal">walk</code> generator allows us to step through
+            each part, fetching their types and payloads:</p><a id="I_programlisting2_d1e56506"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>text</code></strong>    # same as in prior interaction
+'Content-Type: multipart/mixed; boundary="===============1574823535=="\nMIME-Ver...'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.parser import Parser</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>msg = Parser().parsestr(text)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>msg['from']</code></strong>
+'Art &lt;arthur@camelot.org&gt;'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for part in msg.walk():</code></strong>
+...     <strong class="epub__userinput"><code>print(part.get_content_type())</code></strong>
+...     <strong class="epub__userinput"><code>print(part.get_payload())</code></strong>
+...     <strong class="epub__userinput"><code>print()</code></strong>
+...
+ multipart/mixed
+[&lt;email.message.Message object at 0x015EC610&gt;,
+&lt;email.message.Message object at0x015EC630&gt;]
+
+text/plain
+nice red uniforms...
+
+
+text/plain
+line1
+line2
+line3</pre>
+<p>Multipart alternative messages (with text and HTML
+            renditions of the same message) can be composed and parsed in
+            similar fashion. Because <code class="epub__literal">email</code>
+            clients are able to parse and compose messages with a simple
+            object-based API, they are freed to focus on user-interface
+            instead of text <a id="I_indexterm2_d1e56538"></a><a id="I_indexterm2_d1e56540"></a>processing.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Unicode, Internationalization, and the Python 3.1 email Package"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="unicode_comma_internationalization_comma"></a>Unicode, Internationalization, and the Python 3.1 email
+          Package</h2>
+</div>
+</div>
+</div>
+<p>Now that I’ve shown you how “cool” the email package is, I
+          unfortunately need to let you know that it’s not completely
+          operational in Python 3.1. The<a id="I_indexterm2_d1e56548"></a> <code class="epub__literal">email</code> package
+          works as shown for simple messages, but is severely impacted by
+          Python 3.X’s Unicode/bytes string dichotomy in a number of
+          ways.</p>
+<p>In short, the <code class="epub__literal">email</code> package
+          in Python 3.1 is still somewhat coded to operate in the realm of 2.X
+          <code class="epub__literal">str</code> text strings. Because these
+          have become Unicode in 3.X, and because some tools that <code class="epub__literal">email</code> uses are now oriented toward
+          <code class="epub__literal">bytes</code> strings, which do not mix
+          freely with <code class="epub__literal">str</code>, a variety of
+          conflicts crop up and cause issues for programs that depend upon
+          this module.</p>
+<p>At this writing, a new version of <code class="epub__literal">email</code> is being developed which will handle
+          <code class="epub__literal">bytes</code> and Unicode encodings
+          better, but the going consensus is that it won’t be folded back into
+          Python until release 3.3 or later, long after this book’s release.
+          Although a few patches might make their way into 3.2, the current
+          sense is that fully addressing the package’s problems appears to
+          require a full redesign.</p>
+<p>To be fair, it’s a substantial problem. Email has historically
+          been oriented toward single-byte ASCII text, and generalizing it for
+          Unicode is difficult to do well. In fact, the same holds true for
+          most of the Internet today—as discussed elsewhere in this chapter,
+          FTP, POP, SMTP, and even webpage bytes fetched over HTTP pose the
+          same sorts of issues. Interpreting the bytes shipped over networks
+          as text is easy if the mapping is one-to-one, but allowing for
+          arbitrary <a id="I_indexterm2_d1e56584"></a>Unicode encoding in that text opens a Pandora’s box of
+          dilemmas. The extra complexity is necessary today, but, as <code class="epub__literal">email</code> attests, can be a daunting
+          task.</p>
+<p>Frankly, I considered not releasing this edition of this book
+          until this package’s issues could be resolved, but I decided to go
+          forward because a new <code class="epub__literal">email</code>
+          package may be years away (two Python releases, by all accounts).
+          Moreover, the issues serve as a case study of the types of problems
+          you’ll run into in the real world of large-scale software
+          development. Things change over time, and program code is no
+          exception.</p>
+<p>Instead, this book’s examples provide new Unicode and
+          Internationalization support but adopt policies to work around
+          issues where possible. Programs in books are meant to be
+          educational, after all, not commercially viable. Given the state of
+          the <code class="epub__literal">email</code> package that the
+          examples depend on, though, the solutions used here might not be
+          completely universal, and there may be additional Unicode issues
+          lurking. To address the future, watch this book’s website (described
+          in the Preface) for updated notes and code examples if/when the
+          anticipated new <code class="epub__literal">email</code> package
+          appears. Here, we’ll work with what we have.</p>
+<p>The good news is that we’ll be able to make use of <code class="epub__literal">email</code> in its current form to build fairly
+          sophisticated and full-featured email clients in this book anyhow.
+          It still offers an amazing number of tools, including MIME encoding
+          and decoding, message formatting and parsing, Internationalized
+          headers extraction and construction, and more. The bad news is that
+          this will require a handful of obscure workarounds and may need to
+          be changed in the future, though few software projects are exempt
+          from such realities.</p>
+<p>Because <code class="epub__literal">email</code>’s limitations
+          have implications for later email code in this book, I’m going to
+          quickly run through them in this section. Some of this can be safely
+          saved for later reference, but parts of later examples may be
+          difficult to understand if you don’t have this background. The
+          upside is that exploring the package’s limitations here also serves
+          as a vehicle for digging a bit deeper into the <code class="epub__literal">email</code> package’s interfaces in
+          general.</p>
+<div class="epub__sect3" title="Parser decoding requirement"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="parser_decoding_requirement"></a>Parser decoding requirement</h3>
+</div>
+</div>
+</div>
+<p>The first Unicode <a id="par13.9.3.1"></a><a id="uni13.9.3.1"></a><a id="email13.9.3.1"></a>issue in Python3.1’s <code class="epub__literal">email</code> package is nearly a showstopper in
+            some contexts: the <code class="epub__literal">bytes</code>
+            strings of the sort produced by <code class="epub__literal">poplib</code> for mail fetches must be decoded
+            to <code class="epub__literal">str</code> prior to parsing with
+            <code class="epub__literal">email</code>. Unfortunately, because
+            there may not be enough information to know how to decode the
+            message bytes per Unicode, some clients of this package may need
+            to be generalized to detect whole-message encodings prior to
+            parsing; in worst cases other than email that may mandate mixed
+            data types, the current package cannot be used at all. Here’s the
+            issue live:</p><a id="I_programlisting2_d1e56656"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>text</code></strong>    # from prior example in his section
+'Content-Type: multipart/mixed; boundary="===============1574823535=="\nMIME-Ver...'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>btext = text.encode()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>btext</code></strong>
+b'Content-Type: multipart/mixed; boundary="===============1574823535=="\nMIME-Ve...'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>msg = Parser().parsestr(text)</code></strong>           # email parser expects Unicode str
+&gt;&gt;&gt; <strong class="epub__userinput"><code>msg = Parser().parsestr(btext)</code></strong>          # but poplib fetches email as bytes!
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+  File "C:\Python31\lib\email\parser.py", line 82, in parsestr
+    return self.parse(StringIO(text), headersonly=headersonly)
+TypeError: initial_value must be str or None, not bytes
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>msg = Parser().parsestr(btext.decode())</code></strong>               # okay per default
+&gt;&gt;&gt; <strong class="epub__userinput"><code>msg = Parser().parsestr(btext.decode('utf8'))</code></strong>         # ascii encoded (default)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>msg = Parser().parsestr(btext.decode('latin1'))</code></strong>       # ascii is same in all 3
+&gt;&gt;&gt; <strong class="epub__userinput"><code>msg = Parser().parsestr(btext.decode('ascii'))</code></strong></pre>
+<p>This is less than ideal, as a <code class="epub__literal">bytes</code>-based <code class="epub__literal">email</code> would be able to handle message
+            encodings more directly. As mentioned, though, the <code class="epub__literal">email</code> package is not really fully
+            functional in Python 3.1, because of its legacy <code class="epub__literal">str</code> focus, and the sharp distinction
+            that Python 3.X makes between Unicode text and byte strings. In
+            this case, its parser should accept <code class="epub__literal">bytes</code> and not expect clients to know how
+            to decode.</p>
+<p>Because of that, this book’s email clients take simplistic
+            approaches to decoding fetched message bytes to be parsed by
+            <code class="epub__literal">email</code>. Specifically, full-text
+            decoding will try a user-configurable encoding name, then fall
+            back on trying common types as a heuristic, and finally attempt to
+            decode just message headers.</p>
+<p>This will suffice for the examples shown but may need to be
+            enhanced for broader applicability. In some cases, encoding may
+            have to be determined by other schemes such as inspecting email
+            headers (if present at all), guessing from bytes structure <span>analysis</span>, or dynamic user feedback.
+            Adding such enhancements in a robust fashion is likely too complex
+            to attempt in a book’s example code, and it is better performed in
+            common standard library tools in any event.</p>
+<p>Really, robust decoding of mail text may not be possible
+            today at all, if it requires headers inspections—we can’t inspect
+            a message’s encoding information headers unless we parse the
+            message, but we can’t parse a message with 3.1’s <code class="epub__literal">email</code> package unless we already know the
+            encoding. That is, scripts may need to parse in order to decode,
+            but they need to decode in order to parse! The byte strings of
+            <code class="epub__literal">poplib</code> and Unicode strings of
+            <code class="epub__literal">email</code> in 3.1 are fundamentally
+            at odds. Even within its own libraries, Python 3.X’s changes have
+            created a chicken-and-egg dependency problem that still exists
+            nearly two years after 3.0’s release.</p>
+<p>Short of writing our own email parser, or pursuing other
+            similarly complex approaches, the best bet today for fetched
+            messages seems to be decoding per user preferences and defaults,
+            and that’s how we’ll proceed in this edition. The PyMailGUI client
+            of Chapter 14, for instance, will
+            allow Unicode encodings for full mail text to be set on a
+            per-session basis.</p>
+<p>The real issue, of course, is that email in general is
+            inherently complicated by the presence of arbitrary text
+            encodings. Besides full mail text, we also must consider Unicode
+            encoding issues for the text components of a message once it’s
+            parsed—both its text parts and its message headers. To see why,
+            let’s <a id="I_indexterm2_d1e56729"></a><a id="I_indexterm2_d1e56734"></a><a id="I_indexterm2_d1e56736"></a><a id="I_indexterm2_d1e56738"></a>move on.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p><span class="epub__emphasis"><em>Related Issue for CGI scripts</em></span>: I
+              should also note that the full text decoding issue may not be as
+              large a factor for email as it is for some other <code class="epub__literal">email</code> package clients. Because the
+              original email standards call for <span>ASCII</span> text and require binary data
+              to be MIME encoded, most emails are likely to decode properly
+              according to a 7- or 8-bit encoding such as Latin-1.</p>
+<p>As we’ll see in Chapter 15,
+              though, a more insurmountable and related issue looms for
+              server-side scripts that support <span class="epub__emphasis"><em>CGI file
+              uploads</em></span> on the Web—because Python’s CGI module also
+              uses the <code class="epub__literal">email</code> package to
+              parse multipart form data; because this package requires data to
+              be decoded to <code class="epub__literal">str</code> for
+              parsing; and because such data might have mixed text and binary
+              data (included raw binary data that is <span class="epub__emphasis"><em>not</em></span>
+              MIME-encoded, text of any encoding, and even arbitrary
+              combinations of these), these uploads fail in Python 3.1 if any
+              binary or incompatible text files are included. The <code class="epub__literal">cgi</code> module triggers Unicode decoding
+              or type errors internally, before the Python script has a chance
+              to intervene.</p>
+<p>CGI uploads worked in Python 2.X, because the <code class="epub__literal">str</code> type represented both possibly
+              encoded text and binary data. Saving this type’s content to a
+              binary mode file as a string of bytes in 2.X sufficed for both
+              arbitrary text and binary data such as images. Email parsing
+              worked in 2.X for the same reason. For better or worse, the 3.X
+              <code class="epub__literal">str</code>/<code class="epub__literal">bytes</code> dichotomy makes this generality
+              impossible.</p>
+<p>In other words, although we can generally work around the
+              <code class="epub__literal">email</code> parser’s <code class="epub__literal">str</code> requirement for fetched emails by
+              decoding per an 8-bit encoding, it’s much more malignant for web
+              scripting today. Watch for more details on this in Chapter 15, and stay tuned for a future
+              fix, which may have materialized by the time you read these
+              words.</p>
+</div>
+</div>
+<div class="epub__sect3" title="Text payload encodings: Handling mixed type results"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="text_payload_encodings_colon_handling_mi"></a>Text payload encodings: Handling mixed type results</h3>
+</div>
+</div>
+</div>
+<p>Our next <code class="epub__literal">email</code> Unicode
+            <a id="email13.9.3.2"></a><a id="uni13.9.3.2"></a><a id="text13.9.3.2"></a>issue seems to fly in the face of Python’s generic
+            programming model: the data types of message payload objects may
+            differ, depending on how they are fetched. Especially for programs
+            that walk and process payloads of mail parts <span>generically</span>, this complicates
+            code.</p>
+<p>Specifically, the <code class="epub__literal">Message</code>
+            object’s <code class="epub__literal">get_payload</code> <a id="I_indexterm2_d1e56826"></a>method we used earlier accepts an optional <code class="epub__literal">decode</code> argument to control automatic
+            email-style MIME decoding (e.g., Base64, uuencode,
+            quoted-printable). If this argument is passed in as <code class="epub__literal">1</code> (or equivalently, <code class="epub__literal">True</code>), the payload’s data is
+            MIME-decoded when fetched, if required. Because this argument is
+            so useful for complex messages with arbitrary parts, it will
+            normally be passed as true in all cases. Binary parts are normally
+            MIME-encoded, but even text parts might also be present in Base64
+            or another MIME form if their bytes fall outside email standards.
+            Some types of Unicode text, for example, require MIME
+            encoding.</p>
+<p>The upshot is that <code class="epub__literal">get_payload</code> normally returns <code class="epub__literal">str</code> strings for <code class="epub__literal">str</code> text parts, but returns <code class="epub__literal">bytes</code> strings if its <code class="epub__literal">decode</code> argument is true—even if the
+            message part is known to be text by nature. If this argument is
+            not used, the payload’s type depends upon how it was set: <code class="epub__literal">str</code> or <code class="epub__literal">bytes</code>. Because Python 3.X does not allow
+            <code class="epub__literal">str</code> and <code class="epub__literal">bytes</code> to be mixed freely, clients that
+            need to use the result in text processing or store it in files
+            need to accommodate the difference. Let’s run some code to
+            illustrate:</p><a id="I_programlisting2_d1e56872"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.message import Message</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = Message()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m['From'] = 'Lancelot'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.set_payload('Line?...')</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m['From']</code></strong>
+'Lancelot'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.get_payload()</code></strong>                 # str, if payload is str
+'Line?...'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.get_payload(decode=1)</code></strong>         # bytes, if MIME decode (same as decode=True)
+b'Line?...'</pre>
+<p>The combination of these different return types and Python
+            3.X’s strict <code class="epub__literal">str</code>/<code class="epub__literal">bytes</code> dichotomy can cause problems in
+            code that processes the result unless they decode <span>carefully</span>:</p><a id="I_programlisting2_d1e56907"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>m.get_payload(decode=True) + 'spam'</code></strong>                        # can't mix in 3.X!
+TypeError: can't concat bytes to str
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.get_payload(decode=True).decode() + 'spam'</code></strong>               # convert if required
+'Line?...spam'</pre>
+<p>To make sense of these examples, it may help to remember
+            that there are two different concepts of “encoding” for email
+            text:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p><span class="epub__emphasis"><em>Email-style MIME encodings</em></span> such as
+                Base64, uuencode, and quoted-printable, which are applied to
+                binary and otherwise unusual content to make them acceptable
+                for transmission in email text</p></li><li class="epub__listitem">
+<p><span class="epub__emphasis"><em>Unicode text encodings</em></span> for strings
+                in general, which apply to message text as well as its parts,
+                and may be required after MIME encoding for text message
+                parts</p></li></ul>
+</div>
+<p>The <code class="epub__literal">email</code> package handles
+            email-style MIME encodings automatically when we pass <code class="epub__literal">decode=1</code> to fetch parsed payloads, or
+            generate text for messages that have nonprintable parts, but
+            scripts still need to take Unicode encodings into consideration
+            because of Python 3.X’s sharp string types differentiation. For
+            example, the first <code class="epub__literal">decode</code> in
+            the following refers to MIME, and the second to Unicode:</p><a id="I_programlisting2_d1e56939"></a>
+<pre class="epub__programlisting">m.get_payload(decode=True).decode()  # to bytes via MIME, then to str via Unicode</pre>
+<p>Even without the MIME <code class="epub__literal">decode</code> argument, the payload type may
+            also differ if it is stored in different forms:</p><a id="I_programlisting2_d1e56947"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>m = Message(); m.set_payload('spam'); m.get_payload()</code></strong>      # fetched as stored
+'spam'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = Message(); m.set_payload(b'spam'); m.get_payload()</code></strong>
+b'spam'</pre>
+<p>Moreover, the same hold true for the text-specific MIME
+            subclass (though as we’ll see later in this section, we cannot
+            pass a <code class="epub__literal">bytes</code> to its constructor
+            to force a binary payload):</p><a id="I_programlisting2_d1e56960"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.mime.text import MIMEText</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText('Line...?')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m['From'] = 'Lancelot'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m['From']</code></strong>
+'Lancelot'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.get_payload()</code></strong>
+'Line...?'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.get_payload(decode=1)</code></strong>
+b'Line...?'</pre>
+<p>Unfortunately, the fact that payloads might be either
+            <code class="epub__literal">str</code> or <code class="epub__literal">bytes</code> today not only flies in the face
+            of Python’s type-neutral mindset, it can complicate your
+            code—scripts may need to convert in contexts that require one or
+            the other type. For instance, GUI libraries might allow both, but
+            file saves and web page content generation may be less flexible.
+            In our example programs, we’ll process payloads as <code class="epub__literal">bytes</code> whenever possible, but decode to
+            <code class="epub__literal">str</code> text in cases where
+            required using the encoding information available in the header
+            API described in the next section.</p>
+</div>
+<div class="epub__sect3" title="Text payload encodings: Using header information to decode"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="text_payload_encodings_colon_using_heade"></a>Text payload encodings: Using header information to
+            decode</h3>
+</div>
+</div>
+</div>
+<p>More profoundly, text in email can be even richer than
+            implied so far—in principle, text payloads of a single message may
+            be encoded in a variety of different Unicode schemes (e.g., three
+            HTML webpage file attachments, all in different Unicode encodings,
+            and possibly different than the full message text’s encoding).
+            Although treating such text as binary byte strings can sometimes
+            finesse encoding issues, saving such parts in text-mode files for
+            opening must respect the original encoding types. Further, any
+            text processing performed on such parts will be similarly
+            type-specific.</p>
+<p>Luckily, the <code class="epub__literal">email</code>
+            package both adds character-set headers when generating message
+            text and retains character-set information for parts if it is
+            present when parsing message text. For instance, adding non-ASCII
+            text attachments simply requires passing in an encoding name—the
+            appropriate message headers are added automatically on text
+            generation, and the character set is available directly via
+            the<a id="I_indexterm2_d1e57006"></a> <code class="epub__literal">get_content_charset</code> method:</p><a id="I_programlisting2_d1e57015"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>s = b'A\xe4B'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>s.decode('latin1')</code></strong>
+'AäB'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.message import Message</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = Message()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.set_payload(b'A\xe4B', charset='latin1')</code></strong>       # or 'latin-1': see ahead
+&gt;&gt;&gt; <strong class="epub__userinput"><code>t = m.as_string()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(t)</code></strong>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="latin1"
+Content-Transfer-Encoding: base64
+
+QeRC
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.get_content_charset()</code></strong>
+'latin1'</pre>
+<p>Notice how <code class="epub__literal">email</code>
+            automatically applies Base64 MIME encoding to non-ASCII text parts
+            on generation, to conform to email standards. The same is true for
+            the more specific MIME text subclass of <code class="epub__literal">Message</code>:</p><a id="I_programlisting2_d1e57050"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.mime.text import MIMEText</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText(b'A\xe4B', _charset='latin1')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>t = m.as_string()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(t)</code></strong>
+Content-Type: text/plain; charset="latin1"
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+
+QeRC
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.get_content_charset()</code></strong>
+'latin1'</pre>
+<p>Now, if we parse this message’s text string with <code class="epub__literal">email</code>, we get back a new <code class="epub__literal">Message</code> whose text payload is the Base64
+            MIME-encoded text used to represent the non-ASCII Unicode string.
+            Requesting MIME decoding for the payload with <code class="epub__literal">decode=1</code> returns the byte string we
+            originally attached:</p><a id="I_programlisting2_d1e57078"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.parser import Parser</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>q = Parser().parsestr(t)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>q</code></strong>
+&lt;email.message.Message object at 0x019ECA50&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>q.get_content_type()</code></strong>
+'text/plain'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>q._payload</code></strong>
+'QeRC\n'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>q.get_payload()</code></strong>
+'QeRC\n'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>q.get_payload(decode=1)</code></strong>
+b'A\xe4B'</pre>
+<p>However, running Unicode decoding on this byte string to
+            convert to text fails if we attempt to use the platform default on
+            Windows (UTF8). To be more accurate, and support a wide variety of
+            text types, we need to use the character-set information saved by
+            the parser and attached to the <code class="epub__literal">Message</code> object. This is especially
+            important if we need to save the data to a file—we either have to
+            store as bytes in binary mode files, or specify the correct (or at
+            least a compatible) Unicode encoding in order to use such strings
+            for text-mode files. Decoding manually works the same way:</p><a id="I_programlisting2_d1e57107"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>q.get_payload(decode=1).decode()</code></strong>
+UnicodeDecodeError: 'utf8' codec can't decode bytes in position 1-2: unexpected
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>q.get_content_charset()</code></strong>
+'latin1'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>q.get_payload(decode=1).decode('latin1')</code></strong>                    # known type
+'AäB'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>q.get_payload(decode=1).decode(q.get_content_charset())</code></strong>     # allow any type
+'AäB'</pre>
+<p>In fact, all the header details are available on <code class="epub__literal">Message</code> objects, if we know where to
+            look. The character set can also be absent entirely, in which case
+            it’s returned as <code class="epub__literal">None</code>; clients
+            need to define policies for such ambiguous text (they might try
+            common types, guess, or treat the data as a raw byte
+            string):</p><a id="I_programlisting2_d1e57130"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>q['content-type']</code></strong>                                     # mapping interface
+'text/plain; charset="latin1"'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>q.items()</code></strong>
+[('Content-Type', 'text/plain; charset="latin1"'), ('MIME-Version', '1.0'),
+('Content-Transfer-Encoding', 'base64')]
+
+&gt;&gt; <strong class="epub__userinput"><code>q.get_params(header='Content-Type')</code></strong>                    # param interface
+[('text/plain', ''), ('charset', 'latin1')]
+&gt;&gt;&gt; <strong class="epub__userinput"><code>q.get_param('charset', header='Content-Type')</code></strong>
+'latin1'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>charset = q.get_content_charset()</code></strong>                     # might be missing
+&gt;&gt;&gt; <strong class="epub__userinput"><code>if charset:</code></strong>
+...    <strong class="epub__userinput"><code>print(q.get_payload(decode=1).decode(charset))</code></strong>
+...
+AäB</pre>
+<p>This handles encodings for message text parts in parsed
+            emails. For composing new emails, we still must apply session-wide
+            user settings or allow the user to specify an encoding for each
+            part interactively. In some of this book’s email clients, payload
+            conversions are performed as needed—using encoding information in
+            message headers after parsing and provided by users during mail
+            <a id="I_indexterm2_d1e57156"></a><a id="I_indexterm2_d1e57158"></a><a id="I_indexterm2_d1e57160"></a>composition.</p>
+</div>
+<div class="epub__sect3" title="Message header encodings: email package support"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="message_header_encodings_colon_email_pac"></a>Message header encodings: email package support</h3>
+</div>
+</div>
+</div>
+<p>On a related note, the <code class="epub__literal">email</code> package <a id="email13.9.3.4"></a><a id="uni13.9.3.4"></a><a id="in13.9.3.4"></a><a id="mes13.9.3.4"></a>also provides support for encoding and decoding
+            message headers themselves (e.g., From, Subject) per email
+            standards when they are not simple text. Such headers are often
+            called <span class="epub__emphasis"><em>Internationalized</em></span> (or
+            <span class="epub__emphasis"><em>i18n</em></span>) headers, because they support inclusion
+            of non-ASCII character set text in emails. This term is also
+            sometimes used to refer to encoded text of message payloads;
+            unlike message headers, though, message payload encoding is used
+            for both international Unicode text and truly binary data such as
+            images (as we’ll see in the next section).</p>
+<p>Like mail payload parts, i18n headers are encoded specially
+            for email, and may also be encoded per Unicode. For instance,
+            here’s how to decode an encoded subject line from an arguably
+            spammish email that just showed up in my inbox; its <code class="epub__literal">=?UTF-8?Q?</code> preamble declares that the
+            data following it is UTF-8 encoded Unicode text, which is also
+            MIME-encoded per quoted-printable for transmission in email (in
+            short, unlike the prior section’s part payloads, which declare
+            their encodings in separate header lines, headers themselves may
+            declare their Unicode and MIME encodings by embedding them in
+            their own content this way):</p><a id="I_programlisting2_d1e57203"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>rawheader = '=?UTF-8?Q?Introducing=20Top=20Values=3A=20A=20Special=20Selecti</code></strong>
+<strong class="epub__userinput"><code>on=20of=20Great=20Money=20Savers?='</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.header import decode_header</code></strong>        # decode per email+MIME
+&gt;&gt;&gt; <strong class="epub__userinput"><code>decode_header(rawheader)</code></strong>
+[(b'Introducing Top Values: A Special Selection of Great Money Savers', 'utf-8')]
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>bin, enc = decode_header(rawheader)[0]</code></strong>        # and decode per Unicode
+&gt;&gt;&gt; <strong class="epub__userinput"><code>bin, enc</code></strong>
+(b'Introducing Top Values: A Special Selection of Great Money Savers', 'utf-8')
+&gt;&gt;&gt; <strong class="epub__userinput"><code>bin.decode(enc)</code></strong>
+'Introducing Top Values: A Special Selection of Great Money Savers'</pre>
+<p>Subtly, the <code class="epub__literal">email</code> package
+            can return multiple parts if there are encoded substrings in the
+            header, and each must be decoded individually and joined to
+            produce decoded header text. Even more subtly, in 3.1, this
+            package returns all <code class="epub__literal">bytes</code> when
+            any substring (or the entire header) is encoded but returns
+            <code class="epub__literal">str</code> for a fully unencoded
+            header, and uncoded substrings returned as <code class="epub__literal">bytes</code> are encoded per
+            “raw-unicode-escape” in the package—an encoding scheme useful to
+            convert <code class="epub__literal">str</code> to <code class="epub__literal">bytes</code> when no encoding type
+            applies:</p><a id="I_programlisting2_d1e57248"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.header import decode_header</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>S1 = 'Man where did you get that assistant?'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>S2 = '=?utf-8?q?Man_where_did_you_get_that_assistant=3F?='</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>S3 = 'Man where did you get that =?UTF-8?Q?assistant=3F?='</code></strong>
+
+<em class="epub__lineannotation"><span class="epub__lineannotation"># str: don't decode()</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>decode_header(S1)</code></strong>
+[('Man where did you get that assistant?', None)]
+
+# bytes: do decode()
+&gt;&gt;&gt; <strong class="epub__userinput"><code>decode_header(S2)</code></strong>
+[(b'Man where did you get that assistant?', 'utf-8')]
+
+<em class="epub__lineannotation"><span class="epub__lineannotation"># bytes: do decode() using raw-unicode-escape applied in package</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>decode_header(S3)</code></strong>
+[(b'Man where did you get that', None), (b'assistant?', 'utf-8')]
+
+<em class="epub__lineannotation"><span class="epub__lineannotation"># join decoded parts if more than one</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>parts = decode_header(S3)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>' '.join(abytes.decode('raw-unicode-escape' if enc == None else enc)</code></strong>
+...          <strong class="epub__userinput"><code>for (abytes, enc) in parts)</code></strong>
+'Man where did you get that assistant?'</pre>
+<p>We’ll use logic similar to the last step here in the
+            <code class="epub__literal">mailtools</code> package ahead, but
+            also retain <code class="epub__literal">str</code> substrings
+            intact without attempting to <a id="I_indexterm2_d1e57299"></a><a id="I_indexterm2_d1e57301"></a><a id="I_indexterm2_d1e57303"></a><a id="I_indexterm2_d1e57305"></a>decode.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p><span class="epub__emphasis"><em>Late-breaking news</em></span>: As I write this
+              in mid-2010, it seems possible that this mixed type,
+              nonpolymorphic, and frankly, non-Pythonic API behavior may be
+              addressed in a future Python release. In response to a rant
+              posted on the Python developers list by a book author whose work
+              you might be familiar with, there is presently a vigorous
+              discussion of the topic there. Among other ideas is a proposal
+              for a <code class="epub__literal">bytes</code>-like type which
+              carries with it an explicit Unicode encoding; this may make it
+              possible to treat some text cases in a more generic fashion.
+              While it’s impossible to foresee the outcome of such proposals,
+              it’s good to see that the issues are being actively explored.
+              Stay tuned to this book’s website for further developments in
+              the Python 3.X library API and Unicode stories.</p>
+</div>
+</div>
+<div class="epub__sect3" title="Message address header encodings and parsing, and header creation"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="message_address_header_encodings_and_par"></a>Message address header encodings and parsing, and header
+            creation</h3>
+</div>
+</div>
+</div>
+<p>One wrinkle pertaining to the <a id="mes13.9.3.5"></a><a id="email13.9.3.5"></a><a id="uni13.9.3.5"></a><a id="mod13.9.3.5"></a>prior section: for message headers that contain
+            <span class="epub__emphasis"><em>email addresses</em></span> (e.g., From), the name
+            component of the name/address pair might be encoded this way as
+            well. Because the email package’s header parser expects encoded
+            substrings to be followed by whitespace or the end of string, we
+            cannot ask it to decode a complete address-related header—quotes
+            around name components will fail.</p>
+<p>To support such Internationalized address headers, we must
+            also parse out the first part of the email address and then
+            decode. First of all, we need to extract the name and address
+            parts of an email address using <code class="epub__literal">email</code> package tools:</p><a id="I_programlisting2_d1e57348"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.utils import parseaddr, formataddr</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>p = parseaddr('"Smith, Bob" &lt;bob@bob.com&gt;')</code></strong>      # split into name/addr pair
+&gt;&gt;&gt; <strong class="epub__userinput"><code>p</code></strong>                                                # unencoded addr
+('Smith, Bob', 'bob@bob.com')
+&gt;&gt;&gt; <strong class="epub__userinput"><code>formataddr(p)</code></strong>
+'"Smith, Bob" &lt;bob@bob.com&gt;'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>parseaddr('Bob Smith &lt;bob@bob.com&gt;')</code></strong>             # unquoted name part
+('Bob Smith', 'bob@bob.com')
+&gt;&gt;&gt; <strong class="epub__userinput"><code>formataddr(parseaddr('Bob Smith &lt;bob@bob.com&gt;'))</code></strong>
+'Bob Smith &lt;bob@bob.com&gt;'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>parseaddr('bob@bob.com')</code></strong>                          # simple, no name
+('', 'bob@bob.com')
+&gt;&gt;&gt; <strong class="epub__userinput"><code>formataddr(parseaddr('bob@bob.com'))</code></strong>
+'bob@bob.com'</pre>
+<p>Fields with multiple addresses (e.g., To) separate
+            individual addresses by commas. Since email names might embed
+            commas, too, blindly splitting on commas to run each though
+            parsing won’t always work. Instead, another utility can be used to
+            parse each address individually: <code class="epub__literal">getaddresses</code> ignores commas in names
+            when spitting apart separate addresses, and <code class="epub__literal">parseaddr</code> does, too, because it simply
+            returns the first pair in the <code class="epub__literal">getaddresses</code> result (some line breaks
+            were added to the following for legibility):</p><a id="I_programlisting2_d1e57386"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.utils import getaddresses</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>multi = '"Smith, Bob" &lt;bob@bob.com&gt;, Bob Smith &lt;bob@bob.com&gt;, bob@bob.com,</code></strong>
+<strong class="epub__userinput"><code>"Bob" &lt;bob@bob.com&gt;'</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>getaddresses([multi])</code></strong>
+[('Smith, Bob', 'bob@bob.com'), ('Bob Smith', 'bob@bob.com'), ('', 'bob@bob.com'),
+('Bob', 'bob@bob.com')]
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>[formataddr(pair) for pair in getaddresses([multi])]</code></strong>
+['"Smith, Bob" &lt;bob@bob.com&gt;', 'Bob Smith &lt;bob@bob.com&gt;', 'bob@bob.com',
+'Bob &lt;bob@bob.com&gt;']
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>', '.join([formataddr(pair) for pair in getaddresses([multi])])</code></strong>
+'"Smith, Bob" &lt;bob@bob.com&gt;, Bob Smith &lt;bob@bob.com&gt;, bob@bob.com,
+Bob &lt;bob@bob.com&gt;'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>getaddresses(['bob@bob.com'])</code></strong>     # handles single address cases too
+('', 'bob@bob.com')]</pre>
+<p>Now, decoding email addresses is really just an extra step
+            before and after the normal header decoding logic we saw
+            earlier:</p><a id="I_programlisting2_d1e57412"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>rawfromheader = '"=?UTF-8?Q?Walmart?=" &lt;newsletters@walmart.com&gt;'</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.utils import parseaddr, formataddr</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.header import decode_header</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>name, addr = parseaddr(rawfromheader)</code></strong>             # split into name/addr parts
+&gt;&gt;&gt; <strong class="epub__userinput"><code>name, addr</code></strong>
+('=?UTF-8?Q?Walmart?=', 'newsletters@walmart.com')
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>abytes, aenc = decode_header(name)[0]</code></strong>             # do email+MIME decoding
+&gt;&gt;&gt; <strong class="epub__userinput"><code>abytes, aenc</code></strong>
+(b'Walmart', 'utf-8')
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>name = abytes.decode(aenc)</code></strong>                        # do Unicode decoding
+&gt;&gt;&gt; <strong class="epub__userinput"><code>name</code></strong>
+'Walmart'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>formataddr((name, addr))</code></strong>                          # put parts back together
+'Walmart &lt;newsletters@walmart.com&gt;'</pre>
+<p>Although From headers will typically have just one address,
+            to be fully robust we need to apply this to every address in
+            headers, such as To, Cc, and Bcc. Again, the multiaddress <code class="epub__literal">getaddresses</code> utility <a id="I_indexterm2_d1e57450"></a>avoids comma clashes between names and address
+            separators; since it also handles the single address case, it
+            suffices for From headers as well:</p><a id="I_programlisting2_d1e57454"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>rawfromheader = '"=?UTF-8?Q?Walmart?=" &lt;newsletters@walmart.com&gt;'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>rawtoheader = rawfromheader + ', ' + rawfromheader</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>rawtoheader</code></strong>
+'"=?UTF-8?Q?Walmart?=" &lt;newsletters@walmart.com&gt;, "=?UTF-8?Q?Walmart?=" &lt;newslet
+ters@walmart.com&gt;'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>pairs = getaddresses([rawtoheader])</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>pairs</code></strong>
+[('=?UTF-8?Q?Walmart?=', 'newsletters@walmart.com'), ('=?UTF-8?Q?Walmart?=', 'ne
+wsletters@walmart.com')]
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>addrs = []</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for name, addr in pairs:</code></strong>
+...     <strong class="epub__userinput"><code>abytes, aenc = decode_header(name)[0]      # email+MIME</code></strong>
+...     <strong class="epub__userinput"><code>name = abytes.decode(aenc)                 # Unicode</code></strong>
+...     <strong class="epub__userinput"><code>addrs.append(formataddr((name, addr)))     # one or more addrs</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>', '.join(addrs)</code></strong>
+'Walmart &lt;newsletters@walmart.com&gt;, Walmart &lt;newsletters@walmart.com&gt;'</pre>
+<p>These tools are generally forgiving for unencoded content
+            and return them intact. To be robust, though, the last portion of
+            code here should also allow for multiple parts returned by
+            <code class="epub__literal">decode_header</code> (for encoded
+            substrings), <code class="epub__literal">None</code> encoding
+            values for parts (for unencoded substrings), and <code class="epub__literal">str</code> substring values instead of bytes
+            (for fully unencoded names).</p>
+<p>Decoding this way applies both MIME and Unicode decoding
+            steps to fetched mails. Creating properly
+            <span class="epub__emphasis"><em>encoded</em></span> headers for inclusion in new mails
+            composed and sent is similarly straightforward:</p><a id="I_programlisting2_d1e57507"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.header import make_header</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>hdr = make_header([(b'A\xc4B\xe4C', 'latin-1')])</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(hdr)</code></strong>
+AÄBäC
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(hdr.encode())</code></strong>
+=?iso-8859-1?q?A=C4B=E4C?=
+&gt;&gt;&gt; <strong class="epub__userinput"><code>decode_header(hdr.encode())</code></strong>
+[(b'A\xc4B\xe4C', 'iso-8859-1')]</pre>
+<p>This can be applied to entire headers such as Subject, as
+            well as the name component of each email address in an
+            address-related header line such as From and To (use <code class="epub__literal">getaddresses</code> to split into individual
+            addresses first if needed). The header object provides an
+            alternative interface; both techniques handle additional details,
+            such as line lengths, for which we’ll defer to Python
+            manuals:</p><a id="I_programlisting2_d1e57529"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.header import Header</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>h = Header(b'A\xe4B\xc4X', charset='latin-1')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>h.encode()</code></strong>
+'=?iso-8859-1?q?A=E4B=C4X?='
+&gt;&gt;&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>h = Header('spam', charset='ascii')</code></strong>       # same as Header('spam')
+&gt;&gt;&gt; <strong class="epub__userinput"><code>h.encode()</code></strong>
+'spam'</pre>
+<p>The <code class="epub__literal">mailtools</code> package
+            ahead and its PyMailGUI client of Chapter 14 will use these interfaces to
+            automatically decode message headers in fetched mails per their
+            content for display, and to encode headers sent that are not in
+            ASCII format. That latter also applies to the name component of
+            email addresses, and assumes that SMTP servers will allow these to
+            pass. This may encroach on some SMTP server issues which we don’t
+            have space to address in this book. See the Web for more on SMTP
+            headers handling. For more on headers decoding, see also file
+            <em class="epub__filename">_test-i18n-headers.py</em> in the
+            examples package; it decodes additional subject and
+            address-related headers using <code class="epub__literal">mailtools</code> <span>methods</span>, and displays them in a
+            tkinter <code class="epub__literal">Text</code> widget—a foretaste
+            of how these will be displayed in <a id="I_indexterm2_d1e57566"></a><a id="I_indexterm2_d1e57568"></a><a id="I_indexterm2_d1e57570"></a><a id="I_indexterm2_d1e57572"></a><a id="I_indexterm2_d1e57574"></a><a id="I_indexterm2_d1e57576"></a>PyMailGUI.</p>
+</div>
+<div class="epub__sect3" title="Workaround: Message text generation for binary attachment payloads is broken"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="workaround_colon_message_text_generation"></a>Workaround: Message text generation for binary attachment
+            payloads is broken</h3>
+</div>
+</div>
+</div>
+<p>Our last two <code class="epub__literal">email</code>
+            Unicode <a id="email13.9.3.6"></a><a id="uni13.9.3.6"></a>issues are outright bugs which we must work around
+            today, though they will almost certainly be fixed in a future
+            Python release. The first breaks message text generation for all
+            but trivial messages—the <code class="epub__literal">email</code>
+            package today no longer supports generation of full mail text for
+            messages that contain any binary parts, such as images or audio
+            files. Without coding workarounds, only simple emails that consist
+            entirely of text parts can be composed and generated in Python
+            3.1’s <code class="epub__literal">email</code> package; any
+            MIME-encoded binary part causes mail text generation to
+            fail.</p>
+<p>This is a bit tricky to understand without poring over
+            <code class="epub__literal">email</code>’s source code (which,
+            thankfully, we can in the land of open source), but to demonstrate
+            the issue, first notice how simple text payloads are rendered as
+            full message text when printed as we’ve already seen:</p><a id="I_programlisting2_d1e57609"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Email&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.message import Message</code></strong>            # generic message object
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = Message()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m['From'] = 'bob@bob.com'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.set_payload(open('text.txt').read())</code></strong>       # payload is str text
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>                                     # print uses as_string()
+From: bob@bob.com
+
+spam
+Spam
+SPAM!</pre>
+<p>As we’ve also seen, for convenience, the <code class="epub__literal">email</code> package also provides subclasses
+            of the <code class="epub__literal">Message</code> object, tailored
+            to add message headers that provide the extra descriptive details
+            used by email clients to know how to process the data:</p><a id="I_programlisting2_d1e57638"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.mime.text import MIMEText</code></strong>         # Message subclass with headers
+&gt;&gt;&gt; <strong class="epub__userinput"><code>text = open('text.txt').read()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText(text)</code></strong>                           # payload is str text
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m['From'] = 'bob@bob.com'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+From: bob@bob.com
+
+spam
+Spam
+SPAM!</pre>
+<p>This works for text, but watch what happens when we try to
+            render a message part with truly binary data, such as an image
+            that could not be decoded as Unicode text:</p><a id="I_programlisting2_d1e57659"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.message import Message</code></strong>            # generic Message object
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = Message()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m['From'] = 'bob@bob.com'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>bytes = open('monkeys.jpg', 'rb').read()</code></strong>     # read binary bytes (not Unicode)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.set_payload(bytes)</code></strong>                         # we set the payload to bytes
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>
+Traceback (most recent call last):
+  <em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+  File "C:\Python31\lib\email\generator.py", line 155, in _handle_text
+    raise TypeError('string payload expected: %s' % type(payload))
+TypeError: string payload expected: &lt;class 'bytes'&gt;
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.get_payload()[:20]</code></strong>
+b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00x\x00x\x00\x00'</pre>
+<p>The problem here is that the <code class="epub__literal">email</code> package’s text generator assumes
+            that the message’s payload data is a Base64 (or similar) encoded
+            <code class="epub__literal">str</code> text string by generation
+            time, not <code class="epub__literal">bytes</code>. Really, the
+            error is probably our fault in this case, because we set the
+            payload to raw <code class="epub__literal">bytes</code> manually.
+            We should use the <code class="epub__literal">MIMEImage</code>
+            MIME subclass tailored for images; if we do, the <code class="epub__literal">email</code> package internally performs Base64
+            MIME email encoding on the data when the message object is
+            created. Unfortunately, it still leaves it as <code class="epub__literal">bytes</code>, not <code class="epub__literal">str</code>, despite the fact the whole point of
+            Base64 is to change binary data to text (though the exact Unicode
+            flavor this text should take may be unclear). This leads to
+            additional failures in Python 3.1:</p><a id="I_programlisting2_d1e57713"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.mime.image import MIMEImage</code></strong>       # Message sublcass with hdrs+base64
+&gt;&gt;&gt; <strong class="epub__userinput"><code>bytes = open('monkeys.jpg', 'rb').read()</code></strong>     # read binary bytes again
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEImage(bytes)</code></strong>                         # MIME class does Base64 on data
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>
+Traceback (most recent call last):
+  <em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+  File "C:\Python31\lib\email\generator.py", line 155, in _handle_text
+    raise TypeError('string payload expected: %s' % type(payload))
+TypeError: string payload expected: &lt;class 'bytes'&gt;
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.get_payload()[:40]</code></strong>                         # this is already Base64 text
+b'/9j/4AAQSkZJRgABAQEAeAB4AAD/2wBDAAIBAQIB'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.get_payload()[:40].decode('ascii')</code></strong>         # but it's still bytes internally!
+'/9j/4AAQSkZJRgABAQEAeAB4AAD/2wBDAAIBAQIB'</pre>
+<p>In other words, not only does the Python 3.1 <code class="epub__literal">email</code> package not fully support the
+            Python 3.X Unicode/bytes dichotomy, it was actually broken by it.
+            Luckily, there’s a workaround for this case.</p>
+<p>To address this specific issue, I opted to create a custom
+            encoding function for binary MIME attachments, and pass it in to
+            the <code class="epub__literal">email</code> package’s MIME
+            message object <span>subclasses</span>
+            for all binary data types. This custom function is coded in the
+            upcoming <code class="epub__literal">mailtools</code> package of
+            this chapter (Example 13-23). Because it is
+            used by <code class="epub__literal">email</code> to encode from
+            bytes to text at initialization time, it is able to decode to
+            ASCII text per Unicode as an extra step, after running the
+            original call to perform Base64 encoding and arrange
+            content-encoding headers. The fact that <code class="epub__literal">email</code> does not do this extra Unicode
+            decoding step itself is a genuine bug in that package (albeit, one
+            introduced by changes elsewhere in Python standard libraries), but
+            the workaround does <span>its
+            job</span>:</p><a id="I_programlisting2_d1e57766"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># in mailtools.mailSender module ahead in this chapter...</span></em>
+def fix_encode_base64(msgobj):
+     from email.encoders import encode_base64
+     encode_base64(msgobj)                # what email does normally: leaves bytes
+     bytes = msgobj.get_payload()         # bytes fails in email pkg on text gen
+     text  = bytes.decode('ascii')        # decode to unicode str so text gen works
+     <em class="epub__lineannotation"><span class="epub__lineannotation">...line splitting logic omitted...</span></em>
+     msgobj.set_payload('\n'.join(lines))
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.mime.image import MIMEImage</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from mailtools.mailSender import fix_encode_base64</code></strong>      # use custom workaround
+&gt;&gt;&gt; <strong class="epub__userinput"><code>bytes = open('monkeys.jpg', 'rb').read()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEImage(bytes, _encoder=fix_encode_base64)</code></strong>        # convert to ascii str
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m.as_string()[:500])</code></strong>
+Content-Type: image/jpeg
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+
+/9j/4AAQSkZJRgABAQEAeAB4AAD/2wBDAAIBAQIBAQICAgICAgICAwUDAwMDAwYEBAMFBwYHBwcG
+BwcICQsJCAgKCAcHCg0KCgsMDAwMBwkODw0MDgsMDAz/2wBDAQICAgMDAwYDAwYMCAcIDAwMDAwM
+DAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAz/wAARCAHoAvQDASIA
+AhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQA
+AAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3
+ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>   # to print the entire message: very long</pre>
+<p>Another possible workaround involves defining a custom
+            <code class="epub__literal">MIMEImage</code> class that is like
+            the original but does not attempt to perform Base64 ending on
+            creation; that way, we could encode and translate to <code class="epub__literal">str</code> before message object creation, but
+            still make use of the original class’s header-generation logic. If
+            you take this route, though, you’ll find that it requires
+            repeating (really, cutting and pasting) far too much of the
+            original logic to be reasonable—this repeated code would have to
+            mirror any future <code class="epub__literal">email</code>
+            changes:</p><a id="I_programlisting2_d1e57803"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.mime.nonmultipart import MIMENonMultipart</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class MyImage(MIMENonMultipart):</code></strong>
+...     <strong class="epub__userinput"><code>def __init__(self, imagedata, subtype):</code></strong>
+...         <strong class="epub__userinput"><code>MIMENonMultipart.__init__(self, 'image', subtype)</code></strong>
+...         <strong class="epub__userinput"><code>self.set_payload(_imagedata)</code></strong>
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">...repeat all the base64 logic here, with an extra ASCII Unicode decode...</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MyImage(text_from_bytes)</code></strong></pre>
+<p>Interestingly, this regression in <code class="epub__literal">email</code> actually reflects an unrelated
+            change in Python’s <code class="epub__literal">base64</code>
+            module made in 2007, which was completely benign until the Python
+            3.X <code class="epub__literal">bytes</code>/<code class="epub__literal">str</code> differentiation came online. Prior
+            to that, the email encoder worked in Python 2.X, because <code class="epub__literal">bytes</code> was really <code class="epub__literal">str</code>. In 3.X, though, because <code class="epub__literal">base64</code> returns <code class="epub__literal">bytes</code>, the normal mail encoder in
+            <code class="epub__literal">email</code> also leaves the payload
+            as <code class="epub__literal">bytes</code>, even though it’s been
+            encoded to Base64 text form. This in turn breaks <code class="epub__literal">email</code> text generation, because it
+            assumes the payload is text in this case, and requires it to be
+            <code class="epub__literal">str</code>. As is common in
+            large-scale <span>software</span>
+            systems, the effects of some 3.X changes may have been difficult
+            to anticipate or accommodate in full.</p>
+<p>By contrast, <span class="epub__emphasis"><em>parsing</em></span> binary attachments
+            (as opposed to generating text for them) works fine in 3.X,
+            because the parsed message payload is saved in message objects as
+            a Base64-encoded <code class="epub__literal">str</code> string,
+            not <code class="epub__literal">bytes</code>, and is converted to
+            <code class="epub__literal">bytes</code> only when fetched. This
+            bug seems likely to also go away in a future Python and <code class="epub__literal">email</code> package (perhaps even as a simple
+            patch in Python 3.2), but it’s more serious than the other Unicode
+            decoding issues described here, because it prevents mail
+            composition for all but trivial mails.</p>
+<p>The flexibility afforded by the package and the Python
+            language allows such a workaround to be developed external to the
+            package, rather than hacking the package’s code directly. With
+            open source and forgiving APIs, you rarely are truly <a id="I_indexterm2_d1e57888"></a><a id="I_indexterm2_d1e57890"></a>stuck.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p><span class="epub__emphasis"><em>Late-breaking news</em></span>: This section’s
+              bug is scheduled to be fixed in Python 3.2, making our
+              workaround here unnecessary in this and later Python releases.
+              This is per communications with members of Python’s email
+              special interest group (on the “email-sig” mailing list).</p>
+<p>Regrettably, this fix didn’t appear until after this
+              chapter and its examples had been written. I’d like to remove
+              the workaround and its description entirely, but this book is
+              based on Python 3.1, both before and after the fix was
+              incorporated.</p>
+<p>So that it works under Python 3.2 alpha, too, though, the
+              workaround code ahead was specialized just before publication to
+              check for bytes prior to decoding. Moreover, the workaround
+              still must manually split lines in Base64 data, because 3.2
+              still does not.</p>
+</div>
+</div>
+<div class="epub__sect3" title="Workaround: Message composition for non-ASCII text parts is broken"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="workaround_colon_message_composition_for"></a>Workaround: Message composition for non-ASCII text parts is
+            broken</h3>
+</div>
+</div>
+</div>
+<p>Our final <code class="epub__literal">email</code> Unicode
+            issue <a id="uni13.9.3.7"></a><a id="email13.9.3.7"></a>is as severe as the prior one: changes like that of
+            the prior section introduced yet another regression for mail
+            composition. In short, it’s impossible to make text message parts
+            today without specializing for different Unicode encodings.</p>
+<p>Some types of text are automatically MIME-encoded for
+            transmission. Unfortunately, because of the <code class="epub__literal">str</code>/<code class="epub__literal">bytes</code> split, the MIME text message class
+            in <code class="epub__literal">email</code> now requires different
+            string object types for different Unicode encodings. The net
+            effect is that you now have to know how the <code class="epub__literal">email</code> package will process your text
+            data when making a text message object, or repeat most of its
+            logic redundantly.</p>
+<p>For example, to properly generate Unicode encoding headers
+            and apply required MIME encodings, here’s how we must proceed
+            today for common Unicode text types:</p><a id="I_programlisting2_d1e57937"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText('abc', _charset='ascii')</code></strong>             # pass text for ascii
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="us-ascii"
+Content-Transfer-Encoding: 7bit
+
+abc
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText('abc', _charset='latin-1')</code></strong>           # pass text for latin-1
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>                                          # but not for 'latin1': ahead
+MIME-Version: 1.0
+Content-Type: text/plain; charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+abc
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText(b'abc', _charset='utf-8')</code></strong>            # pass bytes for utf8
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+
+YWJj</pre>
+<p>This works, but if you look closely, you’ll notice that we
+            must pass <code class="epub__literal">str</code> to the first two,
+            but <code class="epub__literal">bytes</code> to the third. That
+            requires that we special-case code for Unicode types based upon
+            the package’s internal operation. Types other than those expected
+            for a Unicode encoding don’t work at all, because of newly invalid
+            <code class="epub__literal">str</code>/<code class="epub__literal">bytes</code> combinations that occur inside the
+            <code class="epub__literal">email</code> package in 3.1:</p><a id="I_programlisting2_d1e57975"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText('abc', _charset='ascii')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText(b'abc', _charset='ascii')</code></strong>            # bug: assumes 2.X str
+Traceback (most recent call last):
+  <em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+  File "C:\Python31\lib\email\encoders.py", line 60, in encode_7or8bit
+    orig.encode('ascii')
+AttributeError: 'bytes' object has no attribute 'encode'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText('abc', _charset='latin-1')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText(b'abc', _charset='latin-1')</code></strong>          # bug: qp uses str
+Traceback (most recent call last):
+  <em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+  File "C:\Python31\lib\email\quoprimime.py", line 176, in body_encode
+    if line.endswith(CRLF):
+TypeError: expected an object with the buffer interface
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText(b'abc', _charset='utf-8'</code></strong>)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText('abc', _charset='utf-8')</code></strong>             # bug: base64 uses bytes
+Traceback (most recent call last):
+  <em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+  File "C:\Python31\lib\email\base64mime.py", line 94, in body_encode
+    enc = b2a_base64(s[i:i + max_unencoded]).decode("ascii")
+TypeError: must be bytes or buffer, not str</pre>
+<p>Moreover, the <code class="epub__literal">email</code>
+            package is pickier about encoding name synonyms than Python and
+            most other tools are: “latin-1” is detected as a quoted-printable
+            MIME type, but “latin1” is unknown and so defaults to Base64 MIME.
+            In fact, this is why Base64 was used for the “latin1” Unicode type
+            earlier in this section—an encoding choice that is irrelevant to
+            any recipient that understands the “latin1” synonym, including
+            Python itself. Unfortunately, that means that we also need to pass
+            in a different string type if we use a synonym the package doesn’t
+            understand today:</p><a id="I_programlisting2_d1e58010"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText('abc', _charset='latin-1')</code></strong>            # str for 'latin-1'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+abc
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText('abc', _charset='latin1')</code></strong>
+Traceback (most recent call last):
+  <em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+  File "C:\Python31\lib\email\base64mime.py", line 94, in body_encode
+    enc = b2a_base64(s[i:i + max_unencoded]).decode("ascii")
+TypeError: must be bytes or buffer, not str
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText(b'abc', _charset='latin1')</code></strong>            # bytes for 'latin1'!
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>
+Content-Type: text/plain; charset="latin1"
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+
+YWJj</pre>
+<p>There are ways to add aliases and new encoding types in the
+            <code class="epub__literal">email</code> package, but they’re not
+            supported out of the box. Programs that care about being robust
+            would have to cross-check the user’s spelling, which may be valid
+            for Python itself, against that expected by <code class="epub__literal">email</code>. This also holds true if your data
+            is not ASCII in general—you’ll have to first decode to text in
+            order to use the expected “latin-1” name because its
+            quoted-printable MIME encoding expects <code class="epub__literal">str</code>, even though <code class="epub__literal">bytes</code> are required if “latin1” <span>triggers</span> the default Base64
+            MIME:</p><a id="I_programlisting2_d1e58048"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText(b'A\xe4B', _charset='latin1')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>
+Content-Type: text/plain; charset="latin1"
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+
+QeRC
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText(b'A\xe4B', _charset='latin-1')</code></strong>
+Traceback (most recent call last):
+  <em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+  File "C:\Python31\lib\email\quoprimime.py", line 176, in body_encode
+    if line.endswith(CRLF):
+TypeError: expected an object with the buffer interface
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText(b'A\xe4B'.decode('latin1'), _charset='latin-1')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+A=E4B</pre>
+<p>In fact, the text message object doesn’t check to see that
+            the data you’re MIME-<span>encoding</span> is valid per Unicode in
+            general—we can send invalid UTF text but the receiver may have
+            trouble decoding it:</p><a id="I_programlisting2_d1e58075"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>m = MIMEText(b'A\xe4B', _charset='utf-8'</code></strong>)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+
+QeRC
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>b'A\xe4B'.decode('utf8')</code></strong>
+UnicodeDecodeError: 'utf8' codec can't decode bytes in position 1-2: unexpected...
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import base64</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>base64.b64decode(b'QeRC')</code></strong>
+b'A\xe4B'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>base64.b64decode(b'QeRC').decode('utf')</code></strong>
+UnicodeDecodeError: 'utf8' codec can't decode bytes in position 1-2: unexpected...</pre>
+<p>So what to do if we need to attach message text to composed
+            messages if the text’s datatype requirement is indirectly dictated
+            by its Unicode encoding name? The generic <code class="epub__literal">Message</code> superclass doesn’t help here
+            directly if we specify an encoding, as it exhibits the same
+            encoding-specific behavior:</p><a id="I_programlisting2_d1e58101"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>m = Message()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.set_payload('spam', charset='us-ascii')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="us-ascii"
+Content-Transfer-Encoding: 7bit
+
+spam
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m = Message()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.set_payload(b'spam', charset='us-ascii')</code></strong>
+AttributeError: 'bytes' object has no attribute 'encode'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.set_payload('spam', charset='utf-8')</code></strong>
+TypeError: must be bytes or buffer, not str</pre>
+<p>Although we could try to work around these issues by
+            repeating much of the code that <code class="epub__literal">email</code> runs, the redundancy would make us
+            hopelessly tied to its current implementation and dependent upon
+            its future changes. The following, for example, parrots the steps
+            that email runs internally to create a text message object for
+            ASCII encoding text; unlike the <code class="epub__literal">MIMEText</code> class, this approach allows all
+            data to be read from files as binary byte strings, even if it’s
+            simple ASCII:</p><a id="I_programlisting2_d1e58130"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>m = Message()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.add_header('Content-Type', 'text/plain')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m['MIME-Version'] = '1.0'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.set_param('charset', 'us-ascii')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.add_header('Content-Transfer-Encoding', '7bit')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>data = b'spam'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.set_payload(data.decode('ascii'))</code></strong>           # data read as bytes here
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="us-ascii"
+Content-Transfer-Encoding: 7bit
+
+spam
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(MIMEText('spam', _charset='ascii'))</code></strong>     # same, but type-specific
+MIME-Version: 1.0
+Content-Type: text/plain; charset="us-ascii"
+Content-Transfer-Encoding: 7bit
+
+spam</pre>
+<p>To do the same for other kinds of text that require MIME
+            encoding, just insert an extra encoding step; although we’re
+            concerned with text parts here, a similar imitative approach could
+            address the binary parts text generation bug we met
+            earlier:</p><a id="I_programlisting2_d1e58162"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>m = Message()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.add_header('Content-Type', 'text/plain')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m['MIME-Version'] = '1.0'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.set_param('charset', 'utf-8')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.add_header('Content-Transfer-Encoding', 'base64')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>data = b'spam'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from binascii import b2a_base64</code></strong>               # add MIME encode if needed
+&gt;&gt;&gt; <strong class="epub__userinput"><code>data = b2a_base64(data)</code></strong>                       # data read as bytes here too
+&gt;&gt;&gt; <strong class="epub__userinput"><code>m.set_payload(data.decode('ascii'))</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(m)</code></strong>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+c3BhbQ==
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(MIMEText(b'spam', _charset='utf-8'))</code></strong>    # same, but type-specific
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+
+c3BhbQ==</pre>
+<p>This works, but besides the redundancy and dependency it
+            creates, to use this approach broadly we’d also have to generalize
+            to account for all the various kinds of Unicode encodings and MIME
+            encodings possible, like the <code class="epub__literal">email</code> package already does internally.
+            We might also have to support encoding name synonyms to be
+            flexible, adding further redundancy. In other words, this requires
+            additional work, and in the end, we’d still have to specialize our
+            code for different Unicode types.</p>
+<p>Any way we go, some dependence on the current implementation
+            seems unavoidable today. It seems the best we can do here, apart
+            from hoping for an improved <code class="epub__literal">email</code> package in a few years’ time, is
+            to specialize text message construction calls by Unicode type, and
+            assume both that encoding names match those expected by the
+            package and that message data is valid for the Unicode type
+            selected. Here is the sort of arguably magic code that the
+            upcoming <code class="epub__literal">mailtools</code> package
+            (again in Example 13-23)
+            will apply to choose text types:</p><a id="I_programlisting2_d1e58213"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from email.charset import Charset, BASE64, QP</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for e in ('us-ascii', 'latin-1', 'utf8', 'latin1', 'ascii'):</code></strong>
+...     <strong class="epub__userinput"><code>cset = Charset(e)</code></strong>
+...     <strong class="epub__userinput"><code>benc = cset.body_encoding</code></strong>
+...     <strong class="epub__userinput"><code>if benc in (None, QP):</code></strong>
+...         <strong class="epub__userinput"><code>print(e, benc, 'text')</code></strong>              # read/fetch data as str
+...     <strong class="epub__userinput"><code>else:</code></strong>
+...         <strong class="epub__userinput"><code>print(e, benc, 'binary')</code></strong>            # read/fetch data as bytes
+...
+us-ascii None text
+latin-1 1 text
+utf8 2 binary
+latin1 2 binary
+ascii None text</pre>
+<p>We’ll proceed this way in this book, with the major caveat
+            that this is almost certainly likely to require changes in the
+            future because of its strong coupling with the current email
+            <a id="I_indexterm2_d1e58243"></a><a id="I_indexterm2_d1e58245"></a>implementation.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p><span class="epub__emphasis"><em>Late-breaking news</em></span>: Like the prior
+              section, it now appears that this section’s bug will also be
+              fixed in Python 3.2, making the workaround here unnecessary in
+              this and later Python releases. The nature of the fix is
+              unknown, though, and we still need the fix for the version of
+              Python current when this chapter was written. As of just before
+              publication, the alpha release of 3.2 is still somewhat type
+              specific on this issue, but now accepts either <code class="epub__literal">str</code> or <code class="epub__literal">bytes</code> for text that triggers Base64
+              encodings, instead of just <code class="epub__literal">bytes</code>.</p>
+</div>
+</div>
+<div class="epub__sect3" title="Summary: Solutions and workarounds"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="summary_colon_solutions_and_workarounds"></a>Summary: Solutions and workarounds</h3>
+</div>
+</div>
+</div>
+<p>The <code class="epub__literal">email</code> package in
+            Python 3.1 provides powerful tools for parsing and composing
+            mails, and can be used as the basis for full-featured mail clients
+            like those in this book with just a few workarounds. As you can
+            see, though, it is less than fully functional today. Because of
+            that, further specializing code to its current API is perhaps a
+            temporary solution. Short of writing our own email parser and
+            composer (not a practical option in a finitely-sized book!), some
+            compromises are in order here. Moreover, the inherent complexity
+            of Unicode support in <code class="epub__literal">email</code>
+            places some limits on how much we can pursue this thread in this
+            book.</p>
+<p>In this edition, we will support Unicode encodings of text
+            parts and headers in messages composed, and respect the Unicode
+            encodings in text parts and mail headers of messages fetched. To
+            make this work with the partially crippled <code class="epub__literal">email</code> package in <span>Python 3.1</span>, though, we’ll apply the
+            following Unicode policies in various email clients in this
+            book:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Use user preferences and defaults for the preparse
+                decoding of full mail text fetched and encoding of text
+                payloads sent.</p></li><li class="epub__listitem">
+<p>Use header information, if available, to decode the
+                <code class="epub__literal">bytes</code> payloads returned by
+                <code class="epub__literal">get_payload</code> when text parts
+                must be treated as <code class="epub__literal">str</code>
+                text, but use binary mode files to finesse the issue in other
+                contexts.</p></li><li class="epub__listitem">
+<p>Use formats prescribed by email standard to decode and
+                encode message headers such as From and Subject if they are
+                not simple text.</p></li><li class="epub__listitem">
+<p>Apply the fix described to work around the message text
+                generation issue for binary parts.</p></li><li class="epub__listitem">
+<p>Special-case construction of text message objects
+                according to Unicode types and <code class="epub__literal">email</code> behavior.</p></li></ul>
+</div>
+<p>These are not necessarily complete solutions. For example,
+            some of this edition’s email clients allow for Unicode encodings
+            for both text attachments and mail headers, but they do nothing
+            about encoding the full text of messages sent beyond the policies
+            inherited from <code class="epub__literal">smtplib</code> and
+            implement policies that might be inconvenient in some use cases.
+            But as we’ll see, despite their limitations, our email clients
+            will still be able to handle complex email tasks and a very large
+            set of emails.</p>
+<p>Again, since this story is in flux in Python today, watch
+            this book’s website for updates that may improve or be required of
+            code that uses <code class="epub__literal">email</code> in the
+            future. A future <code class="epub__literal">email</code> may
+            handle Unicode encodings more accurately. Like Python 3.X, though,
+            backward compatibility may be sacrificed in the process and
+            require updates to this book’s code. For more on this issue, see
+            the Web as well as up-to-date Python release notes.</p>
+<p>Although this quick tour captures the basic flavor of the
+            interface, we need to step up to larger examples to see more of
+            the <code class="epub__literal">email</code> package’s power. The
+            next section takes us on the first of those <a id="I_indexterm2_d1e58328"></a><a id="I_indexterm2_d1e58330"></a><a id="I_indexterm2_d1e58332"></a>steps.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

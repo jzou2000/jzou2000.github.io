@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Reloading Modules</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div><h1 class="epub__title"><a id="reloading_modules"></a>Reloading Modules</h1>
+<p>As <a id="ch22modulesreloadingmodules"></a>we’ve seen, <a id="ch22reloadfunction"></a>a module’s code is run only once per process by default.
+        To force a module’s code to be reloaded and rerun, you need to ask
+        Python to do so explicitly by calling the <code class="epub__literal">reload</code> built-in function. In this section,
+        we’ll explore how to use reloads to make your systems more dynamic. In
+        a nutshell:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p>Imports (via both <code class="epub__literal">import</code>
+            and <code class="epub__literal">from</code> statements) load and
+            run a module’s code only the first time the module is imported in
+            a process.</p></li><li class="epub__listitem">
+<p>Later imports use the already loaded module object without
+            reloading or rerunning the file’s code.</p></li><li class="epub__listitem">
+<p>The <code class="epub__literal">reload</code> function
+            forces an already loaded module’s code to be reloaded and rerun.
+            Assignments in the file’s new code change the existing module
+            object in-place.</p></li></ul>
+</div>
+<p>Why all the fuss about reloading modules? The <code class="epub__literal">reload</code> function allows parts of a program to
+        be changed without stopping the whole program. With <code class="epub__literal">reload</code>, therefore, the effects of changes in
+        components can be observed immediately. Reloading doesn’t help in
+        every situation, but where it does, it makes for a much shorter
+        development cycle. For instance, imagine a database program that must
+        connect to a server on startup; because program changes or
+        customizations can be tested immediately after reloads, you need to
+        connect only once while debugging. Long-running servers can update
+        themselves this way, too.</p>
+<p>Because Python is interpreted (more or less), it already gets
+        rid of the compile/link steps you need to go through to get a C
+        program to run: modules are loaded dynamically when imported by a
+        running program. Reloading offers a further performance advantage by allowing you to also change
+        parts of running programs without stopping. Note that <code class="epub__literal">reload</code> currently only works on modules
+        written in Python; compiled extension modules coded in a language such
+        as C can be dynamically loaded at runtime, too, but they can’t be
+        reloaded.</p><div class="epub__note" title="Note">
+<h3 class="epub__title">Note</h3>
+<p><span class="epub__emphasis"><em>Version skew note</em></span>: In Python 2.6,
+          <code class="epub__literal">reload</code> is available as a built-in
+          function. In Python 3.0, it has been moved to the <code class="epub__literal">imp</code> standard library module—it’s known as <code class="epub__literal">imp.reload</code> in 3.0. This simply means that
+          an extra <code class="epub__literal">import</code> or <code class="epub__literal">from</code> statement is required to load this
+          tool (in 3.0 only). Readers using 2.6 can ignore these imports in
+          this book’s examples, or use them anyhow—2.6 also has a <code class="epub__literal">reload</code> in its <code class="epub__literal">imp</code> module to ease migration to 3.0.
+          Reloading works the same regardless of its packaging.</p>
+</div>
+<div class="epub__sect2" title="reload Basics"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="reload_basics"></a>reload Basics</h2>
+</div>
+</div>
+</div>
+<p>Unlike <code class="epub__literal"><a id="I_indexterm2_d1e56195"></a>import</code> and <code class="epub__literal">from</code>:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p><code class="epub__literal">reload</code> is a function in
+              Python, not a statement.</p></li><li class="epub__listitem">
+<p><code class="epub__literal">reload</code> is passed an
+              existing module object, not a name.</p></li><li class="epub__listitem">
+<p><code class="epub__literal">reload</code> lives in a
+              module in Python 3.0 and must be imported itself.</p></li></ul>
+</div>
+<p>Because <code class="epub__literal">reload</code> expects an
+          object, a module must have been previously imported successfully
+          before you can reload it (if the import was unsuccessful, due to a
+          syntax or other error, you may need to repeat it before you can
+          reload the module). Furthermore, the syntax of <code class="epub__literal">import</code> statements and <code class="epub__literal">reload</code> calls differs: reloads require
+          parentheses, but imports do not. Reloading looks like this:</p><a id="I_programlisting2_d1e56232"></a>
+<pre class="epub__programlisting">import module                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Initial import</span></em>
+...use module.attributes...
+...                               <em class="epub__lineannotation"><span class="epub__lineannotation"># Now, go change the module file</span></em>
+...
+from imp import reload            <em class="epub__lineannotation"><span class="epub__lineannotation"># Get reload itself (in 3.0)</span></em>
+reload(module)                    <em class="epub__lineannotation"><span class="epub__lineannotation"># Get updated exports</span></em>
+...use module.attributes...</pre>
+<p>The typical usage pattern is that you import a module, then
+          change its source code in a text editor, and then reload it. When
+          you call <code class="epub__literal">reload</code>, Python rereads
+          the module file’s source code and reruns its top-level statements.
+          Perhaps the most important thing to know about <code class="epub__literal">reload</code> is that it changes a module object
+          <span class="epub__emphasis"><em>in-place</em></span>; it does not delete and re-create the
+          module object. Because of that, every reference to a module object
+          anywhere in your program is automatically affected by a reload. Here
+          are the details:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p><strong class="epub__userinput"><code>reload</code></strong> <span class="epub__strong"><strong>runs a module file’s new code in the module’s
+              current namespace</strong></span>. Rerunning a module file’s code
+              overwrites its existing namespace, rather than deleting and
+              re-creating it.</p></li><li class="epub__listitem">
+<p><span class="epub__strong"><strong>Top-level assignments in the file
+              replace names with new values</strong></span>. For instance,
+              rerunning a <code class="epub__literal">def</code> statement
+              replaces the prior version of the function in the module’s
+              namespace by reassigning the function name.</p></li><li class="epub__listitem">
+<p><span class="epub__strong"><strong>Reloads impact all clients that
+              use</strong></span> <strong class="epub__userinput"><code>import</code></strong>
+<span class="epub__strong"><strong>to fetch modules</strong></span>. Because
+              clients that use <code class="epub__literal">import</code>
+              qualify to fetch attributes, they’ll find new values in the
+              module object after a reload.</p></li><li class="epub__listitem">
+<p><span class="epub__strong"><strong>Reloads impact future</strong></span>
+<strong class="epub__userinput"><code>from</code></strong> <span class="epub__strong"><strong>clients only</strong></span>. Clients that used
+              <code class="epub__literal">from</code> to fetch attributes in
+              the past won’t be affected by a reload; they’ll still have
+              references to the old objects fetched before the reload.</p></li></ul>
+</div>
+</div>
+<div class="epub__sect2" title="reload Example"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="reload_example"></a>reload Example</h2>
+</div>
+</div>
+</div>
+<p>To demonstrate, <a id="I_indexterm2_d1e56307"></a>here’s <a id="I_indexterm2_d1e56313"></a>a more concrete example of <code class="epub__literal">reload</code> in action. In the following, we’ll
+          change and reload a module file without stopping the interactive
+          Python session. Reloads are used in many other scenarios, too (see
+          the sidebar Why You Will Care: Module Reloads), but we’ll keep things simple for illustration
+          here. First, in the text editor of your choice, write a module file
+          named <em class="epub__filename">changer.py</em> with the
+          following contents:</p><a id="I_programlisting2_d1e56329"></a>
+<pre class="epub__programlisting">message = "First version"
+def printer():
+    print(message)</pre>
+<p>This module creates and exports two names—one bound to a
+          string, and another to a function. Now, start the Python
+          interpreter, import the module, and call the function it exports.
+          The function will print the value of the global <code class="epub__literal">message</code> variable:</p><a id="I_programlisting2_d1e56336"></a>
+<pre class="epub__programlisting">% <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import changer</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>changer.printer()</code></strong>
+First version</pre>
+<p>Keeping the interpreter active, now
+          edit the module file in another window:</p><a id="I_programlisting2_d1e56350"></a>
+<pre class="epub__programlisting"><em class="epub__replaceable"><code>...modify changer.py without stopping Python...</code></em>
+% <strong class="epub__userinput"><code>vi changer.py</code></strong></pre>
+<p>Change the global <code class="epub__literal">message</code>
+          variable, as well as the <code class="epub__literal">printer</code>
+          function body:</p><a id="I_programlisting2_d1e56364"></a>
+<pre class="epub__programlisting">message = "After editing"
+def printer():
+    print('reloaded:', message)</pre>
+<p>Then, return to the Python window and reload the module to
+          fetch the new code. Notice in the following interaction that
+          importing the module again has no effect; we get the original
+          message, even though the file’s been changed. We have to call
+          <code class="epub__literal">reload</code> in order to get the new
+          version:</p><a id="I_programlisting2_d1e56371"></a>
+<pre class="epub__programlisting"><em class="epub__replaceable"><code>...back to the Python interpreter/program...</code></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import changer</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>changer.printer()</code></strong>                 <em class="epub__lineannotation"><span class="epub__lineannotation"># No effect: uses loaded module</span></em>
+First version
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from imp import reload</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>reload(changer)</code></strong>                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Forces new code to load/run</span></em>
+&lt;module 'changer' from 'changer.py'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>changer.printer()</code></strong>                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs the new version now</span></em>
+reloaded: After editing</pre>
+<p>Notice that <code class="epub__literal">reload</code> actually
+          <span class="epub__emphasis"><em>returns</em></span> the module object for us—its result is
+          usually ignored, but because expression results are printed at the
+          interactive prompt, Python shows a default <code class="epub__literal">&lt;module 'name'...&gt;</code>
+          representation.</p><div class="epub__sidebar"><a id="why_you_will_care_colon_module_reloads"></a>
+<p class="epub__title">Why You Will Care: Module Reloads</p>
+<p>Besides allowing you to reload (and hence rerun) modules at
+            the interactive prompt, module reloads are also useful in larger
+            systems, especially when the cost of restarting the entire
+            application is prohibitive. For instance, systems that must
+            connect to servers over a network on startup are prime candidates
+            for dynamic reloads.</p>
+<p>They’re also useful in GUI work (a widget’s callback action
+            can be changed while the GUI remains active), and when Python is
+            used as an embedded language in a C or C++ program (the enclosing program
+            can request a reload of the Python code it runs, without having to
+            stop). See <em class="epub__citetitle">Programming
+            Python</em> for more on reloading GUI callbacks and
+            embedded Python code.</p>
+<p>More generally, reloads allow programs to provide highly
+            dynamic interfaces. For instance, Python is often used as a
+            <span class="epub__emphasis"><em>customization</em></span> language for larger
+            systems—users can customize products by coding bits of Python code
+            onsite, without having to recompile the entire product (or even
+            having its source code at all). In such worlds, the Python code
+            already adds a dynamic flavor by itself.</p>
+<p>To be even more dynamic, though,
+            such systems can automatically reload the Python customization
+            code periodically at runtime. That way, users’ changes are picked
+            up while the system is running; there is no need to stop and
+            restart each time the Python code is modified. Not all systems
+            require such a dynamic approach, but for those that do, module
+            reloads provide an easy-to-use dynamic <a id="I_indexterm2_d1e56434"></a>customization <a id="I_indexterm2_d1e56437"></a>tool.</p>
+</div>
+</div>
+<div class="epub__sect1" title="Chapter Summary"><div class="epub__titlepage"><div>
+<div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

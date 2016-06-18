@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>11.10. Improving the Output</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">11.10. Improving the Output</h3>
+<p class="docText">That’s it! You did the three 
+steps it takes to get a working app to the point where we now have a 
+user-facing interface (and don’t have to rely on the Admin for CRUD of 
+data). So now what? We’ve got a simple blog working. It responds to 
+client requests, extracts the information from the database, and 
+displays all posts to the user. This is good but we can certainly make 
+some useful improvements to exhibit more realistic behavior.</p>
+<p class="docText">One logical direction to take 
+is to show the posts in reverse chronological order; it makes sense to 
+see the most recent posts first. Another is to limit the output. If you 
+have any more than 10 (or even 5) posts showing on the page, it is 
+certainly too long for users. First, let’s tackle reverse-chronological 
+order.</p>
+<p class="docText">It’s easy for us to tell Django 
+to do that. In fact, we have a choice as to where we want to tell it to 
+do so. We can either add a default ordering to our model, or we can add 
+it to the query in our view code. We’ll do the latter first because it’s
+ the simplest to explain.</p>
+
+<h4 class="docSection2Title" id="title-ID0EPOAK">11.10.1. Query Change</h4>
+<p class="docText">Taking a quick step back, <tt>BlogPost</tt> is your data model class. The <tt>objects</tt> attribute is a model <tt>Manager</tt> class, and it has an <tt>all()</tt> method to give you a <tt>QuerySet</tt>. You can think of a <tt>QuerySet</tt>
+ as objects that represent the rows of data returned from the database. 
+That’s about as far as you should go because they’re not the actual rows
+ because <tt>QuerySet</tt>s perform “lazy iteration.”</p>
+<p class="docText">The database isn’t actually hit until the <tt>QuerySet</tt> is evaluated. In other words, you can do all kinds of <tt>QuerySet</tt> manipulation without touching the data at all. To find out when a <tt>QuerySet</tt> is evaluated, check out the official documentation at http://docs.djangoproject.com/en/dev/ref/models/querysets/.</p>
+<p class="docText">Now we have the background out of the way. We could have simply told you to add a call to the <tt>order_by()</tt>
+ method and provide a sort parameter. In our case, we want to sort 
+newest first, which means reverse order by timestamp. It’s as simple as 
+changing your query statement to the following:</p>
+<div class="docText"><pre>posts = BlogPost.objects.all().order_by('-timestamp')</pre></div><br/>
+<p class="docText">By prepending the minus sign (–) to <tt>timestamp</tt>, we are specifying a descending chronological sort. For normal ascending order, remove the minus sign.</p>
+<p class="docText">To test reading in the top ten posts, we need more than just two <tt>BlogPost</tt>
+ entries in the database, so here’s a great place to whip up a few lines
+ of code using the Django shell (plain one this time; we don’t need the 
+power of IPython or <tt>bpython</tt>) and auto-generate a bunch of records in the database:</p>
+<div class="docText"><pre>$ ./manage.py shell --plain
+Python 2.7.1 (r271:86882M, Nov 30 2010, 09:39:13)
+[GCC 4.0.1 (Apple Inc. build 5494)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+(InteractiveConsole)
+&gt;&gt;&gt; <span class="docEmphStrong">from</span> datetime <span class="docEmphStrong">import</span> datetime <span class="docEmphStrong">as</span> dt
+&gt;&gt;&gt; <span class="docEmphStrong">from</span> blog.models <span class="docEmphStrong">import</span> BlogPost
+&gt;&gt;&gt; <span class="docEmphStrong">for</span> i <span class="docEmphStrong">in</span> range(10):
+...     bp = BlogPost(title='post #%d' % i,
+...         body='body of post #%d' % i, timestamp=dt.now())
+...     bp.save()
+...</pre></div><br/>
+<p class="docText">Figure 11-16 shows the change reflected in the browser when you perform a refresh.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 11-16. The original pair of blog entries, plus ten more.</h5>
+<p class="docText">
+<img alt="" border="0" height="621" id="" src="Images/getfile_003-16.jpg" width="409"/></p>
+</center><p></p><br/>
+<p class="docText">The shell can also be used to test the change that we just made as well as the new query we want to use:</p>
+<div class="docText"><pre>&gt;&gt;&gt; posts = BlogPost.objects.all().order_by('-timestamp')
+&gt;&gt;&gt; <span class="docEmphStrong">for</span> p <span class="docEmphStrong">in</span> posts:
+...     <span class="docEmphStrong">print</span> p.timestamp.ctime(), p.title
+...
+Fri Dec 17 15:59:37 2010 post #9
+Fri Dec 17 15:59:37 2010 post #8
+Fri Dec 17 15:59:37 2010 post #7
+Fri Dec 17 15:59:37 2010 post #6
+Fri Dec 17 15:59:37 2010 post #5
+Fri Dec 17 15:59:37 2010 post #4
+Fri Dec 17 15:59:37 2010 post #3
+Fri Dec 17 15:59:37 2010 post #2
+Fri Dec 17 15:59:37 2010 post #1
+Fri Dec 17 15:59:37 2010 post #0
+Mon Dec 13 00:13:01 2010 test admin entry
+Sat Dec 11 16:38:37 2010 test cmd-line entry</pre></div><br/>
+<p class="docText">This gives us some 
+degree of certainty that when the core bits are copied to the view 
+function, things should pretty much work right away.</p>
+<p class="docText">Furthermore, the output can be limited to only the top 10 by using Python’s friendly slice syntax (<tt>[:10]</tt>), so add that, too. Take these changes and update your <tt>blog/views.py</tt> file so that it looks like the following:</p>
+<div class="docText"><pre># views.py
+<span class="docEmphStrong">from</span> django.shortcuts <span class="docEmphStrong">import</span> render_to_response
+<span class="docEmphStrong">from</span> blog.models <span class="docEmphStrong">import</span> BlogPost
+
+<span class="docEmphStrong">def</span> archive(request):
+    posts = BlogPost.objects.all().order_by('-timestamp')[:10]
+    return render_to_response('archive.html', {'posts': posts})</pre></div><br/>
+<p class="docText">Save the change and refresh 
+your browser again. You should see two changes: the blogs post in 
+reverse-chronological order, and only the ten most recent posts show 
+up—in other words, of 12 total entries, you should no longer see either 
+of the two original posts, as demonstrated in Figure 11-17.</p>
+<p class="docText"></p><p></p><center>
+<h5 class="docFigureTitle">Figure 11-17. Only the ten newest blog posts appear here.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="368" id="" src="Images/getfile-45.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<p class="docText">So
+ changing the query is fairly straightforward, but for our particular 
+case, setting a default ordering in the model is a more logical option 
+because this (most recent, top <span class="docEmphasis">N</span> posts) is pretty much the only type of ordering that makes sense for a blog.</p>
+
+<h5 class="docSection3Title" id="title-ID0EGXAK">Setting the Model Default Ordering</h5>
+<p class="docText">If we set our preferred 
+ordering in the model, any other Django-based app or project that 
+accesses our data will use that ordering. To set default ordering for 
+your model, give it an inner class called <tt>Meta</tt> and set the ordering attribute in that class:</p>
+<div class="docText"><pre><span class="docEmphStrong">class</span> Meta:
+    ordering = ('-timestamp',)</pre></div><br/>
+<p class="docText">This effectively moves <tt>order_by('-timestamp')</tt> from the query to the model. Make these changes to both files, and you should be left with code shown in the following:</p>
+<div class="docText"><pre># models.py
+<span class="docEmphStrong">from</span> django.db <span class="docEmphStrong">import</span> models
+
+<span class="docEmphStrong">class</span> BlogPost(models.Model):
+    title = models.CharField(max_length=150)
+    body = models.TextField()
+    timestamp = models.DateTimeField()
+
+    <span class="docEmphStrong">class</span> Meta:
+        ordering = ('-timestamp',)
+
+# views.py
+<span class="docEmphStrong">from</span> django.shortcuts <span class="docEmphStrong">import</span> render_to_response
+<span class="docEmphStrong">from</span> blog.models <span class="docEmphStrong">import</span> BlogPost
+
+<span class="docEmphStrong">def</span> archive(request):
+    posts = BlogPost.objects.all()[:10]
+    <span class="docEmphStrong">return</span> render_to_response('archive.html', {'posts': posts})</pre></div><br/>
+<div class="docNote"><p class="docNoteTitle">Core Tip (Hacker’s Corner): Reducing <tt>archive()</tt> down to one (long) line of Python</p><p></p><table border="0" cellpadding="1" cellspacing="0" width="90%"><tbody><tr><td valign="top" width="60">
+<img align="LEFT" alt="" border="0" height="37" id="" src="Images/getfile_002-33.jpg" width="37"/>
+</td><td valign="top"><p class="docText">It’s possible to reduce <tt>archive()</tt> down to a single line if you feel comfortable using <span class="docEmphStrong"><tt>lambda</tt></span>:</p><div class="docText"><pre>archive = <span class="docEmphStrong">lambda</span> req: render_to_response('archive.html',
+  {'posts': BlogPost.objects.all()[:10]})</pre></div><br/><p class="docText">Readability
+ is one of the hallmarks of having a Pythonic piece of code. Another 
+goal of expressive languages such as Python, is to help reduce the 
+number of lines of code to attain such readability. Although this does 
+reduce the number of lines, I can’t say that it helps with making it 
+easier to read; hence, why it’s in this Hacker’s Corner.</p><p class="docText">Other differences to the original: the <tt>request</tt> variable was reduced to just <tt>req</tt>, and we do save a tiny bit of memory without having the <tt>posts</tt> variable. If you’re new to Python, we recommend you check out the Functions chapter of <span class="docEmphasis">Core Python Programming</span> or <span class="docEmphasis">Core Python Language Fundamentals</span> which covers <span class="docEmphStrong"><tt>lambda</tt></span>.</p></td></tr></tbody></table><p></p></div><br/>
+<p class="docText">If you refresh your Web 
+browser, you should see no changes at all, as it should be. Now that 
+we’ve spent some time improving data retrieval from the database, we’re 
+going to suggest that you minimize database interaction.</p>
+</div>
+</body>
+</html>

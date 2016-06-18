@@ -1,0 +1,562 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Coding Class Decorators</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div><h1 class="epub__title"><a id="coding_class_decorators"></a>Coding Class Decorators</h1>
+<p>So far we’ve <a id="ch38decclssdeccod"></a><a id="I_indexterm3_d1e98566"></a>been coding function decorators to manage function
+        calls, but as we’ve seen, Python 2.6 and 3.0 extend decorators to work
+        on classes too. As described earlier, while similar in concept to
+        function decorators, class decorators are applied to classes
+        instead—they may be used either to manage classes themselves, or to
+        intercept instance creation calls in order to manage instances. Also
+        like function decorators, class decorators are really just optional
+        syntactic sugar, though many believe that they make a programmer’s
+        intent more obvious and minimize erroneous calls.</p>
+<div class="epub__sect2" title="Singleton Classes"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="singleton_classes"></a>Singleton Classes</h2>
+</div>
+</div>
+</div>
+<p>Because <a id="I_indexterm3_d1e98577"></a>class decorators may intercept instance creation
+          calls, they can be used to either manage all the instances of a
+          class, or augment the interfaces of those instances. To demonstrate,
+          here’s a first class decorator example that does the former—managing
+          all instances of a class. This code implements the classic
+          <span class="epub__emphasis"><em>singleton</em></span> coding pattern, where at most one
+          instance of a class ever exists. Its <code class="epub__literal">singleton</code> function defines and returns a
+          function for managing instances, and the <code class="epub__literal">@</code> syntax automatically wraps up a subject
+          class in this function:</p><a id="I_programlisting3_d1e98594"></a>
+<pre class="epub__programlisting">instances = {}
+def getInstance(aClass, *args):                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Manage global table</span></em>
+    if aClass not in instances:                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Add **kargs for keywords</span></em>
+        instances[aClass] = aClass(*args)       <em class="epub__lineannotation"><span class="epub__lineannotation"># One dict entry per class</span></em>
+    return instances[aClass]
+
+def singleton(aClass):                          <em class="epub__lineannotation"><span class="epub__lineannotation"># On @ decoration</span></em>
+    def onCall(*args):                          <em class="epub__lineannotation"><span class="epub__lineannotation"># On instance creation</span></em>
+        return getInstance(aClass, *args)
+    return onCall</pre>
+<p>To use this, decorate the classes for which you want to
+          enforce a single-instance model:</p><a id="I_programlisting3_d1e98613"></a>
+<pre class="epub__programlisting">@singleton                                      <em class="epub__lineannotation"><span class="epub__lineannotation"># Person = singleton(Person)</span></em>
+class Person:                                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Rebinds Person to onCall</span></em>
+     def __init__(self, name, hours, rate):     <em class="epub__lineannotation"><span class="epub__lineannotation"># onCall remembers Person</span></em>
+        self.name = name
+        self.hours = hours
+        self.rate = rate
+     def pay(self):
+        return self.hours * self.rate
+
+@singleton                                      <em class="epub__lineannotation"><span class="epub__lineannotation"># Spam = singleton(Spam)</span></em>
+class Spam:                                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Rebinds Spam to onCall</span></em>
+    def __init__(self, val):                    <em class="epub__lineannotation"><span class="epub__lineannotation"># onCall remembers Spam</span></em>
+        self.attr = val
+
+bob = Person('Bob', 40, 10)                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Really calls onCall</span></em>
+print(bob.name, bob.pay())
+
+sue = Person('Sue', 50, 20)                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Same, single object</span></em>
+print(sue.name, sue.pay())
+
+X = Spam(42)                                    <em class="epub__lineannotation"><span class="epub__lineannotation"># One Person, one Spam</span></em>
+Y = Spam(99)
+print(X.attr, Y.attr)</pre>
+<p>Now, when the <code class="epub__literal">Person</code> or
+          <code class="epub__literal">Spam</code> class is later used to
+          create an instance, the wrapping logic layer provided by the
+          decorator routes instance construction calls to <code class="epub__literal">onCall</code>, which in turn calls <code class="epub__literal">getInstance</code> to manage and share a single
+          instance per class, regardless of how many construction calls are
+          made. Here’s this code’s output:</p><a id="I_programlisting3_d1e98657"></a>
+<pre class="epub__programlisting">Bob 400
+Bob 400
+42 42</pre>
+<p>Interestingly, you can code a more self-contained solution
+          here if you’re able to use the <code class="epub__literal">nonlocal</code> statement (available in Python
+          3.0 and later) to change enclosing scope names, as described
+          earlier—the following alternative achieves an identical effect, by
+          using one <span class="epub__emphasis"><em>enclosing scope</em></span> per class, instead of
+          one global table entry per class:</p><a id="I_programlisting3_d1e98667"></a>
+<pre class="epub__programlisting">def singleton(aClass):                          <em class="epub__lineannotation"><span class="epub__lineannotation"># On @ decoration</span></em>
+    instance = None
+    def onCall(*args):                          <em class="epub__lineannotation"><span class="epub__lineannotation"># On instance creation</span></em>
+        nonlocal instance                       <em class="epub__lineannotation"><span class="epub__lineannotation"># 3.0 and later nonlocal</span></em>
+        if instance == None:
+            instance = aClass(*args)            <em class="epub__lineannotation"><span class="epub__lineannotation"># One scope per class</span></em>
+        return instance
+    return onCall</pre>
+<p>This version works the same, but it does not depend on names
+          in the global scope outside the decorator. In either Python 2.6 or
+          3.0, you can also code a self-contained solution with a class
+          instead—the following uses one <span class="epub__emphasis"><em>instance</em></span> per
+          class, rather than an enclosing scope or global table, and works the
+          same as the other two versions (in fact, it relies on the same
+          coding pattern that we will later see is a common decorator class
+          blunder; here we <span class="epub__emphasis"><em>want</em></span> just one instance, but
+          that’s not always the case):</p><a id="I_programlisting3_d1e98689"></a>
+<pre class="epub__programlisting">class singleton:
+    def __init__(self, aClass):                 <em class="epub__lineannotation"><span class="epub__lineannotation"># On @ decoration</span></em>
+        self.aClass = aClass
+        self.instance = None
+    def __call__(self, *args):                  <em class="epub__lineannotation"><span class="epub__lineannotation"># On instance creation</span></em>
+        if self.instance == None:
+            self.instance = self.aClass(*args)  <em class="epub__lineannotation"><span class="epub__lineannotation"># One instance per class</span></em>
+        return self.instance</pre>
+<p>To make this decorator a fully general-purpose tool, store it
+          in an importable module file, indent the self-test code under a
+          <code class="epub__literal">__name__</code> check, and add support
+          for keyword arguments in construction calls with <code class="epub__literal">**kargs</code> syntax (I’ll leave this as a
+          suggested exercise).</p>
+</div>
+<div class="epub__sect2" title="Tracing Object Interfaces"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="tracing_object_interfaces"></a>Tracing Object Interfaces</h2>
+</div>
+</div>
+</div>
+<p>The <a id="ch3842clssdeccodtracobjintfcs"></a>singleton example of the prior section illustrated
+          using class decorators to manage <span class="epub__emphasis"><em>all</em></span> the
+          instances of a class. Another common use case for class decorators
+          augments the interface of <span class="epub__emphasis"><em>each</em></span> generated
+          instance. Class decorators can essentially install on instances a
+          wrapper logic layer that manages access to their interfaces in some
+          way.</p>
+<p>For example, in Chapter 30, the
+          <code class="epub__literal">__getattr__</code> operator overloading
+          method is shown as a way to wrap up entire object interfaces of
+          embedded instances, in order to implement the
+          <span class="epub__emphasis"><em>delegation</em></span> coding pattern. We saw similar
+          examples in the managed attribute coverage of the prior chapter.
+          Recall that <code class="epub__literal">__getattr__</code> is run
+          when an undefined attribute name is fetched; we can use this hook to
+          intercept method calls in a controller class and propagate them to
+          an embedded object.</p>
+<p>For reference, here’s the original nondecorator delegation
+          example, working on two built-in type objects:</p><a id="I_programlisting3_d1e98746"></a>
+<pre class="epub__programlisting">class Wrapper:
+    def __init__(self, object):
+        self.wrapped = object                    <em class="epub__lineannotation"><span class="epub__lineannotation"># Save object</span></em>
+    def __getattr__(self, attrname):
+        print('Trace:', attrname)                <em class="epub__lineannotation"><span class="epub__lineannotation"># Trace fetch</span></em>
+        return getattr(self.wrapped, attrname)   <em class="epub__lineannotation"><span class="epub__lineannotation"># Delegate fetch</span></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = Wrapper([1,2,3])</code></strong>                         <em class="epub__lineannotation"><span class="epub__lineannotation"># Wrap a list</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.append(4)</code></strong>                                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Delegate to list method</span></em>
+Trace: append
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.wrapped</code></strong>                                    <em class="epub__lineannotation"><span class="epub__lineannotation"># Print my member</span></em>
+[1, 2, 3, 4]
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = Wrapper({"a": 1, "b": 2})</code></strong>                <em class="epub__lineannotation"><span class="epub__lineannotation"># Wrap a dictionary</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>list(x.keys())</code></strong>                               <em class="epub__lineannotation"><span class="epub__lineannotation"># Delegate to dictionary method</span></em>
+Trace: keys                                      <em class="epub__lineannotation"><span class="epub__lineannotation"># Use list() in 3.0</span></em>
+['a', 'b']</pre>
+<p>In this code, the <code class="epub__literal">Wrapper</code>
+          class intercepts access to any of the wrapped object’s attributes,
+          prints a trace message, and uses the <code class="epub__literal">getattr</code> built-in to pass off the request
+          to the wrapped object.
+          Specifically, it traces attribute accesses made
+          <span class="epub__emphasis"><em>outside</em></span> the wrapped object’s class; accesses
+          inside the wrapped object’s methods are not caught and run normally
+          by design. This whole-interface model differs from the behavior of
+          function decorators, which wrap up just one specific method.</p>
+<p>Class decorators provide an alternative and convenient way to
+          code this <code class="epub__literal">__getattr__</code> technique
+          to wrap an entire interface. In 2.6 and 3.0, for example, the prior
+          class example can be coded as a class decorator that triggers
+          wrapped instance creation, instead of passing a pre-made instance
+          into the wrapper’s constructor (also augmented here to support
+          keyword arguments with <code class="epub__literal">**kargs</code>
+          and to count the number of accesses made):</p><a id="I_programlisting3_d1e98814"></a>
+<pre class="epub__programlisting">def Tracer(aClass):                                   <em class="epub__lineannotation"><span class="epub__lineannotation"># On @ decorator</span></em>
+    class Wrapper:
+        def __init__(self, *args, **kargs):           <em class="epub__lineannotation"><span class="epub__lineannotation"># On instance creation</span></em>
+            self.fetches = 0
+            self.wrapped = aClass(*args, **kargs)     <em class="epub__lineannotation"><span class="epub__lineannotation"># Use enclosing scope name</span></em>
+        def __getattr__(self, attrname):
+            print('Trace: ' + attrname)               <em class="epub__lineannotation"><span class="epub__lineannotation"># Catches all but own attrs</span></em>
+            self.fetches += 1
+            return getattr(self.wrapped, attrname)    <em class="epub__lineannotation"><span class="epub__lineannotation"># Delegate to wrapped obj</span></em>
+    return Wrapper
+
+@Tracer
+class Spam:                                    <em class="epub__lineannotation"><span class="epub__lineannotation"># Spam = Tracer(Spam)</span></em>
+    def display(self):                         <em class="epub__lineannotation"><span class="epub__lineannotation"># Spam is rebound to Wrapper</span></em>
+        print('Spam!' * 8)
+
+@Tracer
+class Person:                                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Person = Tracer(Person)</span></em>
+    def __init__(self, name, hours, rate):     <em class="epub__lineannotation"><span class="epub__lineannotation"># Wrapper remembers Person</span></em>
+        self.name = name
+        self.hours = hours
+        self.rate = rate
+    def pay(self):                             <em class="epub__lineannotation"><span class="epub__lineannotation"># Accesses outside class traced</span></em>
+        return self.hours * self.rate          <em class="epub__lineannotation"><span class="epub__lineannotation"># In-method accesses not traced</span></em>
+
+food = Spam()                                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Triggers Wrapper()</span></em>
+food.display()                                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Triggers __getattr__</span></em>
+print([food.fetches])
+
+bob = Person('Bob', 40, 50)                    <em class="epub__lineannotation"><span class="epub__lineannotation"># bob is really a Wrapper</span></em>
+print(bob.name)                                <em class="epub__lineannotation"><span class="epub__lineannotation"># Wrapper embeds a Person</span></em>
+print(bob.pay())
+
+print('')
+sue = Person('Sue', rate=100, hours=60)        <em class="epub__lineannotation"><span class="epub__lineannotation"># sue is a different Wrapper</span></em>
+print(sue.name)                                <em class="epub__lineannotation"><span class="epub__lineannotation"># with a different Person</span></em>
+print(sue.pay())
+
+print(bob.name)                                <em class="epub__lineannotation"><span class="epub__lineannotation"># bob has different state</span></em>
+print(bob.pay())
+print([bob.fetches, sue.fetches])              <em class="epub__lineannotation"><span class="epub__lineannotation"># Wrapper attrs not traced</span></em></pre>
+<p>It’s important to note that this is very different from the
+          tracer decorator we met earlier. In Coding Function Decorators, we looked at decorators
+          that enabled us to trace and time calls to a given function or
+          method. In contrast, by intercepting instance creation calls, the class
+          decorator here allows us to trace an entire object interface—i.e., accesses to any of its
+          attributes.</p>
+<p>The following is the output produced by this code under both
+          2.6 and 3.0: attribute fetches on instances of both the <code class="epub__literal">Spam</code> and <code class="epub__literal">Person</code> classes invoke the <code class="epub__literal">__getattr__</code> logic in the <code class="epub__literal">Wrapper</code> class, because <code class="epub__literal">food</code> and <code class="epub__literal">bob</code> are really instances of <code class="epub__literal">Wrapper</code>, thanks to the decorator’s
+          redirection of instance creation calls:</p><a id="I_programlisting3_d1e98909"></a>
+<pre class="epub__programlisting">Trace: display
+Spam!Spam!Spam!Spam!Spam!Spam!Spam!Spam!
+[1]
+Trace: name
+Bob
+Trace: pay
+2000
+
+Trace: name
+Sue
+Trace: pay
+6000
+Trace: name
+Bob
+Trace: pay
+2000
+[4, 2]</pre>
+<p>Notice that the preceding code decorates a user-defined class.
+          Just like in the original example in Chapter 30, we can also use the decorator
+          to wrap up a built-in type such as a list, as long as we either
+          subclass to allow decoration syntax or perform the decoration
+          manually—decorator syntax requires a <code class="epub__literal">class</code> statement for the <code class="epub__literal">@</code> line.</p>
+<p>In the following, <code class="epub__literal">x</code> is
+          really a <code class="epub__literal">Wrapper</code> again due to the
+          indirection of decoration (I moved the decorator class to module
+          file <em class="epub__filename">tracer.py</em> in order to
+          reuse it this way):</p><a id="I_programlisting3_d1e98933"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from tracer import Tracer</code></strong>     <em class="epub__lineannotation"><span class="epub__lineannotation"># Decorator moved to a module file</span></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>@Tracer</code></strong>
+... <strong class="epub__userinput"><code>class MyList(list): pass</code></strong>      <em class="epub__lineannotation"><span class="epub__lineannotation"># MyList = Tracer(MyList)</span></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = MyList([1, 2, 3])</code></strong>         <em class="epub__lineannotation"><span class="epub__lineannotation"># Triggers Wrapper()</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.append(4)</code></strong>                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Triggers __getattr__, append</span></em>
+Trace: append
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.wrapped</code></strong>
+[1, 2, 3, 4]
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>WrapList = Tracer(list)</code></strong>       <em class="epub__lineannotation"><span class="epub__lineannotation"># Or perform decoration manually</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = WrapList([4, 5, 6])</code></strong>       <em class="epub__lineannotation"><span class="epub__lineannotation"># Else subclass statement required</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.append(7)</code></strong>
+Trace: append
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.wrapped</code></strong>
+[4, 5, 6, 7]</pre>
+<p>The decorator approach allows us to move instance creation
+          into the decorator itself, instead of requiring a premade object to
+          be passed in. Although this seems like a minor difference, it lets
+          us retain normal instance creation syntax and realize all the
+          benefits of decorators in general. Rather than requiring all
+          instance creation calls to route objects through a wrapper manually,
+          we need only augment classes with decorator syntax:</p><a id="I_programlisting3_d1e98987"></a>
+<pre class="epub__programlisting">@Tracer                                          <em class="epub__lineannotation"><span class="epub__lineannotation"># Decorator approach</span></em>
+class Person: ...
+bob = Person('Bob', 40, 50)
+sue = Person('Sue', rate=100, hours=60)
+
+class Person: ...                                <em class="epub__lineannotation"><span class="epub__lineannotation"># Non-decorator approach</span></em>
+bob = Wrapper(Person('Bob', 40, 50))
+sue = Wrapper(Person('Sue', rate=100, hours=60))</pre>
+<p>Assuming you will make more than one instance of a class,
+          decorators will generally be a net win in terms of both code size
+          and code maintenance.</p><div class="epub__note" title="Note">
+<h3 class="epub__title">Note</h3>
+<p><span class="epub__emphasis"><em>Attribute version skew note</em></span>: As we
+            learned in Chapter 37, <code class="epub__literal">__getattr__</code> will intercept accesses to
+            operator overloading methods like <code class="epub__literal">__str__</code> and <code class="epub__literal">__repr__</code> in Python 2.6, but not in
+            3.0.</p>
+<p>In Python 3.0, class instances inherit defaults for some
+            (but not all) of these names from the class (really, from the
+            automatic <code class="epub__literal">object</code> superclass),
+            because all classes are “new-style.” Moreover, in 3.0 implicitly
+            invoked attributes for built-in operations like printing and
+            <code class="epub__literal">+</code> are <span class="epub__emphasis"><em>not</em></span>
+            routed through <code class="epub__literal">__getattr__</code> (or
+            its cousin, <code class="epub__literal">__getattribute__</code>).
+            New-style classes look up such methods in
+            <span class="epub__emphasis"><em>classes</em></span> and skip the normal instance lookup entirely.</p>
+<p>Here, this means that the <code class="epub__literal">__getattr__</code>-based tracing wrapper will
+            automatically trace and propagate operator overloading calls in
+            2.6, but not in 3.0. To see this, display “x” directly at the end
+            of the preceding interactive session—in 2.6 the attribute <code class="epub__literal">__repr__</code> is traced and the list prints
+            as expected, but in 3.0 no trace occurs and the list prints using
+            a default display for the <code class="epub__literal">Wrapper</code> class:</p><a id="I_programlisting3_d1e99048"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; x                                   <em class="epub__lineannotation"><span class="epub__lineannotation"># 2.6</span></em>
+Trace: __repr__
+[4, 5, 6, 7]
+&gt;&gt;&gt; x                                   <em class="epub__lineannotation"><span class="epub__lineannotation"># 3.0</span></em>
+&lt;tracer.Wrapper object at 0x026C07D0&gt;</pre>
+<p>To work the same in 3.0, operator overloading methods
+            generally need to be redefined redundantly in the wrapper class,
+            either by hand, by tools, or by definition in superclasses. Only
+            simple named attributes will work the same in both versions. We’ll
+            see this version skew at work again in a <code class="epub__literal">Private</code> decorator later in this
+            <a id="I_indexterm3_d1e99061"></a>chapter.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Class Blunders II: Retaining Multiple Instances"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="class_blunders_ii_colon_retaining_multi"></a>Class Blunders II: Retaining Multiple Instances</h2>
+</div>
+</div>
+</div>
+<p>Curiously, <a id="I_indexterm3_d1e99069"></a>the decorator function in this example can
+          <span class="epub__emphasis"><em>almost</em></span> be coded as a class instead of a
+          function, with the proper operator overloading protocol. The
+          following slightly simplified alternative works similarly because
+          its <code class="epub__literal">__init__</code> is triggered when
+          the <code class="epub__literal">@</code> decorator is applied to the
+          class, and its <code class="epub__literal">__call__</code> is
+          triggered when a subject class instance is created. Our objects are
+          really instances of <code class="epub__literal">Tracer</code> this
+          time, and we essentially just trade an enclosing scope reference for
+          an instance attribute here:</p><a id="I_programlisting3_d1e99093"></a>
+<pre class="epub__programlisting">class Tracer:
+    def __init__(self, aClass):               <em class="epub__lineannotation"><span class="epub__lineannotation"># On @decorator</span></em>
+        self.aClass = aClass                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Use instance attribute</span></em>
+    def __call__(self, *args):                <em class="epub__lineannotation"><span class="epub__lineannotation"># On instance creation</span></em>
+        self.wrapped = self.aClass(*args)     <em class="epub__lineannotation"><span class="epub__lineannotation"># ONE (LAST) INSTANCE PER CLASS!</span></em>
+        return self
+    def __getattr__(self, attrname):
+        print('Trace: ' + attrname)
+        return getattr(self.wrapped, attrname)
+
+@Tracer                                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Triggers __init__</span></em>
+class Spam:                                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Like: Spam = Tracer(Spam)</span></em>
+    def display(self):
+        print('Spam!' * 8)
+
+...
+food = Spam()                                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Triggers __call__</span></em>
+food.display()                                <em class="epub__lineannotation"><span class="epub__lineannotation"># Triggers __getattr__</span></em></pre>
+<p>As we saw in the abstract earlier, though, this class-only
+          alternative handles multiple classes as before, but it won’t quite
+          work for <span class="epub__emphasis"><em>multiple instances</em></span> of a given class:
+          each instance construction call triggers <code class="epub__literal">__call__</code>, which overwrites the prior
+          instance. The net effect is that <code class="epub__literal">Tracer</code> saves just one instance—the last
+          one created. Experiment with this yourself to see how, but here’s an
+          example of the problem:</p><a id="I_programlisting3_d1e99130"></a>
+<pre class="epub__programlisting">@Tracer
+class Person:                                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Person = Tracer(Person)</span></em>
+    def __init__(self, name):                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Wrapper bound to Person</span></em>
+        self.name = name
+
+bob = Person('Bob')                           <em class="epub__lineannotation"><span class="epub__lineannotation"># bob is really a Wrapper</span></em>
+print(bob.name)                               <em class="epub__lineannotation"><span class="epub__lineannotation"># Wrapper embeds a Person</span></em>
+Sue = Person('Sue')
+print(sue.name)                               <em class="epub__lineannotation"><span class="epub__lineannotation"># sue overwrites bob</span></em>
+print(bob.name)                               <em class="epub__lineannotation"><span class="epub__lineannotation"># OOPS: now bob's name is 'Sue'!</span></em></pre>
+<p>This code’s output follows—because this tracer only has a
+          single shared instance, the second overwrites the first:</p><a id="I_programlisting3_d1e99152"></a>
+<pre class="epub__programlisting">Trace: name
+Bob
+Trace: name
+Sue
+Trace: name
+Sue</pre>
+<p>The problem here is bad <span class="epub__emphasis"><em>state
+          retention</em></span>—we make one decorator instance per class, but
+          not per class instance, such that only the last instance is
+          retained. The solution, as in our prior class blunder for decorating
+          methods, lies in abandoning class-based decorators.</p>
+<p>The earlier function-based <code class="epub__literal">Tracer</code> version <span class="epub__emphasis"><em>does</em></span>
+          work for multiple instances, because each instance construction call
+          makes a new <code class="epub__literal">Wrapper</code> instance,
+          instead of overwriting the state of a single shared <code class="epub__literal">Tracer</code> instance; the original nondecorator
+          version handles multiple instances correctly for the same reason.
+          Decorators are not only arguably magical, they can also be
+          incredibly subtle!</p>
+</div>
+<div class="epub__sect2" title="Decorators Versus Manager Functions"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="decorators_versus_manager_functions"></a>Decorators Versus Manager Functions</h2>
+</div>
+</div>
+</div>
+<p>Regardless <a id="I_indexterm3_d1e99181"></a>of such subtleties, the <code class="epub__literal">Tracer</code> class decorator example ultimately
+          still relies on <code class="epub__literal">__getattr__</code> to
+          intercept fetches on a wrapped and embedded instance object. As we
+          saw earlier, all we’ve really accomplished is moving the instance
+          creation call inside a class, instead of passing the instance into a
+          manager function. With the original nondecorator tracing example, we
+          would simply code instance creation differently:</p><a id="I_programlisting3_d1e99195"></a>
+<pre class="epub__programlisting">class Spam:                                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Non-decorator version</span></em>
+    ...                                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Any class will do</span></em>
+food = Wrapper(Spam())                        <em class="epub__lineannotation"><span class="epub__lineannotation"># Special creation syntax</span></em>
+
+@Tracer
+class Spam:                                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Decorator version</span></em>
+    ...                                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Requires @ syntax at class</span></em>
+food = Spam()                                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Normal creation syntax</span></em></pre>
+<p>Essentially, <span class="epub__emphasis"><em>class decorators</em></span> shift
+          special syntax requirements from the instance creation call to the
+          class statement itself. This is also true for the singleton example
+          earlier in this section—rather than decorating a class and using
+          normal instance creation calls, we could simply pass the class and
+          its construction arguments into a manager function:</p><a id="I_programlisting3_d1e99220"></a>
+<pre class="epub__programlisting">instances = {}
+def getInstance(aClass, *args):
+    if aClass not in instances:
+        instances[aClass] = aClass(*args)
+    return instances[aClass]
+
+bob = getInstance(Person, 'Bob', 40, 10)    <em class="epub__lineannotation"><span class="epub__lineannotation"># Versus: bob = Person('Bob', 40, 10)</span></em></pre>
+<p>Alternatively, we could use Python’s introspection facilities
+          to fetch the class from an already-created instance (assuming
+          creating an initial instance is acceptable):</p><a id="I_programlisting3_d1e99226"></a>
+<pre class="epub__programlisting">instances = {}
+def getInstance(object):
+    aClass = object.__class__
+    if aClass not in instances:
+        instances[aClass] = object
+    return instances[aClass]
+
+bob = getInstance(Person('Bob', 40, 10))    <em class="epub__lineannotation"><span class="epub__lineannotation"># Versus: bob = Person('Bob', 40, 10)</span></em></pre>
+<p>The same holds true for <span class="epub__emphasis"><em>function
+          decorators</em></span> like the tracer we wrote earlier: rather than
+          decorating a function with logic that intercepts later calls, we
+          could simply pass the function and its arguments into a manager that
+          dispatches the call:</p><a id="I_programlisting3_d1e99235"></a>
+<pre class="epub__programlisting">def func(x, y):                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Nondecorator version</span></em>
+    ...                           <em class="epub__lineannotation"><span class="epub__lineannotation"># def tracer(func, args): ... func(*args)</span></em>
+result = tracer(func, (1, 2))     <em class="epub__lineannotation"><span class="epub__lineannotation"># Special call syntax</span></em>
+
+@tracer
+def func(x, y):                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Decorator version</span></em>
+    ...                           <em class="epub__lineannotation"><span class="epub__lineannotation"># Rebinds name: func = tracer(func)</span></em>
+result = func(1, 2)               <em class="epub__lineannotation"><span class="epub__lineannotation"># Normal call syntax</span></em></pre>
+<p>Manager function approaches like this place the burden of
+          using special syntax on <span class="epub__emphasis"><em>calls</em></span>, instead of
+          expecting decoration syntax at function and class
+          definitions.</p>
+</div>
+<div class="epub__sect2" title="Why Decorators? (Revisited)"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="why_decorators_question__open_parenthes"></a>Why Decorators? (Revisited)</h2>
+</div>
+</div>
+</div>
+<p>So <a id="I_indexterm3_d1e99265"></a>why did I just show you ways to
+          <span class="epub__emphasis"><em>not</em></span> use decorators to implement singletons? As
+          I mentioned at the start of this chapter, decorators present us with
+          tradeoffs. Although syntax matters, we all too often forget to ask
+          the “why” questions when confronted with new tools. Now that we’ve
+          seen how decorators actually work, let’s step back for a minute to
+          glimpse the big picture here.</p>
+<p>Like most language features, decorators have both pros and
+          cons. For example, in the negatives column, <span class="epub__emphasis"><em>class
+          decorators</em></span> suffer from two potential drawbacks:</p><div class="epub__variablelist"><dl><dt><span class="epub__term">Type changes</span></dt><dd>
+<p>As we’ve seen, when wrappers are inserted, a decorated
+                function or class does not retain its <span class="epub__emphasis"><em>original
+                type</em></span>—its name is rebound to a wrapper object, which
+                might matter in programs that use object names or test object
+                types. In the singleton example, both the decorator and
+                manager function approaches retain the original class type for
+                instances; in the tracer code, neither approach does, because
+                wrappers are required.</p></dd><dt><span class="epub__term">Extra calls</span></dt><dd>
+<p>A wrapping layer added by decoration incurs the
+                additional performance cost of an <span class="epub__emphasis"><em>extra
+                call</em></span> each time the decorated object is
+                invoked—calls are relatively time-expensive operations, so
+                decoration wrappers can make a program slower. In the tracer
+                code, both approaches require each attribute to be routed
+                through a wrapper layer; the singleton example avoids extra
+                calls by retaining the original class type.</p></dd></dl>
+</div>
+<p>Similar concerns apply with <span class="epub__emphasis"><em>function
+          decorators</em></span>: both decoration and manager functions incur
+          extra calls, and type changes generally occur when decorating (but
+          not otherwise).</p>
+<p>That said, neither of these is a very serious issue. For most
+          programs, the type difference issue is unlikely to matter and the
+          speed hit of the extra calls will be insignificant; furthermore, the
+          latter occurs only when wrappers are used, can often be negated by
+          simply removing the decorator when optimal performance is required,
+          and is also incurred by nondecorator solutions that add wrapping
+          logic (including <span class="epub__emphasis"><em>metaclasses</em></span>, as we’ll see in
+          Chapter 39).</p>
+<p>Conversely, as we saw at the start of this chapter, decorators
+          have three main advantages. Compared to the manager (a.k.a.
+          “helper”) function solutions of the prior section, decorators
+          offer:</p><div class="epub__variablelist"><dl><dt><span class="epub__term">Explicit syntax</span></dt><dd>
+<p>Decorators make augmentation explicit and obvious. Their
+                <code class="epub__literal">@</code> syntax is easier to
+                recognize than special code in calls that may appear anywhere
+                in a source file—in our singleton and tracer examples, for
+                instance, the decorator lines seem more likely to be noticed
+                than extra code at calls would be. Moreover, decorators allow
+                function and instance creation calls to use normal syntax
+                familiar to all Python programmers.</p></dd><dt><span class="epub__term">Code maintenance</span></dt><dd>
+<p>Decorators avoid repeated augmentation code at each
+                function or class call. Because they appear just once, at the
+                definition of the class or function itself, they obviate
+                redundancy and simplify future code maintenance. For our
+                singleton and tracer cases, we need to use special code at
+                each call to use a manager function approach—extra work is
+                required both initially and for any modifications that must be
+                made in the future.</p></dd><dt><span class="epub__term">Consistency</span></dt><dd>
+<p>Decorators make it less likely that a programmer will
+                forget to use required wrapping logic. This derives mostly
+                from the two prior advantages—because decoration is explicit
+                and appears only once, at the decorated objects themselves,
+                decorators promote more consistent and uniform API usage than
+                special code that must be included at each call. In the
+                singleton example, for instance, it would be easy to forget to
+                route all class creation calls through special code, which
+                would subvert the singleton management altogether.</p></dd></dl>
+</div>
+<p>Decorators also promote code
+          <span class="epub__emphasis"><em>encapsulation</em></span> to reduce redundancy and minimize
+          future maintenance effort; although other code structuring tools do
+          too, decorators make this natural for augmentation tasks.</p>
+<p>None of these benefits completely requires decorator syntax to
+          be achieved, though, and decorator usage is ultimately a stylistic
+          choice. That said, most programmers find them to be a net win,
+          especially as a tool for using libraries and APIs correctly.</p>
+<p>I can recall similar arguments being made both for and against
+          constructor functions in classes—prior to the introduction of
+          <code class="epub__literal">__init__</code> methods, the same effect
+          was often achieved by running an instance through a method manually
+          when creating it (e.g., <code class="epub__literal">X=Class().init()</code>). Over time, though,
+          despite being fundamentally a stylistic choice, the <code class="epub__literal">__init__</code> syntax came to be universally
+          preferred because it was more explicit, consistent, and
+          maintainable. Although you should be the judge, decorators seem to
+          bring many of the same assets to <a id="I_indexterm3_d1e99352"></a><a id="I_indexterm3_d1e99354"></a>the table.</p>
+</div>
+<div class="epub__sect1" title="Managing Functions and Classes Directly"><div class="epub__titlepage"><div>
+<div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

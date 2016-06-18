@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>12.8. Adding Memcache Service</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">12.8. Adding Memcache Service</h3>
+<p class="docText">New users to App Engine often
+ remark that its database access is slow. Well, that is a relative term,
+ but you will contend that you’re experiencing a decline in performance 
+compared to using a standard relational database. However, keep in mind 
+that you’re making a significant trade off: in exchange for distributed,
+ scalable, replicated storage in the cloud, you take a slight hit 
+because as we all know, you can’t get something for nothing. One of the 
+ways to improve the speed of queries is to bring the data “closer” to 
+your application by caching instead of going to the datastore.</p>
+<p class="docText">High-traffic sites are 
+rarely limited in their performance by how fast the Web server can send 
+data to the client. The bottleneck is almost always in the generation of
+ that data; the database might not be able to answer queries quickly 
+enough, or the server’s CPU might be bogged down executing the same code
+ over and over for every request. It’s also a waste of resources to 
+retrieve or compute the same data payloads for multiple requests.</p>
+<p class="docText">By placing the data at a 
+higher-level and closer to the request, less effort is required by the 
+database or code that generates returned results. An intermediary cache 
+is a great place to temporarily store retrieved data. That way, for 
+identical requests, clients can be sent the same data over and over 
+without the need to refetch or recompute for the purposes of serving to 
+different users. This is especially important for App Engine users if 
+you find your application fetching the same entities over and over again
+ for different queries.</p>
+<p class="docText">The general pattern for 
+object caching (in App Engine or otherwise) is represented by the 
+following: check if the cache contains the desired data. If yes, return 
+it; otherwise, perform the retrieval and cache it</p>
+<p class="docText">If you were to write the above in pseudocode, it would look something like the following snippet for some constant <tt>KEY</tt> which we use to store the cached data:</p>
+<div class="docText"><pre>data = cache.get(KEY)
+<span class="docEmphStrong">if not</span> data:
+    data = QUERY()
+    cache.set(KEY, data)
+<span class="docEmphStrong">return</span> data</pre></div><br/>
+<p class="docText">Not surprisingly, this is pretty much the solution in Python. We’re only missing a value for the <tt>KEY</tt>, a database <tt>QUERY</tt>, and this import of App Engine’s low-level Memcache-compatible API:</p>
+<div class="docText"><pre><span class="docEmphStrong">from</span> google.appengine.api <span class="docEmphStrong">import</span> memcache</pre></div><br/>
+<p class="docText">In our application code, we add a few lines to our <tt>MainHandler.get()</tt> method that surrounds the fetching of the data, only going to the datastore if we have not cached the dataset:</p>
+
+<h4 class="docSection2Title" id="title-ID0E26BK">Before</h4>
+<div class="docText"><pre>. . .
+posts = BlogPost.all().order('-timestamp').fetch(10)
+<span class="docEmphStrong">for</span> post <span class="docEmphStrong">in</span> posts:
+. . .</pre></div><br/>
+
+<h4 class="docSection2Title" id="title-ID0ESACK">After</h4>
+<div class="docText"><pre>. . .
+posts = memcache.get(KEY) # check cache first
+<span class="docEmphStrong">if not</span> posts:
+    posts = BlogPost.all().order('-timestamp').fetch(10)
+    memcache.add(KEY, posts)  # cache this object
+<span class="docEmphStrong">for</span> post <span class="docEmphStrong">in</span> posts:
+. . .</pre></div><br/>
+<p class="docText">Don’t forget to set the key for your cache, that is, <tt>KEY</tt> <tt>=</tt> <tt>'posts'</tt>.</p>
+<p class="docText">With the <tt>add()</tt> call, we’ve
+ effectively cached the object until we either explicitly delete it (see
+ below), or it is evicted to make room for more recently-accessed data 
+Just as a point of interest, the Memcache API employs an LRU (least 
+recently used) algorithm. A third alternative is to cache an object with
+ an expiration. For example, if we wanted to cache this object for one 
+minute, we’d change our call to:</p>
+<div class="docText"><pre>memcache.add(KEY, posts, 60)</pre></div><br/>
+<p class="docText">The final piece of the puzzle
+ is to invalidate the cache when a new blog post entry comes in. To make
+ this happen, we flush the cache whenever a new entry is sent to the 
+datastore in our code for <tt>BlogEntry.post()</tt>:</p>
+<div class="docText"><pre>. . .
+post.put()
+memcache.delete(KEY)
+self.redirect('/')</pre></div><br/>
+<p class="docText">Once these changes are made, 
+you are certainly welcome to try it out in your browser, but because of 
+our small dataset, it’s difficult to determine whether you’re getting 
+your data from memcache or the datastore. The easiest way to do it is to
+ take a look at the Memcache Viewer in the SDK Console (see Figure 12-21).</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 12-21. The Memcache Viewer, which here is showing empty.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="245" id="" src="Images/getfile-54.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<p class="docText">To see it in action, you’ll need a
+ pair of browser windows, one open to your application, and the other to
+ the Memcache Viewer in the SDK Console. Ensure that you have some <tt>BlogPost</tt>
+ objects in your application, and then refresh the main page of the 
+application several times. Now refresh the Memcache Viewer page to see 
+memcache utilization. I did this myself so you can see my usage results,
+ which are shown in Figure 12-22.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 12-22. The Memcache Viewer now registers some usage.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="245" id="" src="Images/getfile_002-39.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<p class="docText">You should have registered one 
+cache miss but an increasing number of hits each successive pass, 
+meaning that the datastore was only accessed the first time, helping to 
+improve the performance for users after the initial data acquisition. To
+ read more about using App Engine’s Memcache API, read the documentation
+ page at http://code.google.com/appengine/docs/python/memcache.</p>
+<p class="docText">In Chapter 11,
+ we did not get a chance to talk about caching. Django has many levels 
+of caching service, including object caching, as we’ve just done here, 
+plus <tt>QuerySet</tt> caching, which helps push
+ lower-level object caching further under the covers. You can find out 
+more about the various types of caching Django has to offer in Chapter 12 of <span class="docEmphasis">Python Web Development with Django</span>.</p>
+<p class="docText">Object-level
+ caching is just one way to prevent the server from having to do extra 
+work to get your data to you. Data doesn’t always come from the 
+database, however. Serving Web pages usually includes many static files,
+ as well. App Engine provides various optimizations for developers 
+there, too, such as requesting upstream caching by using HTTP <tt>Cache-Control</tt>
+ headers in appropriate places. If you can cache on the edge or via 
+proxies, this will allow some of your assets to be served directly to 
+clients without even using your App Engine application.</p>
+</div>
+</body>
+</html>

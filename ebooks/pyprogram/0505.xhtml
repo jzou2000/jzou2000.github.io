@@ -1,0 +1,826 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>The multiprocessing Module</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="The multiprocessing Module"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="the_multiprocessing_module"></a>The multiprocessing Module</h1>
+</div>
+</div>
+</div>
+<p>Now that you <a id="par5.6"></a>know about IPC alternatives and have had a chance to
+        explore processes, threads, and both process nonportability and thread
+        GIL limitations, it turns out that there is another alternative, which
+        aims to provide just the best of both worlds. As mentioned earlier,
+        Python’s standard library <code class="epub__literal">multiprocessing</code> module <a id="multi5.6"></a>package allows scripts to spawn processes using an API
+        very similar to the <code class="epub__literal">threading</code>
+        module.</p>
+<p>This relatively new package works on both Unix and Windows,
+        unlike low-level process forks. It supports a process spawning model
+        which is largely platform-neutral, and provides tools for related
+        goals, such as IPC, including locks, pipes, and queues. In addition,
+        because it uses processes instead of threads to run code in parallel,
+        it effectively works around the limitations of the thread GIL. Hence,
+        <code class="epub__literal">multiprocessing</code> allows the
+        programmer to leverage the capacity of multiple processors for
+        parallel tasks, while retaining much of the simplicity and portability
+        of the threading model.</p>
+<div class="epub__sect2" title="Why multiprocessing?"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="why_multiprocessing_question"></a>Why multiprocessing?</h2>
+</div>
+</div>
+</div>
+<p>So why learn yet another parallel processing paradigm and
+          toolkit, when we already have the threads, processes, and IPC tools
+          like sockets, pipes, and thread queues that we’ve already studied?
+          Before we get into the details, I want to begin with a few words
+          about why you may (or may not) care about this package. In more
+          specific terms, although this module’s performance may not compete
+          with that of pure threads or process forks for some applications,
+          this module offers a compelling solution for many:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Compared to raw process forks, you gain cross-platform
+              portability and powerful IPC tools.</p></li><li class="epub__listitem">
+<p>Compared to threads, you essentially trade some potential
+              and <span>platform</span>-<span>dependent</span> extra task start-up time
+              for the ability to run tasks in truly parallel fashion on
+              multi-core or multi-CPU machines.</p></li></ul>
+</div>
+<p>On the other hand, this module imposes some constraints and
+          tradeoffs that threads do not:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Since objects are copied across process boundaries, shared
+              mutable state does not work as it does for threads—changes in
+              one process are not generally noticed in the other. Really,
+              freely shared state may be the most compelling reason to use
+              threads; its absence in this module may prove limiting in some
+              threading contexts.</p></li><li class="epub__listitem">
+<p>Because this module requires pickleability for both its
+              processes on Windows, as well as some of its IPC tools in
+              general, some coding paradigms are difficult or
+              nonportable—especially if they use bound methods or pass
+              unpickleable objects such as sockets to spawned
+              processes.</p></li></ul>
+</div>
+<p>For instance, common coding patterns with lambda that work for
+          the <code class="epub__literal">threading</code> module cannot be
+          used as process target callables in this module on Windows, because
+          they cannot be pickled. Similarly, because bound object methods are
+          also not pickleable, a threaded program may require a more indirect
+          design if it either runs bound methods in its threads or implements
+          thread exit actions by posting arbitrary callables (possibly
+          including bound methods) on shared queues. The in-process model of
+          threads supports such direct lambda and bound method use, but the
+          separate processes of <code class="epub__literal">multiprocessing</code> do not.</p>
+<p>In fact we’ll write a thread manager for GUIs in Chapter 10 that relies on queueing <span>in-process</span> callables this way to
+          implement thread exit actions—the callables are queued by worker
+          threads, and fetched and dispatched by the main thread. Because the
+          <span>threaded</span> PyMailGUI program
+          we’ll code in Chapter 14 both uses this
+          manager to queue bound methods for thread exit actions and runs
+          bound methods as the main action of a thread itself, it could not be
+          directly translated to the separate process model implied by
+          <code class="epub__literal">multiprocessing</code>.</p>
+<p>Without getting into too many details here, to use <code class="epub__literal">multiprocessing</code>, PyMailGUI’s actions might
+          have to be coded as simple functions or complete process subclasses
+          for pickleability. Worse, they may have to be implemented as simpler
+          action identifiers dispatched in the main process, if they update
+          either the GUI itself or object state in general —pickling results
+          in an object copy in the receiving process, not a reference to the
+          original, and forks on Unix essentially copy an entire process.
+          Updating the state of a mutable message cache copied by pickling it
+          to pass to a new process, for example, has no effect on the
+          original.</p>
+<p>The pickleability constraints for process arguments on Windows
+          can limit <code class="epub__literal">multi</code><code class="epub__literal">processing</code>’s scope in other contexts
+          as well. For instance, in Chapter 12,
+          we’ll find that this module doesn’t directly solve the lack of
+          portability for the <code class="epub__literal">os.fork</code> call
+          for traditionally coded <span class="epub__emphasis"><em>socket servers</em></span> on
+          Windows, because connected sockets are not pickled correctly when
+          passed into a new process created by this module to converse with a
+          client. In this context, threads provide a more portable and likely
+          more efficient solution.</p>
+<p>Applications that pass simpler types of messages, of course,
+          may fare better. Message constraints are easier to accommodate when
+          they are part of an initial process-based design. Moreover, other
+          tools in this module, such as its managers and shared memory API,
+          while narrowly focused and not as general as shared thread state,
+          offer additional mutable state options for some programs.</p>
+<p>Fundamentally, though, because <code class="epub__literal">multiprocessing</code> is based on separate
+          processes, it may be best geared for tasks which are relatively
+          independent, do not share mutable object state freely, and can make
+          do with the message passing and shared memory tools provided by this
+          module. This includes many applications, but this module is not
+          necessarily a direct replacement for every threaded program, and it
+          is not an alternative to process forks in all contexts.</p>
+<p>To truly understand both this module package’s benefits, as
+          well as its tradeoffs, let’s turn to a first example and explore
+          this package’s implementation along the <a id="I_indexterm4_d1e19905"></a>way.</p>
+</div>
+<div class="epub__sect2" title="The Basics: Processes and Locks"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_basics_colon_processes_and_locks"></a>The Basics: Processes and Locks</h2>
+</div>
+</div>
+</div>
+<p>We don’t have <a id="multi5.6.2"></a>space to do full justice to this sophisticated module
+          in this book; see its coverage in the Python library manual for the
+          full story. But as a brief introduction, by design most of this
+          module’s interfaces mirror the <code class="epub__literal">threading</code> and <code class="epub__literal">queue</code> modules we’ve already met, so they
+          should already seem familiar. For example, the <code class="epub__literal">multiprocessing</code> module’s<a id="I_indexterm4_d1e19928"></a> <code class="epub__literal">Process</code> class is
+          intended to mimic the <code class="epub__literal">threading</code>
+          module’s <code class="epub__literal">Thread</code> class we met
+          earlier—it allows us to launch a function call in parallel with the
+          calling script; with this module, though, the function runs in a
+          process instead of a thread. Example 5-29 illustrates these
+          basics in action:</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id43"></a>
+<p class="epub__title">Example 5-29. PP4E\System\Processes\multi1.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+multiprocess basics: Process works like threading.Thread, but
+runs function call in parallel in a process instead of a thread;
+locks can be used to synchronize, e.g. prints on some platforms;
+starts new interpreter on windows, forks a new process on unix;
+"""
+
+import os
+from multiprocessing import Process, Lock
+
+def whoami(label, lock):
+    msg = '%s: name:%s, pid:%s'
+    with lock:
+        print(msg % (label, __name__, os.getpid()))
+
+if __name__ == '__main__':
+    lock = Lock()
+    whoami('function call', lock)
+
+    p = Process(target=whoami, args=('spawned child', lock))
+    p.start()
+    p.join()
+
+    for i in range(5):
+        Process(target=whoami, args=(('run process %s' % i), lock)).start()
+
+    with lock:
+        print('Main process exit.')</pre>
+</div>
+</div>
+<p>When run, this script first calls a function directly and
+          in-process; then launches a call to that function in a new process
+          and waits for it to exit; and finally spawns five function call
+          processes in parallel in a loop—all using an API identical to that
+          of the <code class="epub__literal">threading.</code><code class="epub__literal">Thread</code> model we studied earlier in
+          this chapter. Here’s this script’s output on Windows; notice how the
+          five child processes spawned at the end of this script outlive their
+          parent, as is the usual case for processes:</p><a id="I_programlisting4_d1e19956"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>multi1.py</code></strong>
+function call: name:__main__, pid:8752
+spawned child: name:__main__, pid:9268
+Main process exit.
+run process 3: name:__main__, pid:9296
+run process 1: name:__main__, pid:8792
+run process 4: name:__main__, pid:2224
+run process 2: name:__main__, pid:8716
+run process 0: name:__main__, pid:6936</pre>
+<p>Just like the <code class="epub__literal">threading.Thread</code> class we met earlier, the
+          <code class="epub__literal">multiprocessing.Process</code> object
+          can either be passed a <code class="epub__literal">target</code>
+          with arguments (as done here) or subclassed to redefine its <code class="epub__literal">run</code> action method. Its <code class="epub__literal">start</code> method invokes its <code class="epub__literal">run</code> method in a new process, and the
+          default <code class="epub__literal">run</code> simply calls the
+          passed-in target. Also like <code class="epub__literal">threading</code>, a <code class="epub__literal">join</code> method waits for child process exit,
+          and a <code class="epub__literal">Lock</code> object is provided as
+          one of a handful of process synchronization tools; it’s used here to
+          ensure that prints don’t overlap among processes on platforms where
+          this might matter (it may not on Windows).</p>
+<div class="epub__sect3" title="Implementation and usage rules"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="implementation_and_usage_rules"></a>Implementation and usage rules</h3>
+</div>
+</div>
+</div>
+<p>Technically, to achieve <a id="I_indexterm4_d1e19999"></a><a id="I_indexterm4_d1e20004"></a>its portability, this module currently works by
+            selecting from platform-specific alternatives:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>On Unix, it forks a new child process and invokes the
+                <code class="epub__literal">Process</code> object’s <code class="epub__literal">run</code> method in the new child.</p></li><li class="epub__listitem">
+<p>On Windows, it spawns a new interpreter by using
+                Windows-specific process creation tools, passing the pickled
+                <code class="epub__literal">Process</code> object in to the
+                new process over a pipe, and starting a “python -c” command
+                line in the new process, which runs a special Python-coded
+                function in this package that reads and unpickles the <code class="epub__literal">Process</code> and invokes its <code class="epub__literal">run</code> method.</p></li></ul>
+</div>
+<p>We met pickling briefly in Chapter 1, and we will study it further later
+            in this book. The implementation is a bit more complex than this,
+            and is prone to change over time, of course, but it’s really quite
+            an amazing trick. While the portable API generally hides these
+            details from your code, its basic structure can still have subtle
+            impacts on the way you’re allowed to use it. For instance:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>On Windows, the main process’s logic should generally be
+                nested under a <code class="epub__literal">__name__ ==
+                __main__</code> test as done here when using this module,
+                so it can be imported freely by a new interpreter without side
+                effects. As we’ll learn in more detail in Chapter 17, unpickling classes and
+                functions requires an import of their enclosing module, and
+                this is the root of this requirement.</p></li><li class="epub__listitem">
+<p>Moreover, when globals are accessed in child processes
+                on Windows, their values may not be the same as that in the
+                parent at <code class="epub__literal">start</code> time,
+                because their module will be imported into a new
+                process.</p></li><li class="epub__listitem">
+<p>Also on Windows, all arguments to <code class="epub__literal">Process</code> must be pickleable. Because
+                this includes <code class="epub__literal">target</code>,
+                targets should be simple functions so they can be pickled;
+                they cannot be bound or unbound object
+                <span class="epub__emphasis"><em>methods</em></span> and cannot be functions created
+                with a <span class="epub__emphasis"><em>lambda</em></span>. See <code class="epub__literal">pickle</code> in Python’s library manual
+                for more on pickleability rules; nearly every object type
+                works, but callables like functions and classes must be
+                importable—they are pickled by name only, and later imported
+                to recreate bytecode. On Windows, objects with system state,
+                such as connected sockets, won’t generally work as arguments
+                to a process target either, because they are not <span>pickleable</span>.</p></li><li class="epub__listitem">
+<p>Similarly, instances of custom <code class="epub__literal">Process</code> subclasses must be
+                pickleable on Windows as well. This includes all their
+                attribute values. Objects available in this package (e.g.,
+                <code class="epub__literal">Lock</code> in Example 5-29) are pickleable,
+                and so may be used as both <code class="epub__literal">Process</code> constructor arguments and
+                subclass attributes.</p></li><li class="epub__listitem">
+<p>IPC objects in this package that appear in later
+                examples like <code class="epub__literal">Pipe</code> and
+                <code class="epub__literal">Queue</code> accept only
+                pickleable objects, because of their implementation (more on
+                this in the next section).</p></li><li class="epub__listitem">
+<p>On Unix, although a child process can make use of a
+                shared global item created in the parent, it’s better to pass
+                the object as an argument to the child process’s constructor,
+                both for portability to Windows and to avoid potential
+                problems if such objects were garbage collected in the
+                parent.</p></li></ul>
+</div>
+<p>There are additional rules documented in the library manual.
+            In general, though, if you stick to passing in shared objects to
+            processes and using the synchronization and <span>communication</span> tools provided by this
+            package, your code will usually be portable and correct. Let’s
+            look next at a few of those tools in <a id="I_indexterm4_d1e20104"></a>action.</p>
+</div>
+</div>
+<div class="epub__sect2" title="IPC Tools: Pipes, Shared Memory, and Queues"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="ipc_tools_colon_pipes_comma_shared_memor"></a>IPC Tools: Pipes, Shared Memory, and Queues</h2>
+</div>
+</div>
+</div>
+<p>While the processes <a id="multi5.6.3"></a><a id="ipc5.6.3"></a>created by this package can always communicate using
+          general system-wide tools like the sockets and fifo files we met
+          earlier, the <code class="epub__literal">multiprocessing</code>
+          module also provides portable message passing tools specifically
+          geared to this purpose for the processes it spawns:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Its <code class="epub__literal">Pipe</code> object
+              <a id="I_indexterm4_d1e20133"></a>provides an anonymous pipe, which serves as a
+              connection between two processes. When called, <code class="epub__literal">Pipe</code> returns <a id="I_indexterm4_d1e20140"></a>two <code class="epub__literal">Connection</code>
+              objects that represent the ends of the pipe. Pipes are
+              bidirectional by default, and allow arbitrary pickleable Python
+              objects to be sent and received. On Unix they are implemented
+              internally today with either a connected socket pair or the
+              <code class="epub__literal">os.pipe</code> call we met earlier,
+              and on Windows with named pipes specific to that platform. Much
+              like the <code class="epub__literal">Process</code> object
+              described earlier, though, the <code class="epub__literal">Pipe</code> object’s portable API spares
+              callers from such things.</p></li><li class="epub__listitem">
+<p>Its <code class="epub__literal">Value</code> and <code class="epub__literal">Array</code> objects <a id="I_indexterm4_d1e20168"></a><a id="I_indexterm4_d1e20171"></a>implement shared process/thread-safe memory for
+              communication between processes. These calls return scalar and
+              array objects based in the<a id="I_indexterm4_d1e20175"></a> <code class="epub__literal">ctypes</code> module
+              and created in shared memory, with access synchronized by
+              default.</p></li><li class="epub__listitem">
+<p>Its <code class="epub__literal">Queue</code> object
+              <a id="I_indexterm4_d1e20190"></a>serves as a FIFO list of Python objects, which
+              allows multiple producers and consumers. A queue is essentially
+              a pipe with extra locking mechanisms to coordinate more
+              arbitrary accesses, and inherits the pickleability constraints
+              of <code class="epub__literal">Pipe</code>.</p></li></ul>
+</div>
+<p>Because these devices are safe to use across multiple
+          processes, they can often serve to synchronize points of
+          communication and obviate lower-level tools like locks, much the
+          same as the thread queues we met earlier. As usual, a pipe (or a
+          pair of them) may be used to implement a request/reply model. Queues
+          support more flexible models; in fact, a GUI that wishes to avoid
+          the limitations of the GIL might use the <code class="epub__literal">multi</code><code class="epub__literal">processing</code> module’s <code class="epub__literal">Process</code> and <code class="epub__literal">Queue</code> to spawn long-running tasks that
+          post results, rather than threads. As mentioned, although this may
+          incur extra start-up overhead on some platforms, unlike threads
+          today, tasks coded this way can be as truly parallel as the
+          underlying platform allows.</p>
+<p>One constraint worth noting here: this package’s pipes (and by
+          proxy, queues) <span class="epub__emphasis"><em>pickle</em></span> the objects passed
+          through them, so that they can be reconstructed in the receiving
+          process (as we’ve seen, on Windows the receiver process may be a
+          fully independent Python interpreter). Because of that, they do not
+          support unpickleable objects; as suggested earlier, this includes
+          some callables like bound methods and lambda functions (see file
+          <em class="epub__filename">multi-badq.py</em> in the book
+          examples package for a demonstration of code that violates this
+          constraint). Objects with system state, such as sockets, may fail as
+          well. Most other Python object types, including classes and simple
+          functions, work fine on pipes and queues.</p>
+<p>Also keep in mind that because they are pickled, objects
+          transferred this way are effectively <span class="epub__emphasis"><em>copied</em></span> in
+          the receiving process; direct in-place changes to mutable objects’
+          state won’t be noticed in the sender. This makes sense if you
+          remember that this package runs independent processes with their own
+          memory spaces; state cannot be as freely shared as in threading,
+          regardless of which IPC tools you use.</p>
+<div class="epub__sect3" title="multiprocessing pipes"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="multiprocessing_pipes"></a>multiprocessing pipes</h3>
+</div>
+</div>
+</div>
+<p>To demonstrate <a id="I_indexterm4_d1e20228"></a>the IPC tools listed above, the next three examples
+            implement three flavors of communication between parent and child
+            processes. Example 5-30
+            uses a simple shared pipe object to send and receive data between
+            parent and child processes.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id44"></a>
+<p class="epub__title">Example 5-30. PP4E\System\Processes\multi2.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Use multiprocess anonymous pipes to communicate. Returns 2 connection
+object representing ends of the pipe: objects are sent on one end and
+received on the other, though pipes are bidirectional by default
+"""
+
+import os
+from multiprocessing import Process, Pipe
+
+def sender(pipe):
+    """
+    send object to parent on anonymous pipe
+    """
+    pipe.send(['spam'] +  [42, 'eggs'])
+    pipe.close()
+
+def talker(pipe):
+    """
+    send and receive objects on a pipe
+    """
+    pipe.send(dict(name='Bob', spam=42))
+    reply = pipe.recv()
+    print('talker got:', reply)
+
+if __name__ == '__main__':
+    (parentEnd, childEnd) = Pipe()
+    Process(target=sender, args=(childEnd,)).start()        # spawn child with pipe
+    print('parent got:', parentEnd.recv())                  # receive from child
+    parentEnd.close()                                       # or auto-closed on gc
+
+    (parentEnd, childEnd) = Pipe()
+    child = Process(target=talker, args=(childEnd,))
+    child.start()
+    print('parent got:', parentEnd.recv())                  # receieve from child
+    parentEnd.send({x * 2 for x in 'spam'})                 # send to child
+    child.join()                                            # wait for child exit
+    print('parent exit')</pre>
+</div>
+</div>
+<p>When run on Windows, here’s this script’s output—one child
+            passes an object to the parent, and the other both sends and
+            receives on the same pipe:</p><a id="I_programlisting4_d1e20243"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>multi2.py</code></strong>
+parent got: ['spam', 42, 'eggs']
+parent got: {'name': 'Bob', 'spam': 42}
+talker got: {'ss', 'aa', 'pp', 'mm'}
+parent exit</pre>
+<p>This module’s pipe objects make communication between two
+            processes portable (and nearly trivial).</p>
+</div>
+<div class="epub__sect3" title="Shared memory and globals"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="shared_memory_and_globals"></a>Shared memory and globals</h3>
+</div>
+</div>
+</div>
+<p>Example 5-31 uses
+            shared <a id="shared5.6.3.2"></a><a id="global5.6.3.2"></a><a id="var5.6.3.2"></a>memory to serve as both inputs and outputs of
+            spawned processes. To make this work portably, we must create
+            objects defined by the package and pass them to <code class="epub__literal">Process</code> constructors. The last test in
+            this demo (“loop4”) probably represents the most common use case
+            for shared memory—that of distributing computation work to
+            multiple parallel processes.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id45"></a>
+<p class="epub__title">Example 5-31. PP4E\System\Processes\multi3.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Use multiprocess shared memory objects to communicate.
+Passed objects are shared, but globals are not on Windows.
+Last test here reflects common use case: distributing work.
+"""
+
+import os
+from multiprocessing import Process, Value, Array
+
+procs = 3
+count = 0    # per-process globals, not shared
+
+def showdata(label, val, arr):
+    """
+    print data values in this process
+    """
+    msg = '%-12s: pid:%4s, global:%s, value:%s, array:%s'
+    print(msg % (label, os.getpid(), count, val.value, list(arr)))
+
+def updater(val, arr):
+    """
+    communicate via shared memory
+    """
+    global count
+    count += 1                         # global count not shared
+    val.value += 1                     # passed in objects are
+    for i in range(3): arr[i] += 1
+
+if __name__ == '__main__':
+    scalar = Value('i', 0)             # shared memory: process/thread safe
+    vector = Array('d', procs)         # type codes from ctypes: int, double
+
+    # show start value in parent process
+    showdata('parent start', scalar, vector)
+
+    # spawn child, pass in shared memory
+    p = Process(target=showdata, args=('child ', scalar, vector))
+    p.start(); p.join()
+
+    # pass in shared memory updated in parent, wait for each to finish
+    # each child sees updates in parent so far for args (but not global)
+
+    print('\nloop1 (updates in parent, serial children)...')
+    for i in range(procs):
+        count += 1
+        scalar.value += 1
+        vector[i] += 1
+        p = Process(target=showdata, args=(('process %s' % i), scalar, vector))
+        p.start(); p.join()
+
+    # same as prior, but allow children to run in parallel
+    # all see the last iteration's result because all share objects
+
+    print('\nloop2 (updates in parent, parallel children)...')
+    ps = []
+    for i in range(procs):
+        count += 1
+        scalar.value += 1
+        vector[i] += 1
+        p = Process(target=showdata, args=(('process %s' % i), scalar, vector))
+        p.start()
+        ps.append(p)
+    for p in ps: p.join()
+
+    # shared memory updated in spawned children, wait for each
+
+    print('\nloop3 (updates in serial children)...')
+    for i in range(procs):
+        p = Process(target=updater, args=(scalar, vector))
+        p.start()
+        p.join()
+    showdata('parent temp', scalar, vector)
+
+    # same, but allow children to update in parallel
+
+    ps = []
+    print('\nloop4 (updates in parallel children)...')
+    for i in range(procs):
+        p = Process(target=updater, args=(scalar, vector))
+        p.start()
+        ps.append(p)
+    for p in ps: p.join()
+                                           # global count=6 in parent only
+    # show final results here              # scalar=12:  +6 parent, +6 in 6 children
+    showdata('parent end', scalar, vector) # array[i]=8: +2 parent, +6 in 6 children</pre>
+</div>
+</div>
+<p>The following is this script’s output on Windows. Trace
+            through this and the code to see how it runs; notice how the
+            changed value of the global variable is not shared by the spawned
+            processes on Windows, but passed-in <code class="epub__literal">Value</code> and <code class="epub__literal">Array</code> objects are. The final output line
+            reflects changes made to shared memory in both the parent and
+            spawned children—the array’s final values are all 8.0, because
+            they were incremented twice in the parent, and once in each of six
+            spawned children; the scalar value similarly reflects changes made
+            by both parent and child; but unlike for threads, the global is
+            per-process data on Windows:</p><a id="I_programlisting4_d1e20288"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>multi3.py</code></strong>
+parent start: pid:6204, global:0, value:0, array:[0.0, 0.0, 0.0]
+child       : pid:9660, global:0, value:0, array:[0.0, 0.0, 0.0]
+
+loop1 (updates in parent, serial children)...
+process 0   : pid:3900, global:0, value:1, array:[1.0, 0.0, 0.0]
+process 1   : pid:5072, global:0, value:2, array:[1.0, 1.0, 0.0]
+process 2   : pid:9472, global:0, value:3, array:[1.0, 1.0, 1.0]
+
+loop2 (updates in parent, parallel children)...
+process 1   : pid:9468, global:0, value:6, array:[2.0, 2.0, 2.0]
+process 2   : pid:9036, global:0, value:6, array:[2.0, 2.0, 2.0]
+process 0   : pid:9548, global:0, value:6, array:[2.0, 2.0, 2.0]
+
+loop3 (updates in serial children)...
+parent temp : pid:6204, global:6, value:9, array:[5.0, 5.0, 5.0]
+
+loop4 (updates in parallel children)...
+parent end  : pid:6204, global:6, value:12, array:[8.0, 8.0, 8.0]</pre>
+<p>If you imagine the last test here run with a much larger
+            array and many more parallel children, you might begin to sense
+            some of the power of this package for <a id="I_indexterm4_d1e20295"></a><a id="I_indexterm4_d1e20297"></a><a id="I_indexterm4_d1e20299"></a>distributing work.</p>
+</div>
+<div class="epub__sect3" title="Queues and subclassing"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="queues_and_subclassing"></a>Queues and subclassing</h3>
+</div>
+</div>
+</div>
+<p>Finally, besides <a id="queue5.6.3.3"></a><a id="sub5.6.3.3"></a>basic spawning and IPC tools, the <code class="epub__literal">multiprocessing</code> module also:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Allows its <code class="epub__literal">Process</code>
+                class to be subclassed to provide structure and state
+                retention (much like <code class="epub__literal">threading.Thread</code>, but for
+                processes).</p></li><li class="epub__listitem">
+<p>Implements a process-safe <code class="epub__literal">Queue</code> object which may be shared by
+                any number of processes for more general communication needs
+                (much like <code class="epub__literal">queue.Queue</code>, but
+                for processes).</p></li></ul>
+</div>
+<p>Queues support a more flexible multiple client/server model.
+            Example 5-32, for instance,
+            spawns three producer threads to post to a shared queue and
+            repeatedly polls for results to appear—in much the same fashion
+            that a GUI might collect results in parallel with the display
+            itself, though here the concurrency is achieved with processes
+            instead of threads.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id46"></a>
+<p class="epub__title">Example 5-32. PP4E\System\Processes\multi4.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Process class can also be subclassed just like threading.Thread;
+Queue works like queue.Queue but for cross-process, not cross-thread
+"""
+
+import os, time, queue
+from multiprocessing import Process, Queue           # process-safe shared queue
+                                                     # queue is a pipe + locks/semas
+class Counter(Process):
+    label = '  @'
+    def __init__(self, start, queue):                # retain state for use in run
+        self.state = start
+        self.post  = queue
+        Process.__init__(self)
+
+    def run(self):                                   # run in newprocess on start()
+        for i in range(3):
+            time.sleep(1)
+            self.state += 1
+            print(self.label ,self.pid, self.state)  # self.pid is this child's pid
+            self.post.put([self.pid, self.state])    # stdout file is shared by all
+        print(self.label, self.pid, '-')
+
+if __name__ == '__main__':
+    print('start', os.getpid())
+    expected = 9
+
+    post = Queue()
+    p = Counter(0, post)                        # start 3 processes sharing queue
+    q = Counter(100, post)                      # children are producers
+    r = Counter(1000, post)
+    p.start(); q.start(); r.start()
+
+    while expected:                             # parent consumes data on queue
+        time.sleep(0.5)                         # this is essentially like a GUI,
+        try:                                    # though GUIs often use threads
+            data = post.get(block=False)
+        except queue.Empty:
+            print('no data...')
+        else:
+            print('posted:', data)
+            expected -= 1
+
+    p.join(); q.join(); r.join()                # must get before join putter
+    print('finish', os.getpid(), r.exitcode)    # exitcode is child exit status</pre>
+</div>
+</div>
+<p>Notice in this code how:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>The <code class="epub__literal">time.sleep</code> calls
+                in this code’s producer simulate long-running tasks.</p></li><li class="epub__listitem">
+<p>All four processes share the same output stream;
+                <code class="epub__literal">print</code> calls go the same
+                place and don’t overlap badly on Windows (as we saw earlier,
+                the <code class="epub__literal">multiprocessing</code> module
+                also has a shareable <code class="epub__literal">Lock</code>
+                object to synchronize access if required).</p></li><li class="epub__listitem">
+<p>The exit status of child process is available after they
+                finish in their <code class="epub__literal">exitcode</code>
+<span>attribute</span>.</p></li></ul>
+</div>
+<p>When run, the output of the main consumer process traces its
+            queue fetches, and the (indented) output of spawned child producer
+            processes gives process IDs and state.</p><a id="I_programlisting4_d1e20379"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>multi4.py</code></strong>
+start 6296
+no data...
+no data...
+  @ 8008 101
+posted: [8008, 101]
+  @ 6068 1
+  @ 3760 1001
+posted: [6068, 1]
+  @ 8008 102
+posted: [3760, 1001]
+  @ 6068 2
+  @ 3760 1002
+posted: [8008, 102]
+  @ 8008 103
+  @ 8008 -
+posted: [6068, 2]
+  @ 6068 3
+  @ 6068 -
+  @ 3760 1003
+  @ 3760 -
+posted: [3760, 1002]
+posted: [8008, 103]
+posted: [6068, 3]
+posted: [3760, 1003]
+finish 6296 0</pre>
+<p>If you imagine the “@” lines here as results of long-running
+            operations and the others as a main GUI thread, the wide relevance
+            of this package may become more <a id="I_indexterm4_d1e20386"></a><a id="I_indexterm4_d1e20388"></a><a id="I_indexterm4_d1e20390"></a><a id="I_indexterm4_d1e20392"></a>apparent.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Starting Independent Programs"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="starting_independent_programs"></a>Starting Independent Programs</h2>
+</div>
+</div>
+</div>
+<p>As we learned earlier, <a id="I_indexterm4_d1e20400"></a><a id="I_indexterm4_d1e20405"></a><a id="I_indexterm4_d1e20410"></a>independent programs generally communicate with
+          system-global tools such as sockets and the fifo files we studied
+          earlier. Although processes spawned by <code class="epub__literal">multiprocessing</code> can leverage these tools,
+          too, their closer relationship affords them the host of additional
+          IPC communication devices provided by this <span>module</span>.</p>
+<p>Like threads, <code class="epub__literal">multiprocessing</code> is designed to run
+          function calls in parallel, not to start entirely separate programs
+          directly. Spawned functions might use tools like <code class="epub__literal">os.system</code>, <code class="epub__literal">os.popen</code>, and <code class="epub__literal">subprocess</code> to start a program if such an
+          operation might block the caller, but there’s otherwise often no
+          point in starting a process that just starts a program (<span>you might as well</span> start the program
+          and skip a step). In fact, on Windows, <code class="epub__literal">multi</code><code class="epub__literal">processing</code> today uses the same
+          process creation call as <code class="epub__literal">subprocess</code>, so there’s little point in
+          starting two processes to run one.</p>
+<p>It is, however, possible to start new programs in the child
+          processes spawned, using tools like the <code class="epub__literal">os.exec*</code> calls we met earlier—by spawning
+          a process portably with <code class="epub__literal">multiprocessing</code> and overlaying it with a
+          new program this way, we start a new independent program, and
+          effectively work around the lack of the <code class="epub__literal">os.fork</code> call in standard Windows
+          Python.</p>
+<p>This generally assumes that the new program doesn’t require
+          any resources passed in by the <code class="epub__literal">Process</code> API, of course (once a new program
+          starts, it erases that which was running), but it offers a portable
+          equivalent to the fork/exec combination on Unix. Furthermore,
+          programs started this way can still make use of more traditional IPC
+          tools, such as sockets and fifos, we met earlier in this chapter.
+          Example 5-33 illustrates the
+          technique.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id47"></a>
+<p class="epub__title">Example 5-33. PP4E\System\Processes\multi5.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"Use multiprocessing to start independent programs, os.fork or not"
+
+import os
+from multiprocessing import Process
+
+def runprogram(arg):
+    os.execlp('python', 'python', 'child.py', str(arg))
+
+if __name__ == '__main__':
+    for i in range(5):
+        Process(target=runprogram, args=(i,)).start()
+    print('parent exit')</pre>
+</div>
+</div>
+<p>This script starts 5 instances of the <em class="epub__filename">child.py</em> script we wrote in Example 5-4 as independent
+          processes, without waiting for them to finish. Here’s this script at
+          work on Windows, after deleting a superfluous system prompt that
+          shows up arbitrarily in the middle of its output (it runs the same
+          on Cygwin, but the output is not interleaved there):</p><a id="I_programlisting4_d1e20478"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>type child.py</code></strong>
+import os, sys
+print('Hello from child', os.getpid(), sys.argv[1])
+
+C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>multi5.py</code></strong>
+parent exit
+Hello from child 9844 2
+Hello from child 8696 4
+Hello from child 1840 0
+Hello from child 6724 1
+Hello from child 9368 3</pre>
+<p>This technique isn’t possible with threads, because all
+          threads run in the same process; overlaying it with a new program
+          would kill all its threads. Though this is unlikely to be as fast as
+          a fork/exec combination on Unix, it at least provides similar and
+          portable functionality on Windows when required.</p>
+</div>
+<div class="epub__sect2" title="And Much More"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="and_much_more"></a>And Much More</h2>
+</div>
+</div>
+</div>
+<p>Finally, <code class="epub__literal">multiprocessing</code>
+          provides <a id="multi5.6.5"></a>many more tools than these examples deploy, including
+          condition, event, and semaphore synchronization tools, and local and
+          remote managers that implement servers for shared object. For
+          instance, Example 5-34
+          demonstrates its support for <span class="epub__emphasis"><em>pools</em></span>—spawned
+          children that work in concert on a given task.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id48"></a>
+<p class="epub__title">Example 5-34. PP4E\System\Processes\multi6.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"Plus much more: process pools, managers, locks, condition,..."
+
+import os
+from multiprocessing import Pool
+
+def powers(x):
+    #print(os.getpid())                  # enable to watch children
+    return 2 ** x
+
+if __name__ == '__main__':
+    workers = Pool(processes=5)
+
+    results = workers.map(powers, [2]*100)
+    print(results[:16])
+    print(results[-2:])
+
+    results = workers.map(powers, range(100))
+    print(results[:16])
+    print(results[-2:])</pre>
+</div>
+</div>
+<p>When run, Python arranges to delegate portions of the task to
+          workers run in parallel:</p><a id="I_programlisting4_d1e20515"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>multi6.py</code></strong>
+[4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+[4, 4]
+[1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768]
+[316912650057057350374175801344, 633825300114114700748351602688]</pre>
+<div class="epub__sect3" title="And a little less…"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="and_a_little_less"></a>And a little less…</h3>
+</div>
+</div>
+</div>
+<p>To be fair, besides such additional features and tools,
+            <code class="epub__literal">multiprocessing</code> also comes with
+            additional constraints beyond those we’ve already covered
+            (pickleability, mutable state, and so on). For example, consider
+            the <a id="I_indexterm4_d1e20528"></a>following sort of code:</p><a id="I_programlisting4_d1e20534"></a>
+<pre class="epub__programlisting">def action(arg1, arg2):
+    print(arg1, arg2)
+
+if __name__ == '__main__':
+    Process(target=action, args=('spam', 'eggs')).start()    # shell waits for child</pre>
+<p>This works as expected, but if we change the last line to
+            the following it fails on Windows because
+            <span class="epub__emphasis"><em>lambdas</em></span> are not pickleable (really, not
+            importable):</p><a id="I_programlisting4_d1e20541"></a>
+<pre class="epub__programlisting">Process(target=(lambda: action('spam', 'eggs'))).start()  # fails!-not pickleable</pre>
+<p>This precludes a common coding pattern that uses lambda to
+            add data to calls, which we’ll use often for callbacks in the GUI
+            part of this book. Moreover, this differs from the <code class="epub__literal">threading</code> module that is the model for
+            this package—calls like the following which work for threads must
+            be translated to a callable and arguments:</p><a id="I_programlisting4_d1e20548"></a>
+<pre class="epub__programlisting">threading.Thread(target=(lambda: action(2, 4))).start()   # but lambdas work here</pre>
+<p>Conversely, some behavior of the <code class="epub__literal">threading</code> module is mimicked by <code class="epub__literal">multiprocessing</code>, whether you wish it did
+            or not. Because programs using this package wait for child
+            processes to end by default, we must mark processes as <code class="epub__literal">daemon</code> if we don’t want to block the
+            shell where the following sort of code is run (technically,
+            parents attempt to terminate daemonic children on exit, which
+            means that the program can exit when only daemonic children
+            remain, much like <code class="epub__literal">threading</code>):</p><a id="I_programlisting4_d1e20564"></a>
+<pre class="epub__programlisting">def action(arg1, arg2):
+   print(arg1, arg2)
+   time.sleep(5)          # normally prevents the parent from exiting
+
+if __name__ == '__main__':
+    p = Process(target=action, args=('spam', 'eggs'))
+    p.daemon = True                                        # don't wait for it
+    p.start()</pre>
+<p>There’s more on some of these issues in the Python library
+            manual; they are not show-stoppers by any stretch, but special
+            cases and potential pitfalls to some. We’ll revisit the lambda and
+            daemon issues in a more realistic context in Chapter 8, where we’ll use <code class="epub__literal">multiprocessing</code> to launch GUI demos
+            <a id="I_indexterm4_d1e20573"></a>independently.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Why multiprocessing? The Conclusion"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="why_multiprocessing_question_mthe_conclu"></a>Why multiprocessing? The Conclusion</h2>
+</div>
+</div>
+</div>
+<p>As this section’s examples suggest, <code class="epub__literal">multiprocessing</code> provides a powerful
+          alternative which aims to combine the portability and much of the
+          utility of threads with the fully parallel potential of processes
+          and offers additional solutions to IPC, exit status, and other
+          parallel processing goals.</p>
+<p>Hopefully, this section has also given you a better
+          understanding of this module’s tradeoffs discussed at its beginning.
+          In particular, its separate process model precludes the freely
+          shared mutable state of threads, and bound methods and lambdas are
+          prohibited by both the pickleability requirements of its IPC pipes
+          and queues, as well as its process action implementation on Windows.
+          Moreover, its requirement of pickleability for process arguments on
+          Windows also precludes it as an option for conversing with clients
+          in socket servers portably.</p>
+<p>While not a replacement for threading in all applications,
+          though, <code class="epub__literal">multiprocessing</code> offers
+          compelling solutions for many. Especially for parallel-programming
+          tasks which can be designed to avoid its limitations, this module
+          can offer both performance and portability that Python’s more direct
+          multitasking tools cannot.</p>
+<p>Unfortunately, beyond this brief introduction, we don’t have
+          space for a more complete treatment of this module in this book. For
+          more details, refer to the Python library manual. Here, we turn next
+          to a handful of additional program launching tools and a wrap up of
+          this <a id="I_indexterm4_d1e20593"></a>chapter.</p>
+</div>
+</div>
+</div>
+</body>
+</html>

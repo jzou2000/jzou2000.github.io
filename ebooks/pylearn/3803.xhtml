@@ -1,0 +1,887 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Coding Function Decorators</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div><h1 class="epub__title"><a id="coding_function_decorators"></a>Coding Function Decorators</h1>
+<p>On <a id="ch38decfundeccod"></a><a id="ch38fundeccod"></a>to the code—in the rest of this chapter, we are going to
+        study working examples that demonstrate the decorator concepts we just
+        explored. This section presents a handful of function decorators at
+        work, and the next shows class decorators in action. Following that,
+        we’ll close out with some larger case studies of class and function
+        decorator usage.</p>
+<div class="epub__sect2" title="Tracing Calls"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="tracing_calls"></a>Tracing Calls</h2>
+</div>
+</div>
+</div>
+<p>To get <a id="I_indexterm3_d1e97484"></a>started, let’s revive the call tracer example we met
+          in Chapter 31. The following defines
+          and applies a function decorator that counts the number of calls
+          made to the decorated function and prints a trace message for each
+          call:</p><a id="I_programlisting3_d1e97494"></a>
+<pre class="epub__programlisting">class tracer:
+    def __init__(self, func):             <em class="epub__lineannotation"><span class="epub__lineannotation"># On @ decoration: save original func</span></em>
+        self.calls = 0
+        self.func = func
+    def __call__(self, *args):            <em class="epub__lineannotation"><span class="epub__lineannotation"># On later calls: run original func</span></em>
+        self.calls += 1
+        print('call %s to %s' % (self.calls, self.func.__name__))
+        self.func(*args)
+
+@tracer
+def spam(a, b, c):           <em class="epub__lineannotation"><span class="epub__lineannotation"># spam = tracer(spam)</span></em>
+    print(a + b + c)         <em class="epub__lineannotation"><span class="epub__lineannotation"># Wraps spam in a decorator object</span></em></pre>
+<p>Notice how each function decorated with this class will create
+          a new instance, with its own saved function object and calls
+          counter. Also observe how the <code class="epub__literal">*args</code> argument syntax is used to pack and
+          unpack arbitrarily many passed-in arguments. This generality enables
+          this decorator to be used to wrap any function with any number of
+          arguments (this version doesn’t yet work on class methods, but we’ll
+          fix that later in this section).</p>
+<p>Now, if we import this module’s function and test it
+          interactively, we get the following sort of behavior—each call
+          generates a trace message initially, because the decorator class
+          intercepts it. This code runs under both Python 2.6 and 3.0, as does
+          all code in this chapter unless otherwise noted:</p><a id="I_programlisting3_d1e97514"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from decorator1 import spam</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>spam(1, 2, 3)</code></strong>            <em class="epub__lineannotation"><span class="epub__lineannotation"># Really calls the tracer wrapper object</span></em>
+call 1 to spam
+6
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>spam('a', 'b', 'c')</code></strong>      <em class="epub__lineannotation"><span class="epub__lineannotation"># Invokes __call__ in class</span></em>
+call 2 to spam
+abc
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>spam.calls</code></strong>               <em class="epub__lineannotation"><span class="epub__lineannotation"># Number calls in wrapper state information</span></em>
+2
+&gt;&gt;&gt; <strong class="epub__userinput"><code>spam</code></strong>
+&lt;decorator1.tracer object at 0x02D9A730&gt;</pre>
+<p>When run, the <code class="epub__literal">tracer</code> class
+          saves away the decorated function, and intercepts later calls to it,
+          in order to add a layer of logic that counts and prints each call.
+          Notice how the total number of calls shows up as an attribute of the
+          decorated function—<code class="epub__literal">spam</code> is really
+          an instance of the <code class="epub__literal">tracer</code> class
+          when decorated (a finding that may have ramifications for programs
+          that do type checking, but is generally benign).</p>
+<p>For function calls, the <code class="epub__literal">@</code>
+          decoration syntax can be more convenient than modifying each call to
+          account for the extra logic level, and it avoids accidentally
+          calling the original function directly. Consider a nondecorator
+          equivalent such as the following:</p><a id="I_programlisting3_d1e97557"></a>
+<pre class="epub__programlisting">calls = 0
+def tracer(func, *args):
+    global calls
+    calls += 1
+    print('call %s to %s' % (calls, func.__name__))
+    func(*args)
+
+def spam(a, b, c):
+    print(a, b, c)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>spam(1, 2, 3)</code></strong>            <em class="epub__lineannotation"><span class="epub__lineannotation"># Normal non-traced call: accidental?</span></em>
+1 2 3
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>tracer(spam, 1, 2, 3)</code></strong>    <em class="epub__lineannotation"><span class="epub__lineannotation"># Special traced call without decorators</span></em>
+call 1 to spam
+1 2 3</pre>
+<p>This alternative can be used on any function without the
+          special <code class="epub__literal">@</code> syntax, but unlike the
+          decorator version, it requires extra syntax at every place where the
+          function is called in your code; furthermore, its intent may not be
+          as obvious, and it does not ensure that the extra layer will be
+          invoked for normal calls. Although decorators are never
+          <span class="epub__emphasis"><em>required</em></span> (we can always rebind names manually),
+          they are often the most convenient option.</p>
+</div>
+<div class="epub__sect2" title="State Information Retention Options"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="state_information_retention_options"></a>State Information Retention Options</h2>
+</div>
+</div>
+</div>
+<p>The <a id="ch3832fundeccodstatinfreten"></a>last example of the prior section raises an important
+          issue. Function decorators have a variety of options for retaining
+          state information provided at decoration time, for use during the
+          actual function call. They generally need to support multiple
+          decorated objects and multiple calls, but there are a number of ways
+          to implement these goals: instance attributes, global variables,
+          nonlocal variables, and function attributes can all be used for
+          retaining state<a id="ch38-state-retention"></a>.</p>
+<div class="epub__sect3" title="Class instance attributes"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="class_instance_attributes"></a>Class instance attributes</h3>
+</div>
+</div>
+</div>
+<p>For example, here is an augmented version of the prior
+            example, which adds support for <span class="epub__emphasis"><em>keyword</em></span>
+            arguments and <span class="epub__emphasis"><em>returns</em></span> the wrapped function’s
+            result to support more use cases:</p><a id="I_programlisting3_d1e97609"></a>
+<pre class="epub__programlisting">class tracer:                                <em class="epub__lineannotation"><span class="epub__lineannotation"># State via instance attributes</span></em>
+    def __init__(self, func):                <em class="epub__lineannotation"><span class="epub__lineannotation"># On @ decorator</span></em>
+        self.calls = 0                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Save func for later call</span></em>
+        self.func  = func
+    def __call__(self, *args, **kwargs):     <em class="epub__lineannotation"><span class="epub__lineannotation"># On call to original function</span></em>
+        self.calls += 1
+        print('call %s to %s' % (self.calls, self.func.__name__))
+        return self.func(*args, **kwargs)
+
+@tracer
+def spam(a, b, c):          <em class="epub__lineannotation"><span class="epub__lineannotation"># Same as: spam = tracer(spam)</span></em>
+    print(a + b + c)        <em class="epub__lineannotation"><span class="epub__lineannotation"># Triggers tracer.__init__</span></em>
+
+@tracer
+def eggs(x, y):             <em class="epub__lineannotation"><span class="epub__lineannotation"># Same as: eggs = tracer(eggs)</span></em>
+    print(x ** y)           <em class="epub__lineannotation"><span class="epub__lineannotation"># Wraps eggs in a tracer object</span></em>
+
+spam(1, 2, 3)               <em class="epub__lineannotation"><span class="epub__lineannotation"># Really calls tracer instance: runs tracer.__call__</span></em>
+spam(a=4, b=5, c=6)         <em class="epub__lineannotation"><span class="epub__lineannotation"># spam is an instance attribute</span></em>
+
+eggs(2, 16)                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Really calls tracer instance, self.func is eggs</span></em>
+eggs(4, y=4)                <em class="epub__lineannotation"><span class="epub__lineannotation"># self.calls is per-function here (need 3.0 nonlocal)</span></em></pre>
+<p>Like the original, this uses <span class="epub__emphasis"><em>class instance
+            attributes</em></span> to save state explicitly. Both the wrapped
+            function and the calls counter are
+            <span class="epub__emphasis"><em>per-instance</em></span> information—each decoration gets
+            its own copy. When run as a script under either 2.6 or 3.0, the
+            output of this version is as follows; notice how the <code class="epub__literal">spam</code> and <code class="epub__literal">eggs</code> functions each have their own calls
+            counter, because each decoration creates a new class
+            instance:</p><a id="I_programlisting3_d1e97662"></a>
+<pre class="epub__programlisting">call 1 to spam
+6
+call 2 to spam
+15
+call 1 to eggs
+65536
+call 2 to eggs
+256</pre>
+<p>While useful for decorating functions, this coding scheme
+            has issues when applied to methods (more on this later).</p>
+</div>
+<div class="epub__sect3" title="Enclosing scopes and globals"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="enclosing_scopes_and_globals"></a>Enclosing scopes and globals</h3>
+</div>
+</div>
+</div>
+<p>Enclosing <code class="epub__literal">def</code> scope
+            references and nested <code class="epub__literal">def</code>s can
+            often achieve the same effect, especially for static data like the
+            decorated original function. In this example, though, we would
+            also need a counter in the enclosing scope that changes on each
+            call, and that’s not possible in Python 2.6. In 2.6, we can either
+            use classes and attributes, as we did earlier, or move the state
+            variable out to the <span class="epub__emphasis"><em>global scope</em></span>, with global
+            declarations:</p><a id="I_programlisting3_d1e97680"></a>
+<pre class="epub__programlisting">calls = 0
+def tracer(func):                         <em class="epub__lineannotation"><span class="epub__lineannotation"># State via enclosing scope and global</span></em>
+    def wrapper(*args, **kwargs):         <em class="epub__lineannotation"><span class="epub__lineannotation"># Instead of class attributes</span></em>
+        global calls                      <em class="epub__lineannotation"><span class="epub__lineannotation"># calls is global, not per-function</span></em>
+        calls += 1
+        print('call %s to %s' % (calls, func.__name__))
+        return func(*args, **kwargs)
+    return wrapper
+
+@tracer
+def spam(a, b, c):        <em class="epub__lineannotation"><span class="epub__lineannotation"># Same as: spam = tracer(spam)</span></em>
+    print(a + b + c)
+
+@tracer
+def eggs(x, y):           <em class="epub__lineannotation"><span class="epub__lineannotation"># Same as: eggs = tracer(eggs)</span></em>
+    print(x ** y)
+
+spam(1, 2, 3)             <em class="epub__lineannotation"><span class="epub__lineannotation"># Really calls wrapper, bound to func</span></em>
+spam(a=4, b=5, c=6)       <em class="epub__lineannotation"><span class="epub__lineannotation"># wrapper calls spam</span></em>
+
+eggs(2, 16)               <em class="epub__lineannotation"><span class="epub__lineannotation"># Really calls wrapper, bound to eggs</span></em>
+eggs(4, y=4)              <em class="epub__lineannotation"><span class="epub__lineannotation"># Global calls is not per-function here!</span></em></pre>
+<p>Unfortunately, moving the counter out to the common global
+            scope to allow it to be changed like this also means that it will
+            be <span class="epub__emphasis"><em>shared</em></span> by every wrapped function. Unlike
+            class instance attributes, global counters are cross-program, not
+            per-function—the counter is incremented for
+            <span class="epub__emphasis"><em>any</em></span> traced function call. You can tell the
+            difference if you compare this version’s output with the prior
+            version’s—the single, shared global call counter is incorrectly
+            updated by calls to every decorated function:</p><a id="I_programlisting3_d1e97717"></a>
+<pre class="epub__programlisting">call 1 to spam
+6
+call 2 to spam
+15
+call 3 to eggs
+65536
+call 4 to eggs
+256</pre>
+</div>
+<div class="epub__sect3" title="Enclosing scopes and nonlocals"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="enclosing_scopes_and_nonlocals"></a>Enclosing scopes and nonlocals</h3>
+</div>
+</div>
+</div>
+<p>Shared global state may be what we want in some cases. If we
+            really want a <span class="epub__keep-together">per-function</span> counter, though, we
+            can either use classes as before, or make use of the new <code class="epub__literal">nonlocal</code> statement in Python 3.0,
+            described in Chapter 17. Because this new statement
+            allows enclosing function scope variables to be changed, they can
+            serve as per-decoration and
+            changeable data:</p><a id="I_programlisting3_d1e97735"></a>
+<pre class="epub__programlisting">def tracer(func):                        <em class="epub__lineannotation"><span class="epub__lineannotation"># State via enclosing scope and nonlocal</span></em>
+    calls = 0                            <em class="epub__lineannotation"><span class="epub__lineannotation"># Instead of class attrs or global</span></em>
+    def wrapper(*args, **kwargs):        <em class="epub__lineannotation"><span class="epub__lineannotation"># calls is per-function, not global</span></em>
+        nonlocal calls
+        calls += 1
+        print('call %s to %s' % (calls, func.__name__))
+        return func(*args, **kwargs)
+    return wrapper
+
+@tracer
+def spam(a, b, c):        <em class="epub__lineannotation"><span class="epub__lineannotation"># Same as: spam = tracer(spam)</span></em>
+    print(a + b + c)
+
+@tracer
+def eggs(x, y):           <em class="epub__lineannotation"><span class="epub__lineannotation"># Same as: eggs = tracer(eggs)</span></em>
+    print(x ** y)
+
+spam(1, 2, 3)             <em class="epub__lineannotation"><span class="epub__lineannotation"># Really calls wrapper, bound to func</span></em>
+spam(a=4, b=5, c=6)       <em class="epub__lineannotation"><span class="epub__lineannotation"># wrapper calls spam</span></em>
+
+eggs(2, 16)               <em class="epub__lineannotation"><span class="epub__lineannotation"># Really calls wrapper, bound to eggs</span></em>
+eggs(4, y=4)              <em class="epub__lineannotation"><span class="epub__lineannotation"># Nonlocal calls _is_ not per-function here</span></em></pre>
+<p>Now, because enclosing scope variables are not cross-program
+            globals, each wrapped function gets its own counter again, just as
+            for classes and attributes. Here’s the new output when run under
+            3.0<a id="I_indexterm3_d1e97766"></a>:</p><a id="I_programlisting3_d1e97768"></a>
+<pre class="epub__programlisting">call 1 to spam
+6
+call 2 to spam
+15
+call 1 to eggs
+65536
+call 2 to eggs
+256</pre>
+</div>
+<div class="epub__sect3" title="Function attributes"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="function_attributes-id1"></a>Function attributes</h3>
+</div>
+</div>
+</div>
+<p>Finally, if you are not using Python 3.X and don’t have a
+            <code class="epub__literal">nonlocal</code> statement, you may
+            still be able to avoid globals and classes by making use of
+            <span class="epub__emphasis"><em>function attributes</em></span> for some changeable state
+            instead. In recent Pythons, we can assign arbitrary attributes to
+            functions to attach them, with <code class="epub__literal">func.</code><em class="epub__replaceable"><code>attr</code></em><code class="epub__literal">=</code><em class="epub__replaceable"><code>value</code></em>. In
+            our example, we can simply use <code class="epub__literal">wrapper.calls</code> for state. The
+            following works the same as the preceding <code class="epub__literal">nonlocal</code> version because the counter is
+            again per-decorated-function, but it also runs in Python
+            2.6:</p><a id="I_programlisting3_d1e97797"></a>
+<pre class="epub__programlisting">def tracer(func):                        <em class="epub__lineannotation"><span class="epub__lineannotation"># State via enclosing scope and func attr</span></em>
+    def wrapper(*args, **kwargs):        <em class="epub__lineannotation"><span class="epub__lineannotation"># calls is per-function, not global</span></em>
+        wrapper.calls += 1
+        print('call %s to %s' % (wrapper.calls, func.__name__))
+        return func(*args, **kwargs)
+    wrapper.calls = 0
+    return wrapper</pre>
+<p>Notice that this only works because the name <code class="epub__literal">wrapper</code> is retained in the enclosing
+            <code class="epub__literal">tracer</code> function’s scope. When
+            we later increment <code class="epub__literal">wrapper.calls</code>, we are not changing the
+            name <code class="epub__literal">wrapper</code> itself, so no
+            <code class="epub__literal">nonlocal</code> declaration is
+            required.</p>
+<p>This scheme was almost relegated to a footnote, because it
+            is more obscure than <code class="epub__literal">nonlocal</code> in 3.0 and is probably
+            better saved for cases where other schemes don’t help. However, we
+            will employ it in an answer to one of the end-of-chapter
+            questions, where we’ll need to access the saved state from
+            <span class="epub__emphasis"><em>outside</em></span> the decorator’s code; nonlocals can
+            only be seen inside the nested function itself, but function
+            attributes have wider visibility.</p>
+<p>Because decorators often imply multiple levels of callables,
+            you can combine functions with enclosing scopes and classes with
+            attributes to achieve a variety of coding structures. As we’ll see
+            later, though, this sometimes may be subtler than you expect—each
+            decorated function should have its own state, and each decorated
+            class may require state both for itself and for each generated
+            instance.</p>
+<p>In fact, as the next section will explain, if we want to
+            apply function decorators to class methods, too, we also have to
+            be careful about the distinction Python makes between decorators
+            coded as callable class instance objects and decorators coded as
+            <a id="I_indexterm3_d1e97837"></a>functions.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Class Blunders I: Decorating Class Methods"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="class_blunders_i_colon_decorating_class"></a>Class Blunders I: Decorating Class Methods</h2>
+</div>
+</div>
+</div>
+<p>When <a id="ch3833fundeccoddecclssmeth"></a>I wrote the first <code class="epub__literal">tracer</code> function decorator above, I naively
+          assumed that it could also be applied to any
+          <span class="epub__emphasis"><em>method</em></span>—decorated methods should work the same,
+          but the automatic <code class="epub__literal">self</code> instance
+          argument would simply be included at the front of <code class="epub__literal">*args</code>. Unfortunately, I was wrong: when
+          applied to a class’s method, the first version of the <code class="epub__literal">tracer</code> fails, because <code class="epub__literal">self</code> is the instance of the decorator
+          class and the instance of the decorated subject class is not
+          included in <code class="epub__literal">*args</code>. This is true
+          in both Python 3.0 and 2.6.</p>
+<p>I introduced this phenomenon earlier in this chapter, but now
+          we can see it in the context of realistic working code. Given the
+          class-based tracing decorator:</p><a id="I_programlisting3_d1e97877"></a>
+<pre class="epub__programlisting">class tracer:
+    def __init__(self, func):                <em class="epub__lineannotation"><span class="epub__lineannotation"># On @ decorator</span></em>
+        self.calls = 0                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Save func for later call</span></em>
+        self.func  = func
+    def __call__(self, *args, **kwargs):     <em class="epub__lineannotation"><span class="epub__lineannotation"># On call to original function</span></em>
+        self.calls += 1
+        print('call %s to %s' % (self.calls, self.func.__name__))
+        return self.func(*args, **kwargs)</pre>
+<p>decoration of simple functions works as advertised
+          earlier:</p><a id="I_programlisting3_d1e97890"></a>
+<pre class="epub__programlisting">@tracer
+def spam(a, b, c):                           <em class="epub__lineannotation"><span class="epub__lineannotation"># spam = tracer(spam)</span></em>
+    print(a + b + c)                         <em class="epub__lineannotation"><span class="epub__lineannotation"># Triggers tracer.__init__</span></em>
+
+spam(1, 2, 3)                                <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs tracer.__call__</span></em>
+spam(a=4, b=5, c=6)                          <em class="epub__lineannotation"><span class="epub__lineannotation"># spam is an instance attribute</span></em></pre>
+<p>However, decoration of class methods
+          fails (more lucid readers might recognize this as our <code class="epub__literal">Person</code> class resurrected from the
+          object-oriented tutorial in Chapter 27):</p><a id="I_programlisting3_d1e97911"></a>
+<pre class="epub__programlisting">class Person:
+    def __init__(self, name, pay):
+        self.name = name
+        self.pay  = pay
+
+    @tracer
+    def giveRaise(self, percent):            <em class="epub__lineannotation"><span class="epub__lineannotation"># giveRaise = tracer(giveRaise)</span></em>
+        self.pay *= (1.0 + percent)
+
+    @tracer
+    def lastName(self):                      <em class="epub__lineannotation"><span class="epub__lineannotation"># lastName = tracer(lastName)</span></em>
+        return self.name.split()[-1]
+
+bob = Person('Bob Smith', 50000)             <em class="epub__lineannotation"><span class="epub__lineannotation"># tracer remembers method funcs</span></em>
+bob.giveRaise(.25)                           <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs tracer.__call__(???, .25)</span></em>
+print(bob.lastName())                        <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs tracer.__call__(???)</span></em></pre>
+<p>The root of the problem here is in the <code class="epub__literal">self</code> argument of the tracer class’s
+          <code class="epub__literal">__call__</code> method—is it a <code class="epub__literal">tracer</code> instance or a <code class="epub__literal">Person</code> instance? We really need
+          <span class="epub__emphasis"><em>both</em></span> as it’s coded: the <code class="epub__literal">tracer</code> for decorator state, and the
+          <code class="epub__literal">Person</code> for routing on to the
+          original method. Really, <code class="epub__literal">self</code>
+<span class="epub__emphasis"><em>must</em></span> be the <code class="epub__literal">tracer</code> object, to provide access to
+          <code class="epub__literal">tracer</code>’s state information; this
+          is true whether decorating a simple function or a method.</p>
+<p>Unfortunately, when our decorated method name is rebound to a
+          class instance object with a <code class="epub__literal">__call__</code>, Python passes only the <code class="epub__literal">tracer</code> <span class="epub__emphasis"><em>instance</em></span> to
+          <code class="epub__literal">self</code>; it doesn’t pass along the
+          <code class="epub__literal">Person</code> subject in the arguments
+          list at all. Moreover, because the <code class="epub__literal">tracer</code> knows nothing about the <code class="epub__literal">Person</code> instance we are trying to process
+          with method calls, there’s no way to create a bound method with an
+          instance, and thus no way to correctly dispatch the call.</p>
+<p>In fact, the prior listing winds up passing too few arguments
+          to the decorated method, and results in an error. Add a line to the
+          decorator’s <code class="epub__literal">__call__</code> to print all
+          its arguments to verify this; as you can see, <code class="epub__literal">self</code> is the <code class="epub__literal">tracer</code>, and the <code class="epub__literal">Person</code> instance is entirely absent:</p><a id="I_programlisting3_d1e98006"></a>
+<pre class="epub__programlisting">&lt;__main__.tracer object at 0x02D6AD90&gt; (0.25,) {}
+call 1 to giveRaise
+Traceback (most recent call last):
+  File "C:/misc/tracer.py", line 56, in &lt;module&gt;
+    bob.giveRaise(.25)
+  File "C:/misc/tracer.py", line 9, in __call__
+    return self.func(*args, **kwargs)
+TypeError: giveRaise() takes exactly 2 positional arguments (1 given)</pre>
+<p>As mentioned earlier, this happens because Python passes the
+          implied subject instance to <code class="epub__literal">self</code>
+          when a method name is bound to a simple function only; when it is an
+          instance of a callable class, that class’s instance is passed
+          instead. Technically, Python only makes a bound method object
+          containing the subject instance when the method is a simple
+          function.</p>
+<div class="epub__sect3" title="Using nested functions to decorate methods"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="using_nested_functions_to_decorate_meth"></a>Using nested functions to decorate methods</h3>
+</div>
+</div>
+</div>
+<p>If you want your function decorators to work on
+            <span class="epub__emphasis"><em>both</em></span> simple functions and class methods, the
+            most straightforward solution lies in using one of the other state
+            retention solutions described earlier—code your function decorator
+            as nested <code class="epub__literal">def</code>s, so that you
+            don’t depend on a single <code class="epub__literal">self</code>
+            instance argument to be both the wrapper class instance and the
+            subject class instance.</p>
+<p>The following alternative applies this fix using Python 3.0
+            nonlocals. Because decorated methods are rebound to simple
+            functions instead of instance objects, Python correctly passes the
+            <code class="epub__literal">Person</code> object as the first
+            argument, and the decorator propagates it on in the first item of
+            <code class="epub__literal">*args</code> to the <code class="epub__literal">self</code> argument of the real, decorated
+            methods:</p><a id="I_programlisting3_d1e98038"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># A decorator for both functions and methods</span></em>
+
+def tracer(func):                        <em class="epub__lineannotation"><span class="epub__lineannotation"># Use function, not class with __call__</span></em>
+    calls = 0                            <em class="epub__lineannotation"><span class="epub__lineannotation"># Else "self" is decorator instance only!</span></em>
+    def onCall(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        print('call %s to %s' % (calls, func.__name__))
+        return func(*args, **kwargs)
+    return onCall
+
+
+<em class="epub__lineannotation"><span class="epub__lineannotation"># Applies to simple functions</span></em>
+
+@tracer
+def spam(a, b, c):                       <em class="epub__lineannotation"><span class="epub__lineannotation"># spam = tracer(spam)</span></em>
+    print(a + b + c)                     <em class="epub__lineannotation"><span class="epub__lineannotation"># onCall remembers spam</span></em>
+
+spam(1, 2, 3)                            <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs onCall(1, 2, 3)</span></em>
+spam(a=4, b=5, c=6)
+
+
+<em class="epub__lineannotation"><span class="epub__lineannotation"># Applies to class method functions too!</span></em>
+
+class Person:
+    def __init__(self, name, pay):
+        self.name = name
+        self.pay  = pay
+
+    @tracer
+    def giveRaise(self, percent):        <em class="epub__lineannotation"><span class="epub__lineannotation"># giveRaise = tracer(giveRaise)</span></em>
+        self.pay *= (1.0 + percent)      <em class="epub__lineannotation"><span class="epub__lineannotation"># onCall remembers giveRaise</span></em>
+
+    @tracer
+    def lastName(self):                  <em class="epub__lineannotation"><span class="epub__lineannotation"># lastName = tracer(lastName)</span></em>
+        return self.name.split()[-1]
+
+print('methods...')
+bob = Person('Bob Smith', 50000)
+sue = Person('Sue Jones', 100000)
+print(bob.name, sue.name)
+sue.giveRaise(.10)                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs onCall(sue, .10)</span></em>
+print(sue.pay)
+print(bob.lastName(), sue.lastName())    <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs onCall(bob), lastName in scopes</span></em></pre>
+<p>This version works the same on both functions and
+            methods:</p><a id="I_programlisting3_d1e98081"></a>
+<pre class="epub__programlisting">call 1 to spam
+6
+call 2 to spam
+15
+methods...
+Bob Smith Sue Jones
+call 1 to giveRaise
+110000.0
+call 1 to lastName
+call 2 to lastName
+Smith Jones</pre>
+</div>
+<div class="epub__sect3" title="Using descriptors to decorate methods"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="using_descriptors_to_decorate_methods"></a>Using descriptors to decorate methods</h3>
+</div>
+</div>
+</div>
+<p>Although the nested function solution illustrated in the
+            prior section is the most straightforward way to support
+            decorators that apply to both functions and class methods, other
+            schemes are possible. The descriptor feature we explored in the
+            prior chapter, for example, can help here as well.</p>
+<p>Recall from our discussion in that chapter that a descriptor
+            may be a class attribute assigned to objects with a <code class="epub__literal">__get__</code> method run automatically when
+            that attribute is referenced and fetched (<code class="epub__literal">object</code> derivation is required in Python
+            2.6, but not 3.0):</p><a id="I_programlisting3_d1e98096"></a>
+<pre class="epub__programlisting">class Descriptor(object):
+    def __get__(self, instance, owner): ...
+
+class Subject:
+    attr = Descriptor()
+
+X = Subject()
+X.attr         <em class="epub__lineannotation"><span class="epub__lineannotation"># Roughly runs Descriptor.__get__(Subject.attr, X, Subject)</span></em></pre>
+<p>Descriptors may also have <code class="epub__literal">__set__</code> and <code class="epub__literal">__del__</code> access methods, but we don’t
+            need them here. Now, because the descriptor’s <code class="epub__literal">__get__</code> method receives
+            <span class="epub__emphasis"><em>both</em></span> the descriptor class and subject class
+            instances when invoked, it’s well suited to decorating methods
+            when we need both the decorator’s state and the original class
+            instance for dispatching calls. Consider the following alternative
+            tracing decorator, which is also a descriptor:</p><a id="I_programlisting3_d1e98114"></a>
+<pre class="epub__programlisting">class tracer(object):
+    def __init__(self, func):                <em class="epub__lineannotation"><span class="epub__lineannotation"># On @ decorator</span></em>
+        self.calls = 0                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Save func for later call</span></em>
+        self.func  = func
+    def __call__(self, *args, **kwargs):     <em class="epub__lineannotation"><span class="epub__lineannotation"># On call to original func</span></em>
+        self.calls += 1
+        print('call %s to %s' % (self.calls, self.func.__name__))
+        return self.func(*args, **kwargs)
+    def __get__(self, instance, owner):      <em class="epub__lineannotation"><span class="epub__lineannotation"># On method attribute fetch</span></em>
+        return wrapper(self, instance)
+
+class wrapper:
+    def __init__(self, desc, subj):          <em class="epub__lineannotation"><span class="epub__lineannotation"># Save both instances</span></em>
+        self.desc = desc                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Route calls back to  decr</span></em>
+        self.subj = subj
+    def __call__(self, *args, **kwargs):
+        return self.desc(self.subj, *args, **kwargs)  <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs tracer.__call__</span></em>
+
+@tracer
+def spam(a, b, c):                           <em class="epub__lineannotation"><span class="epub__lineannotation"># spam = tracer(spam)</span></em>
+    <em class="epub__replaceable"><code>...same as prior...</code></em>                      <em class="epub__lineannotation"><span class="epub__lineannotation"># Uses __call__ only</span></em>
+
+class Person:
+    @tracer
+    def giveRaise(self, percent):            <em class="epub__lineannotation"><span class="epub__lineannotation"># giveRaise = tracer(giverRaise)</span></em>
+        <em class="epub__replaceable"><code>...same as prior...</code></em>                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Makes giveRaise a descriptor</span></em></pre>
+<p>This works the same as the preceding nested function coding.
+            Decorated functions invoke only its <code class="epub__literal">__call__</code>, while decorated methods invoke
+            its <code class="epub__literal">__get__</code> first to resolve
+            the method name fetch (on
+            <em class="epub__replaceable"><code>instance</code></em><code class="epub__literal">.</code><em class="epub__replaceable"><code>method</code></em>); the
+            object returned by <code class="epub__literal">__get__</code>
+            retains the subject class instance and is then invoked to complete
+            the call expression, thereby triggering <code class="epub__literal">__call__</code> (on <code class="epub__literal">(</code><em class="epub__replaceable"><code>args...</code></em><code class="epub__literal">)</code>). For example, the test code’s call
+            to:</p><a id="I_programlisting3_d1e98185"></a>
+<pre class="epub__programlisting">sue.giveRaise(.10)                           <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs __get__ then __call__</span></em></pre>
+<p>run’s <code class="epub__literal">tracer.__get__</code>
+            first, because the <code class="epub__literal">giveRaise</code>
+            attribute in the <code class="epub__literal">Person</code> class
+            has been rebound to a descriptor by the function decorator. The
+            call expression then triggers the <code class="epub__literal">__call__</code> method of the returned <code class="epub__literal">wrapper</code> object, which in turn invokes
+            <code class="epub__literal">tracer.__call__</code>.</p>
+<p>The <code class="epub__literal">wrapper</code> object
+            retains both descriptor and subject instances, so it can route
+            control back to the original decorator/descriptor class instance.
+            In effect, the <code class="epub__literal">wrapper</code> object
+            saves the subject class instance available during method attribute
+            fetch and adds it to the later call’s arguments list, which is
+            passed to <code class="epub__literal">__call__</code>. Routing the
+            call back to the descriptor class instance this way is required in
+            this application so that all calls to a wrapped method use the
+            same <code class="epub__literal">calls</code> counter state
+            information in the descriptor instance object.</p>
+<p>Alternatively, we could use a nested function and enclosing
+            scope references to achieve the same effect—the following version
+            works the same as the preceding one, by swapping a class and
+            object attributes for a nested function and scope references, but
+            it requires noticeably less code:</p><a id="I_programlisting3_d1e98227"></a>
+<pre class="epub__programlisting">class tracer(object):
+    def __init__(self, func):                <em class="epub__lineannotation"><span class="epub__lineannotation"># On @ decorator</span></em>
+        self.calls = 0                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Save func for later call</span></em>
+        self.func  = func
+    def __call__(self, *args, **kwargs):     <em class="epub__lineannotation"><span class="epub__lineannotation"># On call to original func</span></em>
+        self.calls += 1
+        print('call %s to %s' % (self.calls, self.func.__name__))
+        return self.func(*args, **kwargs)
+    def __get__(self, instance, owner):                <em class="epub__lineannotation"><span class="epub__lineannotation"># On method fetch</span></em>
+        def wrapper(*args, **kwargs):                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Retain both inst</span></em>
+            return self(instance, *args, **kwargs)     <em class="epub__lineannotation"><span class="epub__lineannotation"># Runs __call__</span></em>
+        return wrapper</pre>
+<p>Add <code class="epub__literal">print</code> statements to
+            these alternatives’ methods to trace the two-step get/call process on your own, and run them
+            with the same test code as in the nested function alternative
+            shown earlier. In either coding, this descriptor-based scheme is
+            also substantially subtler than the nested function option, and so
+            is probably a second choice here; it may be a useful coding
+            pattern in other contexts, though.</p>
+<p>In the rest of this chapter we’re going to be fairly casual
+            about using classes or functions to code our function decorators,
+            as long as they are applied only to functions. Some decorators may
+            not require the instance of the original class, and will still
+            work on both functions and methods if coded as a class—something
+            like Python’s own <code class="epub__literal">staticmethod</code> decorator, for
+            example, wouldn’t require an instance of the subject class
+            (indeed, its whole point is to remove the instance from the
+            call).</p>
+<p>The moral of this story, though, is that if you want your
+            decorators to work on both simple functions and class methods,
+            you’re better off using the nested-function-based coding pattern
+            outlined here instead of a class with <a id="I_indexterm3_d1e98264"></a>call interception.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Timing Calls"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="timing_calls"></a>Timing Calls</h2>
+</div>
+</div>
+</div>
+<p>To <a id="ch3834fundeccodtimcalls"></a>sample the fuller flavor of what function decorators
+          are capable of, let’s turn to a different use case. Our next
+          decorator times calls made to a decorated function—both the time for
+          one call, and the total time among all calls. The decorator is
+          applied to two functions, in order to compare the time requirements
+          of list comprehensions and the <code class="epub__literal">map</code> built-in call (for comparison, also
+          see Chapter 20 for
+          another nondecorator example that times iteration alternatives like
+          these):</p><a id="I_programlisting3_d1e98285"></a>
+<pre class="epub__programlisting">import time
+
+class timer:
+    def __init__(self, func):
+        self.func    = func
+        self.alltime = 0
+    def __call__(self, *args, **kargs):
+        start   = time.clock()
+        result  = self.func(*args, **kargs)
+        elapsed = time.clock() - start
+        self.alltime += elapsed
+        print('%s: %.5f, %.5f' % (self.func.__name__, elapsed, self.alltime))
+        return result
+
+@timer
+def listcomp(N):
+    return [x * 2 for x in range(N)]
+
+@timer
+def mapcall(N):
+    return map((lambda x: x * 2), range(N))
+
+result = listcomp(5)                <em class="epub__lineannotation"><span class="epub__lineannotation"># Time for this call, all calls, return value</span></em>
+listcomp(50000)
+listcomp(500000)
+listcomp(1000000)
+print(result)
+print('allTime = %s' % listcomp.alltime)      <em class="epub__lineannotation"><span class="epub__lineannotation"># Total time for all listcomp calls</span></em>
+
+print('')
+result = mapcall(5)
+mapcall(50000)
+mapcall(500000)
+mapcall(1000000)
+print(result)
+print('allTime = %s' % mapcall.alltime)       <em class="epub__lineannotation"><span class="epub__lineannotation"># Total time for all mapcall calls</span></em>
+
+print('map/comp = %s' % round(mapcall.alltime / listcomp.alltime, 3))</pre>
+<p>In this case, a nondecorator approach would allow the subject
+          functions to be used with or without timing, but it would also
+          complicate the call signature when timing is desired (we’d need to
+          add code at every call instead of once at the <code class="epub__literal">def</code>), and there would be no direct way to
+          guarantee that all list builder calls in a program are routed
+          through timer logic, short of finding and potentially changing them
+          all.</p>
+<p>When run in Python 2.6, the output of this file’s self-test
+          code is as follows:</p><a id="I_programlisting3_d1e98303"></a>
+<pre class="epub__programlisting">listcomp: 0.00002, 0.00002
+listcomp: 0.00910, 0.00912
+listcomp: 0.09105, 0.10017
+listcomp: 0.17605, 0.27622
+[0, 2, 4, 6, 8]
+allTime = 0.276223304917
+
+mapcall: 0.00003, 0.00003
+mapcall: 0.01363, 0.01366
+mapcall: 0.13579, 0.14945
+mapcall: 0.27648, 0.42593
+[0, 2, 4, 6, 8]
+allTime = 0.425933533452
+map/comp = 1.542</pre>
+<p>Testing subtlety: I didn’t run this under Python 3.0 because,
+          as described in Chapter 14, the <code class="epub__literal">map</code> built-in returns an
+          <span class="epub__emphasis"><em>iterator</em></span> in 3.0, instead of an actual list as
+          in 2.6. Hence, 3.0’s <code class="epub__literal">map</code> doesn’t
+          quite compare directly to a list comprehension’s work (as is, the
+          <code class="epub__literal">map</code> test takes virtually no time
+          at all in 3.0!).</p>
+<p>If you wish to run this under 3.0, too, use <code class="epub__literal">list(map())</code> to force it to build a list
+          like the list comprehension does, or else you’re not really
+          comparing apples to apples. Don’t do so in 2.6, though—if you do,
+          the <code class="epub__literal">map</code> test will be charged for
+          building two lists, not one.</p>
+<p>The following sort of code would pick fairly for 2.6 and 3.0;
+          note, though, that while this makes the comparison between list
+          comprehensions and <code class="epub__literal">map</code> more fair
+          in either 2.6 or 3.0, because <code class="epub__literal">range</code> is also an iterator in 3.0, the
+          results for 2.6 and 3.0 won’t compare directly:</p><a id="I_programlisting3_d1e98337"></a>
+<pre class="epub__programlisting">...
+import sys
+
+@timer
+def listcomp(N):
+    return [x * 2 for x in range(N)]
+
+if sys.version_info[0] == 2:
+    @timer
+    def mapcall(N):
+        return map((lambda x: x * 2), range(N))
+else:
+    @timer
+    def mapcall(N):
+        return list(map((lambda x: x * 2), range(N)))
+    ...</pre>
+<p>Finally, as we learned in the modules part of this book if you
+          want to be able to reuse this decorator in other modules, you should
+          indent the self-test code at the bottom of the file under a <code class="epub__literal">__name__ == '__main__'</code> test so it runs
+          only when the file is run, not when it’s imported. We won’t do this,
+          though, because we’re about to add another feature to our <a id="I_indexterm3_d1e98344"></a>code.</p>
+</div>
+<div class="epub__sect2" title="Adding Decorator Arguments"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="adding_decorator_arguments"></a>Adding Decorator Arguments</h2>
+</div>
+</div>
+</div>
+<p>The <a id="ch3835fundeccodaddargs"></a>timer decorator of the prior section works, but it
+          would be nice if it was more configurable—providing an output label
+          and turning trace messages on and off, for instance, might be useful
+          in a general-purpose tool like this. Decorator arguments come in
+          handy here: when they’re coded properly, we can use them to specify
+          configuration options that can vary for each decorated function. A
+          label, for instance, might be added as follows:</p><a id="I_programlisting3_d1e98360"></a>
+<pre class="epub__programlisting">def timer(label=''):
+    def decorator(func):
+        def onCall(*args):          <em class="epub__lineannotation"><span class="epub__lineannotation"># args passed to function</span></em>
+            ...                     <em class="epub__lineannotation"><span class="epub__lineannotation"># func retained in enclosing scope</span></em>
+            print(label, ...        <em class="epub__lineannotation"><span class="epub__lineannotation"># label retained in enclosing scope</span></em>
+        return onCall
+    return decorator                <em class="epub__lineannotation"><span class="epub__lineannotation"># Returns that actual decorator</span></em>
+
+@timer('==&gt;')                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Like listcomp = timer('==&gt;')(listcomp)</span></em>
+def listcomp(N): ...                <em class="epub__lineannotation"><span class="epub__lineannotation"># listcomp is rebound to decorator</span></em>
+
+listcomp(...)                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Really calls decorator</span></em></pre>
+<p>This code adds an enclosing scope to retain a decorator
+          argument for use on a later actual call. When the <code class="epub__literal">listcomp</code> function is defined, it really
+          invokes <code class="epub__literal">decorator</code> (the result of
+          <code class="epub__literal">timer</code>, run before decoration
+          actually occurs), with the <code class="epub__literal">label</code>
+          value available in its enclosing scope. That is, <code class="epub__literal">timer</code> <span class="epub__emphasis"><em>returns</em></span> the
+          decorator, which remembers both the decorator argument and the original
+          function and returns a callable which invokes the original function
+          on later calls.</p>
+<p>We can put this structure to use in our timer to allow a label
+          and a trace control flag to be passed in at decoration time. Here’s
+          an example that does just that, coded in a module file named
+          <em class="epub__filename">mytools.py</em> so it can be
+          imported as a general tool:</p><a id="I_programlisting3_d1e98412"></a>
+<pre class="epub__programlisting">import time
+
+def timer(label='', trace=True):                  <em class="epub__lineannotation"><span class="epub__lineannotation"># On decorator args: retain args</span></em>
+    class Timer:
+        def __init__(self, func):                 <em class="epub__lineannotation"><span class="epub__lineannotation"># On @: retain decorated func</span></em>
+            self.func    = func
+            self.alltime = 0
+        def __call__(self, *args, **kargs):       <em class="epub__lineannotation"><span class="epub__lineannotation"># On calls: call original</span></em>
+            start   = time.clock()
+            result  = self.func(*args, **kargs)
+            elapsed = time.clock() - start
+            self.alltime += elapsed
+            if trace:
+                format = '%s %s: %.5f, %.5f'
+                values = (label, self.func.__name__, elapsed, self.alltime)
+                print(format % values)
+            return result
+    return Timer</pre>
+<p>Mostly all we’ve done here is embed the original <code class="epub__literal">Timer</code> class in an enclosing function, in
+          order to create a scope that retains the decorator arguments. The
+          outer <code class="epub__literal">timer</code> function is called
+          before decoration occurs, and it simply returns the <code class="epub__literal">Timer</code> class to serve as the actual
+          decorator. On decoration, an instance of <code class="epub__literal">Timer</code> is made that remembers the decorated
+          function itself, but also has access to the decorator arguments in
+          the enclosing function scope.</p>
+<p>This time, rather than embedding self-test code in this file,
+          we’ll run the decorator in a different file. Here’s a client of our
+          timer decorator, the module file <em class="epub__filename">testseqs.py</em>, applying it to sequence
+          iteration alternatives again:</p><a id="I_programlisting3_d1e98442"></a>
+<pre class="epub__programlisting">from mytools import timer
+
+@timer(label='[CCC]==&gt;')
+def listcomp(N):                           <em class="epub__lineannotation"><span class="epub__lineannotation"># Like listcomp = timer(...)(listcomp)</span></em>
+    return [x * 2 for x in range(N)]       <em class="epub__lineannotation"><span class="epub__lineannotation"># listcomp(...) triggers Timer.__call__</span></em>
+
+@timer(trace=True, label='[MMM]==&gt;')
+def mapcall(N):
+    return map((lambda x: x * 2), range(N))
+
+for func in (listcomp, mapcall):
+    print('')
+    result = func(5)        <em class="epub__lineannotation"><span class="epub__lineannotation"># Time for this call, all calls, return value</span></em>
+    func(50000)
+    func(500000)
+    func(1000000)
+    print(result)
+    print('allTime = %s' % func.alltime)   <em class="epub__lineannotation"><span class="epub__lineannotation"># Total time for all calls</span></em>
+
+print('map/comp = %s' % round(mapcall.alltime / listcomp.alltime, 3))</pre>
+<p>Again, if you wish to run this fairly in 3.0, wrap the
+          <code class="epub__literal">map</code> function in a <code class="epub__literal">list</code> call. When run as-is in 2.6, this
+          file prints the following output—each decorated function now has a
+          label of its own, defined by decorator arguments:</p><a id="I_programlisting3_d1e98464"></a>
+<pre class="epub__programlisting">[CCC]==&gt; listcomp: 0.00003, 0.00003
+[CCC]==&gt; listcomp: 0.00640, 0.00643
+[CCC]==&gt; listcomp: 0.08687, 0.09330
+[CCC]==&gt; listcomp: 0.17911, 0.27241
+[0, 2, 4, 6, 8]
+allTime = 0.272407666337
+
+[MMM]==&gt; mapcall: 0.00004, 0.00004
+[MMM]==&gt; mapcall: 0.01340, 0.01343
+[MMM]==&gt; mapcall: 0.13907, 0.15250
+[MMM]==&gt; mapcall: 0.27907, 0.43157
+[0, 2, 4, 6, 8]
+allTime = 0.431572169089
+map/comp = 1.584</pre>
+<p>As usual, we can also test this interactively to see how the
+          configuration arguments come into play:</p><a id="I_programlisting3_d1e98469"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from mytools import timer</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>@timer(trace=False)</code></strong>                    <em class="epub__lineannotation"><span class="epub__lineannotation"># No tracing, collect total time</span></em>
+... <strong class="epub__userinput"><code>def listcomp(N):</code></strong>
+...     <strong class="epub__userinput"><code>return [x * 2 for x in range(N)]</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = listcomp(5000)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = listcomp(5000)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = listcomp(5000)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>listcomp</code></strong>
+&lt;mytools.Timer instance at 0x025C77B0&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>listcomp.alltime</code></strong>
+0.0051938863738243413
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>@timer(trace=True, label='\t=&gt;')</code></strong>       <em class="epub__lineannotation"><span class="epub__lineannotation"># Turn on tracing</span></em>
+... <strong class="epub__userinput"><code>def listcomp(N):</code></strong>
+...     <strong class="epub__userinput"><code>return [x * 2 for x in range(N)]</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = listcomp(5000)</code></strong>
+        =&gt; listcomp: 0.00155, 0.00155
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = listcomp(5000)</code></strong>
+        =&gt; listcomp: 0.00156, 0.00311
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = listcomp(5000)</code></strong>
+        =&gt; listcomp: 0.00174, 0.00486
+&gt;&gt;&gt; <strong class="epub__userinput"><code>listcomp.alltime</code></strong>
+0.0048562736325408196</pre>
+<p>This timing function decorator can be used for any function,
+          both in modules and interactively. In other words, it automatically
+          qualifies as a <span class="epub__emphasis"><em>general-purpose tool</em></span> for timing
+          code in our scripts. Watch for another example of decorator
+          arguments in the section Implementing Private Attributes, and again in A Basic Range-Testing Decorator for Positional
+          Arguments.</p><div class="epub__note" title="Note">
+<h3 class="epub__title">Note</h3>
+<p><span class="epub__emphasis"><em>Timing methods</em></span>: This section’s timer
+            decorator works on any function, but a minor rewrite is required
+            to be able to apply it to <span class="epub__emphasis"><em>class methods</em></span> too.
+            In short, as our earlier section Class Blunders I: Decorating Class Methods illustrated,
+            it must avoid using a nested class. Because this mutation will be
+            a subject of one of our end-of-chapter quiz questions, though,
+            I’ll avoid giving away the answer completely <a id="I_indexterm3_d1e98547"></a><a id="I_indexterm3_d1e98549"></a><a id="I_indexterm3_d1e98551"></a>here.</p>
+</div>
+</div>
+<div class="epub__sect1" title="Coding Class Decorators"><div class="epub__titlepage"><div>
+<div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

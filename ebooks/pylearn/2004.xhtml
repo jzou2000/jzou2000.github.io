@@ -1,0 +1,539 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Timing Iteration Alternatives</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div><h1 class="epub__title"><a id="timing_iteration_alternatives"></a>Timing Iteration Alternatives</h1>
+<p>We’ve <a id="ch20iteratorstimingiterationalternatives"></a>met quite a few iteration alternatives in this book. To
+        summarize, let’s work through a larger case study that pulls together
+        some of the things we’ve learned about iteration and functions.</p>
+<p>I’ve mentioned a few times that list comprehensions have a speed
+        performance advantage over <code class="epub__literal">for</code> loop
+        statements, and that <code class="epub__literal">map</code>
+        performance can be better or worse depending on call patterns. The
+        generator expressions of the prior sections tend to be slightly slower
+        than list comprehensions, though they minimize memory space requirements.</p>
+<p>All that’s true today, but relative performance can vary over
+        time because Python’s internals are constantly being changed and
+        optimized. If you want to verify their performance for yourself, you
+        need to time these alternatives on your own computer and your own
+        version of Python.</p>
+<div class="epub__sect2" title="Timing Module"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="timing_module"></a>Timing Module</h2>
+</div>
+</div>
+</div>
+<p>Luckily, <a id="I_indexterm5_d1e52036"></a>Python <a id="I_indexterm5_d1e52040"></a>makes it easy to time code. To see how the iteration
+          options stack up, let’s start with a simple but general timer
+          utility function coded in a module file, so it can be used in a
+          variety of programs:</p><a id="I_programlisting5_d1e52048"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># File mytimer.py</span></em>
+
+import time
+reps = 1000
+repslist = range(reps)
+
+def timer(func, *pargs, **kargs):
+    start = time.clock()
+    for i in repslist:
+        ret = func(*pargs, **kargs)
+    elapsed = time.clock() - start
+    return (elapsed, ret)</pre>
+<p>Operationally, this module times calls to any function with
+          any positional and keyword arguments by fetching the start time,
+          calling the function a fixed number of times, and subtracting the
+          start time from the stop time. Points to notice:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p>Python’s <code class="epub__literal">time</code> module
+              gives access to the current time, with precision that varies per
+              platform. On Windows, this call is claimed to give microsecond
+              granularity and so is very accurate.</p></li><li class="epub__listitem">
+<p>The <code class="epub__literal">range</code> call is
+              hoisted out of the timing loop, so its construction cost is not
+              charged to the timed function in Python 2.6. In 3.0 <code class="epub__literal">range</code> is an iterator, so this step
+              isn’t required (but doesn’t hurt).</p></li><li class="epub__listitem">
+<p>The <code class="epub__literal">reps</code> count is a
+              global that importers can change if needed: <code class="epub__literal">mytimer.reps = N</code>.</p></li></ul>
+</div>
+<p>When complete, the total elapsed time for all calls is
+          returned in a tuple, along with the timed function’s final return
+          value so callers can verify its operation.</p>
+<p>From a larger perspective, because this function is coded in a
+          module file, it becomes a generally useful tool anywhere we wish to
+          import it. You’ll learn more about modules and imports in the next
+          part of this book—simply import the module and call the function to
+          use this file’s timer (and see Chapter 3’s coverage of module attributes if
+          you need a refresher).</p>
+</div>
+<div class="epub__sect2" title="Timing Script"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="timing_script"></a>Timing Script</h2>
+</div>
+</div>
+</div>
+<p>To <a id="I_indexterm5_d1e52090"></a>time iteration tool speed, run the following script—it
+          uses the timer module we wrote to time the relative speeds of the
+          list construction techniques we’ve studied:</p><a id="I_programlisting5_d1e52098"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># File timeseqs.py</span></em>
+
+import sys, mytimer                              <em class="epub__lineannotation"><span class="epub__lineannotation"># Import timer function</span></em>
+reps = 10000
+repslist = range(reps)                           <em class="epub__lineannotation"><span class="epub__lineannotation"># Hoist range out in 2.6</span></em>
+
+def forLoop():
+    res = []
+    for x in repslist:
+        res.append(abs(x))
+    return res
+
+def listComp():
+    return [abs(x) for x in repslist]
+
+def mapCall():
+    return list(map(abs, repslist))              <em class="epub__lineannotation"><span class="epub__lineannotation"># Use list in 3.0 only</span></em>
+
+def genExpr():
+    return list(abs(x) for x in repslist)        <em class="epub__lineannotation"><span class="epub__lineannotation"># list forces results</span></em>
+
+def genFunc():
+    def gen():
+        for x in repslist:
+            yield abs(x)
+    return list(gen())
+
+print(sys.version)
+for test in (forLoop, listComp, mapCall, genExpr, genFunc):
+    elapsed, result = mytimer.timer(test)
+    print ('-' * 33)
+    print ('%-9s: %.5f =&gt; [%s...%s]' %
+           (test.__name__, elapsed, result[0], result[-1]))</pre>
+<p>This script tests five alternative ways to build lists of
+          results and, as shown, executes on the order of 10 million steps for
+          each—that is, each of the five tests builds a list of 10,000 items
+          1,000 times.</p>
+<p>Notice how we have to run the generator expression and
+          function results through the built-in <code class="epub__literal">list</code> call to force them to yield all of
+          their values; if we did not, we would just produce generators that
+          never do any real work. In Python 3.0 (only) we must do the same for the <code class="epub__literal">map</code> result, since it is now an iterable
+          object as well. Also notice how the code at the bottom steps through
+          a tuple of five function objects and prints the <code class="epub__literal">__name__</code> of each: as we’ve seen, this is a
+          built-in attribute that gives a function’s name.<sup>[45]</sup></p>
+</div>
+<div class="epub__sect2" title="Timing Results"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="timing_results"></a>Timing Results</h2>
+</div>
+</div>
+</div>
+<p>When <a id="I_indexterm5_d1e52135"></a>the script of the prior section is run under Python
+          3.0, I get these results on my Windows Vista laptop—<code class="epub__literal">map</code> is slightly faster than list
+          comprehensions, both are quicker than <code class="epub__literal">for</code> loops, and generator expressions and
+          functions place in the middle:</p><a id="I_programlisting5_d1e52149"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python timeseqs.py</code></strong>
+3.0.1 (r301:69561, Feb 13 2009, 20:04:18) [MSC v.1500 32 bit (Intel)]
+---------------------------------
+forLoop  : 2.64441 =&gt; [0...9999]
+---------------------------------
+listComp : 1.60110 =&gt; [0...9999]
+---------------------------------
+mapCall  : 1.41977 =&gt; [0...9999]
+---------------------------------
+genExpr  : 2.21758 =&gt; [0...9999]
+---------------------------------
+genFunc  : 2.18696 =&gt; [0...9999]</pre>
+<p>If you study this code and its output long enough, you’ll
+          notice that generator expressions run slower than list
+          comprehensions. Although wrapping a generator expression in a
+          <code class="epub__literal">list</code> call makes it functionally
+          equivalent to a square-bracketed list comprehension, the internal
+          implementations of the two expressions appear to differ (though
+          we’re also effectively timing the <code class="epub__literal">list</code> call for the generator test):</p><a id="I_programlisting5_d1e52162"></a>
+<pre class="epub__programlisting">return [abs(x) for x in range(size)]         <em class="epub__lineannotation"><span class="epub__lineannotation"># 1.6 seconds</span></em>
+return list(abs(x) for x in range(size))     <em class="epub__lineannotation"><span class="epub__lineannotation"># 2.2 seconds: differs internally</span></em></pre>
+<p>Interestingly, when I ran this on Windows XP with Python 2.5
+          for the prior edition of this book, the results were relatively
+          similar—list comprehensions were nearly twice as fast as equivalent
+          <code class="epub__literal">for</code> loop statements, and <code class="epub__literal">map</code> was slightly quicker than list
+          comprehensions when mapping a built-in function such as <code class="epub__literal">abs</code> (absolute value). I didn’t test
+          generator functions then, and the output format wasn’t quite as
+          grandiose:</p><a id="I_programlisting5_d1e52180"></a>
+<pre class="epub__programlisting">2.5 (r25:51908, Sep 19 2006, 09:52:17) [MSC v.1310 32 bit (Intel)]
+forStatement         =&gt; 6.10899996758
+listComprehension    =&gt; 3.51499986649
+mapFunction          =&gt; 2.73399996758
+generatorExpression  =&gt; 4.11600017548</pre>
+<p>The fact that the actual 2.5 test times listed here are over
+          two times as slow as the output I showed earlier is likely due to my
+          using a quicker laptop for the more recent test, not due to
+          improvements in Python 3.0. In fact, all the 2.6 results for this
+          script are slightly quicker than 3.0 on this same machine if the
+          <code class="epub__literal">list</code> call is removed from the
+          <code class="epub__literal">map</code> test to avoid creating the
+          results list twice (try this on your own to verify).</p>
+<p>Watch what happens, though, if we change this script to
+          perform a real operation on each iteration, such as addition,
+          instead of calling a trivial built-in function like <code class="epub__literal">abs</code> (the omitted parts of the following
+          are the same as before):</p><a id="I_programlisting5_d1e52195"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># File timeseqs.py</span></em>
+...
+...
+def forLoop():
+    res = []
+    for x in repslist:
+        res.append(x + 10)
+    return res
+
+def listComp():
+    return [x + 10 for x in repslist]
+
+def mapCall():
+    return list(map((lambda x: x + 10), repslist))          <em class="epub__lineannotation"><span class="epub__lineannotation"># list in 3.0 only</span></em>
+
+def genExpr():
+    return list(x + 10 for x in repslist)                   <em class="epub__lineannotation"><span class="epub__lineannotation"># list in 2.6 + 3.0</span></em>
+
+def genFunc():
+    def gen():
+        for x in repslist:
+            yield x + 10
+    return list(gen())
+...
+...</pre>
+<p>Now the need to call a user-defined function for the <code class="epub__literal">map</code> call makes it slower than the <code class="epub__literal">for</code> loop statements, despite the fact that
+          the looping statements version is larger in terms of code. On Python
+          3.0:</p><a id="I_programlisting5_d1e52214"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python timeseqs.py</code></strong>
+3.0.1 (r301:69561, Feb 13 2009, 20:04:18) [MSC v.1500 32 bit (Intel)]
+---------------------------------
+forLoop  : 2.60754 =&gt; [10...10009]
+---------------------------------
+listComp : 1.57585 =&gt; [10...10009]
+---------------------------------
+mapCall  : 3.10276 =&gt; [10...10009]
+---------------------------------
+genExpr  : 1.96482 =&gt; [10...10009]
+---------------------------------
+genFunc  : 1.95340 =&gt; [10...10009]</pre>
+<p>The Python 2.5 results on a slower machine were again
+          relatively similar in the prior edition, but twice as slow due to
+          test machine differences:</p><a id="I_programlisting5_d1e52221"></a>
+<pre class="epub__programlisting">2.5 (r25:51908, Sep 19 2006, 09:52:17) [MSC v.1310 32 bit (Intel)]
+forStatement         =&gt; 5.25699996948
+listComprehension    =&gt; 2.68400001526
+mapFunction          =&gt; 5.96900010109
+generatorExpression  =&gt; 3.37400007248</pre>
+<p>Because the interpreter optimizes so much internally,
+          performance analysis of Python code like this is a very tricky
+          affair. It’s virtually impossible to guess which method will perform
+          the best—the best you can do is time your own code, on your
+          computer, with your version of Python. In this case, all we should
+          say for certain is that on this Python, using a user-defined
+          function in <code class="epub__literal">map</code> calls can slow
+          performance by at least a factor of 2, and that list comprehensions
+          run quickest for this test.</p>
+<p>As I’ve mentioned before, however, performance should not be
+          your primary concern when writing Python code—the first thing you
+          should do to optimize Python code is to not optimize Python code!
+          Write for <span class="epub__emphasis"><em>readability and simplicity</em></span> first,
+          then optimize later, if and only if needed. It could very well be
+          that any of the five alternatives is quick enough for the data sets
+          your program needs to process; if so, program clarity should be the
+          chief goal.</p>
+</div>
+<div class="epub__sect2" title="Timing Module Alternatives"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="timing_module_alternatives"></a>Timing Module Alternatives</h2>
+</div>
+</div>
+</div>
+<p>The <a id="I_indexterm5_d1e52238"></a>timing <a id="I_indexterm5_d1e52244"></a>module of the prior section works, but it’s a bit
+          primitive on multiple fronts:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p>It always uses the <code class="epub__literal">time.clock</code> call to time code. While
+              that option is best on Windows, the <code class="epub__literal">time.time</code> call may provide better
+              resolution on some Unix platforms.</p></li><li class="epub__listitem">
+<p>Adjusting the number of repetitions requires changing
+              module-level globals—a less than ideal arrangement if the
+              <code class="epub__literal">timer</code> function is being used
+              and shared by multiple importers.</p></li><li class="epub__listitem">
+<p>As is, the timer works by running the test function a
+              large number of times. To account for random system load
+              fluctuations, it might be better to select the
+              <span class="epub__emphasis"><em>best</em></span> time among all the tests, instead of
+              the <span class="epub__emphasis"><em>total</em></span> time.</p></li></ul>
+</div>
+<p>The following alternative implements a more sophisticated
+          timer module that addresses all three points by selecting a timer
+          call based on platform, allowing the repeat count to be passed in as
+          a keyword argument named <code class="epub__literal">_reps</code>,
+          and providing a best-of-N alternative timing function:</p><a id="I_programlisting5_d1e52282"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># File mytimer.py (2.6 and 3.0)</span></em>
+
+"""
+timer(spam, 1, 2, a=3, b=4, _reps=1000) calls and times spam(1, 2, a=3)
+_reps times, and returns total time for all runs, with final result;
+
+best(spam, 1, 2, a=3, b=4, _reps=50) runs best-of-N timer to filter out
+any system load variation, and returns best time among _reps tests
+"""
+
+import time, sys
+if sys.platform[:3] == 'win':
+    timefunc = time.clock               <em class="epub__lineannotation"><span class="epub__lineannotation"># Use time.clock on Windows</span></em>
+else:
+    timefunc = time.time                <em class="epub__lineannotation"><span class="epub__lineannotation"># Better resolution on some Unix platforms</span></em>
+
+def trace(*args): pass                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Or: print args</span></em>
+
+def timer(func, *pargs, **kargs):
+    _reps = kargs.pop('_reps', 1000)    <em class="epub__lineannotation"><span class="epub__lineannotation"># Passed-in or default reps</span></em>
+    trace(func, pargs, kargs, _reps)
+    repslist = range(_reps)             <em class="epub__lineannotation"><span class="epub__lineannotation"># Hoist range out for 2.6 lists</span></em>
+    start = timefunc()
+    for i in repslist:
+        ret = func(*pargs, **kargs)
+    elapsed = timefunc() - start
+    return (elapsed, ret)
+
+def best(func, *pargs, **kargs):
+    _reps = kargs.pop('_reps', 50)
+    best = 2 ** 32
+    for i in range(_reps):
+        (time, ret) = timer(func, *pargs, _reps=1, **kargs)
+        if time &lt; best: best = time
+    return (best, ret)</pre>
+<p>This module’s docstring at the top of the file describes its
+          intended usage. It uses dictionary <code class="epub__literal">pop</code> operations to remove the <code class="epub__literal">_reps</code> argument from arguments intended for
+          the test function and provide it with a default, and it traces
+          arguments during development if you change its <code class="epub__literal">trace</code> function to <code class="epub__literal">print</code>. To test with this new timer module
+          on either Python 3.0 or 2.6, change the timing script as follows
+          (the omitted code in the test functions of this version use the
+          <code class="epub__literal">x + 1</code> operation for each test, as
+          coded in the prior section):</p><a id="I_programlisting5_d1e52318"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># File timeseqs.py</span></em>
+
+import sys, mytimer
+reps = 10000
+repslist = range(reps)
+
+def forLoop(): ...
+
+def listComp(): ...
+
+def mapCall(): ...
+
+def genExpr(): ...
+
+def genFunc(): ...
+
+print(sys.version)
+for tester in (mytimer.timer, mytimer.best):
+    print('&lt;%s&gt;' % tester.__name__)
+    for test in (forLoop, listComp, mapCall, genExpr, genFunc):
+        elapsed, result = tester(test)
+        print ('-' * 35)
+        print ('%-9s: %.5f =&gt; [%s...%s]' %
+               (test.__name__, elapsed, result[0], result[-1]))</pre>
+<p>When run under Python 3.0, the timing results are essentially
+          the same as before, and relatively the same for both the total-of-N
+          and best-of-N timing techniques—running tests many times seems to do
+          as good a job filtering out system load fluctuations as taking the
+          best case, but the best-of-N scheme may be better when testing a
+          long-running function. The results on my machine are as
+          follows:</p><a id="I_programlisting5_d1e52324"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python timeseqs.py</code></strong>
+3.0.1 (r301:69561, Feb 13 2009, 20:04:18) [MSC v.1500 32 bit (Intel)]
+&lt;timer&gt;
+-----------------------------------
+forLoop  : 2.35371 =&gt; [10...10009]
+-----------------------------------
+listComp : 1.29640 =&gt; [10...10009]
+-----------------------------------
+mapCall  : 3.16556 =&gt; [10...10009]
+-----------------------------------
+genExpr  : 1.97440 =&gt; [10...10009]
+-----------------------------------
+genFunc  : 1.95072 =&gt; [10...10009]
+&lt;best&gt;
+-----------------------------------
+forLoop  : 0.00193 =&gt; [10...10009]
+-----------------------------------
+listComp : 0.00124 =&gt; [10...10009]
+-----------------------------------
+mapCall  : 0.00268 =&gt; [10...10009]
+-----------------------------------
+genExpr  : 0.00164 =&gt; [10...10009]
+-----------------------------------
+genFunc  : 0.00165 =&gt; [10...10009]</pre>
+<p>The times reported by the best-of-N timer here are small, of
+          course, but they might become significant if your program iterates
+          many times over large data sets. At least in terms of relative
+          performance, list comprehensions appear best in most cases; <code class="epub__literal">map</code> is only slightly better when built-ins
+          are applied.</p>
+<div class="epub__sect3" title="Using keyword-only arguments in 3.0"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="using_keyword-only_arguments_in_3.0"></a>Using keyword-only arguments in 3.0</h3>
+</div>
+</div>
+</div>
+<p>We <a id="I_indexterm5_d1e52339"></a>can also make use of Python 3.0
+            <span class="epub__emphasis"><em>keyword-only arguments</em></span> here to simplify the
+            timer module’s code. As we learned in Chapter 19, keyword-only arguments are
+            ideal for configuration options such as our functions’ <code class="epub__literal">_reps</code> argument. They must be coded after
+            a <code class="epub__literal">*</code> and before a <code class="epub__literal">**</code> in the function header, and in a
+            function call they must be passed by keyword and appear before the
+            <code class="epub__literal">**</code> if used. Here’s a
+            keyword-only-based alternative to the prior module. Though
+            simpler, it compiles and runs under Python 3.X only, not
+            2.6:</p><a id="I_programlisting5_d1e52361"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># File mytimer.py (3.X only)</span></em>
+
+"""
+Use 3.0 keyword-only default arguments, instead of ** and dict pops.
+No need to hoist range() out of test in 3.0: a generator, not a list
+"""
+
+import time, sys
+trace = lambda *args: None  # or print
+timefunc = time.clock if sys.platform == 'win32' else time.time
+
+def timer(func, *pargs, _reps=1000, **kargs):
+    trace(func, pargs, kargs, _reps)
+    start = timefunc()
+    for i in range(_reps):
+        ret = func(*pargs, **kargs)
+    elapsed = timefunc() - start
+    return (elapsed, ret)
+
+def best(func, *pargs, _reps=50, **kargs):
+    best = 2 ** 32
+    for i in range(_reps):
+        (time, ret) = timer(func, *pargs, _reps=1, **kargs)
+        if time &lt; best: best = time
+    return (best, ret)</pre>
+<p>This version is used the same way as and produces results
+            identical to the prior version, not counting negligible test time
+            differences from run to run:</p><a id="I_programlisting5_d1e52367"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python timeseqs.py</code></strong>
+<em class="epub__replaceable"><code>...same results as before...</code></em></pre>
+<p>In fact, for variety we can also test this version of the
+            module from the interactive prompt, completely independent of the
+            sequence timer script—it’s a general-purpose tool:</p><a id="I_programlisting5_d1e52376"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from mytimer import timer, best</code></strong>
+&gt;&gt;&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>def power(X, Y): return X ** Y</code></strong>            <em class="epub__lineannotation"><span class="epub__lineannotation"># Test function</span></em>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>timer(power, 2, 32)</code></strong>                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Total time, last result</span></em>
+(0.002625403507987747, 4294967296)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>timer(power, 2, 32, _reps=1000000)</code></strong>        <em class="epub__lineannotation"><span class="epub__lineannotation"># Override defult reps</span></em>
+(1.1822605247314932, 4294967296)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>timer(power, 2, 100000)[0]</code></strong>                <em class="epub__lineannotation"><span class="epub__lineannotation"># 2 ** 100,000 tot time @1,000 reps</span></em>
+2.2496919999608878
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>best(power, 2, 32)</code></strong>                        <em class="epub__lineannotation"><span class="epub__lineannotation"># Best time, last result</span></em>
+(5.58730229727189e-06, 4294967296)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>best(power, 2, 100000)[0]</code></strong>                 <em class="epub__lineannotation"><span class="epub__lineannotation"># 2 ** 100,000 best time</span></em>
+0.0019937589833460834
+&gt;&gt;&gt; <strong class="epub__userinput"><code>best(power, 2, 100000, _reps=500)[0]</code></strong>      <em class="epub__lineannotation"><span class="epub__lineannotation"># Override default reps</span></em>
+0.0019845399345541637</pre>
+<p>For trivial functions like the one tested in this
+            interactive session, the costs of the timer’s code are probably as
+            significant as those of the timed function, so you should not take
+            timer results too absolutely (we are timing more than just
+            <code class="epub__literal">X ** Y</code> here). The timer’s
+            results can help you judge relative speeds of coding alternatives,
+            though, and may be more meaningful for longer-running operations
+            like the following—calculating 2 to the power one million takes an
+            order of magnitude (power of 10) longer than the preceding
+            <code class="epub__literal">2**100,000</code>:</p><a id="I_programlisting5_d1e52436"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>timer(power, 2, 1000000, _reps=1)[0]</code></strong>      <em class="epub__lineannotation"><span class="epub__lineannotation"># 2 ** 1,000,000: total time</span></em>
+0.088112804839710179
+&gt;&gt;&gt; <strong class="epub__userinput"><code>timer(power, 2, 1000000, _reps=10)[0]</code></strong>
+0.40922470593329763
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>best(power, 2, 1000000, _reps=1)[0]</code></strong>       <em class="epub__lineannotation"><span class="epub__lineannotation"># 2 ** 1,000,000: best time</span></em>
+0.086550036387279761
+&gt;&gt;&gt; <strong class="epub__userinput"><code>best(power, 2, 1000000, _reps=10)[0]</code></strong>      <em class="epub__lineannotation"><span class="epub__lineannotation"># 10 is sometimes as good as 50</span></em>
+0.029616752967200455
+&gt;&gt;&gt; <strong class="epub__userinput"><code>best(power, 2, 1000000, _reps=50)[0]</code></strong>      <em class="epub__lineannotation"><span class="epub__lineannotation"># Best resolution</span></em>
+0.029486918030102061</pre>
+<p>Again, although the times measured here are small, the
+            differences can be significant in programs that compute powers
+            often.</p>
+<p>See Chapter 19 for more on
+            keyword-only arguments in 3.0; they can simplify code for
+            configurable tools like this one but are not backward compatible
+            with 2.X Pythons. If you want to compare 2.X and 3.X speed, for
+            example, or support programmers using either Python line, the
+            prior version is likely a better choice. If you’re using Python
+            2.6, the above session runs the same with the prior version of the
+            timer module.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Other Suggestions"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="other_suggestions"></a>Other Suggestions</h2>
+</div>
+</div>
+</div>
+<p>For <a id="I_indexterm5_d1e52477"></a>more insight, try modifying the repetition counts used
+          by these modules, or explore the alternative <code class="epub__literal"><a id="I_indexterm5_d1e52486"></a>timeit</code> module in Python’s standard library,
+          which automates timing of code, supports command-line usage modes,
+          and finesses some platform-specific issues. Python’s manuals
+          document its use.</p>
+<p>You might also want to look at the <code class="epub__literal"><a id="I_indexterm5_d1e52494"></a>profile</code> standard library module for a
+          complete source code profiler tool—we’ll learn more about it in
+          Chapter 35 in the context of
+          development tools for large projects. In general, you should profile
+          code to isolate bottlenecks before recoding and timing alternatives
+          as we’ve done here.</p>
+<p>It might be useful to experiment with the new <code class="epub__literal">str.format</code> method in Python 2.6 and 3.0
+          instead of the <code class="epub__literal">%</code> formatting
+          expression (which could potentially be deprecated in the future!),
+          by changing the timing script’s formatted <code class="epub__literal">print</code> lines as follows:</p><a id="I_programlisting5_d1e52512"></a>
+<pre class="epub__programlisting">print('&lt;%s&gt;' % tester.__name__)            <em class="epub__lineannotation"><span class="epub__lineannotation"># From expression</span></em>
+
+print('&lt;{0}&gt;'.format(tester.__name__))     <em class="epub__lineannotation"><span class="epub__lineannotation"># To method call</span></em>
+
+        print ('%-9s: %.5f =&gt; [%s...%s]' %
+               (test.__name__, elapsed, result[0], result[-1]))
+
+        print('{0:&lt;9}: {1:.5f} =&gt; [{2}...{3}]'.format(
+                test.__name__, elapsed, result[0], result[-1]))</pre>
+<p>You can judge the difference between these techniques
+          yourself.</p>
+<p>You might try modifying or emulating the timing script to
+          measure the speed of the 3.0 <span class="epub__emphasis"><em>set and dictionary
+          comprehensions</em></span> shown in this chapter, and their <code class="epub__literal">for</code> loop equivalents. Using them is less
+          common in Python programs than building lists of results, so we’ll
+          leave this task in the suggested exercise column (and please, no
+          wagering...).</p>
+<p>Finally, keep the timing module we wrote here filed away for
+          future reference—we’ll repurpose it to measure performance of
+          alternative numeric square root operations in an exercise at the end
+          of this chapter. If you’re interested in pursuing this topic
+          further, we’ll also experiment with techniques for timing dictionary
+          comprehensions versus <code class="epub__literal">for</code> loops
+          <a id="I_indexterm5_d1e52535"></a>interactively.<sup>[46]</sup></p>
+</div>
+<div class="epub__sect1" title="Function Gotchas"><div class="epub__titlepage"><div>
+<div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

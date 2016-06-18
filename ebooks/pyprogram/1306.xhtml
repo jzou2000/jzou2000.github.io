@@ -1,0 +1,492 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>POP: Fetching Email</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="POP: Fetching Email"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="pop_colon_fetching_email"></a>POP: Fetching Email</h1>
+</div>
+</div>
+</div>
+<p>I confess: up <a id="I_indexterm2_d1e54859"></a><a id="email13.7"></a><a id="client13.7"></a>until just before 2000, I took a
+        lowest-common-denominator approach to email. I preferred to check my
+        messages by <a id="I_indexterm2_d1e54875"></a>Telnetting to my <a id="I_indexterm2_d1e54879"></a><a id="I_indexterm2_d1e54882"></a>ISP and using a simple command-line email interface. Of
+        course, that’s not ideal for mail with attachments, pictures, and the
+        like, but its portability was staggering—because Telnet runs on almost
+        any machine with a network link, I was able to check my mail quickly
+        and easily from anywhere on the planet. Given that I make my living
+        traveling around the world teaching Python classes, this wild
+        accessibility was a big win.</p>
+<p>As with website maintenance, times have changed on this front.
+        Somewhere along the way, most ISPs began offering web-based email
+        access with similar portability and dropped Telnet altogether. When my
+        ISP took away Telnet access, however, they also took away one of my
+        main email access methods. Luckily, Python came to the rescue again—by
+        writing email access scripts in Python, I could still read and send
+        email from any machine in the world that has Python and an Internet
+        connection. Python can be as portable a solution as Telnet, but much
+        more powerful.</p>
+<p>Moreover, I can still use these scripts as an alternative to
+        tools suggested by the ISP. Besides my not being fond of delegating
+        control to commercial products of large companies, closed email tools
+        impose choices on users that are not always ideal and may sometimes
+        fail altogether. In many ways, the motivation for coding Python email
+        scripts is the same as it was for the larger GUIs in Chapter 11: the
+        <span class="epub__emphasis"><em>scriptability</em></span> of Python programs can be a decided
+        advantage.</p>
+<p>For example, Microsoft Outlook historically and by default has
+        preferred to download mail to your PC and delete it from the mail
+        server as soon as you access it. This keeps your email box small (and
+        your ISP happy), but it isn’t exactly friendly to people who travel
+        and use multiple machines along the way—once accessed, you cannot get
+        to a prior email from any machine except the one to which it was
+        initially downloaded. Worse, the web-based email interfaces offered by
+        my ISPs have at times gone offline completely, leaving me cut off from
+        email (and usually at the worst possible time).</p>
+<p>The next two scripts represent one first-cut solution to such
+        portability and reliability constraints (we’ll see others in this and
+        later chapters). The first, <span class="epub__emphasis"><em>popmail.py</em></span>, is a
+        simple <a id="I_indexterm2_d1e54902"></a><a id="I_indexterm2_d1e54905"></a>mail reader tool, which downloads and prints the
+        contents of each email in an email account. This script is admittedly
+        primitive, but it lets you read your email on any machine with Python
+        and sockets; moreover, it leaves your email intact on the server, and
+        isn’t susceptible to webmail outages. The second,
+        <span class="epub__emphasis"><em>smtpmail.py</em></span>, is a one-shot script for writing and
+        sending a new email message that is as portable as Python
+        itself.</p>
+<p>Later in this chapter, we’ll implement an interactive
+        console-based email client (pymail), and later in this book we’ll code
+        a full-blown GUI email tool (PyMailGUI) and a web-based email program
+        of our own (PyMailCGI). For now, we’ll start with the basics.</p>
+<div class="epub__sect2" title="Mail Configuration Module"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="mail_configuration_module"></a>Mail Configuration Module</h2>
+</div>
+</div>
+</div>
+<p>Before we get to the <a id="pop13.7.1"></a><a id="mail13.7.1"></a>scripts, let’s first take a look at a common module
+          they import and use. The module in Example 13-17 is used to configure
+          email parameters appropriately for a particular user. It’s simply a
+          collection of assignments to variables used by mail programs that
+          appear in this book; each major mail client has its own version, to
+          allow content to vary. Isolating these configuration settings in
+          this single module makes it easy to configure the book’s email
+          programs for a particular user, without having to edit actual
+          program logic code.</p>
+<p>If you want to use any of this book’s email programs to do
+          mail processing of your own, be sure to change its assignments to
+          reflect your servers, account usernames, and so on (as shown, they
+          refer to email accounts used for developing this book). Not all
+          scripts use all of these settings; we’ll revisit this module in
+          later examples to explain more of them.</p>
+<p>Note that some ISPs may require that you be connected directly
+          to their systems in order to use their SMTP servers to send mail.
+          For example, when connected directly by dial-up in the past, I could
+          use my ISP’s server directly, but when connected via broadband, I
+          had to route requests through a cable Internet provider. You may
+          need to adjust these settings to match your configuration; see your
+          ISP to obtain the required POP and SMTP servers. Also, some SMTP
+          servers check domain name validity in addresses, and may require an
+          authenticating login step—see the SMTP section later in this chapter
+          for interface details.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id36"></a>
+<p class="epub__title">Example 13-17. PP4E\Internet\Email\mailconfig.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+user configuration settings for various email programs (pymail/mailtools version);
+email scripts get their server names and other email config options from this
+module: change me to reflect your server names and mail preferences;
+"""
+
+#------------------------------------------------------------------------------
+# (required for load, delete: all) POP3 email server machine, user
+#------------------------------------------------------------------------------
+
+popservername = 'pop.secureserver.net'
+popusername   = 'PP4E@learning-python.com'
+
+#------------------------------------------------------------------------------
+# (required for send: all) SMTP email server machine name
+# see Python smtpd module for a SMTP server class to run locally;
+#------------------------------------------------------------------------------
+
+smtpservername = 'smtpout.secureserver.net'
+
+#------------------------------------------------------------------------------
+# (optional: all) personal information used by clients to fill in mail if set;
+# signature  -- can be a triple-quoted block, ignored if empty string;
+# address -- used for initial value of "From" field if not empty,
+# no longer tries to guess From for replies: this had varying success;
+#------------------------------------------------------------------------------
+
+myaddress   = 'PP4E@learning-python.com'
+mysignature = ('Thanks,\n'
+               '--Mark Lutz  (http://learning-python.com, http://rmi.net/~lutz)')
+
+#------------------------------------------------------------------------------
+# (optional: mailtools) may be required for send; SMTP user/password if
+# authenticated; set user to None or '' if no login/authentication is
+# required; set pswd to name of a file holding your SMTP password, or
+# an empty string to force programs to ask (in a console, or GUI);
+#------------------------------------------------------------------------------
+
+smtpuser  = None                           # per your ISP
+smtppasswdfile  = ''                       # set to '' to be asked
+
+#------------------------------------------------------------------------------
+# (optional: mailtools) name of local one-line text file with your pop
+# password; if empty or file cannot be read, pswd is requested when first
+# connecting; pswd not encrypted: leave this empty on shared machines;
+#------------------------------------------------------------------------------
+
+poppasswdfile  = r'c:\temp\pymailgui.txt'      # set to '' to be asked
+
+#------------------------------------------------------------------------------
+# (required: mailtools) local file where sent messages are saved by some clients;
+#------------------------------------------------------------------------------
+
+sentmailfile   = r'.\sentmail.txt'             # . means in current working dir
+
+#------------------------------------------------------------------------------
+# (required: pymail, pymail2) local file where pymail saves pop mail on request;
+#------------------------------------------------------------------------------
+
+savemailfile   = r'c:\temp\savemail.txt'       # not used in PyMailGUI: dialog
+
+#------------------------------------------------------------------------------
+# (required: pymail, mailtools) fetchEncoding is the Unicode encoding used to
+# decode fetched full message bytes, and to encode and decode message text if
+# stored in text-mode save files; see Chapter 13 for details: this is a limited
+# and temporary approach to Unicode encodings until a new bytes-friendly email
+# package is developed; headersEncodeTo is for sent headers: see chapter13;
+#------------------------------------------------------------------------------
+
+fetchEncoding = 'utf8'      # 4E: how to decode and store message text (or latin1?)
+headersEncodeTo = None      # 4E: how to encode non-ASCII headers sent (None=utf8)
+
+#------------------------------------------------------------------------------
+# (optional: mailtools) the maximum number of mail headers or messages to
+# download on each load request; given this setting N, mailtools fetches at
+# most N of the most recently arrived mails; older mails outside this set are
+# not fetched from the server, but are returned as empty/dummy emails; if this
+# is assigned to None (or 0), loads will have no such limit; use this if you
+# have very many mails in your inbox, and your Internet or mail server speed
+# makes full loads too slow to be practical;  some clients also load only
+# newly-arrived emails, but this setting is independent of that feature;
+#------------------------------------------------------------------------------
+
+fetchlimit = 25             # 4E: maximum number headers/emails to fetch on loads</pre>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="POP Mail Reader Script"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="pop_mail_reader_script"></a>POP Mail Reader Script</h2>
+</div>
+</div>
+</div>
+<p>On to <a id="I_indexterm2_d1e54944"></a><a id="I_indexterm2_d1e54946"></a><a id="pop13.7.2"></a><a id="mail13.7.2"></a><a id="I_indexterm2_d1e54956"></a><a id="popmail13.7.2"></a>reading email in Python: the script in Example 13-18 employs Python’s
+          standard <code class="epub__literal">poplib</code> module, an
+          implementation of the client-side interface to POP—the Post Office
+          Protocol. POP is a well-defined and widely available way to fetch
+          email from servers over sockets. This script connects to a POP
+          server to implement a simple yet portable email download and display
+          tool.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id37"></a>
+<p class="epub__title">Example 13-18. PP4E\Internet\Email\popmail.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/local/bin/python
+"""
+##############################################################################
+use the Python POP3 mail interface module to view your POP email account
+messages;  this is just a simple listing--see pymail.py for a client with
+more user interaction features, and smtpmail.py for a script which sends
+mail;  POP is used to retrieve mail, and runs on a socket using port number
+110 on the server machine, but Python's poplib hides all protocol details;
+to send mail, use the smtplib module (or os.popen('mail...')).  see also:
+imaplib module for IMAP alternative, PyMailGUI/PyMailCGI for more features;
+##############################################################################
+"""
+
+import poplib, getpass, sys, mailconfig
+
+mailserver = mailconfig.popservername      # ex: 'pop.rmi.net'
+mailuser   = mailconfig.popusername        # ex: 'lutz'
+mailpasswd = getpass.getpass('Password for %s?' % mailserver)
+
+print('Connecting...')
+server = poplib.POP3(mailserver)
+server.user(mailuser)                      # connect, log in to mail server
+server.pass_(mailpasswd)                   # pass is a reserved word
+
+try:
+    print(server.getwelcome())             # print returned greeting message
+    msgCount, msgBytes = server.stat()
+    print('There are', msgCount, 'mail messages in', msgBytes, 'bytes')
+    print(server.list())
+    print('-' * 80)
+    input('[Press Enter key]')
+
+    for i in range(msgCount):
+        hdr, message, octets = server.retr(i+1)    # octets is byte count
+        for line in message: print(line.decode())  # retrieve, print all mail
+        print('-' * 80)                            # mail text is bytes in 3.x
+        if i &lt; msgCount - 1:
+           input('[Press Enter key]')              # mail box locked till quit
+finally:                                           # make sure we unlock mbox
+    server.quit()                                  # else locked till timeout
+print('Bye.')</pre>
+</div>
+</div>
+<p>Though primitive, this script illustrates the basics of
+          reading email in Python. To establish a connection to an email
+          server, we start by making an instance of the <code class="epub__literal">poplib.POP3</code> object, passing in the email
+          server machine’s name as a string:</p><a id="I_programlisting2_d1e54980"></a>
+<pre class="epub__programlisting">server = poplib.POP3(mailserver)</pre>
+<p>If this call doesn’t raise an exception, we’re connected (by
+          socket) to the POP server listening on POP port number 110 at the
+          machine where our email account lives.</p>
+<p>The next thing we need to do before fetching messages is tell
+          the server our username and password; notice that the password
+          method is called <code class="epub__literal">pass_</code>. Without
+          the trailing underscore, <code class="epub__literal">pass</code>
+          would name a reserved word and trigger a syntax error:</p><a id="I_programlisting2_d1e54992"></a>
+<pre class="epub__programlisting">server.user(mailuser)                      # connect, log in to mail server
+server.pass_(mailpasswd)                   # pass is a reserved word</pre>
+<p>To keep things simple and relatively secure, this script
+          always asks for the account password interactively; the <code class="epub__literal">getpass</code> module we met in the FTP section
+          of this chapter is used to input but not display a password string
+          typed by the user.</p>
+<p>Once we’ve told the server our username and password, we’re
+          free to fetch mailbox information with the <code class="epub__literal">stat</code> method (number messages, total bytes
+          among all messages) and fetch the full text of a particular message
+          with the <code class="epub__literal">retr</code> method (pass the
+          message number—they start at 1). The full text includes all headers,
+          followed by a blank line, followed by the mail’s text and any
+          attached parts. The <code class="epub__literal">retr</code> call
+          sends back a tuple that includes a list of line strings representing
+          the content of the mail:</p><a id="I_programlisting2_d1e55010"></a>
+<pre class="epub__programlisting">msgCount, msgBytes = server.stat()
+hdr, message, octets = server.retr(i+1)    # octets is byte count</pre>
+<p>We close the email server connection by calling the POP
+          object’s <code class="epub__literal">quit</code> method:</p><a id="I_programlisting2_d1e55018"></a>
+<pre class="epub__programlisting">server.quit()                              # else locked till timeout</pre>
+<p>Notice that this call appears inside the <code class="epub__literal">finally</code> clause of a <code class="epub__literal">try</code> statement that wraps the bulk of the
+          script. To minimize complications associated with changes, POP
+          servers lock your email inbox between the time you first connect and
+          the time you close your connection (or until an arbitrary,
+          system-defined timeout expires). Because the POP <code class="epub__literal">quit</code> method also unlocks the mailbox, it’s
+          crucial that we do this before exiting, whether an exception is
+          raised during email processing or not. By wrapping the action in a
+          <code class="epub__literal">try</code>/<code class="epub__literal">finally</code> statement, we guarantee that the
+          script calls <code class="epub__literal">quit</code> on exit to
+          unlock the mailbox to make it accessible to other processes (e.g.,
+          delivery of incoming email).</p>
+</div>
+<div class="epub__sect2" title="Fetching Messages"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="fetching_messages"></a>Fetching Messages</h2>
+</div>
+</div>
+</div>
+<p>Here is the <code class="epub__literal">popmail</code> script
+          of Example 13-18 in action,
+          displaying two messages in my account’s mailbox on machine
+          <span class="epub__emphasis"><em>pop.secureserver.net</em></span>—the domain name of the
+          mail server machine used by the ISP hosting my
+          <span class="epub__emphasis"><em>learning-python.com</em></span> domain name, as <span>configured</span> in the module <code class="epub__literal">mailconfig</code>. To keep this output reasonably
+          sized, I’ve omitted or truncated a few irrelevant message header
+          lines here, including most of the <code class="epub__literal">Received:</code> headers that chronicle an
+          email’s journey; run this on your own to see all the gory details of
+          raw email text:</p><a id="I_programlisting2_d1e55067"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Email&gt; <strong class="epub__userinput"><code>popmail.py</code></strong>
+Password for pop.secureserver.net?
+Connecting...
+b'+OK &lt;1314.1273085900@p3pop01-02.prod.phx3.gdg&gt;'
+There are 2 mail messages in 3268 bytes
+(b'+OK ', [b'1 1860', b'2 1408'], 16)
+--------------------------------------------------------------------------------
+[Press Enter key]
+Received: (qmail 7690 invoked from network); 5 May 2010 15:29:43 −0000
+X-IronPort-Anti-Spam-Result: AskCAG4r4UvRVllAlGdsb2JhbACDF44FjCkVAQEBAQkLCAkRAx+
+Received: from 72.236.109.185 by webmail.earthlink.net with HTTP; Wed, 5 May 201
+Message-ID: &lt;27293081.1273073376592.JavaMail.root@mswamui-thinleaf.atl.sa.earthl
+Date: Wed, 5 May 2010 11:29:36 −0400 (EDT)
+From: lutz@rmi.net
+Reply-To: lutz@rmi.net
+To: pp4e@learning-python.com
+Subject: I'm a Lumberjack, and I'm Okay
+Mime-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+X-Mailer: EarthLink Zoo Mail 1.0
+X-ELNK-Trace: 309f369105a89a174e761f5d55cab8bca866e5da7af650083cf64d888edc8b5a35
+X-Originating-IP: 209.86.224.51
+X-Nonspam: None
+
+I cut down trees, I skip and jump,
+I like to press wild flowers...
+
+
+--------------------------------------------------------------------------------
+[Press Enter key]
+Received: (qmail 17482 invoked from network); 5 May 2010 15:33:47 −0000
+X-IronPort-Anti-Spam-Result: AlIBAIss4UthSoc7mWdsb2JhbACDF44FjD4BAQEBAQYNCgcRIq1
+Received: (qmail 4009 invoked by uid 99); 5 May 2010 15:33:47 −0000
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/plain; charset="utf-8"
+X-Originating-IP: 72.236.109.185
+User-Agent: Web-Based Email 5.2.13
+Message-Id: &lt;20100505083347.deec9532fd532622acfef00cad639f45.0371a89d29.wbe@emai
+From: lutz@learning-python.com
+To: PP4E@learning-python.com
+Cc: lutz@learning-python.com
+Subject: testing
+Date: Wed, 05 May 2010 08:33:47 −0700
+Mime-Version: 1.0
+X-Nonspam: None
+
+Testing Python mail tools.
+
+
+--------------------------------------------------------------------------------
+Bye.</pre>
+<p>This user interface is about as simple as it could be—after
+          connecting to the server, it prints the complete and raw full text
+          of one message at a time, pausing between each until you press the
+          Enter key. The <code class="epub__literal">input</code> built-in is
+          called to wait for the key press between message displays. The pause
+          keeps messages from scrolling off the screen too fast; to make them
+          visually distinct, emails are also separated by lines of
+          dashes.</p>
+<p>We could make the display fancier (e.g., we can use the
+          <code class="epub__literal">email</code> package to parse headers,
+          bodies, and attachments—watch for examples in this and later
+          chapters), but here we simply display the whole message that was
+          sent. This works well for simple mails like these two, but it can be
+          inconvenient for larger messages with attachments; we’ll improve on
+          this in later clients.</p>
+<p>This book won’t cover the full of set of headers that may
+          appear in emails, but we’ll make use of some along the way. For
+          example, the <span class="epub__emphasis"><em>X-Mailer</em></span> header line, if present,
+          typically identifies the sending program; we’ll use it later to
+          identify Python-coded email senders we write. The more common
+          headers such as <span class="epub__emphasis"><em>From</em></span> and
+          <span class="epub__emphasis"><em>Subject</em></span> are more crucial to a message. In fact,
+          a variety of extra header lines can be sent in a message’s text. The
+          <span class="epub__emphasis"><em>Received</em></span> headers, for example, trace the
+          machines that a message passed through on its way to the target
+          mailbox.</p>
+<p>Because <code class="epub__literal">popmail</code> prints the
+          entire raw text of a message, you see all headers here, but you
+          usually see only a few by default in end-user-oriented mail GUIs
+          such as Outlook and webmail pages. The raw text here also makes
+          apparent the email structure we noted earlier: an email in general
+          consists of a set of headers like those here, followed by a blank
+          line, which is followed by the mail’s main text, though as we’ll see
+          later, they can be more complex if there are alternative parts or
+          attachments.</p>
+<p>The script in Example 13-18 never deletes mail
+          from the server. Mail is simply retrieved and printed and will be
+          shown again the next time you run the script (barring deletion in
+          another tool, of course). To really remove mail permanently, we need
+          to call other methods (e.g., <code class="epub__literal">server.dele(msgnum)</code>), but such a
+          capability is best deferred until we develop more interactive mail
+          tools.</p>
+<p>Notice how the reader script decodes each mail content line
+          with <code class="epub__literal">line.decode</code> into a <code class="epub__literal">str</code> string for display; as mentioned
+          earlier, <code class="epub__literal">poplib</code> returns content
+          as <code class="epub__literal">bytes</code> strings in 3.X. In fact,
+          if we change the script to not decode, this becomes more obvious in
+          its output:</p><a id="I_programlisting2_d1e55122"></a>
+<pre class="epub__programlisting">[Press Enter key]
+<em class="epub__lineannotation"><span class="epub__lineannotation">...assorted lines omitted...</span></em>
+b'Date: Wed, 5 May 2010 11:29:36 −0400 (EDT)'
+b'From: lutz@rmi.net'
+b'Reply-To: lutz@rmi.net'
+b'To: pp4e@learning-python.com'
+b"Subject: I'm a Lumberjack, and I'm Okay"
+b'Mime-Version: 1.0'
+b'Content-Type: text/plain; charset=UTF-8'
+b'Content-Transfer-Encoding: 7bit'
+b'X-Mailer: EarthLink Zoo Mail 1.0'
+b''
+b'I cut down trees, I skip and jump,'
+b'I like to press wild flowers...'
+b''</pre>
+<p>As we’ll see later, we’ll need to decode similarly in order to
+          parse this text with email tools. The next section exposes the
+          bytes-based interface as <a id="I_indexterm2_d1e55129"></a><a id="I_indexterm2_d1e55131"></a><a id="I_indexterm2_d1e55133"></a>well.</p>
+</div>
+<div class="epub__sect2" title="Fetching Email at the Interactive Prompt"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="fetching_email_at_the_interactive_prompt"></a>Fetching Email at the Interactive Prompt</h2>
+</div>
+</div>
+</div>
+<p>If you don’t <a id="I_indexterm2_d1e55141"></a><a id="I_indexterm2_d1e55146"></a>mind typing code and reading POP server messages, it’s
+          possible to use the Python interactive prompt as a simple email
+          client, too. The following session uses two additional interfaces
+          we’ll apply in later examples:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">conn.list()</code></span></dt><dd>
+<p>Returns a list of “message-number message-size”
+                strings.</p></dd><dt><span class="epub__term"><code class="epub__literal">conn.top(</code>
+<em class="epub__replaceable"><code>N</code></em> <code class="epub__literal">,
+              0)</code></span></dt><dd>
+<p>Retrieves just the header text portion of message number
+                <span class="epub__emphasis"><em>N</em></span>.</p></dd></dl>
+</div>
+<p>The <code class="epub__literal">top</code> call also returns a
+          tuple that includes the list of line strings sent back; its second
+          argument tells the server how many additional lines after the
+          headers to send, if any. If all you need are header details,
+          <code class="epub__literal">top</code> can be much quicker than the
+          full text fetch of <code class="epub__literal">retr</code>, provided
+          your mail server implements the TOP command (most do):</p><a id="I_programlisting2_d1e55187"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Email&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from poplib import POP3</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn = POP3('pop.secureserver.net')</code></strong>         # connect to server
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn.user('PP4E@learning-python.com')</code></strong>       # log in to account
+b'+OK '
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn.pass_('xxxxxxxx')</code></strong>
+b'+OK '
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn.stat()</code></strong>      # num mails, num bytes
+(2, 3268)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn.list()</code></strong>
+(b'+OK ', [b'1 1860', b'2 1408'], 16)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn.top(1, 0)</code></strong>
+(b'+OK 1860 octets ', [b'Received: (qmail 7690 invoked from network); 5 May 2010
+<em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+b'X-Originating-IP: 209.86.224.51', b'X-Nonspam: None', b'', b''], 1827)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn.retr(1)</code></strong>
+(b'+OK 1860 octets ', [b'Received: (qmail 7690 invoked from network); 5 May 2010
+<em class="epub__lineannotation"><span class="epub__lineannotation">...lines omitted...</span></em>
+b'X-Originating-IP: 209.86.224.51', b'X-Nonspam: None', b'',
+b'I cut down trees, I skip and jump,', b'I like to press wild flowers...',
+b'', b''], 1898)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn.quit()</code></strong>
+b'+OK '</pre>
+<p>Printing the full text of a message at the interactive prompt
+          is easy once it’s fetched: simply decode each line to a normal
+          string as it is printed, like our pop mail script did, or
+          concatenate the line strings returned by <code class="epub__literal">retr</code> or <code class="epub__literal">top</code> adding a newline between; any of the
+          following will suffice for an open POP server object:</p><a id="I_programlisting2_d1e55235"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>info, msg, oct = connection.retr(1)</code></strong>       # fetch first email in mailbox
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for x in msg: print(x.decode())</code></strong>           # four ways to display message lines
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(b'\n'.join(msg).decode())</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = [print(x.decode()) for x in msg]</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = list(map(print, map(bytes.decode, msg)))</code></strong></pre>
+<p>Parsing email text to extract headers and components is more
+          complex, especially for mails with attached and possibly encoded
+          parts, such as images. As we’ll see later in this chapter, the
+          standard library’s <code class="epub__literal">email</code> package
+          can parse the mail’s full or headers text after it has been fetched
+          with <code class="epub__literal">poplib</code> (or <code class="epub__literal">imaplib</code>).</p>
+<p>See the Python library manual for details on other POP module
+          tools. As of Python 2.4, there is also a <code class="epub__literal">POP3_SSL</code> class in the <code class="epub__literal">poplib</code> module that connects to the server
+          over an SSL-encrypted socket on port 995 by default (the standard
+          port for POP over SSL). It provides an identical interface, but it
+          uses secure sockets for the conversation where supported <a id="I_indexterm2_d1e55270"></a><a id="I_indexterm2_d1e55272"></a>by servers.</p>
+</div>
+</div>
+</div>
+</body>
+</html>

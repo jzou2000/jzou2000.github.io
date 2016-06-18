@@ -1,0 +1,1188 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Interprocess Communication</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Interprocess Communication"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="interprocess_communication"></a>Interprocess Communication</h1>
+</div>
+</div>
+</div>
+<p>As we saw <a id="par5.5"></a><a id="I_indexterm4_d1e18258"></a>earlier, when scripts spawn
+        <span class="epub__emphasis"><em>threads</em></span>—tasks that run in parallel within the
+        program—they can naturally communicate by changing and inspecting
+        names and objects in shared global memory. This includes both
+        accessible variables and attributes, as well as referenced mutable
+        objects. As we also saw, some care must be taken to use locks to
+        synchronize access to shared items that can be updated concurrently.
+        Still, threads offer a fairly straightforward communication model, and
+        the <code class="epub__literal">queue</code> module can make this
+        nearly automatic for many programs.</p>
+<p>Things aren’t quite as simple when scripts start child processes
+        and independent programs that do not share memory in general. If we
+        limit the kinds of communications that can happen between programs,
+        many options are available, most of which we’ve already seen in this
+        and the prior chapters. For example, the following simple mechanisms
+        can all be interpreted as cross-program communication devices:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Simple files</p></li><li class="epub__listitem">
+<p>Command-line arguments</p></li><li class="epub__listitem">
+<p>Program exit status codes</p></li><li class="epub__listitem">
+<p>Shell environment variables</p></li><li class="epub__listitem">
+<p>Standard stream redirections</p></li><li class="epub__listitem">
+<p>Stream pipes managed by <code class="epub__literal">os.popen</code> and <code class="epub__literal">subprocess</code></p></li></ul>
+</div>
+<p>For instance, sending command-line options and writing to input
+        streams lets us pass in program execution parameters; reading program
+        output streams and exit codes gives us a way to grab a result. Because
+        shell environment variable settings are inherited by spawned programs,
+        they provide another way to pass context in. And pipes made by
+        <code class="epub__literal">os.popen</code> or <code class="epub__literal">subprocess</code> allow even more dynamic
+        communication. Data can be sent between programs at arbitrary times,
+        not only at program start and exit.</p>
+<p>Beyond this set, there are other tools in the Python library for
+        performing Inter-Process Communication (IPC). This includes sockets,
+        shared memory, signals, anonymous and named pipes, and more. Some vary
+        in portability, and all vary in complexity and utility. For
+        instance:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p><span class="epub__emphasis"><em>Signals</em></span> allow <a id="I_indexterm4_d1e18312"></a><a id="I_indexterm4_d1e18317"></a>programs to send simple notification events to other
+            programs.</p></li><li class="epub__listitem">
+<p><span class="epub__emphasis"><em>Anonymous pipes</em></span> allow <a id="I_indexterm4_d1e18328"></a><a id="I_indexterm4_d1e18333"></a><a id="I_indexterm4_d1e18338"></a>threads and related processes that share file
+            descriptors to pass data, but generally rely on the Unix-like
+            forking model for processes, which is not universally
+            portable.</p></li><li class="epub__listitem">
+<p><span class="epub__emphasis"><em>Named pipes</em></span> are <a id="I_indexterm4_d1e18349"></a><a id="I_indexterm4_d1e18354"></a><a id="I_indexterm4_d1e18359"></a>mapped to the system’s filesystem—they allow
+            completely unrelated programs to converse, but are not available
+            in Python on all platforms.</p></li><li class="epub__listitem">
+<p><span class="epub__emphasis"><em>Sockets</em></span> map to <a id="I_indexterm4_d1e18370"></a><a id="I_indexterm4_d1e18375"></a>system-wide port numbers—they similarly let us
+            transfer data between arbitrary programs running on the same
+            computer, but also between programs located on remote networked
+            machines, and offer a more portable option.</p></li></ul>
+</div>
+<p>While some of these can be used as communication devices by
+        threads, too, their full power becomes more evident when leveraged by
+        separate processes which do not share memory at large.</p>
+<p>In this section, we explore directly managed pipes (both
+        anonymous and named), as well as signals. We also take a first look at
+        sockets here, but largely as a preview; sockets can be used for IPC on
+        a single machine, but because the larger socket story also involves
+        their role in networking, we’ll save most of their details until the
+        Internet part of this book.</p>
+<p>Other IPC tools are available to <a id="I_indexterm4_d1e18387"></a><a id="I_indexterm4_d1e18392"></a><a id="I_indexterm4_d1e18397"></a>Python programmers (e.g., shared memory as provided by
+        the <code class="epub__literal">mmap</code> module) but are not
+        covered here for lack of space; search the Python manuals and website
+        for more details on other IPC schemes if you’re looking for something
+        more specific.</p>
+<p>After this section, we’ll also study the<a id="I_indexterm4_d1e18406"></a><a id="I_indexterm4_d1e18411"></a> <code class="epub__literal">multiprocessing</code>
+        module, which offers additional and portable IPC options as part of
+        its general process-launching API, including shared memory, and pipes
+        and queues of arbitrary pickled Python objects. For now, let’s study
+        traditional approaches first.</p>
+<div class="epub__sect2" title="Anonymous Pipes"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="anonymous_pipes"></a>Anonymous Pipes</h2>
+</div>
+</div>
+</div>
+<p>Pipes, a cross-program <a id="I_indexterm4_d1e18426"></a><a id="pipes5.5.1"></a><a id="ipc5.5.1"></a>communication device, are implemented by your
+          operating system and made available in the Python standard library.
+          Pipes are unidirectional channels that work something like a shared
+          memory buffer, but with an interface resembling a simple file on
+          each of two ends. In typical use, one program writes data on one end
+          of the pipe, and another reads that data on the other end. Each
+          program sees only its end of the pipes and processes it using normal
+          Python file calls.</p>
+<p>Pipes are much more within the operating system, though. For
+          instance, calls to read a pipe will normally
+          <span class="epub__emphasis"><em>block</em></span> the caller until data becomes available
+          (i.e., is sent by the program on the other end) instead of returning
+          an end-of-file indicator. Moreover, read calls on a pipe always
+          return the oldest data written to the pipe, resulting in a
+          <span class="epub__emphasis"><em>first-in-first-out</em></span> model—the first data written
+          is the first to be read. Because of such properties, pipes are also
+          a way to synchronize the execution of independent programs.</p>
+<p>Pipes come in two flavors—<span class="epub__emphasis"><em>anonymous</em></span> and
+          <span class="epub__emphasis"><em>named</em></span>. <a id="I_indexterm4_d1e18458"></a><a id="I_indexterm4_d1e18463"></a>Named pipes (often called fifos) are represented by a
+          file on your computer. Because named pipes are really external
+          files, the communicating processes need not be related at all; in
+          fact, they can be independently started programs.</p>
+<p>By contrast, anonymous pipes exist only within processes and
+          are typically used in conjunction with process
+          <span class="epub__emphasis"><em>forks</em></span> as a way to link parent and spawned child
+          processes within an application. Parent and child converse over
+          shared pipe file descriptors, which are inherited by spawned
+          processes. Because threads run in the same process and share all
+          global memory in general, anonymous pipes apply to them as
+          well.</p>
+<div class="epub__sect3" title="Anonymous pipe basics"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="anonymous_pipe_basics"></a>Anonymous pipe basics</h3>
+</div>
+</div>
+</div>
+<p>Since they are more <a id="anon5.5.1.1"></a>traditional, let’s start with a look at anonymous
+            pipes. To illustrate, the script in Example 5-19 uses the <code class="epub__literal">os.fork</code> call to make a copy of the
+            calling process as usual (we met forks earlier in this chapter).
+            After forking, the original parent process and its child copy
+            speak through the two ends of a pipe created <a id="I_indexterm4_d1e18490"></a>with <code class="epub__literal">os.pipe</code>
+            prior to the fork. The <code class="epub__literal">os.pipe</code>
+            call returns a tuple of two <span class="epub__emphasis"><em>file
+            descriptors</em></span>—<a id="I_indexterm4_d1e18508"></a>the low-level file identifiers we met in Chapter 4—representing the input and
+            output sides of the pipe. Because forked child processes get
+            <span class="epub__emphasis"><em>copies</em></span> of their parents’ file descriptors,
+            writing to the pipe’s output descriptor in the child sends data
+            back to the parent on the pipe created before the child was
+            spawned.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id33"></a>
+<p class="epub__title">Example 5-19. PP4E\System\Processes\pipe1.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">import os, time
+
+def child(pipeout):
+    zzz = 0
+    while True:
+        time.sleep(zzz)                          # make parent wait
+        msg = ('Spam %03d' % zzz).encode()       # pipes are binary bytes
+        os.write(pipeout, msg)                   # send to parent
+        zzz = (zzz+1) % 5                        # goto 0 after 4
+
+def parent():
+    pipein, pipeout = os.pipe()                  # make 2-ended pipe
+    if os.fork() == 0:                           # copy this process
+        child(pipeout)                           # in copy, run child
+    else:                                        # in parent, listen to pipe
+        while True:
+            line = os.read(pipein, 32)           # blocks until data sent
+            print('Parent %d got [%s] at %s' % (os.getpid(), line, time.time()))
+
+parent()</pre>
+</div>
+</div>
+<p>If you run this program on Linux, Cygwin, or another
+            Unix-like platform (<code class="epub__literal">pipe</code> is
+            available on standard Windows Python, but <code class="epub__literal">fork</code> is not), the parent process waits
+            for the child to send data on the pipe each time it calls <code class="epub__literal">os.read</code>. It’s almost as if the child and
+            parent act as client and server here—the <a id="I_indexterm4_d1e18535"></a>parent starts the child and waits for it to initiate
+            communication.<sup>[17]</sup> To simulate differing task durations, the child
+            keeps the parent waiting one second longer between messages with
+            <code class="epub__literal">time.sleep</code> calls, until the
+            delay has reached four seconds. When the <code class="epub__literal">zzz</code> delay counter hits 005, it rolls
+            back down to 000 and starts again:</p><a id="I_programlisting4_d1e18552"></a>
+<pre class="epub__programlisting">[C:\...\PP4E\System\Processes]$ <strong class="epub__userinput"><code>python pipe1.py</code></strong>
+Parent 6716 got [b'Spam 000'] at 1267996104.53
+Parent 6716 got [b'Spam 001'] at 1267996105.54
+Parent 6716 got [b'Spam 002'] at 1267996107.55
+Parent 6716 got [b'Spam 003'] at 1267996110.56
+Parent 6716 got [b'Spam 004'] at 1267996114.57
+Parent 6716 got [b'Spam 000'] at 1267996114.57
+Parent 6716 got [b'Spam 001'] at 1267996115.59
+Parent 6716 got [b'Spam 002'] at 1267996117.6
+Parent 6716 got [b'Spam 003'] at 1267996120.61
+Parent 6716 got [b'Spam 004'] at 1267996124.62
+Parent 6716 got [b'Spam 000'] at 1267996124.62
+Parent 6716 got [b'Spam 001'] at 1267996125.63
+<em class="epub__lineannotation"><span class="epub__lineannotation">...etc.: Ctrl-C to exit...</span></em></pre>
+<p>Notice how the parent received a <code class="epub__literal">bytes</code> string through the pipe. Raw pipes
+            normally deal in binary byte strings when their descriptors are
+            used directly this way with the descriptor-based file tools we met
+            in Chapter 4 (as we saw there,
+            descriptor read and write tools in <code class="epub__literal">os</code> always return and expect byte
+            strings). That’s why we also have to manually encode to <code class="epub__literal">bytes</code> when writing in the child—the
+            string formatting operation is not available on <code class="epub__literal">bytes</code>. As the next section shows, it’s
+            also possible to wrap a pipe descriptor in a text-mode file
+            object, much as we did in the file examples in Chapter 4, but that object simply
+            performs encoding and decoding automatically on transfers; it’s
+            <a id="I_indexterm4_d1e18578"></a>still bytes in the pipe.</p>
+</div>
+<div class="epub__sect3" title="Wrapping pipe descriptors in file objects"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="wrapping_pipe_descriptors_in_file_object"></a>Wrapping pipe descriptors in file objects</h3>
+</div>
+</div>
+</div>
+<p>If you look closely <a id="I_indexterm4_d1e18586"></a><a id="I_indexterm4_d1e18591"></a><a id="I_indexterm4_d1e18596"></a><a id="I_indexterm4_d1e18601"></a>at the preceding output, you’ll see that when the
+            child’s delay counter hits 004, the parent ends up reading two
+            messages from the pipe at the same time; the child wrote two
+            distinct messages, but on some platforms or configurations (other
+            than that used here) they might be interleaved or processed close
+            enough in time to be fetched as a single unit by the parent.
+            Really, the parent blindly asks to read, at most, 32 bytes each
+            time, but it gets back whatever text is available in the pipe,
+            when it becomes available.</p>
+<p>To distinguish messages better, we can mandate a separator
+            character in the pipe. An end-of-line makes this easy, because we
+            can wrap the pipe descriptor in a file object with<a id="I_indexterm4_d1e18609"></a> <code class="epub__literal">os.fdopen</code> and
+            rely on the file object’s <code class="epub__literal">readline</code> method to scan up through the
+            next <code class="epub__literal">\n</code> separator in the pipe.
+            This also lets us leverage the more powerful tools of the
+            text-mode file object we met in Chapter 4. Example 5-20 implements this
+            scheme for the parent’s end of the pipe.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id34"></a>
+<p class="epub__title">Example 5-20. PP4E\System\Processes\pipe2.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># same as pipe1.py, but wrap pipe input in stdio file object
+# to read by line, and close unused pipe fds in both processes
+
+import os, time
+
+def child(pipeout):
+    zzz = 0
+    while True:
+        time.sleep(zzz)                          # make parent wait
+        msg = ('Spam %03d\n' % zzz).encode()     # pipes are binary in 3.X
+        os.write(pipeout, msg)                   # send to parent
+        zzz = (zzz+1) % 5                        # roll to 0 at 5
+
+def parent():
+    pipein, pipeout = os.pipe()                  # make 2-ended pipe
+    if os.fork() == 0:                           # in child, write to pipe
+        os.close(pipein)                         # close input side here
+        child(pipeout)
+    else:                                        # in parent, listen to pipe
+        os.close(pipeout)                        # close output side here
+        pipein = os.fdopen(pipein)               # make text mode input file object
+        while True:
+            line = pipein.readline()[:-1]        # blocks until data sent
+            print('Parent %d got [%s] at %s' % (os.getpid(), line, time.time()))
+
+parent()</pre>
+</div>
+</div>
+<p>This version has also been augmented to
+            <span class="epub__emphasis"><em>close</em></span> the unused end of the pipe in each
+            process (e.g., after the fork, the parent process closes its copy
+            of the output side of the pipe written by the child); programs
+            should close unused pipe ends in general. Running with this new
+            version reliably returns a single child message to the parent each
+            time it reads from the pipe, because they are separated with
+            markers when written:</p><a id="I_programlisting4_d1e18639"></a>
+<pre class="epub__programlisting">[C:\...\PP4E\System\Processes]$ <strong class="epub__userinput"><code>python pipe2.py</code></strong>
+Parent 8204 got [Spam 000] at 1267997789.33
+Parent 8204 got [Spam 001] at 1267997790.03
+Parent 8204 got [Spam 002] at 1267997792.05
+Parent 8204 got [Spam 003] at 1267997795.06
+Parent 8204 got [Spam 004] at 1267997799.07
+Parent 8204 got [Spam 000] at 1267997799.07
+Parent 8204 got [Spam 001] at 1267997800.08
+Parent 8204 got [Spam 002] at 1267997802.09
+Parent 8204 got [Spam 003] at 1267997805.1
+Parent 8204 got [Spam 004] at 1267997809.11
+Parent 8204 got [Spam 000] at 1267997809.11
+Parent 8204 got [Spam 001] at 1267997810.13
+<em class="epub__lineannotation"><span class="epub__lineannotation">...etc.: Ctrl-C to exit...</span></em></pre>
+<p>Notice that this version’s reads also return a text data
+            <code class="epub__literal">str</code> object now, per the default
+            <code class="epub__literal">r</code> text mode for <code class="epub__literal">os.fdopen</code>. As mentioned, pipes normally
+            deal in binary byte strings when their descriptors are used
+            directly with <code class="epub__literal">os</code> file tools,
+            but wrapping in text-mode files allows us to use <code class="epub__literal">str</code> strings to represent text data
+            instead of <code class="epub__literal">bytes</code>. In this
+            example, bytes are decoded to <code class="epub__literal">str</code> when read by the parent; using
+            <code class="epub__literal">os.fdopen</code> and text mode in the
+            child would allow us to avoid its manual encoding call, but the
+            file object would encode the <code class="epub__literal">str</code> data anyhow (though the encoding is
+            trivial for ASCII bytes like those used here). As for simple
+            files, the best mode for processing pipe data in is determined by
+            its nature.</p>
+</div>
+<div class="epub__sect3" title="Anonymous pipes and threads"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="anonymous_pipes_and_threads"></a>Anonymous pipes and threads</h3>
+</div>
+</div>
+</div>
+<p>Although the <code class="epub__literal">os.fork</code> call
+            <a id="I_indexterm4_d1e18684"></a><a id="I_indexterm4_d1e18689"></a>required by the prior section’s examples isn’t
+            available on standard Windows Python, <code class="epub__literal">os.pipe</code> is. Because threads all run in
+            the same process and share file descriptors (and global memory in
+            general), this makes anonymous pipes usable as a communication and
+            synchronization device for threads, too. This is an arguably
+            lower-level mechanism than queues or shared names and objects, but
+            it provides an additional IPC option for threads. Example 5-21, for instance,
+            demonstrates the same type of pipe-based communication occurring
+            between threads instead of <span>processes</span>.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id35"></a>
+<p class="epub__title">Example 5-21. PP4E\System\Processes\pipe-thread.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># anonymous pipes and threads, not processes; this version works on Windows
+
+import os, time, threading
+
+def child(pipeout):
+    zzz = 0
+    while True:
+        time.sleep(zzz)                              # make parent wait
+        msg = ('Spam %03d' % zzz).encode()           # pipes are binary bytes
+        os.write(pipeout, msg)                       # send to parent
+        zzz = (zzz+1) % 5                            # goto 0 after 4
+
+def parent(pipein):
+    while True:
+        line = os.read(pipein, 32)                   # blocks until data sent
+        print('Parent %d got [%s] at %s' % (os.getpid(), line, time.time()))
+
+pipein, pipeout = os.pipe()
+threading.Thread(target=child, args=(pipeout,)).start()
+parent(pipein)</pre>
+</div>
+</div>
+<p>Since threads work on standard Windows Python, this script
+            does too. The output is similar here, but the speakers are
+            in-process threads, not processes (note that because of its
+            simple-minded infinite loops, at least one of its threads may not
+            die on a <span>Ctrl-C—</span>on Windows
+            you may need to use Task Manager to kill the <em class="epub__filename">python.exe</em> process running this script
+            or close its window to exit):</p><a id="I_programlisting4_d1e18716"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>pipe-thread.py</code></strong>
+Parent 8876 got [b'Spam 000'] at 1268579215.71
+Parent 8876 got [b'Spam 001'] at 1268579216.73
+Parent 8876 got [b'Spam 002'] at 1268579218.74
+Parent 8876 got [b'Spam 003'] at 1268579221.75
+Parent 8876 got [b'Spam 004'] at 1268579225.76
+Parent 8876 got [b'Spam 000'] at 1268579225.76
+Parent 8876 got [b'Spam 001'] at 1268579226.77
+Parent 8876 got [b'Spam 002'] at 1268579228.79
+<em class="epub__lineannotation"><span class="epub__lineannotation">...etc.: Ctrl-C or Task Manager to exit...</span></em></pre>
+</div>
+<div class="epub__sect3" title="Bidirectional IPC with anonymous pipes"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="bidirectional_ipc_with_anonymous_pipes"></a>Bidirectional IPC with anonymous pipes</h3>
+</div>
+</div>
+</div>
+<p>Pipes <a id="ipc5.5.1.4"></a><a id="anon5.5.1.4"></a>normally let data flow in only one direction—one
+            side is input, one is output. What if you need your programs to
+            talk back and forth, though? For example, one program might send
+            another a request for information and then wait for that
+            information to be sent back. A single pipe can’t generally handle
+            such bidirectional conversations, but two pipes can. One pipe can
+            be used to pass requests to a program and another can be used to
+            ship replies back to the requestor.</p>
+<p>This really does have real-world applications. For instance,
+            I once added a GUI interface to a command-line debugger for a
+            C-like programming language by connecting two processes with pipes
+            this way. The GUI ran as a separate process that constructed and
+            sent commands to the non-GUI debugger’s input stream pipe and
+            parsed the results that showed up in the debugger’s output stream
+            pipe. In effect, the GUI acted like a programmer typing commands
+            at a keyboard and a client to the debugger server. More generally,
+            by spawning command-line programs with streams attached by pipes,
+            systems can add new interfaces to legacy programs. In fact, we’ll
+            see a simple example of this sort of GUI program structure in
+            Chapter 10.</p>
+<p>The module in Example 5-22 demonstrates one way
+            to apply this idea to link the input and output streams of two
+            programs. Its <code class="epub__literal">spawn</code> function
+            forks a new child program and connects the input and output
+            streams of the parent to the output and input streams of the
+            child. That is:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>When the parent reads from its standard input, it is
+                reading text sent to the child’s standard output.</p></li><li class="epub__listitem">
+<p>When the parent writes to its standard output, it is
+                sending data to the child’s standard input.</p></li></ul>
+</div>
+<p>The net effect is that the two independent programs
+            communicate by speaking over their standard streams.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id36"></a>
+<p class="epub__title">Example 5-22. PP4E\System\Processes\pipes.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+spawn a child process/program, connect my stdin/stdout to child process's
+stdout/stdin--my reads and writes map to output and input streams of the
+spawned program; much like tying together streams with subprocess module;
+"""
+
+import os, sys
+
+def spawn(prog, *args):                       # pass progname, cmdline args
+    stdinFd  = sys.stdin.fileno()             # get descriptors for streams
+    stdoutFd = sys.stdout.fileno()            # normally stdin=0, stdout=1
+
+    parentStdin, childStdout  = os.pipe()     # make two IPC pipe channels
+    childStdin,  parentStdout = os.pipe()     # pipe returns (inputfd, outoutfd)
+    pid = os.fork()                           # make a copy of this process
+    if pid:
+        os.close(childStdout)                 # in parent process after fork:
+        os.close(childStdin)                  # close child ends in parent
+        os.dup2(parentStdin,  stdinFd)        # my sys.stdin copy  = pipe1[0]
+        os.dup2(parentStdout, stdoutFd)       # my sys.stdout copy = pipe2[1]
+    else:
+        os.close(parentStdin)                 # in child process after fork:
+        os.close(parentStdout)                # close parent ends in child
+        os.dup2(childStdin,  stdinFd)         # my sys.stdin copy  = pipe2[0]
+        os.dup2(childStdout, stdoutFd)        # my sys.stdout copy = pipe1[1]
+        args = (prog,) + args
+        os.execvp(prog, args)                 # new program in this process
+        assert False, 'execvp failed!'        # os.exec call never returns here
+
+if __name__ == '__main__':
+    mypid = os.getpid()
+    spawn('python', 'pipes-testchild.py', 'spam')     # fork child program
+
+    print('Hello 1 from parent', mypid)               # to child's stdin
+    sys.stdout.flush()                                # subvert stdio buffering
+    reply = input()                                   # from child's stdout
+    sys.stderr.write('Parent got: "%s"\n' % reply)    # stderr not tied to pipe!
+
+    print('Hello 2 from parent', mypid)
+    sys.stdout.flush()
+    reply = sys.stdin.readline()
+    sys.stderr.write('Parent got: "%s"\n' % reply[:-1])</pre>
+</div>
+</div>
+<p>The <code class="epub__literal">spawn</code> function in
+            this module does not work on standard Windows Python (remember
+            that <code class="epub__literal">fork</code> isn’t yet available
+            there today). In fact, most of the calls in this module map
+            straight to Unix system calls (and may be arbitrarily terrifying
+            at first glance to non-Unix developers!). We’ve already met some
+            of these (e.g., <code class="epub__literal">os.fork</code>), but
+            much of this code depends on Unix concepts we don’t have time to
+            address well in this text. But in simple terms, here is a brief
+            summary of the system calls demonstrated in this code:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">os.fork</code></span></dt><dd>
+<p>Copies the <a id="I_indexterm4_d1e18783"></a>calling process as usual and returns the
+                  child’s process ID in the parent process only.</p></dd><dt><span class="epub__term"><code class="epub__literal">os.execvp</code></span></dt><dd>
+<p>Overlays a <a id="I_indexterm4_d1e18798"></a>new program in the calling process; it’s just
+                  like the <code class="epub__literal">os.execlp</code> used
+                  earlier but takes a <span class="epub__emphasis"><em>tuple</em></span> or
+                  <span class="epub__emphasis"><em>list</em></span> of command-line argument strings
+                  (collected with the <code class="epub__literal">*args</code>
+                  form in the function header).</p></dd><dt><span class="epub__term"><code class="epub__literal">os.pipe</code></span></dt><dd>
+<p>Returns a <a id="I_indexterm4_d1e18823"></a>tuple of file descriptors representing the
+                  input and output ends of a pipe, as in earlier
+                  examples.</p></dd><dt><span class="epub__term"><code class="epub__literal">os.close(fd)</code></span></dt><dd>
+<p>Closes the <a id="I_indexterm4_d1e18838"></a>descriptor-based file <code class="epub__literal">fd</code>.</p></dd><dt><span class="epub__term"><code class="epub__literal">os.dup2(fd1,fd2)</code></span></dt><dd>
+<p>Copies all system <a id="I_indexterm4_d1e18854"></a>information associated with the file named by
+                  the file descriptor <code class="epub__literal">fd1</code>
+                  to the file named by <code class="epub__literal">fd2</code>.</p></dd></dl>
+</div>
+<p>In terms of connecting standard streams, <code class="epub__literal">os.dup2</code> is the real nitty-gritty here.
+            For example, the call <code class="epub__literal">os.dup2(parentStdin,stdinFd)</code> essentially
+            assigns the parent process’s <code class="epub__literal">stdin</code> file to the input end of one of
+            the two pipes created; all <code class="epub__literal">stdin</code> reads will henceforth come from
+            the pipe. By connecting the other end of this pipe to the child
+            process’s copy of the <code class="epub__literal">stdout</code>
+            stream file with <code class="epub__literal">os.dup2(childStdout,stdoutFd)</code>, text
+            written by the child to its <code class="epub__literal">sdtdout</code> winds up being routed through
+            the pipe to the parent’s <code class="epub__literal">stdin</code>
+            stream. The effect is reminiscent of the way we tied together
+            streams with the <code class="epub__literal">subprocess</code>
+            module in Chapter 3, but this
+            script is more low-level and less portable.</p>
+<p>To test this utility, the self-test code at the end of the
+            file spawns the program shown in Example 5-23 in a child process
+            and reads and writes standard streams to converse with it over two
+            pipes.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id37"></a>
+<p class="epub__title">Example 5-23. PP4E\System\Processes\pipes-testchild.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">import os, time, sys
+mypid     = os.getpid()
+parentpid = os.getppid()
+sys.stderr.write('Child %d of %d got arg: "%s"\n' %
+                                (mypid, parentpid, sys.argv[1]))
+for i in range(2):
+    time.sleep(3)              # make parent process wait by sleeping here
+    recv = input()             # stdin tied to pipe: comes from parent's stdout
+    time.sleep(3)
+    send = 'Child %d got: [%s]' % (mypid, recv)
+    print(send)                # stdout tied to pipe: goes to parent's stdin
+    sys.stdout.flush()         # make sure it's sent now or else process blocks</pre>
+</div>
+</div>
+<p>The following is our test in action on Cygwin (it’s similar
+            other Unix-like platforms like Linux); its output is not
+            incredibly impressive to read, but it represents two programs
+            running independently and shipping data back and forth through a
+            pipe device managed by the operating system. This is even more
+            like a client/server model (if you imagine the child as the
+            server, responding to requests sent from the parent). The text in
+            square brackets in this output went from the parent process to the
+            child and back to the parent again, all through pipes connected to
+            standard <a id="I_indexterm4_d1e18910"></a><a id="I_indexterm4_d1e18912"></a>streams:</p><a id="I_programlisting4_d1e18915"></a>
+<pre class="epub__programlisting">[C:\...\PP4E\System\Processes]$ <strong class="epub__userinput"><code>python pipes.py</code></strong>
+Child 9228 of 9096 got arg: "spam"
+Parent got: "Child 9228 got: [Hello 1 from parent 9096]"
+Parent got: "Child 9228 got: [Hello 2 from parent 9096]"</pre>
+</div>
+<div class="epub__sect3" title="Output stream buffering revisited: Deadlocks and flushes"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="output_stream_buffering_revisited_colon"></a>Output stream buffering revisited: Deadlocks and
+            flushes</h3>
+</div>
+</div>
+</div>
+<p>The two processes of <a id="out5.5.1.5"></a><a id="in5.5.1.5"></a><a id="anon5.5.1.5"></a><a id="dead5.5.1.5"></a><a id="flush5.5.1.5"></a>the prior section’s example engage in a simple
+            dialog, but it’s already enough to illustrate some of the dangers
+            lurking in cross-program communications. First of all, notice that
+            both programs need to write to <code class="epub__literal">stderr</code> to display a message; their
+            <code class="epub__literal">stdout</code> streams are tied to the
+            other program’s input stream. Because processes share file
+            descriptors, <code class="epub__literal">stderr</code> is
+            <a id="I_indexterm4_d1e18959"></a>the same in both parent and child, so status
+            messages show up in the same place.</p>
+<p>More subtly, note that both parent and child call <code class="epub__literal">sys.stdout.flush</code> after they print text
+            to the output stream. Input requests on pipes normally block the
+            caller if no data is available, but it seems that this shouldn’t
+            be a problem in our example because there are as many writes as
+            there are reads on the other side of the pipe. By default, though,
+            <code class="epub__literal">sys.stdout</code> <a id="I_indexterm4_d1e18973"></a>is <span class="epub__emphasis"><em>buffered</em></span> in this context, so
+            the printed text may not actually be transmitted until some time
+            in the future (when the output buffers fill up). In fact, if the
+            flush calls are not made, both processes may get stuck on some
+            platforms waiting for input from the other—input that is sitting
+            in a buffer and is never flushed out over the pipe. They wind up
+            in a <span class="epub__emphasis"><em>deadlock</em></span> state, both blocked on <code class="epub__literal">input</code> calls waiting for events that
+            never occur.</p>
+<p>Technically, by default <code class="epub__literal">stdout</code> is just
+            <span class="epub__emphasis"><em>line-buffered</em></span> when connected to a terminal,
+            but it is <span class="epub__emphasis"><em>fully buffered</em></span> when connected to
+            other devices such as files, sockets, and the pipes used here.
+            This is why you see a script’s printed text in a shell window
+            immediately as it is produced, but not until the process exits or
+            its buffer fills when its output stream is connected to something
+            else.</p>
+<p>This output buffering is really a function of the system
+            libraries used to access pipes, not of the pipes themselves (pipes
+            do queue up output data, but they never hide it from readers!). In
+            fact, it appears to occur in this example only because we copy the
+            pipe’s information over to <code class="epub__literal">sys.stdout</code>, a built-in file object that
+            uses stream buffering by default. However, such anomalies can also
+            occur when using other cross-process tools.</p>
+<p>In general terms, if your programs engage in a two-way
+            dialog like this, there are a variety of ways to avoid
+            buffering-related deadlock problems:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p><span class="epub__emphasis"><em>Flushes</em></span>: As <a id="I_indexterm4_d1e19013"></a>demonstrated in Examples 5-22 and 5-23, manually flushing output
+                pipe streams by calling the file object <code class="epub__literal">flush</code> method is an easy way to force
+                buffers to be cleared. Use <code class="epub__literal">sys.stdout.flush</code> for the output
+                stream used by <code class="epub__literal">print</code>.</p></li><li class="epub__listitem">
+<p><span class="epub__emphasis"><em>Arguments</em></span>: As introduced earlier in
+                this chapter, the <code class="epub__literal">-u</code> Python
+                command-line flag turns off full buffering for the <code class="epub__literal">sys.stdout</code> stream in Python
+                programs. Setting your <code class="epub__literal">PYTHONUNBUFFERED</code> environment
+                variable to a nonempty value is equivalent to passing this
+                flag but applies to every program run.</p></li><li class="epub__listitem">
+<p><span class="epub__emphasis"><em>Open modes</em></span>: It’s possible to
+                <a id="I_indexterm4_d1e19052"></a>use pipes themselves in unbuffered mode. Either
+                use low-level <code class="epub__literal">os</code> module
+                calls to read and write pipe descriptors directly, or pass a
+                buffer size argument of <code class="epub__literal">0</code>
+                (for <span class="epub__emphasis"><em>unbuffered</em></span>) or <code class="epub__literal">1</code> (for
+                <span class="epub__emphasis"><em>line-buffered</em></span>) to <code class="epub__literal">os.fdopen</code> to disable buffering in
+                the file object used to wrap the descriptor. You can use
+                <code class="epub__literal">open</code> arguments the same way
+                to control buffering for output to <span class="epub__emphasis"><em>fifo
+                files</em></span> (described in the next section). Note that in
+                Python 3.X, fully unbuffered mode is allowed only for binary
+                mode files, not text.</p></li><li class="epub__listitem">
+<p><span class="epub__emphasis"><em>Command pipes</em></span>: As <a id="I_indexterm4_d1e19088"></a><a id="I_indexterm4_d1e19093"></a>mentioned earlier in this chapter, you can
+                similarly specify buffering mode arguments for command-line
+                pipes when they are created by <code class="epub__literal">os.popen</code> and <code class="epub__literal">subprocess.Popen</code>, but this pertains
+                to the caller’s end of the pipe, not those of the spawned
+                program. Hence it cannot prevent delayed outputs from the
+                latter, but can be used for text sent to another program’s
+                input pipe.</p></li><li class="epub__listitem">
+<p><span class="epub__emphasis"><em>Sockets</em></span>: As we’ll see <a id="I_indexterm4_d1e19110"></a>later, the<a id="I_indexterm4_d1e19116"></a> <code class="epub__literal">socket.makefile</code> call accepts a
+                similar buffering mode argument for sockets (described later
+                in this chapter and book), but in Python 3.X this call
+                requires buffering for text-mode access and appears to not
+                support line-buffered mode (more on this on Chapter 12).</p></li><li class="epub__listitem">
+<p><span class="epub__emphasis"><em>Tools</em></span>: For more complex tasks, we
+                can also use higher-level tools that essentially fool a
+                program into believing it is connected to a terminal. These
+                address programs not written in Python, for which neither
+                manual flush calls nor <code class="epub__literal">-u</code>
+                are an option. See More on Stream Buffering: pty and Pexpect.</p></li></ul>
+</div>
+<p>Thread can avoid blocking a main GUI, too, but really just
+            delegate the problem (the spawned thread will still be
+            deadlocked). Of the options listed, the first two—manual flushes
+            and command-line arguments—are often the simplest solutions. In
+            fact, because it is so useful, the second technique listed above
+            merits a few more words. Try this: comment-out all the <code class="epub__literal">sys.stdout.flush</code> calls in Examples 5-22 and 5-23 (the files
+            <span class="epub__emphasis"><em>pipes.py</em></span> and
+            <span class="epub__emphasis"><em>pipes-testchild.py</em></span>) and change the parent’s
+            spawn call in <span class="epub__emphasis"><em>pipes.py</em></span> to this (i.e., add a
+            <code class="epub__literal">-u</code> command-line
+            argument):</p><a id="I_programlisting4_d1e19159"></a>
+<pre class="epub__programlisting">spawn('python', '-u', 'pipes-testchild.py', 'spam')</pre>
+<p>Then start the program with a command line like this:
+            <code class="epub__literal">python -u pipes.py</code>. It will
+            work as it did with the manual <code class="epub__literal">stdout</code> flush calls, because <code class="epub__literal">stdout</code> will be operating in unbuffered
+            mode in both parent and child.</p>
+<p>We’ll revisit the effects of unbuffered output streams in
+            Chapter 10, where we’ll code a
+            simple GUI that displays the output of a non-GUI program by
+            reading it over both a nonblocking socket and a pipe in a thread.
+            We’ll explore the topic again in more depth in Chapter 12, where we will redirect standard
+            streams to sockets in more general ways. Deadlock in general,
+            though, is a bigger problem than we have space to address fully
+            here. On the other hand, if you know enough that you want to do
+            IPC in Python, you’re probably already a veteran of the deadlock
+            wars.</p>
+<p>Anonymous pipes allow related tasks to communicate but are
+            not directly suited for independently launched programs. To allow
+            the latter group to converse, we need to move on to the next
+            section and explore devices that have broader <a id="I_indexterm4_d1e19181"></a><a id="I_indexterm4_d1e19183"></a><a id="I_indexterm4_d1e19185"></a><a id="I_indexterm4_d1e19187"></a><a id="I_indexterm4_d1e19189"></a><a id="I_indexterm4_d1e19191"></a><a id="I_indexterm4_d1e19193"></a>visibility.</p><div class="epub__sidebar"><a id="more_on_stream_buffering_colon_pty_and_p"></a>
+<p class="epub__title">More on Stream Buffering: pty and Pexpect</p>
+<p>On Unix-like platforms, you <a id="I_indexterm4_d1e19201"></a><a id="I_indexterm4_d1e19204"></a>may also be able to use the Python <code class="epub__literal">pty</code> standard library module to force
+              another program’s standard output to be unbuffered, especially
+              if it’s not a Python program and you cannot change its
+              code.</p>
+<p>Technically, default buffering for <code class="epub__literal">stdout</code> in other programs is determined
+              outside Python by whether the underlying file descriptor refers
+              to a terminal. This occurs in the <code class="epub__literal">stdio</code> file system library and cannot
+              be controlled by the spawning program. In general, output to
+              terminals is line buffered, and output to nonterminals
+              (including files, pipes, and sockets) is fully buffered. This
+              policy is used for efficiency. Files and streams created within
+              a Python script follow the same defaults, but you can specify
+              buffering policies in Python’s file creation tools.</p>
+<p>The <code class="epub__literal">pty</code> module
+              essentially fools the spawned program into thinking it is
+              connected to a terminal so that only one line is buffered for
+              <code class="epub__literal">stdout</code>. The net effect is
+              that each newline flushes the prior line—typical of interactive
+              programs, and what you need if you wish to grab each piece of
+              the printed output as it is produced.</p>
+<p>Note, however, that the <code class="epub__literal">pty</code> module is not required for this
+              role when spawning Python scripts with pipes: simply use the
+              <code class="epub__literal">-u</code> Python command-line flag,
+              pass line-buffered mode arguments to file creation tools, or
+              manually call <code class="epub__literal">sys.stdout.flush()</code> in the spawned
+              program. The <code class="epub__literal">pty</code> module is
+              also not available on all Python platforms today (most notably,
+              it runs on Cygwin but not the standard Windows Python).</p>
+<p>The <code class="epub__literal">Pexpect</code> package,
+              <a id="I_indexterm4_d1e19248"></a><a id="I_indexterm4_d1e19253"></a>a pure-Python equivalent of the Unix <code class="epub__literal">expect</code> program, uses <code class="epub__literal">pty</code> to provide additional
+              functionality and to handle interactions that bypass standard
+              streams (e.g., password inputs). See the Python library manual
+              for more on <code class="epub__literal">pty</code>, and search
+              the Web for <code class="epub__literal">Pexpect</code>.</p>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="Named Pipes (Fifos)"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="named_pipes_open_parenthesis_fifos_close"></a>Named Pipes (Fifos)</h2>
+</div>
+</div>
+</div>
+<p>On some platforms, <a id="pipes5.5.2"></a><a id="ipc5.5.2"></a><a id="I_indexterm4_d1e19287"></a>it is also possible to create a long-lived pipe that
+          exists as a real named file in the filesystem. Such files are called
+          named pipes (or, sometimes, <span class="epub__emphasis"><em>fifos</em></span>) because they
+          behave just like the pipes created by the previous section’s
+          programs. Because fifos are associated with a real file on your
+          computer, though, they are external to any particular program—they
+          do not rely on memory shared between tasks, and so they can be used
+          as an IPC mechanism for threads, processes, and independently
+          launched programs.</p>
+<p>Once a named pipe file is created, clients open it by name and
+          read and write data using normal file operations. Fifos are
+          unidirectional streams. In typical operation, a server program reads
+          data from the fifo, and one or more client programs write data to
+          it. In addition, a set of two fifos can be used to implement
+          bidirectional communication just as we did for anonymous pipes in
+          the prior section.</p>
+<p>Because fifos reside in the filesystem, they are longer-lived
+          than in-process anonymous pipes and can be accessed by programs
+          started independently. The unnamed, in-<span>process</span> pipe examples thus far depend
+          on the fact that file descriptors (including pipes) are copied to
+          child processes’ memory. That makes it difficult to use anonymous
+          pipes to connect programs started independently. With fifos, pipes
+          are accessed instead by a filename visible to all programs running
+          on the computer, regardless of any parent/child process
+          relationships. In fact, like normal files, fifos typically outlive
+          the programs that access them. Unlike normal files, though, the
+          operating system synchronizes fifo access, making them ideal for
+          IPC.</p>
+<p>Because of their distinctions, fifo pipes are better suited as
+          general IPC mechanisms for independent client and server programs.
+          For instance, a perpetually running server program may create and
+          listen for requests on a fifo that can be accessed later by
+          arbitrary clients not forked by the server. In a sense, fifos are an
+          alternative to the socket port interface we’ll meet in the next
+          section. Unlike sockets, though, fifos do not directly support
+          remote network connections, are not available in standard Windows
+          Python today, and are accessed using the standard file interface
+          instead of the more unique socket port numbers and calls we’ll study
+          later.</p>
+<div class="epub__sect3" title="Named pipe basics"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="named_pipe_basics"></a>Named pipe basics</h3>
+</div>
+</div>
+</div>
+<p>In Python, named <a id="named5.5.2.1"></a>pipe files are created with the<a id="I_indexterm4_d1e19316"></a> <code class="epub__literal">os.mkfifo</code> call,
+            which is available today on Unix-like platforms, including
+            Cygwin’s Python on Windows, but is not currently available in
+            standard Windows Python. This call creates only the external file,
+            though; to send and receive data through a fifo, it must be opened
+            and processed as if it were a standard file.</p>
+<p>To illustrate, Example 5-24 is a derivation of
+            the <span class="epub__emphasis"><em>pipe2.py</em></span> script listed in Example 5-20, but rewritten here
+            to use fifos rather than anonymous pipes. Much like <em class="epub__filename">pipe2.py</em>, this script opens the fifo
+            using <code class="epub__literal">os.open</code> in the child for
+            low-level byte string access, but with the <code class="epub__literal">open</code> built-in in the parent to treat the
+            pipe as text; in general, either end may use either technique to
+            treat the pipe’s data as bytes or text.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id38"></a>
+<p class="epub__title">Example 5-24. PP4E\System\Processes\pipefifo.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+named pipes; os.mkfifo is not available on Windows (without Cygwin);
+there is no reason to fork here, since fifo file pipes are external
+to processes--shared fds in parent/child processes are irrelevent;
+"""
+
+import os, time, sys
+fifoname = '/tmp/pipefifo'                       # must open same name
+
+def child():
+    pipeout = os.open(fifoname, os.O_WRONLY)     # open fifo pipe file as fd
+    zzz = 0
+    while True:
+        time.sleep(zzz)
+        msg = ('Spam %03d\n' % zzz).encode()     # binary as opened here
+        os.write(pipeout, msg)
+        zzz = (zzz+1) % 5
+
+def parent():
+    pipein = open(fifoname, 'r')                 # open fifo as text file object
+    while True:
+        line = pipein.readline()[:-1]            # blocks until data sent
+        print('Parent %d got "%s" at %s' % (os.getpid(), line, time.time()))
+
+if __name__ == '__main__':
+    if not os.path.exists(fifoname):
+        os.mkfifo(fifoname)                      # create a named pipe file
+    if len(sys.argv) == 1:
+        parent()                                 # run as parent if no args
+    else:                                        # else run as child process
+        child()</pre>
+</div>
+</div>
+<p>Because the fifo exists independently of both parent and
+            child, there’s no reason to fork here. The child may be started
+            independently of the parent as long as it opens a fifo file by the
+            same name. Here, for instance, on Cygwin the parent is started in
+            one shell window and then the child is started in another.
+            Messages start appearing in the parent window only after the child
+            is started and begins writing messages onto the <a id="I_indexterm4_d1e19351"></a>fifo file:</p><a id="I_programlisting4_d1e19354"></a>
+<pre class="epub__programlisting">[C:\...\PP4E\System\Processes] $ <strong class="epub__userinput"><code>python pipefifo.py</code></strong>           # parent window
+Parent 8324 got "Spam 000" at 1268003696.07
+Parent 8324 got "Spam 001" at 1268003697.06
+Parent 8324 got "Spam 002" at 1268003699.07
+Parent 8324 got "Spam 003" at 1268003702.08
+Parent 8324 got "Spam 004" at 1268003706.09
+Parent 8324 got "Spam 000" at 1268003706.09
+Parent 8324 got "Spam 001" at 1268003707.11
+Parent 8324 got "Spam 002" at 1268003709.12
+Parent 8324 got "Spam 003" at 1268003712.13
+Parent 8324 got "Spam 004" at 1268003716.14
+Parent 8324 got "Spam 000" at 1268003716.14
+Parent 8324 got "Spam 001" at 1268003717.15
+<em class="epub__lineannotation"><span class="epub__lineannotation">...etc: Ctrl-C to exit...</span></em>
+
+[C:\...\PP4E\System\Processes]$ <strong class="epub__userinput"><code>file /tmp/pipefifo</code></strong>            # child window
+/tmp/pipefifo: fifo (named pipe)
+
+[C:\...\PP4E\System\Processes]$ <strong class="epub__userinput"><code>python pipefifo.py -child</code></strong>
+<em class="epub__lineannotation"><span class="epub__lineannotation">...Ctrl-C to exit...</span></em></pre>
+</div>
+<div class="epub__sect3" title="Named pipe use cases"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="named_pipe_use_cases"></a>Named pipe use cases</h3>
+</div>
+</div>
+</div>
+<p>By mapping <a id="I_indexterm4_d1e19375"></a>communication points to a file system entity
+            accessible to all programs run on a machine, fifos can address a
+            broad range of IPC goals on platforms where they are supported.
+            For instance, although this section’s example runs independent
+            programs, named pipes can also be used as an IPC device by both
+            in-process threads and directly forked related processes, much as
+            we saw for anonymous pipes earlier.</p>
+<p>By also supporting unrelated programs, though, fifo files
+            are more widely applicable to general client/server models. For
+            example, named pipes can make the GUI and <span>command</span>-line debugger integration I
+            described earlier for anonymous pipes even more flexible—by using
+            fifo files to connect the GUI to the non-GUI debugger’s streams,
+            the GUI could be started independently when needed.</p>
+<p>Sockets provide similar functionality but also buy us both
+            inherent network awareness and broader portability to Windows—as
+            the next section <a id="I_indexterm4_d1e19388"></a><a id="I_indexterm4_d1e19390"></a>explains.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Sockets: A First Look"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="sockets_colon_a_first_look"></a>Sockets: A First Look</h2>
+</div>
+</div>
+</div>
+<p>Sockets, implemented <a id="ipc5.5.3"></a><a id="soc5.5.3"></a>by the Python <code class="epub__literal">socket</code> module, are a more general IPC
+          device than the pipes we’ve seen so far. Sockets let us transfer
+          data between programs running on the same computer, as well as
+          programs located on remote networked machines. When used as an IPC
+          mechanism on the same machine, programs connect to sockets by a
+          machine-global port number and transfer data. When used as a
+          networking connection, programs provide both a machine name and port
+          number to transfer data to a remotely-running program.</p>
+<div class="epub__sect3" title="Socket basics"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="socket_basics"></a>Socket basics</h3>
+</div>
+</div>
+</div>
+<p>Although sockets are <a id="soc5.5.3.1"></a>one of the most commonly used IPC tools, it’s
+            impossible to fully grasp their API without also seeing its role
+            in networking. Because of that, we’ll defer most of our socket
+            coverage until we can explore their use in network scripting in
+            Chapter 12. This section provides a
+            brief introduction and preview, so you can compare with the prior
+            section’s named pipes (a.k.a. fifos). In short:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Like fifos, sockets are global across a machine; they do
+                not require shared memory among threads or processes, and are
+                thus applicable to independent programs.</p></li><li class="epub__listitem">
+<p>Unlike fifos, sockets are identified by port number, not
+                filesystem path name; they employ a very different nonfile
+                API, though they can be wrapped in a file-like object; and
+                they are more portable: they work on nearly every Python
+                platform, including standard Windows Python.</p></li></ul>
+</div>
+<p>In addition, sockets support networking roles that go beyond
+            both IPC and this chapter’s scope. To illustrate the basics,
+            though, Example 5-25
+            launches a server and 5 clients in threads running in parallel on
+            the same machine, to communicate over a socket—because all threads
+            connect to the same port, the server consumes the data added by
+            each of the clients.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id39"></a>
+<p class="epub__title">Example 5-25. PP4E\System\Processes\socket_preview.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+sockets for cross-task communication: start threads to communicate over sockets;
+independent programs can too, because sockets are system-wide, much like fifos;
+see the GUI and Internet parts of the book for more realistic socket use cases;
+some socket servers may also need to talk to clients in threads or processes;
+sockets pass byte strings, but can be pickled objects or encoded Unicode text;
+caveat: prints in threads may need to be synchronized if their output overlaps;
+"""
+
+from socket import socket, AF_INET, SOCK_STREAM     # portable socket api
+
+port = 50008                 # port number identifies socket on machine
+host = 'localhost'           # server and client run on same local machine here
+
+def server():
+    sock = socket(AF_INET, SOCK_STREAM)         # ip addresses tcp connection
+    sock.bind(('', port))                       # bind to port on this machine
+    sock.listen(5)                              # allow up to 5 pending clients
+    while True:
+        conn, addr = sock.accept()              # wait for client to connect
+        data = conn.recv(1024)                  # read bytes data from this client
+        reply = 'server got: [%s]' % data       # conn is a new connected socket
+        conn.send(reply.encode())               # send bytes reply back to client
+
+def client(name):
+    sock = socket(AF_INET, SOCK_STREAM)
+    sock.connect((host, port))                  # connect to a socket port
+    sock.send(name.encode())                    # send bytes data to listener
+    reply = sock.recv(1024)                     # receive bytes data from listener
+    sock.close()                                # up to 1024 bytes in message
+    print('client got: [%s]' % reply)
+
+if __name__ == '__main__':
+    from threading import Thread
+    sthread = Thread(target=server)
+    sthread.daemon = True                       # don't wait for server thread
+    sthread.start()                             # do wait for children to exit
+    for i in range(5):
+         Thread(target=client, args=('client%s' % i,)).start()</pre>
+</div>
+</div>
+<p>Study this script’s code and comments to see how the socket
+            objects’ methods are used to transfer data. In a nutshell, with
+            this type of socket the server accepts a client connection, which
+            by default blocks until a client requests service, and returns a
+            new socket connected to the client. Once connected, the client and
+            server transfer byte strings by using send and receive calls
+            instead of writes and reads, though as we’ll see later in the
+            book, sockets can be wrapped in file objects much as we did
+            earlier for pipe descriptors. Also like pipe descriptors,
+            unwrapped sockets deal in binary <code class="epub__literal">bytes</code> strings, not text <code class="epub__literal">str</code>; that’s why string formatting
+            results are manually encoded again here.</p>
+<p>Here is this script’s output on Windows:</p><a id="I_programlisting4_d1e19451"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>socket_preview.py</code></strong>
+client got: [b"server got: [b'client1']"]
+client got: [b"server got: [b'client3']"]
+client got: [b"server got: [b'client4']"]
+client got: [b"server got: [b'client2']"]
+client got: [b"server got: [b'client0']"]</pre>
+<p>This output isn’t much to look at, but each line reflects
+            data sent from client to server, and then back again: the server
+            receives a bytes string from a connected client and echoes it back
+            in a larger reply string. Because all threads run in parallel, the
+            order in which the clients are served is random on this <a id="I_indexterm4_d1e19458"></a>machine.</p>
+</div>
+<div class="epub__sect3" title="Sockets and independent programs"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="sockets_and_independent_programs"></a>Sockets and independent programs</h3>
+</div>
+</div>
+</div>
+<p>Although sockets <a id="I_indexterm4_d1e19466"></a><a id="I_indexterm4_d1e19471"></a><a id="I_indexterm4_d1e19476"></a>work for threads, the shared memory model of threads
+            often allows them to employ simpler communication devices such as
+            shared names and objects and queues. Sockets tend to shine
+            brighter when used for IPC by separate processes and independently
+            launched programs. Example 5-26, for instance,
+            reuses the server <span>and client</span>
+            functions of the prior example, but runs them in both processes
+            and threads of independently launched programs.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id40"></a>
+<p class="epub__title">Example 5-26. PP4E\System\Processes\socket-preview-progs.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+same socket, but talk between independent programs too, not just threads;
+server here runs in a process and serves both process and thread clients;
+sockets are machine-global, much like fifos: don't require shared memory
+"""
+
+from socket_preview import server, client         # both use same port number
+import sys, os
+from threading import Thread
+
+mode = int(sys.argv[1])
+if mode == 1:                                     # run server in this process
+    server()
+elif mode == 2:                                   # run client in this process
+    client('client:process=%s' % os.getpid())
+else:                                             # run 5 client threads in process
+    for i in range(5):
+        Thread(target=client, args=('client:thread=%s' % i,)).start()</pre>
+</div>
+</div>
+<p>Let’s run this script on Windows, too (again, this
+            portability is a major advantage of sockets). First, start the
+            server in a process as an independently launched program in its
+            own window; this process runs perpetually waiting for clients to
+            request connections (and as for our prior pipe example you may
+            need to use Task Manager or a window close to kill the server
+            process eventually):</p><a id="I_programlisting4_d1e19494"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>socket-preview-progs.py 1</code></strong></pre>
+<p>Now, in another window, run a few clients in both processes
+            and thread, by launching them as independent programs—using 2 as
+            the command-line argument runs a single client process, but 3
+            spawns five threads to converse with the server on
+            parallel:</p><a id="I_programlisting4_d1e19500"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>socket-preview-progs.py 2</code></strong>
+client got: [b"server got: [b'client:process=7384']"]
+
+C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>socket-preview-progs.py 2</code></strong>
+client got: [b"server got: [b'client:process=7604']"]
+
+C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>socket-preview-progs.py 3</code></strong>
+client got: [b"server got: [b'client:thread=1']"]
+client got: [b"server got: [b'client:thread=2']"]
+client got: [b"server got: [b'client:thread=0']"]
+client got: [b"server got: [b'client:thread=3']"]
+client got: [b"server got: [b'client:thread=4']"]
+
+C:\..\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>socket-preview-progs.py 3</code></strong>
+client got: [b"server got: [b'client:thread=3']"]
+client got: [b"server got: [b'client:thread=1']"]
+client got: [b"server got: [b'client:thread=2']"]
+client got: [b"server got: [b'client:thread=4']"]
+client got: [b"server got: [b'client:thread=0']"]
+
+C:\...\PP4E\System\Processes&gt; <strong class="epub__userinput"><code>socket-preview-progs.py 2</code></strong>
+client got: [b"server got: [b'client:process=6428']"]</pre>
+</div>
+<div class="epub__sect3" title="Socket use cases"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="socket_use_cases"></a>Socket use cases</h3>
+</div>
+</div>
+</div>
+<p>This section’s <a id="I_indexterm4_d1e19522"></a>examples illustrate the basic IPC role of sockets,
+            but this only hints at their full utility. Despite their seemingly
+            limited byte string nature, higher-order use cases for sockets are
+            not difficult to imagine. With a little extra work, for
+            instance:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Arbitrary Python <span class="epub__emphasis"><em>objects</em></span> like lists
+                and dictionaries (or at least copies of them) can be
+                transferred over sockets, too, by shipping the serialized byte
+                strings produced by Python’s <code class="epub__literal">pickle</code> module introduced in Chapter 1 and covered in full in <span>Chapter 17.</span></p></li><li class="epub__listitem">
+<p>As we’ll see in Chapter 10, the printed output of a
+                simple script can be <span class="epub__emphasis"><em>redirected</em></span> to a GUI
+                window, by connecting the script’s output stream to a socket
+                on which a GUI is listening in nonblocking mode.</p></li><li class="epub__listitem">
+<p>Programs that fetch arbitrary <span class="epub__emphasis"><em>text</em></span>
+                off the Web might read it as byte strings over sockets, but
+                manually decode it using encoding names embedded in
+                content-type headers or tags in the data itself.</p></li><li class="epub__listitem">
+<p>In fact, <span class="epub__emphasis"><em>the entire Internet</em></span> can be
+                seen as a socket use case—as we’ll see in Chapter 12, at the bottom, email, FTP, and
+                web pages are largely just formatted byte string messages
+                shipped over sockets.</p></li></ul>
+</div>
+<p>Plus any other context in which programs exchange
+            data—sockets are a general, portable, and flexible tool. For
+            instance, they would provide the same utility as fifos for the
+            GUI/debugger example used earlier, but would also work in Python
+            on Windows and would even allow the GUI to connect to a debugger
+            running on a different computer altogether. As such, they are seen
+            by many as a more powerful IPC tool.</p>
+<p>Again, you should consider this section just a preview;
+            because the grander socket story also entails networking concepts,
+            we’ll defer a more in-depth look at the socket API until Chapter 12. We’ll also see sockets again
+            briefly in Chapter 10 in the GUI
+            stream redirection use case listed above, and we’ll explore a
+            variety of additional socket use cases in the Internet part of
+            this book. In Part IV, for
+            instance, we’ll use sockets to transfer entire files and write
+            more robust socket servers that spawn threads or processes to
+            converse with clients to avoid denying connections. For the
+            purposes of this chapter, let’s move on to one last traditional
+            IPC tool—<a id="I_indexterm4_d1e19575"></a><a id="I_indexterm4_d1e19577"></a>the signal.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Signals"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="signals"></a>Signals</h2>
+</div>
+</div>
+</div>
+<p>For lack of a <a id="ipc5.5.4"></a><a id="sig5.5.4"></a>better analogy, signals are a way to poke a stick at a
+          process. Programs generate signals to trigger a handler for that
+          signal in another process. The operating system pokes, too—some
+          signals are generated on unusual system events and may kill the
+          program if not handled. If this sounds a little like raising
+          exceptions in Python, it should; signals are software-generated
+          events and the cross-process analog of exceptions. Unlike
+          exceptions, though, signals are identified by number, are not
+          stacked, and are really an asynchronous event mechanism outside the
+          scope of the Python interpreter controlled by the operating
+          system.</p>
+<p>In order to make signals available to scripts, Python provides
+          <a id="sigm5.5.4"></a>a <code class="epub__literal">signal</code> module
+          that allows Python programs to register Python functions as handlers
+          for signal events. This module is available on both Unix-like
+          platforms and Windows (though the Windows version may define fewer
+          kinds of signals to be caught). To illustrate the basic signal
+          interface, the script in Example 5-27 installs a Python
+          handler function for the signal number passed in as a command-line
+          argument.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id41"></a>
+<p class="epub__title">Example 5-27. PP4E\System\Processes\signal1.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+catch signals in Python; pass signal number N as a command-line arg,
+use a "kill -N pid" shell command to send this process a signal;  most
+signal handlers restored by Python after caught (see network scripting
+chapter for SIGCHLD details); on Windows, signal module is available,
+but it defines only a few signal types there, and os.kill is missing;
+"""
+
+import sys, signal, time
+def now(): return time.ctime(time.time())        # current time string
+
+def onSignal(signum, stackframe):                # python signal handler
+    print('Got signal', signum, 'at', now())     # most handlers stay in effect
+
+signum = int(sys.argv[1])
+signal.signal(signum, onSignal)                  # install signal handler
+while True: signal.pause()                       # wait for signals (or: pass)</pre>
+</div>
+</div>
+<p>There are only two <code class="epub__literal">signal</code>
+          module calls at work here:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">signal.signal</code></span></dt><dd>
+<p>Takes a <a id="I_indexterm4_d1e19627"></a>signal number and function object and installs
+                that function to handle that signal number when it is raised.
+                Python automatically restores most signal handlers when
+                signals occur, so there is no need to recall this function
+                within the signal handler itself to reregister the handler.
+                That is, except for <code class="epub__literal">SIGCHLD</code>, a signal handler remains
+                installed until explicitly reset (e.g., by setting the handler
+                to <code class="epub__literal">SIG_DFL</code> to restore
+                default behavior or to <code class="epub__literal">SIG_IGN</code> to ignore the signal).
+                <code class="epub__literal">SIGCHLD</code> behavior is
+                platform specific.</p></dd><dt><span class="epub__term"><code class="epub__literal">signal.pause</code></span></dt><dd>
+<p>Makes the <a id="I_indexterm4_d1e19652"></a>process sleep until the next signal is caught. A
+                <code class="epub__literal">time.sleep</code> call is similar
+                but doesn’t work with signals on my Linux box; it generates an
+                interrupted system call error. A busy <code class="epub__literal">while True: pass</code> loop here would
+                pause the script, too, but may squander CPU resources.</p></dd></dl>
+</div>
+<p>Here is what this script looks like running on Cygwin on
+          Windows (it works the same on other Unix-like platforms like Linux):
+          a signal number to watch for (12) is passed in on the command line,
+          and the program is made to run in the background with an <code class="epub__literal">&amp;</code> shell operator (available in most
+          Unix-like shells):</p><a id="I_programlisting4_d1e19669"></a>
+<pre class="epub__programlisting">[C:\...\PP4E\System\Processes]$ <strong class="epub__userinput"><code>python signal1.py 12 &amp;</code></strong>
+[1] 8224
+
+$ <strong class="epub__userinput"><code>ps</code></strong>
+      PID    PPID    PGID     WINPID  TTY  UID    STIME COMMAND
+I    8944       1    8944       8944  con 1004 18:09:54 /usr/bin/bash
+     8224    7336    8224      10020  con 1004 18:26:47 /usr/local/bin/python
+     8380    7336    8380        428  con 1004 18:26:50 /usr/bin/ps
+
+$ <strong class="epub__userinput"><code>kill −12 8224</code></strong>
+Got signal 12 at Sun Mar  7 18:27:28 2010
+
+$ <strong class="epub__userinput"><code>kill −12 8224</code></strong>
+Got signal 12 at Sun Mar  7 18:27:30 2010
+
+$ <strong class="epub__userinput"><code>kill −9 8224</code></strong>
+[1]+  Killed                  python signal1.py 12</pre>
+<p>Inputs and outputs can be a bit jumbled here because the
+          process prints to the same screen used to type new shell commands.
+          To send the program a signal, the <code class="epub__literal">kill</code> shell command takes a signal number
+          and a process ID to be signaled (8224); every time a new <code class="epub__literal">kill</code> command sends a signal, the process
+          replies with a message generated by a Python signal handler
+          function. Signal 9 always kills the process altogether.</p>
+<p>The <code class="epub__literal">signal</code> module also
+          exports a<a id="I_indexterm4_d1e19699"></a> <code class="epub__literal">signal.alarm</code>
+          function for scheduling a <code class="epub__literal">SIGALRM</code><a name="seconds in"></a>
+          signal to occur at some number of seconds in the future. To trigger
+          and catch timeouts, set the alarm and install a <code class="epub__literal">SIGALRM</code> handler as shown in Example 5-28.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id42"></a>
+<p class="epub__title">Example 5-28. PP4E\System\Processes\signal2.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+set and catch alarm timeout signals in Python; time.sleep doesn't play
+well with alarm (or signal in general in my Linux PC), so we call
+signal.pause here to do nothing until a signal is received;
+"""
+
+import sys, signal, time
+def now(): return time.asctime()
+
+def onSignal(signum, stackframe):                 # python signal handler
+    print('Got alarm', signum, 'at', now())       # most handlers stay in effect
+
+while True:
+    print('Setting at', now())
+    signal.signal(signal.SIGALRM, onSignal)       # install signal handler
+    signal.alarm(5)                               # do signal in 5 seconds
+    signal.pause()                                # wait for signals</pre>
+</div>
+</div>
+<p>Running this script on Cygwin on Windows causes its<a id="I_indexterm4_d1e19725"></a> <code class="epub__literal">onSignal</code> handler
+          function to be invoked every five seconds:</p><a id="I_programlisting4_d1e19732"></a>
+<pre class="epub__programlisting">[C:\...\PP4E\System\Processes]$ <strong class="epub__userinput"><code>python signal2.py</code></strong>
+Setting at Sun Mar  7 18:37:10 2010
+Got alarm 14 at Sun Mar  7 18:37:15 2010
+Setting at Sun Mar  7 18:37:15 2010
+Got alarm 14 at Sun Mar  7 18:37:20 2010
+Setting at Sun Mar  7 18:37:20 2010
+Got alarm 14 at Sun Mar  7 18:37:25 2010
+Setting at Sun Mar  7 18:37:25 2010
+Got alarm 14 at Sun Mar  7 18:37:30 2010
+Setting at Sun Mar  7 18:37:30 2010
+<em class="epub__lineannotation"><span class="epub__lineannotation">...Ctrl-C to exit...</span></em></pre>
+<p>Generally speaking, signals must be used with cautions not
+          made obvious by the examples we’ve just seen. For instance, some
+          system calls don’t react well to being interrupted by signals, and
+          only the main thread can install signal handlers and respond to
+          signals in a multithreaded program.</p>
+<p>When used well, though, signals provide an event-based
+          communication mechanism. They are less powerful than data streams
+          such as pipes, but are sufficient in situations in which you just
+          need to tell a program that something important has occurred and
+          don’t need to pass along any details about the event itself. Signals
+          are sometimes also combined with other IPC tools. For example, an
+          initial signal may inform a program that a client wishes to
+          communicate over a named pipe—the equivalent of tapping someone’s
+          shoulder to get their attention before speaking. Most platforms
+          reserve one or more <code class="epub__literal">SIGUSR</code> signal
+          numbers for user-defined events of this sort. Such an integration
+          structure is sometimes an alternative to running a blocking input
+          call in a spawned thread.</p>
+<p>See also the<a id="I_indexterm4_d1e19748"></a> <code class="epub__literal">os.kill(</code><em class="epub__replaceable"><code>pid</code></em><code class="epub__literal">,</code> <em class="epub__replaceable"><code>sig</code></em><code class="epub__literal">)</code> call for sending signals to known
+          processes from within a Python script on Unix-like platforms, much
+          like the<a id="I_indexterm4_d1e19766"></a><a id="I_indexterm4_d1e19772"></a> <code class="epub__literal">kill</code> shell command
+          used earlier; the required process ID can be obtained from the
+          <code class="epub__literal">os.fork</code> call’s child process ID
+          return value or from other interfaces. Like <code class="epub__literal">os.fork</code>, this call is also available in
+          Cygwin Python, but not in standard Windows Python. Also watch for
+          the discussion about using signal handlers to clean up “zombie”
+          processes in Chapter 12<a id="I_indexterm4_d1e19786"></a><a id="I_indexterm4_d1e19788"></a><a id="I_indexterm4_d1e19791"></a><a id="I_indexterm4_d1e19793"></a>.</p>
+</div><div class="epub__footnotes"><br/><hr/><div class="epub__footnote">
+<p><sup>[17] </sup>We will clarify the notions of “client” and “server” in
+                the Internet programming part of this book. There, we’ll
+                communicate with sockets (which we’ll see later in this
+                chapter are roughly like bidirectional pipes for programs
+                running both across networks and on the same machine), but the
+                overall conversation model is similar. Named pipes (fifos),
+                described ahead, are also a better match to the client/server
+                model because they can be accessed by arbitrary, unrelated
+                processes (no forks are required). But as we’ll see, the
+                socket port model is generally used by most Internet scripting
+                protocols—email, for instance, is mostly just formatted
+                strings shipped over sockets between programs on standard port
+                numbers reserved for the email protocol.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

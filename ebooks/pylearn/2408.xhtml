@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Transitive Module Reloads</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div><h1 class="epub__title"><a id="transitive_module_reloads"></a>Transitive Module Reloads</h1>
+<p>We <a id="ch24modtransmodreloads"></a>studied <a id="ch24transmodreloads"></a>module reloads in Chapter 22, as a way to pick up changes in code
+        without stopping and restarting a program. When you <a id="ch24reloadfunctransmodreloads"></a>reload a module, though, Python only reloads that
+        particular module’s file; it doesn’t automatically reload modules that
+        the file being reloaded happens to import.</p>
+<p>For example, if you reload some module <code class="epub__literal">A</code>, and <code class="epub__literal">A</code>
+        imports modules <code class="epub__literal">B</code> and <code class="epub__literal">C</code>, the reload applies only to <code class="epub__literal">A</code>, not to <code class="epub__literal">B</code> and <code class="epub__literal">C</code>.
+        The statements inside <code class="epub__literal">A</code> that import
+        <code class="epub__literal">B</code> and <code class="epub__literal">C</code> are rerun during the reload, but they just
+        fetch the already loaded <code class="epub__literal">B</code> and
+        <code class="epub__literal">C</code> module objects (assuming they’ve
+        been imported before). In actual code, here’s the file <em class="epub__filename">A.py</em>:</p><a id="I_programlisting4_d1e59693"></a>
+<pre class="epub__programlisting">import B                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Not reloaded when A is</span></em>
+import C                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Just an import of an already loaded module</span></em>
+
+% <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; . . .
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from imp import reload</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>reload(A)</code></strong></pre>
+<p>By default, this means that you cannot depend on reloads picking
+        up changes in all the modules in your program transitively—instead,
+        you must use multiple <code class="epub__literal">reload</code> calls
+        to update the subcomponents independently. This can require
+        substantial work for large systems you’re testing interactively. You
+        can design your systems to reload their subcomponents automatically by
+        adding <code class="epub__literal">reload</code> calls in parent
+        modules like <code class="epub__literal">A</code>, but this
+        complicates the modules’ code.</p>
+<p>A better approach is to write a general tool to do transitive
+        reloads automatically by scanning modules’ <code class="epub__literal">__dict__</code> attributes and checking each item’s
+        <code class="epub__literal">type</code> to find nested modules to
+        reload. Such a utility function could call itself
+        <span class="epub__emphasis"><em>recursively</em></span> to navigate arbitrarily shaped import
+        dependency chains. Module <code class="epub__literal">__dict__</code>
+        attributes were introduced earlier in, the section Modules Are Objects: Metaprograms, and the <code class="epub__literal">type</code> call was presented in Chapter 9; we just need to
+        combine the two tools.</p>
+<p>For example, the module <a id="I_indexterm4_d1e59744"></a><em class="epub__filename">reloadall.py</em> listed
+        next has a <code class="epub__literal">reload_all</code> function that
+        automatically reloads a module, every module that the module imports,
+        and so on, all the way to the bottom of each import chain. It uses a
+        dictionary to keep track of already reloaded modules, recursion to
+        walk the import chains, and the standard library’s <code class="epub__literal">types</code> module, which simply predefines
+        <code class="epub__literal">type</code> results for built-in types.
+        The <code class="epub__literal">visited</code> dictionary technique
+        works to avoid cycles here when imports are recursive or redundant,
+        because module objects can be dictionary keys (as we learned in Chapter 5, a set would offer similar functionality if
+        we use <code class="epub__literal">visited.add(module)</code> to
+        insert):</p><a id="I_programlisting4_d1e59768"></a>
+<pre class="epub__programlisting">"""
+reloadall.py: transitively reload nested modules
+"""
+
+import types
+from imp import reload                               <em class="epub__lineannotation"><span class="epub__lineannotation"># from required in 3.0</span></em>
+
+def status(module):
+    print('reloading ' + module.__name__)
+
+def transitive_reload(module, visited):
+    if not module in visited:                        <em class="epub__lineannotation"><span class="epub__lineannotation"># Trap cycles, duplicates</span></em>
+        status(module)                               <em class="epub__lineannotation"><span class="epub__lineannotation"># Reload this module</span></em>
+        reload(module)                               <em class="epub__lineannotation"><span class="epub__lineannotation"># And visit children</span></em>
+        visited[module] = None
+        for attrobj in module.__dict__.values():     <em class="epub__lineannotation"><span class="epub__lineannotation"># For all attrs</span></em>
+            if type(attrobj) == types.ModuleType:    <em class="epub__lineannotation"><span class="epub__lineannotation"># Recur if module</span></em>
+                transitive_reload(attrobj, visited)
+
+def reload_all(*args):
+    visited = {}
+    for arg in args:
+        if type(arg) == types.ModuleType:
+            transitive_reload(arg, visited)
+
+if __name__ == '__main__':
+    import reloadall                                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Test code: reload myself</span></em>
+    reload_all(reloadall)                            <em class="epub__lineannotation"><span class="epub__lineannotation"># Should reload this, types</span></em></pre>
+<p>To use this utility, import its <code class="epub__literal">reload_all</code> function and pass it the name of
+        an already loaded module (like you would the built-in <code class="epub__literal">reload</code> function). When the file runs
+        standalone, its self-test code will test itself—it has to import
+        itself because its own name is not defined in the file without an
+        import (this code works in both 3.0 and 2.6 and prints identical
+        output, because we’ve used <code class="epub__literal">+</code>
+        instead of a comma in the <code class="epub__literal">print</code>):</p><a id="I_programlisting4_d1e59808"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\Python30\python reloadall.py</code></strong>
+reloading reloadall
+reloading types</pre>
+<p>Here is this module at work in 3.0 on some standard library
+        modules. Notice how <code class="epub__literal">os</code> is imported
+        by <code class="epub__literal">tkinter</code>, but <code class="epub__literal">tkinter</code> reaches <code class="epub__literal">sys</code> before <code class="epub__literal">os</code> can (if you want to test this on Python
+        2.6, substitute <code class="epub__literal">Tkinter</code> for
+        <code class="epub__literal">tkinter</code>):</p><a id="I_programlisting4_d1e59838"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from reloadall import reload_all</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import os, tkinter</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>reload_all(os)</code></strong>
+reloading os
+reloading copyreg
+reloading ntpath
+reloading genericpath
+reloading stat
+reloading sys
+reloading errno
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>reload_all(tkinter)</code></strong>
+reloading tkinter
+reloading _tkinter
+reloading tkinter._fix
+reloading sys
+reloading ctypes
+reloading os
+reloading copyreg
+reloading ntpath
+reloading genericpath
+reloading stat
+reloading errno
+reloading ctypes._endian
+reloading tkinter.constants</pre>
+<p>And here is a session that shows the effect of normal versus
+        transitive reloads—changes made to the two nested files are not picked
+        up by reloads, unless the transitive utility is used:</p><a id="I_programlisting4_d1e59854"></a>
+<pre class="epub__programlisting">import b                          <em class="epub__lineannotation"><span class="epub__lineannotation"># a.py</span></em>
+X = 1
+
+import c                          <em class="epub__lineannotation"><span class="epub__lineannotation"># b.py</span></em>
+Y = 2
+
+Z = 3                             <em class="epub__lineannotation"><span class="epub__lineannotation"># c.py</span></em>
+
+C:\misc&gt; <strong class="epub__userinput"><code>C:\Python30\python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import a</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>a.X, a.b.Y, a.b.c.Z</code></strong>
+(1, 2, 3)
+
+<em class="epub__lineannotation"><span class="epub__lineannotation"># Change all three files' assignment values and save</span></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from imp import reload</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>reload(a)</code></strong>                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Normal reload is top level only</span></em>
+&lt;module 'a' from 'a.py'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>a.X, a.b.Y, a.b.c.Z</code></strong>
+(111, 2, 3)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from reloadall import reload_all</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>reload_all(a)</code></strong>
+reloading a
+reloading b
+reloading c
+&gt;&gt;&gt; <strong class="epub__userinput"><code>a.X, a.b.Y, a.b.c.Z</code></strong>           <em class="epub__lineannotation"><span class="epub__lineannotation"># Reloads all nested modules too</span></em>
+(111, 222, 333)</pre>
+<p>For more insight, study and experiment with this example on your
+        own; it’s another importable tool you might want to add to your own
+        source code <a id="I_indexterm4_d1e59905"></a><a id="I_indexterm4_d1e59907"></a><a id="I_indexterm4_d1e59909"></a>library.</p>
+<div class="epub__sect1" title="Module Design Concepts"><div class="epub__titlepage"><div>
+<div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

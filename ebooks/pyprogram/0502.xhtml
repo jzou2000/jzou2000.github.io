@@ -1,0 +1,1555 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Threads</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Threads"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="threads"></a>Threads</h1>
+</div>
+</div>
+</div>
+<p>Threads are <a id="par5.3"></a>another way to start activities running at the same
+        time. In short, they run a call to a function (or any other type of
+        callable object) in parallel with the rest of the program. Threads are
+        sometimes called “lightweight processes,” because they run in parallel
+        like forked processes, but all of them run within the same single
+        process. While processes are commonly used to start independent
+        programs, threads are commonly used for tasks such as nonblocking
+        input calls and long-running tasks in a GUI. They also provide a
+        natural model for algorithms that can be expressed as independently
+        running tasks. For applications that can benefit from parallel
+        processing, some developers consider threads to offer a <a id="I_indexterm4_d1e15916"></a>number of advantages:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Performance</em></span></span></dt><dd>
+<p>Because all threads <a id="I_indexterm4_d1e15930"></a>run within the same process, they don’t generally
+              incur a big startup cost to copy the process itself. The costs
+              of both copying forked processes and running threads can vary
+              per platform, but threads are usually considered less expensive
+              in terms of performance overhead.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Simplicity</em></span></span></dt><dd>
+<p>To many observers, threads can be noticeably simpler to
+              program, too, especially when some of the more complex aspects
+              of processes enter the picture (e.g., process exits,
+              communication schemes, and zombie processes, covered in Chapter 12).</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Shared global memory</em></span></span></dt><dd>
+<p>On a related note, because threads run in a single
+              process, every thread shares the same <a id="I_indexterm4_d1e15952"></a>global memory space of the process. This provides
+              a natural and easy way for threads to communicate—by fetching
+              and setting names or objects accessible to all the threads. To
+              the Python programmer, this means that things like global scope
+              variables, passed objects and their attributes, and program-wide
+              interpreter components such as imported modules are shared among
+              all threads in a program; if one thread assigns a global
+              variable, for instance, its new value will be seen by other
+              threads. Some care must be taken to control access to shared
+              items, but to some this seems generally simpler to use than the
+              process communication tools necessary for forked processes,
+              which we’ll meet later in this chapter and book (e.g., pipes,
+              streams, signals, sockets, etc.). Like much in programming, this
+              is not a universally shared view, however, so you’ll have to
+              weigh the difference for your programs and platforms
+              yourself.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Portability</em></span></span></dt><dd>
+<p>Perhaps most important is the fact that threads are more
+              portable than forked processes. At this writing, <code class="epub__literal">os.fork</code> is not supported by the
+              standard version of Python on Windows, but threads are. If you
+              want to run parallel tasks portably in a Python script today and
+              you are unwilling or unable to install a Unix-like library such
+              as Cygwin on Windows, threads may be your best bet. Python’s
+              thread tools automatically account for any platform-specific
+              thread differences, and they provide a consistent interface
+              across all operating systems. Having said that, the relatively
+              new <code class="epub__literal">multiprocessing</code> module
+              described later in this chapter offers another answer to the
+              process portability issue in some use cases.</p></dd></dl>
+</div>
+<p>So what’s the catch? There are three potential <a id="I_indexterm4_d1e15973"></a>downsides you should be aware of before you start
+        spinning your threads:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Function calls versus programs</em></span></span></dt><dd>
+<p>First of all, threads are not a way—<a id="I_indexterm4_d1e15987"></a><a id="I_indexterm4_d1e15992"></a>at least, not a direct way—to start up another
+              <span class="epub__emphasis"><em>program</em></span>. Rather, threads are designed to
+              run a call to a <span class="epub__emphasis"><em>function</em></span> (technically, any
+              callable, including bound and unbound methods) in parallel with
+              the rest of the program. As we saw in the prior section, by
+              contrast, forked processes can either call a function or start a
+              new program. Naturally, the threaded function can run scripts
+              with the <code class="epub__literal">exec</code> built-in
+              function and can start new programs with tools such as <code class="epub__literal">os.system</code>, <code class="epub__literal">os.popen</code> and the <code class="epub__literal">subprocess</code> module, especially if doing
+              so is itself a long-running task. But fundamentally, threads run
+              in-program functions.</p>
+<p>In practice, this is usually not a limitation. For many
+              applications, parallel functions are sufficiently powerful. For
+              instance, if you want to implement nonblocking input and output
+              and avoid blocking a GUI or its users with long-running tasks,
+              threads do the job; simply spawn a thread to run a function that
+              performs the potentially long-running task. The rest of the
+              program will continue independently.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Thread synchronization and
+            queues</em></span></span></dt><dd>
+<p>Secondly, the <a id="I_indexterm4_d1e16026"></a>fact that threads share objects and names in
+              global process memory is both good news and bad news—it provides
+              a communication mechanism, but we have to be careful to
+              synchronize a variety of operations. As we’ll see, even
+              operations such as printing are a potential conflict since there
+              is only one <code class="epub__literal">sys.stdout</code> per
+              process, which is shared by all threads.</p>
+<p>Luckily, the <a id="I_indexterm4_d1e16037"></a>Python <code class="epub__literal">queue</code>
+              module, described in this section, makes this simple: realistic
+              threaded programs are usually structured as one or more
+              <span class="epub__emphasis"><em>producer</em></span> (a.k.a.
+              <span class="epub__emphasis"><em>worker</em></span>) threads that add data to a queue,
+              along with one or more <span class="epub__emphasis"><em>consumer</em></span> threads
+              that take the data off the queue and process it. In a typical
+              threaded GUI, for example, producers may download or compute
+              data and place it on the queue; the consumer—the main GUI
+              thread—checks the queue for data periodically with a timer event
+              and displays it in the GUI when it arrives. Because the shared
+              queue is thread-safe, programs structured this way automatically
+              synchronize much cross-thread data communication.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>The global interpreter lock
+            (GIL)</em></span></span></dt><dd>
+<p>Finally, <a id="I_indexterm4_d1e16062"></a><a id="I_indexterm4_d1e16067"></a>as we’ll learn in more detail later in this
+              section, Python’s implementation of threads means that only one
+              thread is ever really running its Python language code in the
+              Python virtual machine at any point in time. Python threads are
+              true operating system threads, but all threads must acquire a
+              single shared lock when they are ready to run, and each thread
+              may be swapped out after running for a short period of time
+              (currently, after a set number of virtual machine instructions,
+              though this implementation may change in Python 3.2).</p>
+<p>Because of this structure, the Python language parts of
+              Python threads cannot today be distributed across multiple CPUs
+              on a multi-CPU computer. To leverage more than one CPU, you’ll
+              simply need to use process forking, not threads (the amount and
+              complexity of code required for both are roughly the same).
+              Moreover, the parts of a thread that perform long-running tasks
+              implemented as C extensions can run truly independently if they
+              release the GIL to allow the Python code of other threads to run
+              while their task is in progress. Python code, however, cannot
+              truly overlap in time.</p>
+<p>The advantage of Python’s implementation of threads is
+              performance—when it was attempted, making the virtual machine
+              truly thread-safe reportedly slowed all programs by a factor of
+              two on Windows and by an even larger factor on Linux. Even
+              nonthreaded programs ran at half speed.</p>
+<p>Even though the GIL’s multiplexing of Python language code
+              makes Python threads less useful for leveraging capacity on
+              multiple CPU machines, threads are still useful as programming
+              tools to implement nonblocking operations, especially in GUIs.
+              Moreover, the newer <code class="epub__literal">multiprocessing</code> module we’ll meet
+              later offers another solution here, too—by providing a portable
+              thread-like API that is implemented with processes, programs can
+              both leverage the simplicity and <span>program</span><span>mability</span> of threads and benefit
+              from the scalability of independent processes across
+              CPUs.</p></dd></dl>
+</div>
+<p>Despite what you may think after reading the preceding overview,
+        threads are remarkably easy to use in Python. In fact, when a program
+        is started it is already running a thread, usually called the “main
+        thread” of the process. To start new, independent threads of execution
+        within a process, Python code uses either the low-level <code class="epub__literal">_thread</code> module to run a function call in a
+        spawned thread, or the higher-level <code class="epub__literal">threading</code> module to manage threads with
+        high-level class-based objects. Both modules also provide tools for
+        synchronizing access to shared objects with locks.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p>This book presents both the <code class="epub__literal">_thread</code> and <code class="epub__literal">threading</code> modules, and its examples use
+          both interchangeably. Some Python users would recommend that you
+          always use <code class="epub__literal">threading</code> rather than
+          <code class="epub__literal">_thread</code> in general. In fact, the
+          latter was renamed from <code class="epub__literal">thread</code> to
+          <code class="epub__literal">_thread</code> in 3.X to suggest such a
+          lesser status for it. Personally, I think that is too extreme (and
+          this is one reason this book sometimes uses <code class="epub__literal">as thread</code> in imports to retain the
+          original module name). Unless you need the more powerful tools in
+          <code class="epub__literal">threading</code>, the choice is largely
+          arbitrary, and the <code class="epub__literal">threading</code>
+          module’s extra requirements may be unwarranted.</p>
+<p>The basic <code class="epub__literal">thread</code> module
+          does not impose OOP, and as you’ll see in the examples of this
+          section, is very straightforward to use. The <code class="epub__literal">threading</code> module may be better for more
+          complex tasks which require per-thread state retention or joins, but
+          not all threaded programs require its extra tools, and many use
+          threads in more limited scopes. In fact, this is roughly the same as
+          comparing the <code class="epub__literal">os.walk</code> call and
+          visitor classes we’ll meet in Chapter 6—both have valid audiences and
+          use cases. The most general Python rule of thumb applies here as
+          always: <span class="epub__emphasis"><em>keep it simple, <span>unless</span> it has to be
+          complex</em></span>.</p>
+</div>
+<div class="epub__sect2" title="The _thread Module"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_underscore_thread_module"></a>The _thread Module</h2>
+</div>
+</div>
+</div>
+<p>Since the basic <code class="epub__literal">_thread</code>
+          module <a id="th5.3.1"></a>is a bit simpler than the more advanced <code class="epub__literal">threading</code> module covered later in this
+          section, let’s look at some of its interfaces first. This module
+          provides a <span class="epub__emphasis"><em>portable</em></span> interface to whatever
+          threading system is available in your platform: its interfaces work
+          the same on Windows, Solaris, SGI, and any system with an installed
+          <code class="epub__literal">pthreads</code> POSIX threads
+          implementation (including Linux and others). Python scripts that use
+          the Python <code class="epub__literal">_thread</code> module work on
+          all of these platforms without changing their source code.</p>
+<div class="epub__sect3" title="Basic usage"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="basic_usage"></a>Basic usage</h3>
+</div>
+</div>
+</div>
+<p>Let’s start off by <a id="thread5.3.1.1"></a>experimenting with a script that demonstrates the
+            main thread interfaces. The script in Example 5-5 spawns threads until
+            you reply with a <span class="epub__emphasis"><em>q</em></span> at the console; it’s
+            similar in spirit to (and a bit simpler than) the script in Example 5-1, but it goes
+            parallel with threads instead of process forks.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id19"></a>
+<p class="epub__title">Example 5-5. PP4E\System\Threads\thread1.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"spawn threads until you type 'q'"
+
+import _thread
+
+def child(tid):
+    print('Hello from thread', tid)
+
+def parent():
+    i = 0
+    while True:
+        i += 1
+        _thread.start_new_thread(child, (i,))
+        if input() == 'q': break
+
+parent()</pre>
+</div>
+</div>
+<p>This script really contains only two thread-specific lines:
+            the import of the <code class="epub__literal">_thread</code>
+            module and the thread creation call. To start a thread, we simply
+            call <a id="I_indexterm4_d1e16202"></a>the <code class="epub__literal">_thread.start_new_thread</code> function, no
+            matter what platform we’re programming on.<sup>[14]</sup> This call takes a function (or other callable)
+            object and an arguments tuple and starts a new thread to execute a
+            call to the passed function with the passed arguments. It’s almost
+            like Python’s <code class="epub__literal">function(*args)</code>
+            call syntax, and similarly accepts an optional keyword arguments
+            dictionary, too, but in this case the function call begins running
+            in parallel with the rest of the program.</p>
+<p>Operationally speaking, the <code class="epub__literal">_thread.start_new_thread</code> call itself
+            returns immediately with no useful value, and the thread it spawns
+            silently exits when the function being run returns (the return
+            value of the threaded function call is simply ignored). Moreover,
+            if a function run in a thread raises an uncaught exception, a
+            stack trace is printed and the thread exits, but the rest of the
+            program continues. With the <code class="epub__literal">_thread</code> module, the entire program exits
+            silently on most platforms when the main thread does (though as
+            we’ll see later, the <code class="epub__literal">threading</code>
+            module may require special handling if child threads are still
+            running).</p>
+<p>In practice, though, it’s almost trivial to use threads in a
+            Python script. Let’s run this program to launch a few threads; we
+            can run it on both Unix-like platforms and Windows this time,
+            because threads are more portable than process forks—here it is
+            spawning threads on Windows:</p><a id="I_programlisting4_d1e16246"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Threads&gt; <strong class="epub__userinput"><code>python thread1.py</code></strong>
+Hello from thread 1
+
+Hello from thread 2
+
+Hello from thread 3
+
+Hello from thread 4
+<strong class="epub__userinput"><code>q</code></strong></pre>
+<p>Each message here is printed from a new thread, which exits
+            almost as soon as it <a id="I_indexterm4_d1e16255"></a>is started.</p>
+</div>
+<div class="epub__sect3" title="Other ways to code threads with _thread"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="other_ways_to_code_threads_with_undersco"></a>Other ways to code threads with _thread</h3>
+</div>
+</div>
+</div>
+<p>Although the <a id="I_indexterm4_d1e16263"></a>preceding script runs a simple function<span class="epub__emphasis"><em>,
+            any callable object</em></span> may be run in the thread, because
+            all threads live in the same process. For instance, a thread can
+            also run a lambda function or bound method of an object (the
+            following code is part of file <em class="epub__filename">thread-alts.py</em> in the book examples
+            package):</p><a id="I_programlisting4_d1e16275"></a>
+<pre class="epub__programlisting">import _thread                                       # all 3 print 4294967296
+
+def action(i):                                       # function run in threads
+    print(i ** 32)
+
+class Power:
+    def __init__(self, i):
+        self.i = i
+    def action(self):                                # bound method run in threads
+        print(self.i ** 32)
+
+_thread.start_new_thread(action, (2,))               # simple function
+
+_thread.start_new_thread((lambda: action(2)), ())    # lambda function to defer
+
+obj = Power(2)
+_thread.start_new_thread(obj.action, ())             # bound method object</pre>
+<p>As we’ll see in larger examples later in this book,
+            <span class="epub__emphasis"><em>bound methods</em></span> are especially useful in this
+            role—because they remember both the method function and instance
+            object, they also give access to state information and class
+            methods for use within and during the thread.</p>
+<p>More fundamentally, because threads all run in the same
+            process, bound methods run by threads reference the original
+            in-process instance object, not a copy of it. Hence, any changes
+            to its state made in a thread will be visible to all threads
+            automatically. Moreover, since bound methods of a class instance
+            pass for callables interchangeably with simple functions, using
+            them in threads this way just works. And as we’ll see later, the
+            fact that they are normal objects also allows them to be stored
+            freely on shared queues.</p>
+</div>
+<div class="epub__sect3" title="Running multiple threads"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="running_multiple_threads"></a>Running multiple threads</h3>
+</div>
+</div>
+</div>
+<p>To really <a id="thread5.3.1.3"></a>understand the power of threads running in parallel,
+            though, we have to do something more long-lived in our threads,
+            just as we did earlier for processes. Let’s mutate the <code class="epub__literal">fork-count</code> program of the prior section
+            to use threads. The script in Example 5-6 starts 5 copies of
+            its <code class="epub__literal">counter</code> function running in
+            parallel threads.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id20"></a>
+<p class="epub__title">Example 5-6. PP4E\System\Threads\thread-count.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+thread basics: start 5 copies of a function running in parallel;
+uses time.sleep so that the main thread doesn't die too early--
+this kills all other threads on some platforms; stdout is shared:
+thread outputs may be intermixed in this version arbitrarily.
+"""
+
+import _thread as thread, time
+
+def counter(myId, count):                        # function run in threads
+    for i in range(count):
+        time.sleep(1)                            # simulate real work
+        print('[%s] =&gt; %s' % (myId, i))
+
+for i in range(5):                               # spawn 5 threads
+    thread.start_new_thread(counter, (i, 5))     # each thread loops 5 times
+
+time.sleep(6)
+print('Main thread exiting.')                    # don't exit too early</pre>
+</div>
+</div>
+<p>Each parallel copy of the <code class="epub__literal">counter</code> function simply counts from zero
+            up to four here and prints a message to standard output for each
+            count.</p>
+<p>Notice how this script sleeps for 6 seconds at the end. On
+            Windows and Linux machines this has been tested on, the main
+            thread shouldn’t exit while any spawned threads are running if it
+            cares about their work; if it does exit, all spawned threads are
+            immediately terminated. This differs from processes, where spawned
+            children live on when parents exit. Without the sleep here, the
+            spawned threads would die almost immediately after they are
+            started.</p>
+<p>This may seem ad hoc, but it isn’t required on all
+            platforms, and programs are usually structured such that the main
+            thread naturally lives as long as the threads it starts. For
+            instance, a user interface may start an FTP download running in a
+            thread, but the download lives a much shorter life than the user
+            interface itself. Later in this section, we’ll also see different
+            ways to avoid this sleep using global locks and flags that let
+            threads signal their completion.</p>
+<p>Moreover, we’ll later find that the <code class="epub__literal">threading</code> module both provides a
+            <code class="epub__literal">join</code> method that lets us wait
+            for spawned threads to finish explicitly, and refuses to allow a
+            program to exit at all if any of its normal threads are still
+            running (which may be useful in this case, but can require extra
+            work to shut down in others). The <code class="epub__literal">multiprocessing</code> module we’ll meet later
+            in this chapter also allows spawned children to outlive their
+            parents, though this is largely an artifact of its process-based
+            model.</p>
+<p>Now, when Example 5-6 is run on Windows 7
+            under Python 3.1, here is the output I get:</p><a id="I_programlisting4_d1e16332"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Threads&gt; <strong class="epub__userinput"><code>python thread-count.py</code></strong>
+[1] =&gt; 0
+[1] =&gt; 0
+[0] =&gt; 0
+[1] =&gt; 0
+[0] =&gt; 0
+[2] =&gt; 0
+[3] =&gt; 0
+[3] =&gt; 0
+
+[1] =&gt; 1
+[3] =&gt; 1
+[3] =&gt; 1
+[0] =&gt; 1[2] =&gt; 1
+[3] =&gt; 1
+[0] =&gt; 1[2] =&gt; 1
+[4] =&gt; 1
+
+[1] =&gt; 2
+[3] =&gt; 2[4] =&gt; 2
+[3] =&gt; 2[4] =&gt; 2
+[0] =&gt; 2
+[3] =&gt; 2[4] =&gt; 2
+[0] =&gt; 2
+[2] =&gt; 2
+[3] =&gt; 2[4] =&gt; 2
+[0] =&gt; 2
+[2] =&gt; 2
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more output omitted...</span></em>
+Main thread exiting.</pre>
+<p>If this looks odd, it’s because it should. In fact, this
+            demonstrates probably the most unusual aspect of threads. What’s
+            happening here is that the output of the 5 threads run in parallel
+            is intermixed—because all the threaded function calls run in the
+            same process, they all share the same standard output stream (in
+            Python terms, there is just one <code class="epub__literal">sys.stdout</code> file between them, which is
+            where printed text is sent). The net effect is that their output
+            can be combined and confused arbitrarily. In fact, this script’s
+            output can differ on each run. This jumbling of output grew even
+            more pronounced in Python 3, presumably due to its new file output
+            implementation.</p>
+<p>More fundamentally, when multiple threads can access a
+            shared resource like this, their access must be synchronized to
+            avoid overlap in time—as explained in the next <a id="I_indexterm4_d1e16347"></a>section.</p>
+</div>
+<div class="epub__sect3" title="Synchronizing access to shared objects and names"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="synchronizing_access_to_shared_objects_a"></a>Synchronizing access to shared objects and names</h3>
+</div>
+</div>
+</div>
+<p>One of the nice things <a id="thread5.3.1.4"></a><a id="syn5.3.1.4"></a>about threads is that they automatically come with a
+            cross-task communications mechanism: objects and namespaces in a
+            process that span the life of threads are shared by all spawned
+            threads. For instance, because every thread runs in the same
+            process, if one Python thread changes a global scope variable, the
+            change can be seen by every other thread in the process, main or
+            child. Similarly, threads can share and change mutable objects in
+            the process’s memory as long as they hold a reference to them
+            (e.g., passed-in arguments). This serves as a simple way for a
+            program’s threads to pass information—exit flags, result objects,
+            event indicators, and so on—back and forth to each other.</p>
+<p>The downside to this scheme is that our threads must
+            sometimes be careful to avoid changing global objects and names at
+            the same time. If two threads may change a shared object at once,
+            it’s not impossible that one of the two changes will be lost (or
+            worse, will silently corrupt the state of the shared object
+            completely): one thread may step on the work done so far by
+            another whose operations are still in progress. The extent to
+            which this becomes an issue varies per application, and sometimes
+            it isn’t an issue at all.</p>
+<p>But even things that aren’t obviously at risk may be at
+            risk. Files and streams, for example, are shared by all threads in
+            a program; if multiple threads write to one stream at the same
+            time, the stream might wind up with interleaved, garbled data.
+            Example 5-6 of the prior
+            section was a simple demonstration of this phenomenon in action,
+            but it’s indicative of the sorts of clashes in time that can occur
+            when our programs go parallel. Even simple changes can go awry if
+            they might happen concurrently. To be robust, threaded programs
+            need to control access to shared global items like these so that
+            only one thread uses them at once.</p>
+<p>Luckily, Python’s <code class="epub__literal">_thread</code>
+            module comes with its own easy-to-use tools for synchronizing
+            access to objects shared among threads. These tools are based on
+            the concept of a <span class="epub__emphasis"><em>lock</em></span>—to change a shared
+            object, threads <span class="epub__emphasis"><em>acquire</em></span> a lock, make their
+            changes, and then <span class="epub__emphasis"><em>release</em></span> the lock for other
+            threads to grab. Python ensures that only one thread can hold a
+            lock at any point in time; if others request it while it’s held,
+            they are blocked until the lock becomes available. Lock objects
+            are allocated and processed with simple and portable calls in the
+            <code class="epub__literal">_thread</code> module that are
+            automatically mapped to thread locking mechanisms on the
+            underlying platform.</p>
+<p>For instance, in Example 5-7, a lock object
+            created by<a id="I_indexterm4_d1e16393"></a> <code class="epub__literal">_thread.allocate_lock</code> is acquired and
+            released by each thread around the <code class="epub__literal">print</code> call that writes to the shared
+            standard output stream.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id21"></a>
+<p class="epub__title">Example 5-7. PP4E\System\Threads\thread-count-mutex.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+synchronize access to stdout: because it is shared global,
+thread outputs may be intermixed if not synchronized
+"""
+
+import _thread as thread, time
+
+def counter(myId, count):                        # function run in threads
+    for i in range(count):
+        time.sleep(1)                            # simulate real work
+        mutex.acquire()
+        print('[%s] =&gt; %s' % (myId, i))          # print isn't interrupted now
+        mutex.release()
+
+mutex = thread.allocate_lock()                   # make a global lock object
+for i in range(5):                               # spawn 5 threads
+    thread.start_new_thread(counter, (i, 5))     # each thread loops 5 times
+
+time.sleep(6)
+print('Main thread exiting.')                    # don't exit too early</pre>
+</div>
+</div>
+<p>Really, this script simply augments Example 5-6 to synchronize
+            prints with a thread lock. The net effect of the additional lock
+            calls in this script is that no two threads will ever execute a
+            <code class="epub__literal">print</code> call at the same point in
+            time; the lock ensures mutually exclusive access to the <code class="epub__literal">stdout</code> stream. Hence, the output of this
+            script is similar to that of the original version, except that
+            standard output text is never mangled by overlapping
+            prints:</p><a id="I_programlisting4_d1e16420"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Threads&gt; <strong class="epub__userinput"><code>thread-count-mutex.py</code></strong>
+[0] =&gt; 0
+[1] =&gt; 0
+[3] =&gt; 0
+[2] =&gt; 0
+[4] =&gt; 0
+[0] =&gt; 1
+[1] =&gt; 1
+[3] =&gt; 1
+[2] =&gt; 1
+[4] =&gt; 1
+[0] =&gt; 2
+[1] =&gt; 2
+[3] =&gt; 2
+[4] =&gt; 2
+[2] =&gt; 2
+[0] =&gt; 3
+[1] =&gt; 3
+[3] =&gt; 3
+[4] =&gt; 3
+[2] =&gt; 3
+[0] =&gt; 4
+[1] =&gt; 4
+[3] =&gt; 4
+[4] =&gt; 4
+[2] =&gt; 4
+Main thread exiting.</pre>
+<p>Though somewhat platform-specific, the order in which the
+            threads check in with their prints may still be arbitrary from run
+            to run because they execute in parallel (getting work done in
+            parallel is the whole point of threads, after all); but they no
+            longer collide in time while printing their text. We’ll see other
+            cases where the lock idiom comes in to play later in this
+            chapter—it’s a core component of the multithreading <a id="I_indexterm4_d1e16427"></a><a id="I_indexterm4_d1e16429"></a>model.</p>
+</div>
+<div class="epub__sect3" title="Waiting for spawned thread exits"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="waiting_for_spawned_thread_exits"></a>Waiting for spawned thread exits</h3>
+</div>
+</div>
+</div>
+<p>Besides <a id="thread5.3.1.5"></a>avoiding print collisions, thread module locks are
+            surprisingly useful. They can form the basis of higher-level
+            synchronization paradigms (e.g., semaphores) and can be used as
+            general thread communication devices.<sup>[15]</sup> For instance, Example 5-8 uses a global list
+            of locks to know when all child threads have finished.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id22"></a>
+<p class="epub__title">Example 5-8. PP4E\System\Threads\thread-count-wait1.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+uses mutexes to know when threads are done in parent/main thread,
+instead of time.sleep; lock stdout to avoid comingled prints;
+"""
+
+import _thread as thread
+stdoutmutex = thread.allocate_lock()
+exitmutexes = [thread.allocate_lock() for i in range(10)]
+
+def counter(myId, count):
+    for i in range(count):
+        stdoutmutex.acquire()
+        print('[%s] =&gt; %s' % (myId, i))
+        stdoutmutex.release()
+    exitmutexes[myId].acquire()    # signal main thread
+
+for i in range(10):
+    thread.start_new_thread(counter, (i, 100))
+
+for mutex in exitmutexes:
+    while not mutex.locked(): pass
+print('Main thread exiting.')</pre>
+</div>
+</div>
+<p>A lock’s <code class="epub__literal">locked</code> method
+            can be used to check its state. To make this work, the main thread
+            makes one lock per child and tacks them onto a global <code class="epub__literal">exitmutexes</code> list (remember, the threaded
+            function shares global scope with the main thread). On exit, each
+            thread acquires its lock on the list, and the main thread simply
+            watches for all locks to be acquired. This is much more accurate
+            than naïvely sleeping while child threads run in hopes that all
+            will have exited after the sleep. Run this on your own to see its
+            output—all 10 spawned threads count up to 100 (they run in
+            arbitrarily interleaved order that can vary per run and platform,
+            but their prints run atomically and do not comingle), before the
+            main thread exits.</p>
+<p>Depending on how your threads run, this could be even
+            simpler: since threads share global memory anyhow, we can usually
+            achieve the same effect with a simple global list of
+            <span class="epub__emphasis"><em>integers</em></span> instead of locks. In Example 5-9, the module’s
+            namespace (scope) is shared by top-level code and the threaded
+            function, as before. <code class="epub__literal">exitmutexes</code> refers to the same list
+            object in the main thread and all threads it spawns. Because of
+            that, changes made in a thread are still noticed in the main
+            thread without resorting to extra locks.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id23"></a>
+<p class="epub__title">Example 5-9. PP4E\System\Threads\thread-count-wait2.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+uses simple shared global data (not mutexes) to know when threads
+are done in parent/main thread; threads share list but not its items,
+assumes list won't move in memory once it has been created initially
+"""
+
+import _thread as thread
+stdoutmutex = thread.allocate_lock()
+exitmutexes = [False] * 10
+
+def counter(myId, count):
+    for i in range(count):
+        stdoutmutex.acquire()
+        print('[%s] =&gt; %s' % (myId, i))
+        stdoutmutex.release()
+    exitmutexes[myId] = True  # signal main thread
+
+for i in range(10):
+    thread.start_new_thread(counter, (i, 100))
+
+while False in exitmutexes: pass
+print('Main thread exiting.')</pre>
+</div>
+</div>
+<p>The output of this script is similar to the prior—10 threads
+            counting to 100 in parallel and synchronizing their prints along
+            the way. In fact, both of the last two counting thread scripts
+            produce roughly the same output as the original
+            <span class="epub__emphasis"><em>thread_count.py</em></span>, albeit without <code class="epub__literal">stdout</code> corruption and with larger counts
+            and different random ordering of output lines. The main difference
+            is that the main thread exits immediately after (and no sooner
+            than!) the spawned child <a id="I_indexterm4_d1e16503"></a>threads:</p><a id="I_programlisting4_d1e16506"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Threads&gt; <strong class="epub__userinput"><code>python thread-count-wait2.py</code></strong>
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more deleted...</span></em>
+[4] =&gt; 98
+[6] =&gt; 98
+[8] =&gt; 98
+[5] =&gt; 98
+[0] =&gt; 99
+[7] =&gt; 98
+[9] =&gt; 98
+[1] =&gt; 99
+[3] =&gt; 99
+[2] =&gt; 99
+[4] =&gt; 99
+[6] =&gt; 99
+[8] =&gt; 99
+[5] =&gt; 99
+[7] =&gt; 99
+[9] =&gt; 99
+Main thread exiting.</pre>
+</div>
+<div class="epub__sect3" title="Coding alternatives: busy loops, arguments, and context managers"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="coding_alternatives_colon_busy_loops_com"></a>Coding alternatives: busy loops, arguments, and context
+            managers</h3>
+</div>
+</div>
+</div>
+<p>Notice how the <a id="thread5.3.1.6"></a><a id="con5.3.1.6"></a><a id="arg5.3.1.6"></a><a id="loop5.3.1.6"></a>main threads of both of the last two scripts fall
+            into busy-wait loops at the end, which might become significant
+            performance drains in tight applications. If so, simply add a
+            <code class="epub__literal">time.sleep</code> call in the wait
+            loops to insert a pause between end tests and to free up the CPU
+            for other tasks: this call pauses the calling thread only (in this
+            case, the main one). You might also try experimenting with adding
+            sleep calls to the thread function to simulate real work.</p>
+<p>Passing in the lock to threaded functions as an
+            <span class="epub__emphasis"><em>argument</em></span> instead of referencing it in the
+            global scope might be more coherent, too. When passed in, all
+            threads reference the same object, because they are all part of
+            the same process. Really, the process’s object memory is shared
+            memory for threads, regardless of how objects in that shared
+            memory are referenced (whether through global scope variables,
+            passed argument names, object attributes, or another way).</p>
+<p>And while we’re at it, the <code class="epub__literal">with</code> statement can be used to ensure
+            thread operations around a nested block of code, much like its use
+            to ensure file closure in the prior chapter. The thread lock’s
+            <span class="epub__emphasis"><em>context manager</em></span> acquires the lock on <code class="epub__literal">with</code> statement entry and releases it on
+            statement exit regardless of exception outcomes. The net effect is
+            to save one line of code, but also to guarantee lock release when
+            exceptions are possible. Example 5-10 adds all these
+            coding alternatives to our threaded counter script.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id24"></a>
+<p class="epub__title">Example 5-10. PP4E\System\Threads\thread-count-wait3.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+passed in mutex object shared by all threads instead of globals;
+use with context manager statement for auto acquire/release;
+sleep calls added to avoid busy loops and simulate real work
+"""
+
+import _thread as thread, time
+stdoutmutex = thread.allocate_lock()
+numthreads  = 5
+exitmutexes = [thread.allocate_lock() for i in range(numthreads)]
+
+def counter(myId, count, mutex):                     # shared object passed in
+    for i in range(count):
+        time.sleep(1 / (myId+1))                     # diff fractions of second
+        with mutex:                                  # auto acquire/release: with
+            print('[%s] =&gt; %s' % (myId, i))
+    exitmutexes[myId].acquire()                      # global: signal main thread
+
+for i in range(numthreads):
+    thread.start_new_thread(counter, (i, 5, stdoutmutex))
+
+while not all(mutex.locked() for mutex in exitmutexes): time.sleep(0.25)
+print('Main thread exiting.')</pre>
+</div>
+</div>
+<p>When run, the different sleep times per thread make them run
+            more independently:</p><a id="I_programlisting4_d1e16568"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Threads&gt; <strong class="epub__userinput"><code>thread-count-wait3.py</code></strong>
+[4] =&gt; 0
+[3] =&gt; 0
+[2] =&gt; 0
+[4] =&gt; 1
+[1] =&gt; 0
+[3] =&gt; 1
+[4] =&gt; 2
+[2] =&gt; 1
+[3] =&gt; 2
+[4] =&gt; 3
+[4] =&gt; 4
+[0] =&gt; 0
+[1] =&gt; 1
+[2] =&gt; 2
+[3] =&gt; 3
+[3] =&gt; 4
+[2] =&gt; 3
+[1] =&gt; 2
+[2] =&gt; 4
+[0] =&gt; 1
+[1] =&gt; 3
+[1] =&gt; 4
+[0] =&gt; 2
+[0] =&gt; 3
+[0] =&gt; 4
+Main thread exiting.</pre>
+<p>Of course, threads are for much more than counting. We’ll
+            put shared global data to more practical use in Adding a User Interface, where it will serve as
+            completion signals from child processing threads transferring data
+            over a network to a main thread controlling a tkinter GUI display,
+            and again later in Chapter 10’s
+            threadtools and Chapter 14’s
+            PyMailGUI to post results of email operations to a GUI (watch for
+            Preview: GUIs and Threads for more
+            pointers on this topic). Global data shared among threads also
+            turns out to be the basis of queues, which are discussed later in
+            this chapter; each thread gets or puts data using the same shared
+            queue <a id="I_indexterm4_d1e16583"></a><a id="I_indexterm4_d1e16585"></a><a id="I_indexterm4_d1e16588"></a><a id="I_indexterm4_d1e16590"></a><a id="I_indexterm4_d1e16592"></a>object.</p>
+</div>
+</div>
+<div class="epub__sect2" title="The threading Module"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_threading_module"></a>The threading Module</h2>
+</div>
+</div>
+</div>
+<p>The Python <a id="th5.3.2"></a><a id="thread5.3.2"></a>standard library comes with two thread modules:
+          <code class="epub__literal">_thread</code>, the basic lower-level
+          interface illustrated thus far, and <code class="epub__literal">threading</code>, a higher-level interface based
+          on <span>objects</span> and classes. The
+          <code class="epub__literal">threading</code> module internally uses
+          the <code class="epub__literal">_thread</code> module to implement
+          objects that represent threads and common synchronization tools. It
+          is loosely based on a subset of the Java language’s threading model,
+          but it differs in ways that only Java programmers <a id="I_indexterm4_d1e16627"></a>would notice.<sup>[16]</sup> Example 5-11
+          morphs our counting threads example again to demonstrate this new
+          module’s interfaces.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id25"></a>
+<p class="epub__title">Example 5-11. PP4E\System\Threads\thread-classes.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+thread class instances with state and run() for thread's action;
+uses higher-level Java-like threading module object join method (not
+mutexes or shared global vars) to know when threads are done in main
+parent thread; see library manual for more details on threading;
+"""
+
+import threading
+
+class Mythread(threading.Thread):              # subclass Thread object
+    def __init__(self, myId, count, mutex):
+        self.myId  = myId
+        self.count = count                     # per-thread state information
+        self.mutex = mutex                     # shared objects, not globals
+        threading.Thread.__init__(self)
+
+    def run(self):                             # run provides thread logic
+        for i in range(self.count):            # still sync stdout access
+            with self.mutex:
+                print('[%s] =&gt; %s' % (self.myId, i))
+
+stdoutmutex = threading.Lock()                 # same as thread.allocate_lock()
+threads = []
+for i in range(10):
+    thread = Mythread(i, 100, stdoutmutex)     # make/start 10 threads
+    thread.start()                             # starts run method in a thread
+    threads.append(thread)
+
+for thread in threads:
+    thread.join()                              # wait for thread exits
+print('Main thread exiting.')</pre>
+</div>
+</div>
+<p>The output of this script is the same as that shown for its
+          ancestors earlier (again, threads may be randomly distributed in
+          time, depending on your platform):</p><a id="I_programlisting4_d1e16647"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Threads&gt; <strong class="epub__userinput"><code>python thread-classes.py</code></strong>
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more deleted...</span></em>
+[4] =&gt; 98
+[8] =&gt; 97
+[9] =&gt; 97
+[5] =&gt; 98
+[3] =&gt; 99
+[6] =&gt; 98
+[7] =&gt; 98
+[4] =&gt; 99
+[8] =&gt; 98
+[9] =&gt; 98
+[5] =&gt; 99
+[6] =&gt; 99
+[7] =&gt; 99
+[8] =&gt; 99
+[9] =&gt; 99
+Main thread exiting.</pre>
+<p>Using the <code class="epub__literal">threading</code> module
+          this way is largely a matter of specializing classes. Threads in
+          this module are implemented with a <code class="epub__literal">Thread</code> object, a Python class which we may
+          customize per application by providing a <code class="epub__literal">run</code> method that defines the thread’s
+          action. For example, this script subclasses <code class="epub__literal">Thread</code> with its own <code class="epub__literal">Mythread</code> class; the <code class="epub__literal">run</code> method will be executed by the
+          <code class="epub__literal">Thread</code> framework in a new thread
+          when we make a <code class="epub__literal">Mythread</code> and call
+          its <code class="epub__literal">start</code> method.</p>
+<p>In other words, this script simply provides methods expected
+          by the <code class="epub__literal">Thread</code> framework. The
+          advantage of taking this more coding-intensive route is that we get
+          both per-thread state information (the usual instance attribute
+          namespace), and a set of additional thread-related tools from the
+          framework “for free.” The <code class="epub__literal">Thread.join</code> method used near the end of
+          this script, for instance, waits until the thread exits (by
+          default); we can use this method to prevent the main thread from
+          exiting before its children, rather than using the <code class="epub__literal">time.sleep</code> calls and global locks and
+          variables we relied on in earlier threading examples.</p>
+<p>The example script also uses <code class="epub__literal">threading.Lock</code> to synchronize stream
+          access as before (though this name is really just a synonym for
+          <code class="epub__literal">_thread.allocate_lock</code> in the
+          current implementation). The threading module may provide the extra
+          structure of classes, but it doesn’t remove the specter of
+          concurrent updates in the multithreading model in <a id="I_indexterm4_d1e16704"></a>general.</p>
+<div class="epub__sect3" title="Other ways to code threads with threading"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="other_ways_to_code_threads_with_threadin"></a>Other ways to code threads with threading</h3>
+</div>
+</div>
+</div>
+<p>The <code class="epub__literal">Thread</code> class
+            <a id="I_indexterm4_d1e16715"></a>can also be used to start a simple function, or any
+            other type of callable object, without coding subclasses at all—if
+            not redefined, the <code class="epub__literal">Thread</code>
+            class’s default <code class="epub__literal">run</code> method
+            simply calls whatever you pass to its constructor’s <code class="epub__literal">target</code> argument, with any provided
+            arguments passed to <code class="epub__literal">args</code> (which
+            defaults to <code class="epub__literal">()</code> for none). This
+            allows us to use <code class="epub__literal">Thread</code> to run
+            simple functions, too, though this call form is not noticeably
+            simpler than the basic <code class="epub__literal">_thread</code>
+            module. For instance, the following code snippets sketch four
+            different ways to spawn the same sort of thread (see <em class="epub__filename">four-threads*.py</em> in the examples tree;
+            you can run all four in the same script, but would have to also
+            synchronize prints to avoid overlap):</p><a id="I_programlisting4_d1e16746"></a>
+<pre class="epub__programlisting">import threading, _thread
+def action(i):
+    print(i ** 32)
+
+<span class="epub__emphasis"><em># subclass with state</em></span>
+class Mythread(threading.Thread):
+    def __init__(self, i):
+        self.i = i
+        threading.Thread.__init__(self)
+    def run(self):                                        # redefine run for action
+        print(self.i ** 32)
+Mythread(2).start()                                       # start invokes run()
+
+<span class="epub__emphasis"><em># pass action in</em></span>
+thread = threading.Thread(target=(lambda: action(2)))     # run invokes target
+thread.start()
+
+<span class="epub__emphasis"><em># same but no lambda wrapper for state</em></span>
+threading.Thread(target=action, args=(2,)).start()        # callable plus its args
+
+<span class="epub__emphasis"><em># basic thread module</em></span>
+_thread.start_new_thread(action, (2,))                    # all-function interface</pre>
+<p>As a rule of thumb, class-based threads may be better if
+            your threads require per-thread state, or can leverage any of
+            OOP’s many benefits in general. Your thread classes don’t
+            necessarily have to subclass <code class="epub__literal">Thread</code>, though. In fact, just as in the
+            <code class="epub__literal">_thread</code> module, the thread’s
+            target in <code class="epub__literal">threading</code> may be
+            <span class="epub__emphasis"><em>any type of callable object</em></span>. When combined
+            with techniques such as bound methods and nested scope references,
+            the choice between coding techniques becomes even less
+            clear-cut:</p><a id="I_programlisting4_d1e16774"></a>
+<pre class="epub__programlisting"><span class="epub__emphasis"><em># a non-thread class with state, OOP</em></span>
+class Power:
+    def __init__(self, i):
+        self.i = i
+    def action(self):
+        print(self.i ** 32)
+
+obj = Power(2)
+threading.Thread(target=obj.action).start()        # thread runs bound method
+
+<span class="epub__emphasis"><em># nested scope to retain state</em></span>
+def action(i):
+    def power():
+        print(i ** 32)
+    return power
+
+threading.Thread(target=action(2)).start()         # thread runs returned function
+
+<span class="epub__emphasis"><em># both with basic thread module</em></span>
+_thread.start_new_thread(obj.action, ())           # thread runs a callable object
+_thread.start_new_thread(action(2), ())</pre>
+<p>As usual, the threading APIs are as flexible as the Python
+            language itself.</p>
+</div>
+<div class="epub__sect3" title="Synchronizing access to shared objects and names revisited"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="synchronizing_access_to_shared_objec"></a>Synchronizing access to shared objects and names
+            revisited</h3>
+</div>
+</div>
+</div>
+<p>Earlier, we saw <a id="thread5.3.2.2"></a><a id="syn5.3.2.2"></a>how print operations in threads need to be
+            synchronized with locks to avoid overlap, because the output
+            stream is shared by all threads. More formally, threads need to
+            synchronize their changes to any item that may be shared across
+            thread in a process—both objects and namespaces. Depending on a
+            given program’s goals, this might include:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Mutable object in memory (passed or otherwise referenced
+                objects whose lifetimes span threads)</p></li><li class="epub__listitem">
+<p>Names in global scopes (changeable variables outside
+                thread functions and classes)</p></li><li class="epub__listitem">
+<p>The contents of modules (each has just one shared copy
+                in the system’s module table)</p></li></ul>
+</div>
+<p>For instance, even simple global variables can require
+            coordination if concurrent updates are possible, as in Example 5-12.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id26"></a>
+<p class="epub__title">Example 5-12. PP4E\System\Threads\thread-add-random.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"prints different results on different runs on Windows 7"
+
+import threading, time
+count = 0
+
+def adder():
+    global count
+    count = count + 1             # update a shared name in global scope
+    time.sleep(0.5)               # threads share object memory and global names
+    count = count + 1
+
+threads = []
+for i in range(100):
+    thread = threading.Thread(target=adder, args=())
+    thread.start()
+    threads.append(thread)
+
+for thread in threads: thread.join()
+print(count)</pre>
+</div>
+</div>
+<p>Here, 100 threads are spawned to update the same global
+            scope variable twice (with a sleep between updates to better
+            interleave their operations). When run on Windows 7 with Python
+            3.1, different runs produce different results:</p><a id="I_programlisting4_d1e16823"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Threads&gt; <strong class="epub__userinput"><code>thread-add-random.py</code></strong>
+189
+
+C:\...\PP4E\System\Threads&gt; <strong class="epub__userinput"><code>thread-add-random.py</code></strong>
+200
+
+C:\...\PP4E\System\Threads&gt; <strong class="epub__userinput"><code>thread-add-random.py</code></strong>
+194
+
+C:\...\PP4E\System\Threads&gt; <strong class="epub__userinput"><code>thread-add-random.py</code></strong>
+191</pre>
+<p>This happens because threads overlap arbitrarily in time:
+            statements, even the simple assignment statements like those here,
+            are not guaranteed to run to completion by themselves (that is,
+            they are not atomic). As one thread updates the global, it may be
+            using the partial result of another thread’s work in progress. The
+            net effect is this seemingly random behavior. To make this script
+            work correctly, we need to again use thread locks to synchronize
+            the updates—when Example 5-13 is run, it always
+            prints 200 as expected.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id27"></a>
+<p class="epub__title">Example 5-13. PP4E\System\Threads\thread-add-synch.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"prints 200 each time, because shared resource access synchronized"
+
+import threading, time
+count = 0
+
+def adder(addlock):                 # shared lock object passed in
+    global count
+    with addlock:
+        count = count + 1           # auto acquire/release around stmt
+    time.sleep(0.5)
+    with addlock:
+        count = count + 1           # only 1 thread updating at once
+
+addlock = threading.Lock()
+threads = []
+for i in range(100):
+    thread = threading.Thread(target=adder, args=(addlock,))
+    thread.start()
+    threads.append(thread)
+
+for thread in threads: thread.join()
+print(count)</pre>
+</div>
+</div>
+<p>Although some basic operations in the Python language are
+            atomic and need not be synchronized, you’re probably better off
+            doing so for every potential concurrent update. Not only might the
+            set of atomic operations change over time, but the internal
+            implementation of threads in general can as well (and in fact, it
+            may in Python 3.2, as described ahead).</p>
+<p>Of course, this is an artificial example (spawning 100
+            threads to add twice isn’t exactly a real-world use case for
+            threads!), but it illustrates the issues that threads must address
+            for any sort of potentially concurrent updates to shared object or
+            name. Luckily, for many or most realistic applications, the
+            <code class="epub__literal">queue</code> module of the next
+            section can make thread synchronization an automatic artifact of
+            program structure.</p>
+<p>Before we move ahead, I should point out that besides
+            <code class="epub__literal">Thread</code> and <code class="epub__literal">Lock</code>, the <code class="epub__literal">threading</code> module also includes
+            higher-level objects for synchronizing access to shared items
+            (e.g., <code class="epub__literal">Semaphore</code>, <code class="epub__literal">Condition</code>, <code class="epub__literal">Event</code>)—many more, in fact, than we have
+            space to cover here; see the library manual for details. For more
+            examples of threads and forks in general, see the remainder this
+            chapter as well as the examples in the GUI and network scripting
+            parts of this book. We will thread GUIs, for instance, to avoid
+            blocking them, and we will thread and fork network servers to
+            avoid denying service to clients.</p>
+<p>We’ll also explore the threading module’s approach to
+            program exits in the absence of <code class="epub__literal">join</code> calls in conjunction with
+            queues—our next <a id="I_indexterm4_d1e16880"></a><a id="I_indexterm4_d1e16882"></a><a id="I_indexterm4_d1e16884"></a>topic.</p>
+</div>
+</div>
+<div class="epub__sect2" title="The queue Module"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_queue_module"></a>The queue Module</h2>
+</div>
+</div>
+</div>
+<p>You can <a id="th5.3.3"></a><a id="I_indexterm4_d1e16897"></a>synchronize your threads’ access to shared resources
+          with locks, but you often don’t have to. As mentioned, realistically
+          scaled threaded programs are often structured as a set of producer
+          and consumer threads, which communicate by placing data on, and
+          taking it off of, a shared queue. As long as the queue synchronizes
+          access to itself, this automatically synchronizes the threads’
+          interactions.</p>
+<p>The Python <code class="epub__literal">queue</code> module
+          implements this storage device. It provides a standard queue data
+          structure—a first-in first-out (fifo) list of Python objects, in
+          which items are added on one end and removed from the other. Like
+          normal lists, the queues provided by this module may contain any
+          type of Python object, including both simple types (strings, lists,
+          dictionaries, and so on) and more exotic types (class instances,
+          arbitrary callables like functions and bound methods, and
+          more).</p>
+<p>Unlike normal lists, though, the queue object is automatically
+          controlled with thread lock acquire and release operations, such
+          that only one thread can modify the queue at any given point in
+          time. Because of this, programs that use a queue for their
+          cross-thread communication will be thread-safe and can usually avoid
+          dealing with locks of their own for data passed between
+          threads.</p>
+<p>Like the other tools in Python’s threading arsenal, queues are
+          surprisingly simple to use. The script in Example 5-14, for instance, spawns
+          two consumer threads that watch for data to appear on the shared
+          queue and four producer threads that place data on the queue
+          periodically after a sleep interval (each of their sleep durations
+          differs to simulate a real, long-running task). In other words, this
+          program runs 7 threads (including the main one), 6 of which access
+          the shared queue in parallel.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id28"></a>
+<p class="epub__title">Example 5-14. PP4E\System\Threads\queuetest.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"producer and consumer threads communicating with a shared queue"
+
+numconsumers = 2                  # how many consumers to start
+numproducers = 4                  # how many producers to start
+nummessages  = 4                  # messages per producer to put
+
+import _thread as thread, queue, time
+safeprint = thread.allocate_lock()    # else prints may overlap
+dataQueue = queue.Queue()             # shared global, infinite size
+
+def producer(idnum):
+    for msgnum in range(nummessages):
+        time.sleep(idnum)
+        dataQueue.put('[producer id=%d, count=%d]' % (idnum, msgnum))
+
+def consumer(idnum):
+    while True:
+        time.sleep(0.1)
+        try:
+            data = dataQueue.get(block=False)
+        except queue.Empty:
+            pass
+        else:
+            with safeprint:
+                print('consumer', idnum, 'got =&gt;', data)
+
+if __name__ == '__main__':
+    for i in range(numconsumers):
+        thread.start_new_thread(consumer, (i,))
+    for i in range(numproducers):
+        thread.start_new_thread(producer, (i,))
+    time.sleep(((numproducers-1) * nummessages) + 1)
+    print('Main thread exit.')</pre>
+</div>
+</div>
+<p>Before I show you this script’s output, I want to highlight a
+          few points in its code.</p>
+<div class="epub__sect3" title="Arguments versus globals"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="arguments_versus_globals"></a>Arguments versus globals</h3>
+</div>
+</div>
+</div>
+<p>Notice how the queue is <a id="I_indexterm4_d1e16926"></a><a id="I_indexterm4_d1e16931"></a><a id="I_indexterm4_d1e16936"></a><a id="I_indexterm4_d1e16941"></a>assigned to a global variable; because of that, it
+            is shared by all of the spawned threads (all of them run in the
+            same process and in the same global scope). Since these threads
+            change an object instead of a variable name, it would work just as
+            well to pass the queue object in to the threaded functions as an
+            argument—the queue is a shared object in memory, regardless of how
+            it is referenced (see <em class="epub__filename">queuetest2.py</em> in the examples tree
+            for a full version that does this):</p><a id="I_programlisting4_d1e16950"></a>
+<pre class="epub__programlisting">dataQueue = queue.Queue()             # shared object, infinite size
+
+def producer(idnum, dataqueue):
+    for msgnum in range(nummessages):
+        time.sleep(idnum)
+        dataqueue.put('[producer id=%d, count=%d]' % (idnum, msgnum))
+
+def consumer(idnum, dataqueue): ...
+
+if __name__ == '__main__':
+    for i in range(numproducers):
+        thread.start_new_thread(producer, (i, dataQueue))
+    for i in range(numproducers):
+        thread.start_new_thread(producer, (i, dataQueue))</pre>
+</div>
+<div class="epub__sect3" title="Program exit with child threads"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="program_exit_with_child_threads"></a>Program exit with child threads</h3>
+</div>
+</div>
+</div>
+<p>Also notice how this <a id="I_indexterm4_d1e16957"></a><a id="I_indexterm4_d1e16962"></a>script exits when the main thread does, even though
+            consumer threads are still running in their infinite loops. This
+            works fine on Windows (and most other platforms)—with the basic
+            <code class="epub__literal">_thread</code> module, the program
+            ends silently when the main thread does. This is why we’ve had to
+            sleep in some examples to give threads time to do their work, but
+            is also why we do not need to be concerned about exiting while
+            consumer threads are still running here.</p>
+<p>In the alternative <code class="epub__literal">threading</code> module, though, the program
+            will not exit if any spawned threads are running, unless they are
+            set to be <span class="epub__emphasis"><em>daemon</em></span> threads. Specifically, the
+            entire program exits when only daemon threads are left. Threads
+            inherit a default initial daemonic value from the thread that
+            creates them. The initial thread of a Python program is considered
+            not daemonic, though alien threads created outside this module’s
+            control are considered daemonic (including some threads created in
+            C code). To override inherited defaults, a thread object’s
+            <code class="epub__literal">daemon</code> flag can be set
+            manually. In other words, nondaemon threads prevent program exit,
+            and programs by default do not exit until all <code class="epub__literal">threading</code>-managed threads finish.</p>
+<p>This is either a feature or nonfeature, depending on your
+            program—it allows spawned worker threads to finish their tasks in
+            the absence of <code class="epub__literal">join</code> calls or
+            sleeps, but it can prevent programs like the one in Example 5-14 from shutting down
+            when they wish. To make this example work with <code class="epub__literal">threading</code>, use the following alternative
+            code (see <em class="epub__filename">queuetest3.py</em> in the examples tree
+            for a complete version of this, as well as <em class="epub__filename">thread-count-threading.py</em>, also in the
+            tree, for a case where this refusal to exit can come in
+            handy):</p><a id="I_programlisting4_d1e17001"></a>
+<pre class="epub__programlisting">import threading, queue, time
+
+def producer(idnum, dataqueue): ...
+
+def consumer(idnum, dataqueue): ...
+
+if __name__ == '__main__':
+    for i in range(numconsumers):
+        thread = threading.Thread(target=consumer, args=(i, dataQueue))
+        thread.daemon = True  # else cannot exit!
+        thread.start()
+
+    waitfor = []
+    for i in range(numproducers):
+        thread = threading.Thread(target=producer, args=(i, dataQueue))
+        waitfor.append(thread)
+        thread.start()
+
+    for thread in waitfor: thread.join()    # or time.sleep() long enough here
+    print('Main thread exit.')</pre>
+<p>We’ll revisit the daemons and exits issue in Chapter 10 while studying GUIs; as we’ll
+            see, it’s no different in that context, except that the main
+            thread is usually the GUI itself.</p>
+</div>
+<div class="epub__sect3" title="Running the script"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="running_the_script"></a>Running the script</h3>
+</div>
+</div>
+</div>
+<p>Now, as coded in Example 5-14, the <a id="I_indexterm4_d1e17014"></a><a id="I_indexterm4_d1e17019"></a>following is the output of this example when run on
+            my Windows machine. Notice that even though the queue
+            automatically coordinates the communication of data between the
+            threads, this script still must use a lock to manually synchronize
+            access to the standard output stream; queues synchronize data
+            passing, but some programs may still need to use locks for other
+            purposes. As in prior examples, if the <code class="epub__literal">safeprint</code> lock is not used, the printed
+            lines from one consumer may be intermixed with those of another.
+            It is not impossible that a consumer may be paused in the middle
+            of a print operation:</p><a id="I_programlisting4_d1e17028"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Threads&gt; <strong class="epub__userinput"><code>queuetest.py</code></strong>
+consumer 1 got =&gt; [producer id=0, count=0]
+consumer 0 got =&gt; [producer id=0, count=1]
+consumer 1 got =&gt; [producer id=0, count=2]
+consumer 0 got =&gt; [producer id=0, count=3]
+consumer 1 got =&gt; [producer id=1, count=0]
+consumer 1 got =&gt; [producer id=2, count=0]
+consumer 0 got =&gt; [producer id=1, count=1]
+consumer 1 got =&gt; [producer id=3, count=0]
+consumer 0 got =&gt; [producer id=1, count=2]
+consumer 1 got =&gt; [producer id=2, count=1]
+consumer 1 got =&gt; [producer id=1, count=3]
+consumer 1 got =&gt; [producer id=3, count=1]
+consumer 0 got =&gt; [producer id=2, count=2]
+consumer 1 got =&gt; [producer id=2, count=3]
+consumer 1 got =&gt; [producer id=3, count=2]
+consumer 1 got =&gt; [producer id=3, count=3]
+Main thread exit.</pre>
+<p>Try adjusting the parameters at the top of this script to
+            experiment with different scenarios. A single consumer, for
+            instance, would simulate a GUI’s main thread. Here is the output
+            of a single-consumer run—producers still add to the queue in
+            fairly random fashion, because threads run in parallel with each
+            other and with the consumer:</p><a id="I_programlisting4_d1e17035"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Threads&gt; <strong class="epub__userinput"><code>queuetest.py</code></strong>
+consumer 0 got =&gt; [producer id=0, count=0]
+consumer 0 got =&gt; [producer id=0, count=1]
+consumer 0 got =&gt; [producer id=0, count=2]
+consumer 0 got =&gt; [producer id=0, count=3]
+consumer 0 got =&gt; [producer id=1, count=0]
+consumer 0 got =&gt; [producer id=2, count=0]
+consumer 0 got =&gt; [producer id=1, count=1]
+consumer 0 got =&gt; [producer id=3, count=0]
+consumer 0 got =&gt; [producer id=1, count=2]
+consumer 0 got =&gt; [producer id=2, count=1]
+consumer 0 got =&gt; [producer id=1, count=3]
+consumer 0 got =&gt; [producer id=3, count=1]
+consumer 0 got =&gt; [producer id=2, count=2]
+consumer 0 got =&gt; [producer id=2, count=3]
+consumer 0 got =&gt; [producer id=3, count=2]
+consumer 0 got =&gt; [producer id=3, count=3]
+Main thread exit.</pre>
+<p>In addition to the basics used in our script, queues may be
+            fixed or infinite in size, and get and put calls may or may not
+            block; see the Python library manual for more details on queue
+            interface options. Since we just simulated a typical GUI
+            structure, though, let’s explore the notion a bit <a id="I_indexterm4_d1e17042"></a>further.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Preview: GUIs and Threads"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="preview_colon_guis_and_threads"></a>Preview: GUIs and Threads</h2>
+</div>
+</div>
+</div>
+<p>We will return <a id="th5.3.4"></a><a id="gui5.3.4"></a>to threads and queues and see additional thread and
+          queue examples when we study GUIs later in this book. The PyMailGUI
+          example in Chapter 14, for instance,
+          will make extensive use of thread and queue tools introduced here
+          and developed further in Chapter 10,
+          and Chapter 9 will discuss
+          threading in the context of the tkinter GUI toolkit once we’ve had a
+          chance to study it. Although we can’t get into code at this point,
+          threads are usually an integral part of most nontrivial GUIs. In
+          fact, the activity model of many GUIs is a combination of threads, a
+          queue, and a timer-based loop.</p>
+<p>Here’s why. In the context of a GUI, any operation that can
+          block or take a long time to complete must be spawned off to run in
+          parallel so that the GUI (the main thread) remains active and
+          continues responding to its users. Although such tasks can be run as
+          processes, the efficiency and shared-state model of threads make
+          them ideal for this role. Moreover, since most GUI toolkits do not
+          allow multiple threads to update the GUI in parallel, updates are
+          best restricted to the main thread.</p>
+<p>Because only the main thread should generally update the
+          display, GUI programs typically take the form of a main GUI thread
+          and one or more long-running producer threads—one for each
+          long-running task being performed. To synchronize their points of
+          interface, all of the threads share data on a global queue: non-GUI
+          threads post results, and the GUI thread consumes them.</p>
+<p>More specifically:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>The <span class="epub__emphasis"><em>main thread</em></span> handles all GUI
+              updates and runs a timer-based loop that wakes up periodically
+              to check for new data on the queue to be displayed on-screen. In
+              Python’s tkinter toolkit, for instance, the widget <code class="epub__literal">after(</code><em class="epub__replaceable"><code>msecs</code></em><code class="epub__literal">,</code>
+<em class="epub__replaceable"><code>func</code></em><code class="epub__literal">,</code>
+<em class="epub__replaceable"><code>*args</code></em><code class="epub__literal">)</code> method can be used to schedule
+              queue-check events. Because such events are dispatched by the
+              GUI’s event processor, all GUI updates occur only in this main
+              thread (and often must, due to the lack of thread safety in GUI
+              toolkits).</p></li><li class="epub__listitem">
+<p>The <span class="epub__emphasis"><em>child threads</em></span> don’t do anything
+              GUI-related. They just produce data and put it on the queue to
+              be picked up by the main thread. Alternatively, child threads
+              can place a callback function on the queue, to be picked up and
+              run by the main thread. It’s not generally sufficient to simply
+              pass in a GUI update callback function from the main thread to
+              the child thread and run it from there; the function in shared
+              memory will still be executed in the child thread, and
+              potentially in parallel with other threads.</p></li></ul>
+</div>
+<p>Since threads are much more responsive than a timer event loop
+          in the GUI, this scheme both avoids blocking the GUI (producer
+          threads run in parallel with the GUI), and avoids missing incoming
+          events (producer threads run independent of the GUI event loop and
+          as fast as they can). The main GUI thread will display the queued
+          results as quickly as it can, in the context of a slower GUI event
+          loop.</p>
+<p>Also keep in mind that regardless of the thread safety of a
+          GUI toolkit, threaded GUI programs must still adhere to the
+          principles of threaded programs in general—access to shared
+          resources may still need to be synchronized if it falls outside the
+          scope of the producer/consumer shared queue model. If spawned
+          threads might also update another shared state that is used by the
+          main GUI thread, thread locks may also be required to avoid
+          operation overlap. For instance, spawned threads that download and
+          cache email probably cannot overlap with others that use or update
+          the same cache. That is, queues may not be enough; unless you can
+          restrict threads’ work to queuing their results, threaded GUIs still
+          must address concurrent updates.</p>
+<p>We’ll see how the threaded GUI model can be realized in code
+          later in this book. For more on this subject, see especially the
+          discussion of threaded tkinter GUIs in <span>Chapter 9,</span> the thread queue
+          tools implemented in Chapter 10, and
+          the PyMailGUI example in Chapter 14.</p>
+<p>Later in this chapter, we’ll also meet the <code class="epub__literal">multiprocessing</code> module, whose process and
+          queue support offers new options for implementing this GUI model
+          using processes instead of threads; as such, they work around the
+          limitations of the thread GIL, but may incur extra performance
+          overheads that can vary per platform, and may not be directly usable
+          at all in threading contexts (the direct shared and mutable object
+          state of threads is not supported, though messaging is). For now,
+          let’s cover a few final thread fine <a id="I_indexterm4_d1e17123"></a><a id="I_indexterm4_d1e17125"></a>points.</p><div class="epub__sidebar"><a id="thread_timers_versus_gui_timers"></a>
+<p class="epub__title">Thread Timers versus GUI Timers</p>
+<p>Interestingly, the <code class="epub__literal">threading</code> module <a id="I_indexterm4_d1e17136"></a><a id="I_indexterm4_d1e17141"></a>exports a general timer function, which, like the
+            tkinter widget <code class="epub__literal">after</code> method,
+            can be used to run another function after a timer has
+            expired:</p><a id="I_programlisting4_d1e17150"></a>
+<pre class="epub__programlisting">Timer(N.M, somefunc).start()   # after N.M seconds run somefunc</pre>
+<p>Timer <a id="I_indexterm4_d1e17154"></a>objects have a <code class="epub__literal">start()</code> method to set the timer as well
+            as a <code class="epub__literal">cancel()</code> method to cancel
+            the scheduled event, and they implement the wait state in a
+            spawned thread. For example, the following prints a message after
+            5.5 seconds:</p><a id="I_programlisting4_d1e17164"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>import sys</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from threading import Timer</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>t = Timer(5.5, lambda: print('Spam!'))</code></strong>    # spawned thread
+&gt;&gt;&gt; <strong class="epub__userinput"><code>t.start()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>Spam!</code></strong></pre>
+<p>This may be useful in a variety of contexts, but it doesn’t
+            quite apply to GUIs: because the time-delayed function call is run
+            in a spawned thread, not in the main GUI thread, it should not
+            generally perform GUI updates. Because the tkinter <code class="epub__literal">after</code> method is run from the main
+            thread’s event processing loop instead, it runs in the main GUI
+            thread and can freely update the GUI.</p>
+<p>As a preview, for instance, the following displays a pop-up
+            message window in 5.5 seconds in the main thread of a tkinter GUI
+            (you might also have to run <code class="epub__literal">win.mainloop()</code> in some
+            interfaces):</p><a id="I_programlisting4_d1e17190"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from tkinter import Tk</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from tkinter.messagebox import showinfo</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>win = Tk()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>win.after(5500, lambda: showinfo('Popup', 'Spam!'))</code></strong></pre>
+<p>The last call here schedules the function to be run once in
+            the main GUI thread, but it does not pause the caller during the
+            wait, and so does not block the GUI. It’s equivalent to this
+            simpler form:</p><a id="I_programlisting4_d1e17205"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>win.after(5500, showinfo, 'Popup', 'Spam')</code></strong></pre>
+<p>Stay tuned for much more on tkinter in the next part of this
+            book, and watch for the full story on its <code class="epub__literal">after</code> timer events in Chapter 9 and the roles of threads
+            in GUIs in Chapter 10.</p>
+</div>
+</div>
+<div class="epub__sect2" title="More on the Global Interpreter Lock"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="more_on_the_global_interpreter_lock"></a>More on the Global Interpreter Lock</h2>
+</div>
+</div>
+</div>
+<p>Although it’s a <a id="th5.3.5"></a><a id="gil5.3.5"></a>lower-level topic than you generally need to do useful
+          thread work in Python, the implementation of Python’s threads can
+          have impacts on both performance and coding. This section summarizes
+          implementation details and <a id="I_indexterm4_d1e17235"></a>some of their <span>ramifications</span>.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p><span class="epub__emphasis"><em>Threads implementation in the upcoming Python
+            3.2</em></span>: This section describes the current implementation
+            of threads up to and including Python 3.1. At this writing, Python
+            3.2 is still in development, but one of its likely enhancements is
+            a new version of the GIL that provides better performance,
+            especially on some multicore CPUs. The new GIL implementation will
+            still synchronize access to the PVM (Python language code is still
+            multiplexed as before), but it will use a context switching scheme
+            that is more efficient than the current N-bytecode-instruction
+            approach.</p>
+<p>Among other things, the current <code class="epub__literal">sys.setcheckinterval</code> call will likely be
+            replaced with a timer duration call in the new scheme.
+            Specifically, the concept of a check interval for thread switches
+            will be abandoned and replaced by an absolute time duration
+            expressed in seconds. It’s anticipated that this duration will
+            default to 5 milliseconds, but it will be tunable through <code class="epub__literal">sys.setswitchinterval</code>.</p>
+<p>Moreover, there have been a variety of plans made to remove
+            the GIL altogether (including goals of the Unladen Swallow project
+            being conducted by Google employees), though none have managed to
+            produce any fruit thus far. Since I cannot predict the future,
+            please see Python release documents to follow this (well…)
+            thread.</p>
+</div>
+<p>Strictly speaking, Python currently uses the <span class="epub__emphasis"><em>global
+          interpreter lock</em></span> (GIL) mechanism introduced at the start
+          of this section, which guarantees that one thread, at most, is
+          running code within the Python interpreter at any given point in
+          time. In addition, to make sure that each thread gets a chance to
+          run, the interpreter automatically switches its attention between
+          threads at regular intervals (in Python 3.1, by releasing and
+          acquiring the lock after a number of bytecode instructions) as well
+          as at the start of long-running operations (e.g., on some file
+          input/output requests).</p>
+<p>This scheme avoids problems that could arise if multiple
+          threads were to update Python system data at the same time. For
+          instance, if two threads were allowed to simultaneously change an
+          object’s reference count, the result might be unpredictable. This
+          scheme can also have subtle consequences. In this chapter’s
+          threading examples, for instance, the <code class="epub__literal">stdout</code> stream can be corrupted unless each
+          thread’s call to write text is synchronized with thread
+          locks.</p>
+<p>Moreover, even though the GIL prevents more than one Python
+          thread from running at the same time, it is not enough to ensure
+          thread safety in general, and it does not address higher-level
+          synchronization issues at all. For example, as we saw, when more
+          than one thread might attempt to <span class="epub__emphasis"><em>update</em></span> the
+          same variable at the same time, the threads should generally be
+          given exclusive access to the object with locks. Otherwise, it’s not
+          impossible that thread switches will occur in the middle of an
+          update statement’s <span>bytecode</span>.</p>
+<p>Locks are not strictly required for all shared object access,
+          especially if a single thread updates an object inspected by other
+          threads. As a rule of thumb, though, you should generally use locks
+          to synchronize threads whenever update rendezvous are possible
+          instead of relying on artifacts of the current thread <a id="I_indexterm4_d1e17279"></a>implementation.</p>
+<div class="epub__sect3" title="The thread switch interval"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="the_thread_switch_interval"></a>The thread switch interval</h3>
+</div>
+</div>
+</div>
+<p>Some concurrent <a id="I_indexterm4_d1e17287"></a>updates might work without locks if the
+            thread-switch interval is set high enough to allow each thread to
+            finish without being swapped out. The <code class="epub__literal">sys.</code><code class="epub__literal">set</code><code class="epub__literal">check</code><code class="epub__literal">interval(N)</code> call sets the frequency
+            with which the interpreter checks for things like thread switches
+            and signal handlers.</p>
+<p>This interval defines the number of bytecode instructions
+            before a switch. It does not need to be reset for most programs,
+            but it can be used to tune thread performance. Setting higher
+            values means switches happen less often: threads incur less
+            overhead but they are less responsive to events. Setting lower
+            values makes threads more responsive to events but increases
+            thread switch overhead.</p>
+</div>
+<div class="epub__sect3" title="Atomic operations"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="atomic_operations"></a>Atomic operations</h3>
+</div>
+</div>
+</div>
+<p>Because of the way <a id="I_indexterm4_d1e17309"></a>Python uses the GIL to synchronize threads’ access
+            to the virtual machine, whole statements are not generally
+            thread-safe, but each bytecode instruction is. Because of this
+            bytecode indivisibility, some Python language operations are
+            thread-safe—also called <span class="epub__emphasis"><em>atomic</em></span>, because they
+            run without interruption—and do not require the use of locks or
+            queues to avoid concurrent update issues. For instance, as of this
+            writing, <code class="epub__literal">list.append</code>, fetches
+            and some assignments for variables, list items, dictionary keys,
+            and object attributes, and other operations were still atomic in
+            standard C Python; others, such as <code class="epub__literal">x =
+            x+1</code> (and any operation in general that reads data,
+            modifies it, and writes it back) were not.</p>
+<p>As mentioned earlier, though, relying on these rules is a
+            bit of a gamble, because they require a deep understanding of
+            Python internals and may vary per release. Indeed, the set of
+            atomic operations may be radically changed if a new free-threaded
+            implementation ever appears. As a rule of thumb, it may be easier
+            to use locks for all access to global and shared objects than to
+            try to remember which types of access may or may not be safe
+            across multiple threads.</p>
+</div>
+<div class="epub__sect3" title="C API thread considerations"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="c_api_thread_considerations"></a>C API thread considerations</h3>
+</div>
+</div>
+</div>
+<p>Finally, if you <a id="I_indexterm4_d1e17331"></a>plan to mix Python with C, also see the thread
+            interfaces described in the Python/C API standard<a id="I_indexterm4_d1e17337"></a> manual. In threaded programs, C extensions must
+            release and reacquire the GIL around long-running operations to
+            let the Python language portions of other Python threads run
+            during the wait. Specifically, the long-running C extension
+            function should release the lock on entry and reacquire it on exit
+            when resuming Python code.</p>
+<p>Also note that even though the Python code in Python threads
+            cannot truly overlap in time due to the GIL synchronization, the
+            C-coded portions of threads can. Any number may be running in
+            parallel, as long as they do work outside the scope of the Python
+            virtual machine. In fact, C threads may overlap both with other C
+            threads and with Python language threads run in the virtual
+            machine. Because of this, splitting code off to C libraries is one
+            way that Python applications can still take advantage of multi-CPU
+            machines.</p>
+<p>Still, it may often be easier to leverage such machines by
+            simply writing Python programs that fork processes instead of
+            starting threads. The complexity of process and thread code is
+            similar. For more on C extensions and their threading
+            requirements, see Chapter 20.
+            In short, Python includes C language tools (including a pair of
+            GIL management macros) that can be used to wrap long-running
+            operations in C-coded extensions and that allow other Python
+            language threads to run in parallel.</p>
+</div>
+<div class="epub__sect3" title="A process-based alternative: multiprocessing (ahead)"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="a_process-based_alternative_colon_multip"></a>A process-based alternative: multiprocessing
+            (ahead)</h3>
+</div>
+</div>
+</div>
+<p>By now, you <a id="I_indexterm4_d1e17354"></a>should have a basic grasp of parallel processes and
+            threads, and Python’s tools that support them. Later in this
+            chapter, we’ll revisit both ideas to study the <code class="epub__literal">multiprocessing</code> <a id="I_indexterm4_d1e17363"></a>module—a standard library tool that seeks to combine
+            the simplicity and portability of threads with the benefits of
+            processes, by implementing a <span>threading</span>-like API that runs
+            processes instead of threads. It seeks to address the portability
+            issue of processes, as well as the multiple-CPU limitations
+            imposed in threads by the GIL, but it cannot be used as a
+            replacement for forking in some contexts, and it imposes some
+            constraints that threads do not, which stem from its process-based
+            model (for instance, mutable object state is not directly shared
+            because objects are copied across process boundaries, and
+            unpickleable objects such as bound methods cannot be as freely
+            used).</p>
+<p>Because the <code class="epub__literal">multiprocessing</code> module also implements
+            tools to simplify tasks such as inter-process communication and
+            exit status, though, let’s first get a handle on Python’s support
+            in those domains as well, and explore some more process and thread
+            examples along the <a id="I_indexterm4_d1e17377"></a><a id="I_indexterm4_d1e17379"></a>way.</p>
+</div>
+</div><div class="epub__footnotes"><br/><hr/><div class="epub__footnote">
+<p><sup>[14] </sup>The <code class="epub__literal">_thread</code> examples
+                in this book now all use <code class="epub__literal">start_new_thread</code>. This call is also
+                available as <code class="epub__literal">thread.start_new</code> for historical
+                reasons, but this synonym may be removed in a future Python
+                release. As of Python 3.1, both names are still available, but
+                the <code class="epub__literal">help</code> documentation for
+                <code class="epub__literal">start_new</code> claims that it is
+                obsolete; in other words, you should probably prefer the other
+                if you care about the future (and this book must!).</p>
+</div><div class="epub__footnote">
+<p><sup>[15] </sup>They cannot, however, be used to directly synchronize
+                <span class="epub__emphasis"><em>processes</em></span>. Since processes are more
+                independent, they usually require locking mechanisms that are
+                more long-lived and external to programs. Chapter 4’s <code class="epub__literal">os.open</code> call with an open flag of
+                <code class="epub__literal">O_EXCL</code> allows scripts to
+                lock and unlock files and so is ideal as a cross-process
+                locking tool. See also the synchronization tools in the
+                <code class="epub__literal">multiprocessing</code> and
+                <code class="epub__literal">threading</code> modules and the
+                IPC section later in this chapter for other general
+                synchronization ideas.</p>
+</div><div class="epub__footnote">
+<p><sup>[16] </sup>But in case this means you, Python’s lock and condition
+              variables are distinct objects, not something inherent in all
+              objects, and Python’s <code class="epub__literal">Thread</code>
+              class doesn’t have all the features of Java’s. See Python’s
+              library manual for further details.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

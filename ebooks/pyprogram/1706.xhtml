@@ -1,0 +1,1410 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>SQL Database Interfaces</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="SQL Database Interfaces"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="sql_database_interfaces"></a>SQL Database Interfaces</h1>
+</div>
+</div>
+</div>
+<p>The <code class="epub__literal">shelve</code> <a id="sql17.7"></a><a id="per17.7"></a>module and ZODB package of the prior sections are
+        powerful tools. Both allow scripts to throw nearly arbitrary Python
+        objects on a keyed-access file and load them back later—in a single
+        step for shelves and with a small amount of administrative code for
+        ZODB. Especially for applications that record highly structured data,
+        object databases can be convenient and efficient—there is no need to
+        split and later join together the parts of large objects, and stored
+        data is processed with normal Python syntax because it is normal
+        Python objects.</p>
+<p>Shelves and ZODB aren’t relational database systems, though;
+        objects (records) are accessed with a single key, and there is no
+        notion of SQL queries. Shelves, for instance, are essentially
+        databases with a single index and no other query-processing support.
+        Although it’s possible to build a multiple-index interface to store
+        data with multiple shelves, it’s not a trivial task and requires
+        manually coded extensions.</p>
+<p>ZODB supports some types of searching beyond shelve (e.g., its
+        cataloging feature), and persistent objects may be traversed with all
+        the power of the Python language. However, neither shelves nor ZODB
+        object-oriented databases provide the full generality of SQL queries.
+        Moreover, especially for data that has a naturally tabular structure,
+        relational databases may sometimes be a better fit.</p>
+<p>For programs that can benefit from the power of SQL, Python also
+        broadly supports relational database management systems (RDBMSs).
+        Relational databases are not necessarily mutually exclusive with the
+        object persistence topics we studied earlier in this chapter—it is
+        possible, for example, to store the serialized string representation
+        of a Python object produced by pickling in a relational database. ZODB
+        also supports the notion of mapping an object database to a relational
+        storage medium.</p>
+<p>The databases we’ll meet in this section, though, are structured
+        and processed in very different ways:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>They store data in related tables of columns (rather than in
+            persistent dictionaries of arbitrarily structured persistent
+            Python objects).</p></li><li class="epub__listitem">
+<p>They support the SQL query language for accessing data and
+            exploiting relationships among it (instead of Python object
+            traversals).</p></li></ul>
+</div>
+<p>For some applications, the end result can be a potent
+        combination. Moreover, some SQL-based database systems provide
+        industrial-strength persistence support for <span>enterprise</span>-level data.</p>
+<p>Today, there are freely available interfaces that let Python
+        scripts utilize all common relational database systems, both free and
+        commercial<a id="I_indexterm1_d1e75736"></a><a id="I_indexterm1_d1e75741"></a>: MySQL, Oracle, Sybase, Informix, InterBase, PostgreSQL
+        (Postgres), SQLite, ODBC, and more. In addition, the Python community
+        has defined a <span class="epub__emphasis"><em>database API</em></span> specification that
+        works portably with a variety of underlying database packages. Scripts
+        written for this API can be migrated to different database vendor
+        packages, with minimal or no source code changes.</p>
+<p>As of Python 2.5, Python itself includes built-in support for
+        the SQLite relational database system as part of its standard library.
+        Because this system supports the portable database API, it serves as a
+        tool for both program storage and prototyping—systems developed with
+        SQLite work largely unchanged when a more feature-rich database such
+        as MySQL or Oracle is deployed.</p>
+<p>Moreover, the popular<a id="I_indexterm1_d1e75754"></a><a id="I_indexterm1_d1e75757"></a> SQLObject and SQLAlchemy third-party systems both
+        provide an Object Relational Mapper (ORM), which grafts an object
+        interface onto your database, in which tables are modeled by as Python
+        classes, rows by instances of those classes, and columns by instance
+        attributes. Since ORMs largely just wrap SQL databases in Python
+        classes, we’ll defer their coverage until later in this chapter; for
+        now, let’s explore SQL basics in <a id="I_indexterm1_d1e75761"></a>Python.</p>
+<div class="epub__sect2" title="SQL Interface Overview"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="sql_interface_overview"></a>SQL Interface Overview</h2>
+</div>
+</div>
+</div>
+<p>Like ZODB, and <a id="sql17.7.1"></a>unlike the <code class="epub__literal">pickle</code>
+          and <code class="epub__literal">shelve</code> persistence modules
+          presented earlier, most SQL databases are optional extensions that
+          are not part of Python itself. SQLite is the only relational
+          database package that comes with Python. Moreover, you need to know
+          SQL to fully understand their interfaces. Because we don’t have
+          space to teach SQL in this text, this section gives a brief overview
+          of the API; please consult other SQL references and the database API
+          resources mentioned in the next section for more details that we’ll
+          skip here.</p>
+<p>The good news is that you can access SQL databases from
+          Python, through a straightforward and portable model. The Python
+          database API specification defines an interface for communicating
+          with underlying database systems from Python scripts.
+          Vendor-specific database interfaces for Python may or may not
+          conform to this API completely, but all database extensions for
+          Python in common use are minor variations on a theme. Under the
+          database API, SQL databases in Python are grounded on three core
+          <span>concepts</span>:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Connection objects</em></span></span></dt><dd>
+<p>Represent a connection to a database, are the interface
+                to rollback and commit operations, provide package
+                implementation details, and generate cursor objects.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Cursor objects</em></span></span></dt><dd>
+<p>Represent an SQL statement submitted as a string and can
+                be used to access and step through SQL statement
+                results.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Query results of SQL</em></span> <code class="epub__literal">select</code>
+<span class="epub__emphasis"><em>statements</em></span></span></dt><dd>
+<p>Are returned to scripts as Python sequences of sequences
+                (e.g., a list of tuples), representing database tables of
+                rows. Within these row sequences, column field values are
+                normal Python objects such as strings, integers, and floats
+                (e.g., <code class="epub__literal">[('bob',48),
+                ('emily',47)]</code>). Column values may also be special
+                types that encapsulate things such as date and time, and
+                database NULL values are returned as the Python <code class="epub__literal">None</code> object.</p></dd></dl>
+</div>
+<p>Beyond this, the API defines a standard set of database
+          exception types, special database type object constructors, and
+          informational top-level calls including thread safety and
+          replacement style checks.</p>
+<p>For instance, to establish a database connection under the
+          Python API-compliant Oracle interface, install the commonly used
+          Python Oracle extension module as well as Oracle itself, and then
+          run a statement of this form:</p><a id="I_programlisting1_d1e75825"></a>
+<pre class="epub__programlisting">connobj = connect("user/password@system")</pre>
+<p>This call’s arguments may vary per database and vendor (e.g.,
+          some may require network details or a local file’s name), but they
+          generally contain what you provide to log in to your database
+          system. Once you have a connection object, there a variety of things
+          you can do with it, including:</p><a id="I_programlisting1_d1e75829"></a>
+<pre class="epub__programlisting">connobj.close()                       <em class="epub__lineannotation"><span class="epub__lineannotation">close connection now (not at object __del__ time)</span></em>
+connobj.commit()                      <em class="epub__lineannotation"><span class="epub__lineannotation">commit any pending transactions to the database</span></em>
+connobj.rollback()                    <em class="epub__lineannotation"><span class="epub__lineannotation">roll database back to start of pending transactions</span></em></pre>
+<p>But one of the most useful things to do with a connection
+          object is to generate a cursor object:</p><a id="I_programlisting1_d1e75841"></a>
+<pre class="epub__programlisting">cursobj = connobj.cursor()            <em class="epub__lineannotation"><span class="epub__lineannotation">return a new cursor object for running SQL</span></em></pre>
+<p>Cursor objects have a set of methods, too (e.g., <code class="epub__literal">close</code> to close the cursor before its
+          destructor runs, and <code class="epub__literal">callproc</code> to
+          call a stored procedure), but the most important may be this
+          one:</p><a id="I_programlisting1_d1e75854"></a>
+<pre class="epub__programlisting">cursobj.execute(<em class="epub__replaceable"><code>sqlstring</code></em> [, <em class="epub__replaceable"><code>parameters</code></em>])   <em class="epub__lineannotation"><span class="epub__lineannotation">run SQL query or command string</span></em></pre>
+<p>Parameters are passed in as a sequence or mapping of values,
+          and are substituted into the SQL statement string according to the
+          interface module’s replacement target conventions. The <code class="epub__literal">execute</code> method can be used to run a
+          variety of SQL statement strings:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>DDL definition statements (e.g., <code class="epub__literal">CREATE TABLE</code>)</p></li><li class="epub__listitem">
+<p>DML modification statements (e.g., <code class="epub__literal">UPDATE</code> or <code class="epub__literal">INSERT</code>)</p></li><li class="epub__listitem">
+<p>DQL query statements (e.g., <code class="epub__literal">SELECT</code>)</p></li></ul>
+</div>
+<p>After running an SQL statement, the cursor’s <code class="epub__literal">rowcount</code> attribute gives the number of
+          rows changed (for DML changes) or fetched (for DQL queries), and the
+          cursor’s <code class="epub__literal">description</code> attribute
+          gives column names and types after a query; <code class="epub__literal">execute</code> also returns the number of rows
+          affected or fetched in the most vendor interfaces. For DQL query
+          statements, you must call one of the <code class="epub__literal">fetch</code> methods to complete the
+          operation:</p><a id="I_programlisting1_d1e75905"></a>
+<pre class="epub__programlisting">tuple       = cursobj.fetchone()          <em class="epub__lineannotation"><span class="epub__lineannotation">fetch next row of a query result</span></em>
+listoftuple = cursobj.fetchmany([<em class="epub__replaceable"><code>size</code></em>])   <em class="epub__lineannotation"><span class="epub__lineannotation">fetch next set of rows of query result</span></em>
+listoftuple = cursobj.fetchall()          <em class="epub__lineannotation"><span class="epub__lineannotation">fetch all remaining rows of the result</span></em></pre>
+<p>And once you’ve received fetch method results, table
+          information is processed using normal Python sequence operations;
+          for example, you can step through the tuples in a <code class="epub__literal">fetchall</code> result list with a simple
+          <code class="epub__literal">for</code> loop or comprehension
+          expression. Most Python database interfaces also allow you to
+          provide values to be passed to SQL statement strings, by providing
+          targets and a tuple of parameters. For instance:</p><a id="I_programlisting1_d1e75926"></a>
+<pre class="epub__programlisting">query = 'SELECT name, shoesize FROM spam WHERE job = ? AND age = ?'
+cursobj.execute(query, (value1, value2))
+results = cursobj.fetchall()
+for row in results: <em class="epub__replaceable"><code>...</code></em></pre>
+<p>In this event, the database interface utilizes prepared
+          statements (an optimization and convenience) and correctly passes
+          the parameters to the database regardless of their Python types. The
+          notation used to code targets in the query string may vary in some
+          database interfaces (e.g., <code class="epub__literal">:p1</code>
+          and <code class="epub__literal">:p2</code> or two <code class="epub__literal">%s</code>, rather than the two <code class="epub__literal">?</code>s used by the Oracle interface); in any
+          event, this is not the same as Python’s <code class="epub__literal">%</code> string formatting operator, as it
+          sidesteps security issues along the way.</p>
+<p>Finally, if your database supports stored procedures, you can
+          call them with the <code class="epub__literal">callproc</code>
+          method or by passing an SQL <code class="epub__literal">CALL</code>
+          or <code class="epub__literal">EXEC</code> statement string to the
+          <code class="epub__literal">execute</code> method. <code class="epub__literal">callproc</code> may generate a result table
+          retrieved with a <code class="epub__literal">fetch</code> variant,
+          and returns a modified copy of the input sequence—input parameters
+          are left untouched, and output and input/output parameters are
+          replaced with possibly new values. Additional API features,
+          including support for database blobs (roughly, with sized results),
+          is described in the API’s documentation. For now, let’s move on to
+          do some real SQL processing in <a id="I_indexterm1_d1e75968"></a>Python.</p>
+</div>
+<div class="epub__sect2" title="An SQL Database API Tutorial with SQLite"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="an_sql_database_api_tutorial_with_sqlite"></a>An SQL Database API Tutorial with SQLite</h2>
+</div>
+</div>
+</div>
+<p>We don’t have <a id="sql17.7.2"></a><a id="I_indexterm1_d1e75981"></a>space to provide an exhaustive reference for the
+          database API in this book. To sample the flavor of the interface,
+          though, let’s step through a few simple examples. We’ll use the
+          SQLite database system for this tutorial. SQLite is a standard part
+          of Python itself, which you can reasonably expect to be available in
+          all Python installations. Although SQLite implements a complete
+          relational database system, it takes the form of an in-process
+          library instead of a server. This generally makes it better suited
+          for program storage than for enterprise-level data needs.</p>
+<p>Thanks to Python’s portable database API, though, other
+          popular database packages such as PostgreSQL, MySQL, and Oracle are
+          used almost identically; the initial call to log in to the database
+          will be all that normally requires different argument values for
+          scripts that use standard SQL code. Because of this, we can use the
+          SQLite system both as a prototyping tool in applications development
+          and as an easy way to get started with the Python SQL database API
+          in this book.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p>As mentioned earlier, the third edition’s coverage of MySQL
+            had to be replaced here because the interface used is not yet
+            ported to Python 3.X. However, the third edition’s MySQL-based
+            examples and overview are available in the book examples package,
+            in directory <em class="epub__filename">C:\...\PP4E\Dbase\Sql\MySql-2.X</em>, and
+            its <em class="epub__filename">Documentation</em>
+            subdirectory. The examples are in Python 2.X form, but their
+            database-related code is largely version neutral. Since that code
+            is also largely database neutral, it is probably of limited value
+            to most readers; the scripts listed in this book should work on
+            other database packages like MySQL with only trivial
+            changes.</p>
+</div>
+<div class="epub__sect3" title="Getting started"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="getting_started-id1"></a>Getting started</h3>
+</div>
+</div>
+</div>
+<p>Regardless of which <a id="I_indexterm1_d1e76003"></a>database system your scripts talk to, the basic SQL
+            interface in Python is very simple. In fact, it’s hardly
+            object-oriented at all—queries and other database commands are
+            sent as strings of SQL. If you know SQL, you already have most of
+            what you need to use relational databases in Python. That’s good
+            news if you fall into this category, but adds a prerequisite if
+            you don’t.</p>
+<p>This isn’t a book on the SQL language, so we’ll defer to
+            other resources for details on the commands we’ll be running here
+            (O’Reilly has a suite of books on the topic). In fact, the
+            databases we’ll use are tiny, and the commands we’ll use are
+            deliberately simple as SQL goes—you’ll want to extrapolate from
+            what you see here to the more realistic tasks you face. This
+            section is just a brief look at how to use the Python language in
+            conjunction with an SQL database.</p>
+<p>Whether large or small, though, the Python code needed to
+            process your database turns out to be surprisingly
+            straightforward. To get started, the first thing we need to do is
+            open a connection to the database and create a table for storing
+            records:</p><a id="I_programlisting1_d1e76013"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import sqlite3</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn = sqlite3.connect('dbase1')</code></strong>     # use a full path for files elsewhere</pre>
+<p>We start out by importing the Python SQLite interface
+            here—it’s a standard library module called <code class="epub__literal">sqlite3</code> to our scripts. Next we create a
+            connection object, passing in the items our database requires at
+            start-up time—here, the name of the local file where our databases
+            will be stored. This file is what you’ll want to back up to save
+            your database. It will create the file if needed, or open its
+            current content; SQLite also accepts that special string
+            “:memory:” to create a temporary database in memory
+            instead.</p>
+<p>As long as a script sticks to using standard SQL code, the
+            <code class="epub__literal">connect</code> call’s arguments are
+            usually the only thing that can vary across different database
+            systems. For example, in the MySQL interface this call accepts a
+            network host’s domain name, user name, and password, passed as
+            keyword arguments instead, and the Oracle example sketched earlier
+            expects a more specific sting syntax. Once we’ve gotten past this
+            platform-<span>specific</span> call,
+            though, the rest of the API is largely database neutral.</p>
+</div>
+<div class="epub__sect3" title="Making databases and tables"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="making_databases_and_tables"></a>Making databases and tables</h3>
+</div>
+</div>
+</div>
+<p>Next, let’s make a <a id="I_indexterm1_d1e76042"></a><a id="I_indexterm1_d1e76047"></a><a id="I_indexterm1_d1e76052"></a>cursor for submitting SQL statements to the database
+            server, and submit one to create a first table:</p><a id="I_programlisting1_d1e76058"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs = conn.cursor()</code></strong>
+&gt;&gt;&gt;&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>tblcmd = 'create table people (name char(30), job char(10), pay int(4))'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute(tblcmd)</code></strong></pre>
+<p>The last command here creates the table called “people”
+            within the database; the name, job, and pay information specifies
+            the columns in this table, as well as their datatypes, using a
+            “type(size)” syntax—two strings and an integer. Datatypes can be
+            more sophisticated than ours, but we’ll ignore such details here
+            (see SQL references). In SQLite, the file is the database, so
+            there’s no notion of creating or using a specific database within
+            it, as there is in some systems. At this point, there is a simple
+            flat file in the current working directory named <em class="epub__filename">data1</em>, which contains binary data and
+            contains our <code class="epub__literal">people</code> database
+            table.</p>
+</div>
+<div class="epub__sect3" title="Adding records"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="adding_records"></a>Adding records</h3>
+</div>
+</div>
+</div>
+<p>So far, we’ve <a id="I_indexterm1_d1e76081"></a><a id="I_indexterm1_d1e76086"></a>logged in (which just means opening a local file in
+            SQLite) and created a table. Next let’s start a new Python session
+            and create some records. There are three basic statement-based
+            approaches we can use here: inserting one row at a time or
+            inserting multiple rows with a single call statement or a Python
+            loop. Here is the simple case (I’m omitting some call return
+            values here if they are irrelevant to the story):</p><a id="I_programlisting1_d1e76092"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import sqlite3</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn = sqlite3.connect('dbase1')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs = conn.cursor()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('insert into people values (?, ?, ?)', ('Bob', 'dev', 5000))</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.rowcount</code></strong>
+1
+&gt;&gt;&gt; <strong class="epub__userinput"><code>sqlite3.paramstyle</code></strong>
+'qmark'</pre>
+<p>Create a cursor object to submit SQL statements to the
+            database server as before. The SQL <code class="epub__literal">insert</code> <a id="I_indexterm1_d1e76121"></a>command adds a single row to the table. After an
+            execute call, the cursor’s <code class="epub__literal">rowcount</code> attribute gives the number of
+            rows produced or affected by the last statement run. This is also
+            available as the return value of an <code class="epub__literal">execute</code> call in some database interface
+            modules, but this is not defined in the database API
+            specification, and isn’t <span>provided</span> in SQLite; in other words,
+            don’t depend on it if you want your database scripts to work on
+            other database systems.</p>
+<p>Parameters to substitute into the SQL statement string are
+            generally passed in as a sequence (e.g., list or tuple). Notice
+            the module’s <code class="epub__literal">paramstyle</code>—this
+            tells us what style it uses for substitution targets in the
+            statement string. Here, <code class="epub__literal">qmark</code>
+            means this module accepts <code class="epub__literal">?</code> for
+            replacement targets. Other database modules might use styles such
+            as <code class="epub__literal">format</code> (meaning a <code class="epub__literal">%s</code> target), or numeric indexes or
+            mapping keys; see the DB API for more details.</p>
+<p>To insert multiple rows with a single statement, use the
+            <code class="epub__literal">executemany</code> method and a
+            sequence of row sequences (e.g., a list of lists). This call is
+            like calling <code class="epub__literal">execute</code> once for
+            each row sequence in the argument, and in fact may be implemented
+            as such; database interfaces may also use database-specific
+            techniques to make this run quicker, though:</p><a id="I_programlisting1_d1e76159"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.executemany('insert into people values (?, ?, ?)',</code></strong>
+...          <strong class="epub__userinput"><code>[ ('Sue', 'mus', '70000'),</code></strong>
+...            <strong class="epub__userinput"><code>('Ann', 'mus', '60000')])</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.rowcount</code></strong>
+2</pre>
+<p>We inserted two rows at once in the last statement. It’s
+            hardly any more work to achieve the same result by inserting one
+            row at a time with a Python loop:</p><a id="I_programlisting1_d1e76175"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>rows = [['Tom', 'mgr', 100000],</code></strong>
+...         <strong class="epub__userinput"><code>['Kim', 'adm', 30000],</code></strong>
+...         <strong class="epub__userinput"><code>['pat', 'dev', 90000]]</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for row in rows:</code></strong>
+...     <strong class="epub__userinput"><code>curs.execute('insert into people values (? , ?, ?)', row)</code></strong>
+...
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn.commit()</code></strong></pre>
+<p>Blending Python and SQL like this starts to open up all
+            sorts of interesting possibilities. Notice the last command; we
+            always need to call the connection’s <code class="epub__literal">commit</code> method to write our changes out
+            to the database. Otherwise, when the connection is closed, our
+            changes may be lost. In fact, until we call the <code class="epub__literal">commit</code> method, none of our inserts may
+            be visible from other database connections.</p>
+<p>Technically, the API suggests that a connection object
+            should automatically call its <code class="epub__literal">rollback</code> method to back out changes that
+            have not yet been committed, when it is closed (which happens
+            manually when its <code class="epub__literal">close</code> method
+            is called, or automatically when the connection object is about to
+            be garbage collected). For database systems that don’t support
+            transaction commit and rollback operations, these calls may do
+            nothing. SQLite implements both the <code class="epub__literal">commit</code> and <code class="epub__literal">rollback</code> methods; the latter rolls back
+            any changes made since the last <code class="epub__literal">commit</code>.</p>
+</div>
+<div class="epub__sect3" title="Running queries"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="running_queries"></a>Running queries</h3>
+</div>
+</div>
+</div>
+<p>OK, we’ve now <a id="sql17.7.2.4"></a><a id="qu17.7.2.4"></a>added six records to our database table. Let’s run
+            an SQL query to see how we did:</p><a id="I_programlisting1_d1e76236"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchall()</code></strong>
+[('Bob', 'dev', 5000), ('Sue', 'mus', 70000), ('Ann', 'mus', 60000), ('Tom', 'mgr',
+100000), ('Kim', 'adm', 30000), ('pat', 'dev', 90000)]</pre>
+<p>Run an SQL <code class="epub__literal">select</code>
+            statement with a cursor object to grab all rows and call the
+            cursor’s <code class="epub__literal">fetchall</code> to retrieve
+            them. They come back to our script as a sequence of sequences. In
+            this module, it’s a list of tuples—the outer list represents the
+            result table, the nested tuples are that table’s rows, and the
+            nested tuple’s contents are the column data. Because it’s all
+            Python data, once we get the query result, we process it with
+            normal Python code. For example, to make the display a bit more
+            coherent, loop through the query’s result as usual:</p><a id="I_programlisting1_d1e76252"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for row in curs.fetchall():</code></strong>
+...     <strong class="epub__userinput"><code>print(row)</code></strong>
+...
+('Bob', 'dev', 5000)
+('Sue', 'mus', 70000)
+('Ann', 'mus', 60000)
+('Tom', 'mgr', 100000)
+('Kim', 'adm', 30000)
+('pat', 'dev', 90000)</pre>
+<p>Tuple unpacking comes in handy in loops here, too, to pick
+            out column values as we go. Here’s a simple formatted display of
+            two of the columns’ values:</p><a id="I_programlisting1_d1e76265"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for (name, job, pay) in curs.fetchall():</code></strong>
+...     <strong class="epub__userinput"><code>print(name, ':', pay)</code></strong>
+...
+Bob : 5000
+Sue : 70000
+Ann : 60000
+Tom : 100000
+Kim : 30000
+pat : 90000</pre>
+<p>Because the query result is a sequence, we can use Python’s
+            powerful sequence and iteration tools to process it. For instance,
+            to select just the name column values, we can run a more specific
+            SQL query and get a list of tuples:</p><a id="I_programlisting1_d1e76278"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select name from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>names = curs.fetchall()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>names</code></strong>
+[('Bob',), ('Sue',), ('Ann',), ('Tom',), ('Kim',), ('pat',)]</pre>
+<p>Or we can use a Python list comprehension to pick out the
+            fields we want—by using Python code, we have more control over the
+            data’s content and format:</p><a id="I_programlisting1_d1e76291"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>names = [rec[0] for rec in curs.fetchall()]</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>names</code></strong>
+['Bob', 'Sue', 'Ann', 'Tom', 'Kim', 'pat']</pre>
+<p>The <code class="epub__literal">fetchall</code> call we’ve
+            used so far fetches the entire query result table all at once, as
+            a single sequence (an empty sequence comes back, if the result is
+            empty). That’s convenient, but it may be slow enough to block the
+            caller temporarily for large result tables or generate substantial
+            network traffic if the server is running remotely (something could
+            easily require a parallel thread in GUI). To avoid such a
+            bottleneck, we can also grab just one row, or a bunch of rows, at
+            a time with <code class="epub__literal">fetchone</code> and
+            <code class="epub__literal">fetchmany</code>. The <code class="epub__literal">fetchone</code> call returns the next result
+            row or a <code class="epub__literal">None</code> false value at
+            the end of the table:</p><a id="I_programlisting1_d1e76320"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>while True:</code></strong>
+...     <strong class="epub__userinput"><code>row = curs.fetchone()</code></strong>
+...     <strong class="epub__userinput"><code>if not row: break</code></strong>
+...     <strong class="epub__userinput"><code>print(row)</code></strong>
+...
+('Bob', 'dev', 5000)
+('Sue', 'mus', 70000)
+('Ann', 'mus', 60000)
+('Tom', 'mgr', 100000)
+('Kim', 'adm', 30000)
+('pat', 'dev', 90000)</pre>
+<p>The <code class="epub__literal">fetchmany</code> call
+            returns a sequence of rows from the result, but not the entire
+            table; you can specify how many rows to grab each time with a
+            parameter or rely on the default as given by the cursor’s <code class="epub__literal">arraysize</code> attribute. Each call gets at
+            most that many more rows from the result or an empty sequence at
+            the end of the table:</p><a id="I_programlisting1_d1e76345"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>while True:</code></strong>
+...     <strong class="epub__userinput"><code>rows = curs.fetchmany()</code></strong>           # size=N optional argument
+...     <strong class="epub__userinput"><code>if not rows: break</code></strong>
+...     <strong class="epub__userinput"><code>for row in rows:</code></strong>
+...         <strong class="epub__userinput"><code>print(row)</code></strong>
+...
+('Bob', 'dev', 5000)
+('Sue', 'mus', 70000)
+('Ann', 'mus', 60000)
+('Tom', 'mgr', 100000)
+('Kim', 'adm', 30000)
+('pat', 'dev', 90000)</pre>
+<p>For this module at least, the result table is exhausted
+            after a <code class="epub__literal">fetchone</code> or <code class="epub__literal">fetchmany</code> returns a <code class="epub__literal">False</code> value. The DB API says that
+            <code class="epub__literal">fetchall</code> returns “all
+            (remaining) rows,” so you generally need to call <code class="epub__literal">execute</code> again to regenerate results
+            before fetching <span>new
+            data</span>:</p><a id="I_programlisting1_d1e76387"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchone()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchmany()</code></strong>
+[]
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchall()</code></strong>
+[]</pre>
+<p>Naturally, we can do more than fetch an entire table; the
+            full power of the SQL language is at your disposal in
+            Python:</p><a id="I_programlisting1_d1e76400"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select name, job from people where pay &gt; 60000')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchall()</code></strong>
+[('Sue', 'mus'), ('Tom', 'mgr'), ('pat', 'dev')]</pre>
+<p>The last query fetches name and job fields for people who
+            earn more than $60,000. The next is similar, but passes in the
+            selection value as a parameter and orders the <a id="I_indexterm1_d1e76410"></a><a id="I_indexterm1_d1e76412"></a>result table:</p><a id="I_programlisting1_d1e76415"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>query = 'select name, job from people where pay &gt;= ? order by name'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute(query, [60000])</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for row in curs.fetchall(): print(row)</code></strong>
+...
+('Ann', 'mus')
+('Sue', 'mus')
+('Tom', 'mgr')
+('pat', 'dev')</pre>
+</div>
+<div class="epub__sect3" title="Running updates"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="running_updates"></a>Running updates</h3>
+</div>
+</div>
+</div>
+<p>Cursor objects <a id="I_indexterm1_d1e76431"></a>also are used to submit SQL update statements to the
+            database <span>server—</span>updates,
+            deletes, and inserts. We’ve already seen the <code class="epub__literal">insert</code> statement at work. Let’s start a
+            new session to perform some other kinds of updates; we begin with
+            the same data we had in the prior session:</p><a id="I_programlisting1_d1e76443"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import sqlite3</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn = sqlite3.connect('dbase1')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs = conn.cursor()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchall()</code></strong>
+[('Bob', 'dev', 5000), ('Sue', 'mus', 70000), ('Ann', 'mus', 60000), ('Tom', 'mgr',
+100000), ('Kim', 'adm', 30000), ('pat', 'dev', 90000)]</pre>
+<p>The SQL <code class="epub__literal">update</code> statement
+            changes records—the following changes three records’ pay column
+            values to <code class="epub__literal">65000</code> (Bob, Ann, and
+            Kim), because their pay was no more than $60,000. As usual, the
+            cursor’s <code class="epub__literal">rowcount</code> gives the
+            number of records changed:</p><a id="I_programlisting1_d1e76475"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('update people set pay=? where pay &lt;= ?', [65000, 60000])</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.rowcount</code></strong>
+3
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchall()</code></strong>
+[('Bob', 'dev', 65000), ('Sue', 'mus', 70000), ('Ann', 'mus', 65000), ('Tom', 'mgr',
+100000), ('Kim', 'adm', 65000), ('pat', 'dev', 90000)]</pre>
+<p>The SQL <code class="epub__literal">delete</code> statement
+            <a id="I_indexterm1_d1e76494"></a>removes records, optionally according to a condition
+            (to delete all records, omit the condition). In the following, we
+            delete Bob’s record, as well as any record with a pay that is at
+            least $90,000:</p><a id="I_programlisting1_d1e76498"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('delete from people where name = ?', ['Bob'])</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('delete from people where pay &gt;= ?',(90000,))</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchall()</code></strong>
+[('Sue', 'mus', 70000), ('Ann', 'mus', 65000), ('Kim', 'adm', 65000)]
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn.commit()</code></strong></pre>
+<p>Finally, remember to commit your changes to the database
+            before exiting Python, assuming you wish to keep them. Without a
+            commit, a connection rollback or close call, as well as the
+            connection’s <code class="epub__literal">__del__</code> deletion
+            method, will back out uncommitted changes. Connection objects are
+            automatically closed if they are still open when they are garbage
+            collected, which in turn triggers a <code class="epub__literal">__del__</code> and a rollback; garbage
+            collection happens automatically on program exit, if not
+            <a id="I_indexterm1_d1e76522"></a>sooner.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Building Record Dictionaries"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="building_record_dictionaries"></a>Building Record Dictionaries</h2>
+</div>
+</div>
+</div>
+<p>Now that we’ve seen the <a id="sql17.7.3"></a><a id="re17.7.3"></a><a id="dic17.7.3"></a>basics in action, let’s move on and apply them to a
+          few larger tasks. The SQL API defines query results to be sequences
+          of sequences. One of the more common features that people seem to
+          miss from the API is the ability to get records back as something
+          more structured—a dictionary or class instance, for example, with
+          keys or attributes giving column names. The ORMs we’ll meet at the
+          end of this chapter map to class instances, but because this is
+          Python, it’s easy to code this kind of transformation in other ways.
+          Moreover, the API already gives us the tools we need.</p>
+<div class="epub__sect3" title="Using table descriptions"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="using_table_descriptions"></a>Using table descriptions</h3>
+</div>
+</div>
+</div>
+<p>For example, after a <a id="I_indexterm1_d1e76551"></a>query <code class="epub__literal">execute</code>
+            call, the DB API specifies that the cursor’s <code class="epub__literal">description</code>
+            attribute gives the names and (for some databases) types of the
+            columns in the result table. To see how, let’s continue with the
+            database in the state in which we left it in the prior
+            section:</p><a id="I_programlisting1_d1e76563"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.description</code></strong>
+(('name', None, None, None, None, None, None), ('job', None, None, None, None, None,
+None), ('pay', None, None, None, None, None, None))
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchall()</code></strong>
+[('Sue', 'mus', 70000), ('Ann', 'mus', 65000), ('Kim', 'adm', 65000)]</pre>
+<p>Formally, the description is a sequence of
+            column-description sequences, each of the following form. See the
+            DB API for more on the meaning of the type code slot—it maps to
+            objects at the top level of the database interface module, but the
+            <code class="epub__literal">sqlite3</code> module implements only
+            the name component:</p><a id="I_programlisting1_d1e76579"></a>
+<pre class="epub__programlisting">(name, type_code, display_size, internal_size, precision, scale, null_ok)</pre>
+<p>Now, we can use this metadata anytime we want to label the
+            columns—for instance, in a formatted records display (be sure to
+            regenerate a query result first, since the prior result has been
+            fetched):</p><a id="I_programlisting1_d1e76583"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>colnames = [desc[0] for desc in curs.description]</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>colnames</code></strong>
+['name', 'job', 'pay']
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for row in curs.fetchall():</code></strong>
+...     <strong class="epub__userinput"><code>for name, value in zip(colnames, row):</code></strong>
+...         <strong class="epub__userinput"><code>print(name, '\t=&gt;', value)</code></strong>
+...     <strong class="epub__userinput"><code>print()</code></strong>
+...
+name    =&gt; Sue
+job     =&gt; mus
+pay     =&gt; 70000
+
+name    =&gt; Ann
+job     =&gt; mus
+pay     =&gt; 65000
+
+name    =&gt; Kim
+job     =&gt; adm
+pay     =&gt; 65000</pre>
+<p>Notice how a tab character is used to try to make this
+            output align; a better approach might be to determine the maximum
+            field name length (we’ll see how in a later <span>example</span>).</p>
+</div>
+<div class="epub__sect3" title="Record dictionaries construction"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="record_dictionaries_construction"></a>Record dictionaries construction</h3>
+</div>
+</div>
+</div>
+<p>It’s a minor extension of our formatted display code to
+            create a dictionary for each record, with field names for keys—we
+            just need to fill in the dictionary as we go:</p><a id="I_programlisting1_d1e76617"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>colnames = [desc[0] for desc in curs.description]</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>rowdicts = []</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for row in curs.fetchall():</code></strong>
+...     <strong class="epub__userinput"><code>newdict = {}</code></strong>
+...     <strong class="epub__userinput"><code>for name, val in zip(colnames, row):</code></strong>
+...         <strong class="epub__userinput"><code>newdict[name] = val</code></strong>
+...     <strong class="epub__userinput"><code>rowdicts.append(newdict)</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for row in rowdicts: print(row)</code></strong>
+...
+{'pay': 70000, 'job': 'mus', 'name': 'Sue'}
+{'pay': 65000, 'job': 'mus', 'name': 'Ann'}
+{'pay': 65000, 'job': 'adm', 'name': 'Kim'}</pre>
+<p>Because this is Python, though, there are more powerful ways
+            to build up these record dictionaries. For instance, the
+            dictionary constructor call accepts the zipped name/value pairs to
+            fill out the dictionaries for us:</p><a id="I_programlisting1_d1e76649"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>colnames = [desc[0] for desc in curs.description]</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>rowdicts = []</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for row in curs.fetchall():</code></strong>
+...     <strong class="epub__userinput"><code>rowdicts.append( dict(zip(colnames, row)) )</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>rowdicts[0]</code></strong>
+{'pay': 70000, 'job': 'mus', 'name': 'Sue'}</pre>
+<p>And finally, a list comprehension will do the job of
+            collecting the dictionaries into a <span>list—</span>not only is this less to type,
+            but it probably runs quicker than the original version:</p><a id="I_programlisting1_d1e76675"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>colnames = [desc[0] for desc in curs.description]</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>rowdicts = [dict(zip(colnames, row)) for row in curs.fetchall()]</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>rowdicts[0]</code></strong>
+{'pay': 70000, 'job': 'mus', 'name': 'Sue'}</pre>
+<p>One of the things we lose when moving to dictionaries is
+            record field order—if you look back at the raw result of <code class="epub__literal">fetchall</code>, you’ll notice that record
+            fields are in the name, job, and pay order in which they were
+            stored. Our dictionary’s fields come back in the pseudorandom
+            order of Python mappings. As long as we fetch fields by key, this
+            is irrelevant to our script. Tables still maintain their order,
+            and dictionary construction works fine because the description
+            result tuple is in the same order as the fields in row tuples
+            returned by queries.</p>
+<p>We’ll leave the task of translating record tuples into class
+            instances as a suggested exercise, except for two hints: Python’s
+            standard library <code class="epub__literal">collections</code>
+            module implements more exotic data types, such as named tuples and
+            ordered dictionaries; and we can access fields as attributes
+            rather than as keys, by simply creating an empty class instance
+            and assigning to attributes with the Python <code class="epub__literal">setattr</code> function. Classes would also
+            provide a natural place to code inheritable tools such as standard
+            display methods. In fact, this is part of the utility that the
+            upcoming ORMs can provide for us.</p>
+</div>
+<div class="epub__sect3" title="Automating with scripts and modules"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="automating_with_scripts_and_modules"></a>Automating with scripts and modules</h3>
+</div>
+</div>
+</div>
+<p>Up to this point, we’ve <a id="sc17.7.3.3"></a><a id="qu17.7.3.3"></a>essentially used Python as a command-line SQL
+            client—our queries have been typed and run interactively. All the
+            kinds of code we’ve run, though, can be used as the basis of
+            database access in script files. Working interactively requires
+            retyping things such as multiline loops, which can become tedious.
+            With scripts, we can automate our work.</p>
+<p>To demonstrate, let’s make the last section’s prior example
+            into a utility module—Example 17-4 is a reusable
+            module that knows how to translate the result of a query from row
+            tuples to row dictionaries.</p><div class="epub__example"><a id="pp4e_reverse_solidus_dbase_revers-id3"></a>
+<p class="epub__title">Example 17-4. PP4E\Dbase\Sql\makedicts.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+convert list of row tuples to list of row dicts with field name keys
+this is not a command-line utility: hardcoded self-test if run
+"""
+
+def makedicts(cursor, query, params=()):
+    cursor.execute(query, params)
+    colnames = [desc[0] for desc in cursor.description]
+    rowdicts = [dict(zip(colnames, row)) for row in cursor.fetchall()]
+    return rowdicts
+
+if __name__ == '__main__':   # self test
+    import sqlite3
+    conn = sqlite3.connect('dbase1')
+    cursor = conn.cursor()
+    query  = 'select name, pay from people where pay &lt; ?'
+    lowpay = makedicts(cursor, query, [70000])
+    for rec in lowpay: print(rec)</pre>
+</div>
+</div>
+<p>As usual, we can run this file from the system command line
+            as a script to invoke its self-test code:</p><a id="I_programlisting1_d1e76729"></a>
+<pre class="epub__programlisting">...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>makedicts.py</code></strong>
+{'pay': 65000, 'name': 'Ann'}
+{'pay': 65000, 'name': 'Kim'}</pre>
+<p>Or we can import it as a module and call its function from
+            another context, like the interactive prompt. Because it is a
+            module, it has become a reusable database tool:</p><a id="I_programlisting1_d1e76736"></a>
+<pre class="epub__programlisting">...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from makedicts import makedicts</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from sqlite3 import connect</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn = connect('dbase1')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs = conn.cursor()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchall()</code></strong>
+[('Sue', 'mus', 70000), ('Ann', 'mus', 65000), ('Kim', 'adm', 65000)]
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>rows = makedicts(curs, "select name from people where job = 'mus'")</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>rows</code></strong>
+[{'name': 'Sue'}, {'name': 'Ann'}]</pre>
+<p>Our utility handles arbitrarily complex queries—they are
+            simply passed through the DB API to the database server or
+            library. The <code class="epub__literal">order by</code> clause
+            here sorts the result on the name <a id="I_indexterm1_d1e76771"></a><a id="I_indexterm1_d1e76773"></a><a id="I_indexterm1_d1e76775"></a><a id="I_indexterm1_d1e76777"></a><a id="I_indexterm1_d1e76779"></a>field:</p><a id="I_programlisting1_d1e76782"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>query = 'select name, pay from people where job = ? order by name'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>musicians = makedicts(curs, query, ['mus'])</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for row in musicians: print(row)</code></strong>
+...
+{'pay': 65000, 'name': 'Ann'}
+{'pay': 70000, 'name': 'Sue'}</pre>
+</div>
+</div>
+<div class="epub__sect2" title="Tying the Pieces Together"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="tying_the_pieces_together"></a>Tying the Pieces Together</h2>
+</div>
+</div>
+</div>
+<p>So far, we’ve <a id="sql17.7.4"></a>learned how to make databases and tables, insert
+          records into tables, query table contents, and extract column names.
+          For reference, and to show how these techniques are combined, Example 17-5 collects them
+          into a single script.</p><div class="epub__example"><a id="pp4e_reverse_solidus_dbase_revers-id4"></a>
+<p class="epub__title">Example 17-5. PP4E\Dbase\Sql\testdb.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">from sqlite3 import connect
+conn = connect('dbase1')
+curs = conn.cursor()
+try:
+    curs.execute('drop table people')
+except:
+    pass  # did not exist
+curs.execute('create table people (name char(30), job char(10), pay int(4))')
+
+curs.execute('insert into people values (?, ?, ?)', ('Bob', 'dev', 50000))
+curs.execute('insert into people values (?, ?, ?)', ('Sue', 'dev', 60000))
+
+curs.execute('select * from people')
+for row in curs.fetchall():
+    print(row)
+
+curs.execute('select * from people')
+colnames = [desc[0] for desc in curs.description]
+while True:
+    print('-' * 30)
+    row = curs.fetchone()
+    if not row: break
+    for (name, value) in zip(colnames, row):
+        print('%s =&gt; %s' % (name, value))
+
+conn.commit()   # save inserted records</pre>
+</div>
+</div>
+<p>Refer to prior sections in this tutorial if any of the code in
+          this script is unclear. When run, it creates a two-record database
+          and lists its content to the standard output stream:</p><a id="I_programlisting1_d1e76813"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>testdb.py</code></strong>
+('Bob', 'dev', 50000)
+('Sue', 'dev', 60000)
+------------------------------
+name =&gt; Bob
+job =&gt; dev
+pay =&gt; 50000
+------------------------------
+name =&gt; Sue
+job =&gt; dev
+pay =&gt; 60000
+------------------------------</pre>
+<p>As is, this example is really just meant to demonstrate the
+          database API. It hardcodes database names, and it re-creates the
+          database from scratch each time. We could turn this code into
+          generally useful tools by refactoring it into reusable parts, as
+          we’ll see later in this section. First, though, let’s explore
+          techniques for getting data into <a id="I_indexterm1_d1e76820"></a>our databases.</p>
+</div>
+<div class="epub__sect2" title="Loading Database Tables from Files"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="loading_database_tables_from_files"></a>Loading Database Tables from Files</h2>
+</div>
+</div>
+</div>
+<p>One of the nice <a id="tab17.7.5"></a><a id="files17.7.5"></a><a id="sql17.7.5"></a>things about using Python in the database domain is
+          that you can combine the power of the SQL query language with the
+          power of the Python general-purpose programming language. They
+          naturally complement each other.</p>
+<div class="epub__sect3" title="Loading with SQL and Python"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="loading_with_sql_and_python"></a>Loading with SQL and Python</h3>
+</div>
+</div>
+</div>
+<p>Suppose, for example, that you want to load a database table
+            from a flat file, where each line in the file represents a
+            database row, with individual field values separated by commas.
+            Examples 17-6 and 17-7 list two such datafiles we’re
+            going to be using here.</p><div class="epub__example"><a id="pp4e_reverse_solidus_dbase_revers-id5"></a>
+<p class="epub__title">Example 17-6. PP4E\Dbase\Sql\data.txt</p><div class="epub__example-contents">
+<pre class="epub__programlisting">bob,devel,50000
+sue,music,60000
+ann,devel,40000
+tim,admin,30000
+kim,devel,60000</pre>
+</div>
+</div><div class="epub__example"><a id="pp4e_reverse_solidus_dbase_revers-id6"></a>
+<p class="epub__title">Example 17-7. PP4E\Dbase\Sql\data2.txt</p><div class="epub__example-contents">
+<pre class="epub__programlisting">bob,developer,80000
+sue,music,90000
+ann,manager,80000</pre>
+</div>
+</div>
+<p>Now, some database systems like MySQL have a handy SQL
+            statement for loading such a table quickly. Its <code class="epub__literal">load data</code> statement parses and loads
+            data from a text file, located on either the client or the server
+            machine. In the following, the first command deletes all records
+            in the table, and we’re using the fact that Python automatically
+            concatenates adjacent string literals to split the SQL statement
+            over multiple lines:</p><a id="I_programlisting1_d1e76868"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># Using MySQL (currently available for Python 2.X only)</span></em>
+<em class="epub__lineannotation"><span class="epub__lineannotation">...log into MySQL first...</span></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('delete from people')</code></strong>                # all records
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute(</code></strong>
+...     <strong class="epub__userinput"><code>"load data local infile 'data.txt' "</code></strong>
+...           <strong class="epub__userinput"><code>"into table people fields terminated by ','")</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for row in curs.fetchall(): print(row)</code></strong>
+...
+('bob', 'devel', 50000L)
+('sue', 'music', 60000L)       # 2.X long integers
+('ann', 'devel', 40000L)
+('tim', 'admin', 30000L)
+('kim', 'devel', 60000L)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn.commit()</code></strong></pre>
+<p>This works as expected. But what if you must use a system
+            like the SQLite database used in this book, which lacks this
+            specific SQL statement? Or, perhaps you just need to do something
+            more custom than this MySQL statement allows. Not to worry—a small
+            amount of simple Python code can easily accomplish the same result
+            with SQLite and Python 3.X (again, some irrelevant output lines
+            are omitted here):</p><a id="I_programlisting1_d1e76898"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from sqlite3 import connect</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>conn = connect('dbase1')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs = conn.cursor()</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('delete from people')</code></strong>         # empty the table
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchall()</code></strong>
+[]
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>file = open('data.txt')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>rows = [line.rstrip().split(',') for line in file]</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>rows[0]</code></strong>
+['bob', 'devel', '50000']
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for rec in rows:</code></strong>
+...     <strong class="epub__userinput"><code>curs.execute('insert into people values (?, ?, ?)', rec)</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute('select * from people')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for rec in curs.fetchall(): print(rec)</code></strong>
+...
+('bob', 'devel', 50000)
+('sue', 'music', 60000)
+('ann', 'devel', 40000)
+('tim', 'admin', 30000)
+('kim', 'devel', 60000)</pre>
+<p>This code makes use of a list comprehension to collect
+            string split results for all lines in the file after removing any
+            newline characters, and file iterators to step through the file
+            line by line. Its Python loop does the same work as the MySQL
+            <code class="epub__literal">load</code> statement, and it will
+            work on more database types, including SQLite. We can get some
+            similar result from an <code class="epub__literal">executemany</code> DB API call shown earlier as
+            well, but the Python <code class="epub__literal">for</code> loop
+            here has the potential to be more general.</p>
+</div>
+<div class="epub__sect3" title="Python versus SQL"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="python_versus_sql"></a>Python versus SQL</h3>
+</div>
+</div>
+</div>
+<p>In fact, you have the entire Python language at your
+            disposal for processing database results, and a little Python can
+            often duplicate or go beyond SQL syntax. For instance, SQL has
+            special aggregate function syntax for computing things such as
+            sums and averages:</p><a id="I_programlisting1_d1e76960"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute("select sum(pay), avg(pay) from people where job = 'devel'")</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchall()</code></strong>
+[(150000, 50000.0)]</pre>
+<p>By shifting the processing to Python, we can sometimes
+            simplify and do more than SQL’s syntax allows (albeit potentially
+            sacrificing any query performance optimizations the database may
+            perform). Computing pay sums and averages with Python can be
+            accomplished with a simple loop:</p><a id="I_programlisting1_d1e76970"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute("select name, pay from people where job = 'devel'")</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>result = curs.fetchall()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>result</code></strong>
+(('bob', 50000L), ('ann', 40000L), ('kim', 60000L))
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>tot = 0</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for (name, pay) in result: tot += pay</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print('total:', tot, 'average:', tot / len(result))</code></strong>         # use // to truncate
+total: 150000 average: 50000.0</pre>
+<p>Or we can use more advanced tools such as comprehensions and
+            generator expressions to calculate sums, averages, maximums, and
+            the like:</p><a id="I_programlisting1_d1e76993"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>print(sum(rec[1] for rec in result))</code></strong>         # generator expr
+150000
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(sum(rec[1] for rec in result) / len(result))</code></strong>
+50000.0
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(max(rec[1] for rec in result))</code></strong>
+60000</pre>
+<p>The Python approach is more general, but it doesn’t buy us
+            much until things become more complex. For example, here are a few
+            more advanced comprehensions that collect the names of people
+            whose pay is above and below the average in the query result
+            set:</p><a id="I_programlisting1_d1e77006"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>avg = sum(rec[1] for rec in result) / len(result)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print([rec[0] for rec in result if rec[1] &gt; avg])</code></strong>
+['kim']
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print([rec[0] for rec in result if rec[1] &lt; avg])</code></strong>
+['ann']</pre>
+<p>We may be able to do some of these kinds of tasks with more
+            advanced SQL techniques such as nested queries, but we eventually
+            reach a complexity threshold where Python’s general-purpose nature
+            makes it attractive and potentially more portable. For comparison,
+            here is the equivalent SQL:</p><a id="I_programlisting1_d1e77019"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>query = ("select name from people where job = 'devel' and "</code></strong>
+...                <strong class="epub__userinput"><code>"pay &gt; (select avg(pay) from people where job = 'devel')")</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute(query)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchall()</code></strong>
+[('kim',)]
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>query = ("select name from people where job = 'devel' and "</code></strong>
+...                <strong class="epub__userinput"><code>"pay &lt; (select avg(pay) from people where job = 'devel')")</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.execute(query)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>curs.fetchall()</code></strong>
+[('ann',)]</pre>
+<p>This isn’t the most complex SQL you’re likely to meet, but
+            beyond this point, SQL can become more involved. Moreover, unlike
+            Python, SQL is limited to database-specific tasks by design.
+            Imagine a query that compares a column’s values to data fetched
+            off the Web or from a user in a GUI—simple with Python’s Internet
+            and GUI support, but well beyond the scope of a special-purpose
+            language such as SQL. By combining Python and SQL, you get the
+            best of both and can choose which is best suited to your
+            goals.</p>
+<p>With Python, you also have access to utilities you’ve
+            already coded: your database tool set is arbitrarily extensible
+            with functions, modules, and classes. To illustrate, here are some
+            of the same operations coded in a more mnemonic fashion with the
+            dictionary-record module we wrote earlier:</p><a id="I_programlisting1_d1e77051"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from makedicts import makedicts</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>recs = makedicts(curs, "select * from people where job = 'devel'")</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(len(recs), recs[0])</code></strong>
+3 {'pay': 50000, 'job': 'devel', 'name': 'bob'}
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print([rec['name'] for rec in recs])</code></strong>
+['bob', 'ann', 'kim']
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(sum(rec['pay'] for rec in recs))</code></strong>
+150000
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>avg = sum(rec['pay'] for rec in recs) / len(recs)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print([rec['name'] for rec in recs if rec['pay'] &gt; avg])</code></strong>
+['kim']
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print([rec['name'] for rec in recs if rec['pay'] &gt;= avg])</code></strong>
+['bob', 'kim']</pre>
+<p>Similarly, Python’s <code class="epub__literal">set</code>
+            object type provides operations such as intersection, union, and
+            difference which can serve as alternatives to other SQL database
+            operations (in the interest of space, we’ll leave their
+            exploration as a suggested side trip). For more <span>advanced</span> database extensions, see
+            the SQL-related tools available for Python in the <span>third</span>-<span>party</span> domain. For example, a variety
+            of packages add an OOP flavor to the DB <span>API—</span>the ORMs we’ll explore near the
+            end of this <a id="I_indexterm1_d1e77096"></a><a id="I_indexterm1_d1e77098"></a><a id="I_indexterm1_d1e77100"></a>chapter.</p>
+</div>
+</div>
+<div class="epub__sect2" title="SQL Utility Scripts"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="sql_utility_scripts"></a>SQL Utility Scripts</h2>
+</div>
+</div>
+</div>
+<p>At this point in <a id="sql17.7.6"></a><a id="sc17.7.6"></a>our SQL DB API tour, we’ve started to stretch the
+          interactive prompt to its breaking point—we wind up retyping the
+          same boilerplate code again every time we start a session and every
+          time we run a test. Moreover, the code we’re writing is substantial
+          enough to be reused in other programs. Let’s wrap up by transforming
+          our code into reusable scripts that automate tasks and support
+          reuse.</p>
+<p>To illustrate more of the power of the Python/SQL mix, this
+          section presents a handful of utility scripts that perform common
+          tasks—the sorts of things you’d otherwise have to recode often
+          during development. As an added bonus, most of these files are both
+          command-line utilities and modules of functions that can be imported
+          and called from other programs. Most of the scripts in this section
+          also allow a database file name to be passed in on the command line;
+          this allows us to use different databases for different purposes
+          during development—changes in one won’t impact others.</p>
+<div class="epub__sect3" title="Table load scripts"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="table_load_scripts"></a>Table load scripts</h3>
+</div>
+</div>
+</div>
+<p>Let’s take a <a id="I_indexterm1_d1e77126"></a>quick look at code first, before seeing it in
+            action; feel free to skip ahead to correlate the code here with
+            its behavior. As a first (and less than ideal) step, Example 17-8 shows a simple
+            way to script-ify the table-loading logic of the prior
+            section.</p><div class="epub__example"><a id="pp4e_reverse_solidus_dbase_revers-id7"></a>
+<p class="epub__title">Example 17-8. PP4E\Dbase\Sql\loaddb1.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+load table from comma-delimited text file; equivalent to this nonportable SQL:
+load data local infile 'data.txt' into table people fields terminated by ','"
+"""
+
+import sqlite3
+conn = sqlite3.connect('dbase1')
+curs = conn.cursor()
+
+file = open('data.txt')
+rows = [line.rstrip().split(',') for line in file]
+for rec in rows:
+    curs.execute('insert into people values (?, ?, ?)', rec)
+
+conn.commit()       # commit changes now, if db supports transactions
+conn.close()        # close, __del__ call rollback if changes not committed yet</pre>
+</div>
+</div>
+<p>As is, Example 17-8 is a top-level
+            script geared toward one particular case. It’s hardly any extra
+            work to generalize this into a function that can be imported and
+            used in a variety of scenarios, as in Example 17-9—a much more
+            widely useful module and command-line script.</p><div class="epub__example"><a id="pp4e_reverse_solidus_dbase_revers-id8"></a>
+<p class="epub__title">Example 17-9. PP4E\Dbase\Sql\loaddb.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+load table from comma-delimited text file: reusable/generalized version
+Importable functions; command-line usage: loaddb.py dbfile? datafile? table?
+"""
+
+def login(dbfile):
+    import sqlite3
+    conn = sqlite3.connect(dbfile)         # create or open db file
+    curs = conn.cursor()
+    return conn, curs
+
+def loaddb(curs, table, datafile, conn=None, verbose=True):
+    file = open(datafile)                                  # x,x,x\nx,x,x\n
+    rows = [line.rstrip().split(',') for line in file]     # [[x,x,x], [x,x,x]]
+    rows = [str(tuple(rec)) for rec in rows]               # ["(x,x,x)", "(x,x,x)"]
+    for recstr in rows:
+        curs.execute('insert into ' + table + ' values ' + recstr)
+    if conn: conn.commit()
+    if verbose: print(len(rows), 'rows loaded')
+
+if __name__ == '__main__':
+    import sys
+    dbfile, datafile, table = 'dbase1', 'data.txt', 'people'
+    if len(sys.argv) &gt; 1: dbfile   = sys.argv[1]
+    if len(sys.argv) &gt; 2: datafile = sys.argv[2]
+    if len(sys.argv) &gt; 3: table    = sys.argv[3]
+    conn, curs = login(dbfile)
+    loaddb(curs, table, datafile, conn)</pre>
+</div>
+</div>
+<p>Notice the way this code uses two list comprehensions to
+            build a string of record values for the <code class="epub__literal">insert</code> statement (see its comments for
+            the transforms applied). We could also use an <code class="epub__literal">executemany</code> call as we did earlier, but
+            we want to be general and avoid hardcoding the fields insertion
+            template—this function might be used for tables with any number of
+            columns.</p>
+<p>This file also defines a <code class="epub__literal">login</code> function to automate the initial
+            connection calls—after retyping this four-command sequence enough
+            times, it seemed a prime candidate for a function. In addition,
+            this reduces code redundancy; in the future, such logic need only
+            be changed in a single location if we change database systems, as
+            long as the <code class="epub__literal">login</code> function is
+            used everywhere.</p>
+</div>
+<div class="epub__sect3" title="Table display script"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="table_display_script"></a>Table display script</h3>
+</div>
+</div>
+</div>
+<p>Once we load <a id="tab17.7.6.2"></a>data, we probably will want to display it. Example 17-10 allows us to
+            display results as we go—it prints an entire table with either a
+            simple display (which could be parsed by other tools) or a
+            formatted display (generated with the dictionary-record utility we
+            wrote earlier). Notice how it computes the maximum field-name size
+            for alignment with a generator expression; the size is passed in
+            to a string formatting expression by specifying an asterisk (*)
+            for the field size in the format string.</p><div class="epub__example"><a id="pp4e_reverse_solidus_dbase_revers-id9"></a>
+<p class="epub__title">Example 17-10. PP4E\Dbase\Sql\dumpdb.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+display table contents as raw tuples, or formatted with field names
+command-line usage: dumpdb.py dbname? table? [-] (dash=formatted display)
+"""
+
+def showformat(recs, sept=('-' * 40)):
+    print(len(recs), 'records')
+    print(sept)
+    for rec in recs:
+        maxkey = max(len(key) for key in rec)                # max key len
+        for key in rec:                                      # or: \t align
+            print('%-*s =&gt; %s' % (maxkey, key, rec[key]))    # -ljust, *len
+        print(sept)
+
+def dumpdb(cursor, table, format=True):
+    if not format:
+        cursor.execute('select * from ' + table)
+        while True:
+            rec = cursor.fetchone()
+            if not rec: break
+            print(rec)
+    else:
+        from makedicts import makedicts
+        recs = makedicts(cursor, 'select * from ' + table)
+        showformat(recs)
+
+if __name__ == '__main__':
+    import sys
+    dbname, format, table = 'dbase1', False, 'people'
+    cmdargs = sys.argv[1:]
+    if '-' in cmdargs:                     # format if '-' in cmdline args
+        format = True                      # dbname if other cmdline arg
+        cmdargs.remove('-')
+    if cmdargs: dbname = cmdargs.pop(0)
+    if cmdargs: table  = cmdargs[0]
+
+    from loaddb import login
+    conn, curs = login(dbname)
+    dumpdb(curs, table, format)</pre>
+</div>
+</div>
+<p>While we’re at it, let’s code some utility scripts to
+            initialize and erase the database, so we do not have to type these
+            by hand at the interactive prompt again every time we want to
+            start from scratch. Example 17-11 completely
+            deletes and re-creates the database, to reset it to an initial
+            state (we did this manually at the start of the tutorial).</p><div class="epub__example"><a id="pp4e_reverse_solidus_dbase_revers-id10"></a>
+<p class="epub__title">Example 17-11. PP4E\Dbase\Sql\makedb.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+physically delete and re-create database files
+usage: makedb.py dbname? tablename?
+"""
+
+import sys
+if input('Are you sure?').lower() not in ('y', 'yes'):
+    sys.exit()
+
+dbname = (len(sys.argv) &gt; 1 and sys.argv[1]) or 'dbase1'
+table  = (len(sys.argv) &gt; 2 and sys.argv[2]) or 'people'
+
+from loaddb import login
+conn, curs = login(dbname)
+try:
+    curs.execute('drop table ' + table)
+except:
+    print('database table did not exist')
+
+command = 'create table %s (name char(30), job char(10), pay int(4))' % table
+curs.execute(command)
+conn.commit()                 # commit may be optional here
+print('made', dbname, table)</pre>
+</div>
+</div>
+<p>Next, the clear script in Example 17-12 deletes all
+            rows in the table, instead of dropping and re-creating them
+            entirely. For testing purposes, either approach is sufficient.
+            Minor caveat: the <code class="epub__literal">rowcount</code>
+            attribute doesn’t always reflect the number of rows deleted in
+            SQLite; see its library manual entry for details.</p><div class="epub__example"><a id="pp4e_reverse_solidus_dbase_revers-id11"></a>
+<p class="epub__title">Example 17-12. PP4E\Dbase\Sql\cleardb.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+delete all rows in table, but don't drop the table or database it is in
+usage: cleardb.py dbname? tablename?
+"""
+
+import sys
+if input('Are you sure?').lower() not in ('y', 'yes'):
+    sys.exit()
+
+dbname = sys.argv[1] if len(sys.argv) &gt; 1 else 'dbase1'
+table  = sys.argv[2] if len(sys.argv) &gt; 2 else 'people'
+
+from loaddb import login
+conn, curs = login(dbname)
+curs.execute('delete from ' + table)
+#print(curs.rowcount, 'records deleted')        # conn closed by its __del__
+conn.commit()                                   # else rows not really deleted</pre>
+</div>
+</div>
+<p>Finally, Example 17-13 provides a
+            command-line tool that runs a query and prints its result table in
+            formatted style. There’s not much to this script; because we’ve
+            automated most of its tasks already, this is largely just a
+            combination of existing tools. Such is the power of code reuse in
+            <a id="I_indexterm1_d1e77209"></a>Python.</p><div class="epub__example"><a id="pp4e_reverse_solidus_dbase_revers-id12"></a>
+<p class="epub__title">Example 17-13. PP4E\Dbase\Sql\querydb.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+run a query string, display formatted result table
+example: querydb.py dbase1 "select name, job from people where pay &gt; 50000"
+"""
+
+import sys
+database, querystr = 'dbase1', 'select * from people'
+if len(sys.argv) &gt; 1: database = sys.argv[1]
+if len(sys.argv) &gt; 2: querystr = sys.argv[2]
+
+from makedicts import makedicts
+from dumpdb    import showformat
+from loaddb    import login
+
+conn, curs = login(database)
+rows = makedicts(curs, querystr)
+showformat(rows)</pre>
+</div>
+</div>
+</div>
+<div class="epub__sect3" title="Using the scripts"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="using_the_scripts"></a>Using the scripts</h3>
+</div>
+</div>
+</div>
+<p>Last but not least, here <a id="sc17.7.6.3"></a>is a log of a session that makes use of these
+            scripts in command-line mode, to illustrate their operation. Most
+            of the files also have functions that can be imported and called
+            from a different program; the scripts simply map command-line
+            arguments to the functions’ arguments when run standalone. The
+            first thing we do is initialize a testing database and load its
+            table from a text file:</p><a id="I_programlisting1_d1e77228"></a>
+<pre class="epub__programlisting">...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>makedb.py testdb</code></strong>
+Are you sure?<strong class="epub__userinput"><code>y</code></strong>
+database table did not exist
+made testdb people
+
+...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>loaddb.py testdb data2.txt</code></strong>
+3 rows loaded</pre>
+<p>Next, let’s check our work with the dump utility (use a
+            <code class="epub__literal">-</code> argument to force a formatted
+            display):</p><a id="I_programlisting1_d1e77244"></a>
+<pre class="epub__programlisting">...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>dumpdb.py testdb</code></strong>
+('bob', 'developer', 80000)
+('sue', 'music', 90000)
+('ann', 'manager', 80000)
+
+...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>dumpdb.py testdb -</code></strong>
+3 records
+----------------------------------------
+pay  =&gt; 80000
+job  =&gt; developer
+name =&gt; bob
+----------------------------------------
+pay  =&gt; 90000
+job  =&gt; music
+name =&gt; sue
+----------------------------------------
+pay  =&gt; 80000
+job  =&gt; manager
+name =&gt; ann
+----------------------------------------</pre>
+<p>The dump script is an exhaustive display; to be more
+            specific about which records to view, use the query script and
+            pass in a query string on the command line (the command lines are
+            split here to fit in this book):</p><a id="I_programlisting1_d1e77254"></a>
+<pre class="epub__programlisting">...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>querydb.py testdb</code></strong>
+                               <strong class="epub__userinput"><code>"select name, job from people where pay = 80000"</code></strong>
+2 records
+----------------------------------------
+job  =&gt; developer
+name =&gt; bob
+----------------------------------------
+job  =&gt; manager
+name =&gt; ann
+----------------------------------------
+
+...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>querydb.py testdb</code></strong>
+                               <strong class="epub__userinput"><code>"select * from people where name = 'sue'"</code></strong>
+1 records
+----------------------------------------
+pay  =&gt; 90000
+job  =&gt; music
+name =&gt; sue
+----------------------------------------</pre>
+<p>Now, let’s erase and start again with a new data set file.
+            The clear script erases all records but doesn’t reinitialize the
+            database completely:</p><a id="I_programlisting1_d1e77270"></a>
+<pre class="epub__programlisting">...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>cleardb.py testdb</code></strong>
+Are you sure?<strong class="epub__userinput"><code>y</code></strong>
+
+...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>dumpdb.py testdb -</code></strong>
+0 records
+----------------------------------------
+
+...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>loaddb.py testdb data.txt</code></strong>
+5 rows loaded
+
+...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>dumpdb.py testdb</code></strong>
+('bob', 'devel', 50000)
+('sue', 'music', 60000)
+('ann', 'devel', 40000)
+('tim', 'admin', 30000)
+('kim', 'devel', 60000)</pre>
+<p>In closing, here are three queries in action on this new
+            data set: they fetch names of developers, jobs that pay above an
+            amount, and records with a given pay level sorted by job. We could
+            run these at the Python interactive prompt, of course, but we’re
+            getting a lot of setup and boilerplate code for free here:</p><a id="I_programlisting1_d1e77289"></a>
+<pre class="epub__programlisting">...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>querydb.py testdb</code></strong>
+                               <strong class="epub__userinput"><code>"select name from people where job = 'devel'"</code></strong>
+3 records
+----------------------------------------
+name =&gt; bob
+----------------------------------------
+name =&gt; ann
+----------------------------------------
+name =&gt; kim
+----------------------------------------
+
+...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>querydb.py testdb</code></strong>
+                               <strong class="epub__userinput"><code>"select job from people where pay &gt;= 60000"</code></strong>
+2 records
+----------------------------------------
+job =&gt; music
+----------------------------------------
+job =&gt; devel
+----------------------------------------
+
+...\PP4E\Dbase\Sql&gt; <strong class="epub__userinput"><code>querydb.py testdb</code></strong>
+                               <strong class="epub__userinput"><code>"select * from people where pay &gt;= 60000 order by job"</code></strong>
+2 records
+----------------------------------------
+pay  =&gt; 60000
+job  =&gt; devel
+name =&gt; kim
+----------------------------------------
+pay  =&gt; 60000
+job  =&gt; music
+name =&gt; sue
+----------------------------------------</pre>
+<p>Before we move on, some context: the scripts in this section
+            illustrate the benefits of code reuse, accomplish their purpose
+            (which was partly demonstrating the SQL API), and serve as a model
+            for canned database utilities. But they are still not as general
+            as they could be; support for sorting options in the dump script,
+            for example, may be a useful extension. Although we could
+            generalize to support more options, at some point we may need to
+            revert to typing SQL commands in a client—part of the reason SQL
+            is a language is because it must support so much generality.
+            Further extensions to these scripts are left as exercises. Change
+            this code as you like; it’s Python, <a id="I_indexterm1_d1e77313"></a><a id="I_indexterm1_d1e77315"></a><a id="I_indexterm1_d1e77317"></a>after all.</p>
+</div>
+</div>
+<div class="epub__sect2" title="SQL Resources"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="sql_resources"></a>SQL Resources</h2>
+</div>
+</div>
+</div>
+<p>Although the <a id="I_indexterm1_d1e77325"></a>examples we’ve seen in this section are simple, their
+          techniques scale up to much more realistic databases and contexts.
+          The websites we studied in the prior part of the book, for instance,
+          can make use of SQL-based systems such as MySQL to store page state
+          information as well as long-lived client information. Because MySQL
+          (among others) supports both large databases and concurrent updates,
+          it’s a natural for website implementation.</p>
+<p>There is more to database interfaces than we’ve seen, but
+          additional API documentation is readily available on the Web. To
+          find the full database API specification, search the Web for “Python
+          Database API.” You’ll find the formal API definition—really just a
+          text file describing the PEP (the Python Enhancement Proposal) under
+          which the API was hashed out.</p>
+<p>Perhaps the best resource for additional information about
+          database extensions today is the home page of the Python database
+          SIG. Go to http://www.python.org, click on the
+          Community and SIGs links there, and navigate to the database group’s
+          page, or run a search. There, you’ll find API documentation (this is
+          where it is officially maintained), links to database
+          vendor–specific extension modules, and more. And as always, see the
+          PyPI website and search the Web at large for related third-party
+          tools and <a id="I_indexterm1_d1e77337"></a>extensions.</p>
+</div>
+</div>
+</div>
+</body>
+</html>

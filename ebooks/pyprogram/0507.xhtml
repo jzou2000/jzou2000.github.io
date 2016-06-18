@@ -1,0 +1,265 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>A Portable Program-Launch Framework</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="A Portable Program-Launch Framework"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="a_portable_program-launch_framework"></a>A Portable Program-Launch Framework</h1>
+</div>
+</div>
+</div>
+<p>With all of these <a id="par5.8"></a>different ways to start programs on different platforms,
+        it can be difficult to remember what tools to use in a given
+        situation. Moreover, some of these tools are called in ways that are
+        complicated and thus easy to forget. Although modules like <code class="epub__literal">subprocess</code> and <code class="epub__literal">multiprocessing</code> offer fully portable options
+        today, other tools sometimes provide more specific behavior that’s
+        better on a given platform; shell window pop ups on Windows, for
+        example, are often better suppressed.</p>
+<p>I write scripts that need to launch Python programs often enough
+        that I eventually wrote a module to try to hide most of the underlying
+        details. By encapsulating the details in this module, I’m free to
+        change them to use new tools in the future without breaking code that
+        relies on them. While I was at it, I made this module smart enough to
+        automatically pick a “best” launch scheme based on the underlying
+        platform. Laziness is the mother of many a useful module.</p>
+<p>Example 5-36 collects
+        in a single module many of the techniques we’ve met in this chapter.
+        It implements an abstract superclass, <code class="epub__literal">LaunchMode</code>, <a id="I_indexterm4_d1e21119"></a>which defines what it means to start a Python program
+        named by a shell command line, but it doesn’t define how. Instead, its
+        subclasses provide a <code class="epub__literal">run</code> method
+        that actually starts a Python program according to a given scheme and
+        (optionally) define an <code class="epub__literal">announce</code>
+        method to display a program’s name at startup time.</p><div class="epub__example"><a id="pp4e_reverse_solidus_launchmodes.py"></a>
+<p class="epub__title">Example 5-36. PP4E\launchmodes.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+###################################################################################
+launch Python programs with command lines and reusable launcher scheme classes;
+auto inserts "python" and/or path to Python executable at front of command line;
+some of this module may assume 'python' is on your system path (see Launcher.py);
+
+subprocess module would work too, but os.popen() uses it internally, and the goal
+is to start a program running independently here, not to connect to its streams;
+multiprocessing module also is an option, but this is command-lines, not functions:
+doesn't make sense to start a process which would just do one of the options here;
+
+new in this edition: runs script filename path through normpath() to change any
+/ to \ for Windows tools where required; fix is inherited by PyEdit and others;
+on Windows, / is generally allowed for file opens, but not by all launcher tools;
+###################################################################################
+"""
+
+import sys, os
+pyfile = (sys.platform[:3] == 'win' and 'python.exe') or 'python'
+pypath = sys.executable     # use sys in newer pys
+
+def fixWindowsPath(cmdline):
+    """
+    change all / to \ in script filename path at front of cmdline;
+    used only by classes which run tools that require this on Windows;
+    on other platforms, this does not hurt (e.g., os.system on Unix);
+    """
+    splitline = cmdline.lstrip().split(' ')           # split on spaces
+    fixedpath = os.path.normpath(splitline[0])        # fix forward slashes
+    return ' '.join([fixedpath] + splitline[1:])      # put it back together
+
+class LaunchMode:
+    """
+    on call to instance, announce label and run command;
+    subclasses format command lines as required in run();
+    command should begin with name of the Python script
+    file to run, and not with "python" or its full path;
+    """
+    def __init__(self, label, command):
+        self.what  = label
+        self.where = command
+    def __call__(self):                     # on call, ex: button press callback
+        self.announce(self.what)
+        self.run(self.where)                # subclasses must define run()
+    def announce(self, text):               # subclasses may redefine announce()
+        print(text)                         # methods instead of if/elif logic
+    def run(self, cmdline):
+        assert False, 'run must be defined'
+
+class System(LaunchMode):
+    """
+    run Python script named in shell command line
+    caveat: may block caller, unless &amp; added on Unix
+    """
+    def run(self, cmdline):
+        cmdline = fixWindowsPath(cmdline)
+        os.system('%s %s' % (pypath, cmdline))
+
+class Popen(LaunchMode):
+    """
+    run shell command line in a new process
+    caveat: may block caller, since pipe closed too soon
+    """
+    def run(self, cmdline):
+        cmdline = fixWindowsPath(cmdline)
+        os.popen(pypath + ' ' + cmdline)           # assume nothing to be read
+
+class Fork(LaunchMode):
+    """
+    run command in explicitly created new process
+    for Unix-like systems only, including cygwin
+    """
+    def run(self, cmdline):
+        assert hasattr(os, 'fork')
+        cmdline = cmdline.split()                  # convert string to list
+        if os.fork() == 0:                         # start new child process
+            os.execvp(pypath, [pyfile] + cmdline)  # run new program in child
+
+class Start(LaunchMode):
+    """
+    run command independent of caller
+    for Windows only: uses filename associations
+    """
+    def run(self, cmdline):
+        assert sys.platform[:3] == 'win'
+        cmdline = fixWindowsPath(cmdline)
+        os.startfile(cmdline)
+
+class StartArgs(LaunchMode):
+    """
+    for Windows only: args may require real start
+    forward slashes are okay here
+    """
+    def run(self, cmdline):
+        assert sys.platform[:3] == 'win'
+        os.system('start ' + cmdline)              # may create pop-up window
+
+class Spawn(LaunchMode):
+    """
+    run python in new process independent of caller
+    for Windows or Unix; use P_NOWAIT for dos box;
+    forward slashes are okay here
+    """
+    def run(self, cmdline):
+        os.spawnv(os.P_DETACH, pypath, (pyfile, cmdline))
+
+class Top_level(LaunchMode):
+    """
+    run in new window, same process
+    tbd: requires GUI class info too
+    """
+    def run(self, cmdline):
+        assert False, 'Sorry - mode not yet implemented'
+
+#
+# pick a "best" launcher for this platform
+# may need to specialize the choice elsewhere
+#
+
+if sys.platform[:3] == 'win':
+    PortableLauncher = Spawn
+else:
+    PortableLauncher = Fork
+
+class QuietPortableLauncher(PortableLauncher):
+    def announce(self, text):
+        pass
+
+def selftest():
+    file = 'echo.py'
+    input('default mode...')
+    launcher = PortableLauncher(file, file)
+    launcher()                                             # no block
+
+    input('system mode...')
+    System(file, file)()                                   # blocks
+
+    if sys.platform[:3] == 'win':
+        input('DOS start mode...')                         # no block
+        StartArgs(file, file)()
+
+if __name__ == '__main__': selftest()</pre>
+</div>
+</div>
+<p>Near the end of the file, the module picks a default class based
+        on the <code class="epub__literal">sys.platform</code> attribute:
+        <code class="epub__literal">PortableLauncher</code> is set to a class
+        that uses <code class="epub__literal">spawnv</code> on Windows and one
+        that uses the <code class="epub__literal">fork</code>/<code class="epub__literal">exec</code> combination elsewhere; in recent
+        Pythons, we could probably just use the <code class="epub__literal">spawnv</code> scheme on most platforms, but the
+        alternatives in this module are used in additional contexts. If you
+        import this module and always use its <code class="epub__literal">PortableLauncher</code> attribute, you can forget
+        many of the platform-specific details enumerated in this
+        chapter.</p>
+<p>To run a Python program, simply import the <code class="epub__literal">PortableLauncher</code> class, make an instance by
+        passing a label and command line (without a leading “python” word),
+        and then call the instance object as though it were a function. The
+        program is started by a <span class="epub__emphasis"><em>call</em></span> operation—by its
+        <code class="epub__literal">__call__</code> operator-overloading
+        method, instead of a normally named method—so that the classes in this
+        module can also be used to generate callback handlers in tkinter-based
+        GUIs. As we’ll see in the upcoming chapters, button-presses in tkinter
+        invoke a callable object with no arguments; by registering a <code class="epub__literal">PortableLauncher</code> instance to handle the
+        press event, we can automatically start a new program from another
+        program’s GUI. A GUI might associate a launcher with a GUI’s button
+        press with code like this:</p><a id="I_programlisting4_d1e21173"></a>
+<pre class="epub__programlisting"> Button(root, text=name, command=PortableLauncher(name, commandLine))</pre>
+<p>When run standalone, this module’s <code class="epub__literal">selftest</code> function is invoked as usual. As
+        coded, <code class="epub__literal">System</code> blocks the caller
+        until the program exits, but <code class="epub__literal">PortableLauncher</code> (really, <code class="epub__literal">Spawn</code> or <code class="epub__literal">Fork</code>) and <code class="epub__literal">Start</code> do not:</p><a id="I_programlisting4_d1e21197"></a>
+<pre class="epub__programlisting">C:\...\PP4E&gt; <strong class="epub__userinput"><code>type echo.py</code></strong>
+print('Spam')
+input('press Enter')
+
+C:\...\PP4E&gt; <strong class="epub__userinput"><code>python launchmodes.py</code></strong>
+default mode...
+echo.py
+system mode...
+echo.py
+Spam
+press Enter
+DOS start mode...
+echo.py</pre>
+<p>As more practical applications, this file is also used in Chapter 8 to launch GUI dialog demos
+        independently, and again in a number of Chapter 10’s examples, including <span>PyDemos</span> and PyGadgets—launcher scripts
+        designed to run major examples in this book in a portable fashion,
+        which live at the top of this book’s examples distribution directory.
+        Because these launcher scripts simply import <code class="epub__literal">PortableLauncher</code> and register instances to
+        respond to GUI events, they run on both Windows and Unix unchanged
+        (tkinter’s portability helps, too, of course). The PyGadgets script
+        even customizes <code class="epub__literal">PortableLauncher</code> to update a GUI label
+        at start time:</p><a id="I_programlisting4_d1e21220"></a>
+<pre class="epub__programlisting">class Launcher(launchmodes.PortableLauncher):    # use wrapped launcher class
+    def announce(self, text):                    # customize to set GUI label
+        Info.config(text=text)</pre>
+<p>We’ll explore these two client scripts, and others, such as
+        Chapter 11’s PyEdit after we start
+        coding GUIs in Part III. Partly because of
+        its role in PyEdit, this edition extends this module to automatically
+        replace forward slashes with <span class="epub__emphasis"><em>backward slashes</em></span> in
+        the script’s file path name. PyEdit uses forward slashes in some
+        filenames because they are allowed in file opens on Windows, but some
+        Windows launcher tools require the backslash form instead.
+        Specifically, <code class="epub__literal">system</code>, <code class="epub__literal">popen</code>, and <code class="epub__literal">startfile</code> in <code class="epub__literal">os</code> require backslashes, but <code class="epub__literal">spawnv</code> does not. PyEdit and others inherit
+        the new pathname fix of <code class="epub__literal">fix</code><code class="epub__literal">Windows</code><code class="epub__literal">Path</code> here simply by importing and using
+        this module’s classes; PyEdit <span>eventually</span> changed so as to make this
+        fix irrelevant for its own use case (see Chapter 11), but other clients still acquire
+        the fix for free.</p>
+<p>Also notice how some of the classes in this example use the
+        <code class="epub__literal">sys.executable</code> path string to
+        obtain the Python executable’s full path name. This is partly due to
+        their role in user-friendly demo launchers. In prior versions that
+        predated <code class="epub__literal">sys.executable</code>, these
+        classes instead called two functions exported by a module named
+        <span class="epub__emphasis"><em>Launcher.py</em></span> to find a suitable Python executable,
+        regardless of whether the user had added its directory to the system
+        <code class="epub__literal">PATH</code> variable’s setting.</p>
+<p>This search is no longer required. Since I’ll describe this
+        module’s other roles in the next chapter, and since this search has
+        been largely precluded by Python’s perpetual pandering to programmers’
+        professional proclivities, I’ll postpone any pointless pedagogical
+        presentation <a id="I_indexterm4_d1e21276"></a>here. (Period.)</p>
+</div>
+</div>
+</body>
+</html>

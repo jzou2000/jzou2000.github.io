@@ -1,0 +1,660 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Multiple Inheritance: “Mix-in” Classes</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div><h1 class="epub__title"><a id="multiple_inheritance_colon_quotation_mar"></a>Multiple Inheritance: “Mix-in” Classes</h1>
+<p>Many <a id="ch30OOPdesissmultipleinheritance"></a>class-based designs call for combining disparate sets of
+        methods. In a <code class="epub__literal">class</code> statement, more
+        than one superclass can be listed in parentheses in the header line.
+        When you do this, you use something called <span class="epub__emphasis"><em><a id="ch30multipleinheritance"></a>multiple inheritance</em></span>—the class and its
+        instances inherit names from <span class="epub__emphasis"><em>all</em></span> the listed
+        superclasses.</p>
+<p>When searching for an attribute,
+        Python’s inheritance search traverses all superclasses in the class
+        header from left to right until a match is found. Technically, because
+        any of the superclasses may have superclasses of its own, this search
+        can be a bit more complex for larger class tress:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p>In classic classes (the default until Python 3.0), the
+            attribute search proceeds depth-first all the way to the top of
+            the inheritance tree, and then from left to right.</p></li><li class="epub__listitem">
+<p>In new-style classes (and all classes in 3.0), the attribute
+            search proceeds across by tree levels, in a more breadth-first
+            fashion (see the new-style class discussion in the next
+            chapter).</p></li></ul>
+</div>
+<p>In either model, though, when a class has multiple superclasses,
+        they are searched from left to right according to the order listed in
+        the <code class="epub__literal">class</code> statement header
+        lines.</p>
+<p>In general, multiple inheritance is good for modeling objects
+        that belong to more than one set. For instance, a person may be an
+        engineer, a writer, a musician, and so on, and inherit properties from
+        all such sets. With multiple inheritance, objects obtain the union of the behavior in all their
+        superclasses.</p>
+<p>Perhaps the most common way multiple inheritance is used is to
+        “mix in” general-purpose methods from superclasses. Such superclasses
+        are usually called <span class="epub__emphasis"><em><a id="I_indexterm6_d1e75627"></a>mix-in </em></span>
+<span class="epub__emphasis"><em>classes</em></span>—they
+        provide methods you add to application classes by inheritance. In a
+        sense, mix-in classes are similar to modules: they provide packages of
+        methods for use in their client subclasses. Unlike simple functions in
+        modules, though, methods in mix-ins also have access to the <code class="epub__literal">self</code> instance, for using state information
+        and other methods. The next section demonstrates one common use case
+        for such tools.</p>
+<div class="epub__sect2" title="Coding Mix-in Display Classes"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="coding_mix-in_display_classes"></a>Coding Mix-in Display Classes</h2>
+</div>
+</div>
+</div>
+<p>As <a id="ch30mix-inclassescoding"></a>we’ve seen, <a id="I_indexterm6_d1e75650"></a>Python’s default way to print a class instance object
+          isn’t incredibly useful:</p><a id="I_programlisting6_d1e75658"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>class Spam:</code></strong>
+...     <strong class="epub__userinput"><code>def __init__(self):</code></strong>                   <em class="epub__lineannotation"><span class="epub__lineannotation"># No __repr__ or __str__</span></em>
+...         <strong class="epub__userinput"><code>self.data1 = "food"</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X = Spam()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(X)</code></strong>                                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Default: class, address</span></em>
+&lt;__main__.Spam object at 0x00864818&gt;          <em class="epub__lineannotation"><span class="epub__lineannotation"># Displays "instance" in Python 2.6</span></em></pre>
+<p>As you saw in Chapter 29 when
+          studying operator overloading, you can provide a <code class="epub__literal">__str__</code> or <code class="epub__literal">__repr__</code> method to implement a custom
+          string representation of your own. But, rather than coding one of
+          these in each and every class you wish to print, why not code it
+          once in a general-purpose tool class and inherit it in all your
+          classes?</p>
+<p>That’s what mix-ins are for. Defining a display method in a
+          mix-in superclass once enables us to reuse it anywhere we want to
+          see a custom display format. We’ve already seen tools that do
+          related work:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p>Chapter 27’s <code class="epub__literal">AttrDisplay</code> class formatted instance
+              attributes in a generic <code class="epub__literal">__str__</code> method, but it did not climb
+              class trees and was used in single-inheritance mode only.</p></li><li class="epub__listitem">
+<p>Chapter 28’s <em class="epub__filename">classtree.py</em> module defined functions
+              for climbing and sketching class trees, but it did not display
+              object attributes along the way and was not architected as an
+              inheritable class.</p></li></ul>
+</div>
+<p>Here, we’re going to revisit these examples’ techniques and
+          expand upon them to code a set of three mix-in classes that serve as
+          generic display tools for listing instance attributes, inherited
+          attributes, and attributes on all objects in a class tree. We’ll
+          also use our tools in multiple-inheritance mode and deploy coding
+          techniques that make classes better suited to use as generic
+          tools.</p>
+<div class="epub__sect3" title="Listing instance attributes with __dict__"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="listing_instance_attributes_with_unders"></a>Listing instance attributes with __dict__</h3>
+</div>
+</div>
+</div>
+<p>Let’s <a id="I_indexterm6_d1e75721"></a>get started with the simple case—listing attributes
+            attached to an instance. The following class, coded in the file
+            <a id="I_indexterm6_d1e75729"></a><em class="epub__filename">lister.py</em>,
+            defines a mix-in called <code class="epub__literal"><a id="ch30ListInstanceclass"></a>ListInstance</code> that overloads the <code class="epub__literal">__str__</code> method for all classes that
+            include it in their header lines. Because this is coded as a
+            class, <code class="epub__literal">ListInstance</code> is a
+            generic tool whose formatting logic can be used for instances of
+            any subclass:</p><a id="I_programlisting6_d1e75747"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># File lister.py</span></em>
+
+class ListInstance:
+    """
+    Mix-in class that provides a formatted print() or str() of
+    instances via inheritance of __str__, coded here; displays
+    instance attrs only; self is the instance of lowest class;
+    uses __X names to avoid clashing with client's attrs
+    """
+    def __str__(self):
+        return '&lt;Instance of %s, address %s:\n%s&gt;' % (
+                           self.__class__.__name__,         <em class="epub__lineannotation"><span class="epub__lineannotation"># My class's name</span></em>
+                           id(self),                        <em class="epub__lineannotation"><span class="epub__lineannotation"># My address</span></em>
+                           self.__attrnames())              <em class="epub__lineannotation"><span class="epub__lineannotation"># name=value list</span></em>
+    def __attrnames(self):
+        result = ''
+        for attr in sorted(self.__dict__):                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Instance attr dict</span></em>
+            result += '\tname %s=%s\n' % (attr, self.__dict__ [attr])
+        return result</pre>
+<p><code class="epub__literal">ListInstance</code> uses some
+            previously explored tricks to extract the instance’s class name
+            and attributes:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p>Each instance has a built-in <code class="epub__literal">__class__</code> attribute that references
+                the class from which it was created, and each class has a
+                <code class="epub__literal">__name__</code> attribute that
+                references the name in the header, so the expression <code class="epub__literal">self.__class__.__name__</code> fetches the
+                name of an instance’s class.</p></li><li class="epub__listitem">
+<p>This class does most of its work by simply scanning the
+                instance’s attribute dictionary (remember, it’s exported in
+                <code class="epub__literal">__dict__</code>) to build up a
+                string showing the names and values of all instance
+                attributes. The dictionary’s keys are sorted to finesse any
+                ordering differences across Python releases.</p></li></ul>
+</div>
+<p>In these respects, <code class="epub__literal">ListInstance</code> is similar to Chapter 27’s attribute display; in
+            fact, it’s largely just a variation on a theme. Our class here
+            uses two additional techniques, though:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p>It displays the instance’s memory address by calling the
+                <code class="epub__literal">id</code> built-function, which
+                returns any object’s address (by definition, a unique object
+                identifier, which will be useful in later mutations of this
+                code).</p></li><li class="epub__listitem">
+<p>It uses the <span class="epub__emphasis"><em>pseudoprivate</em></span> naming
+                pattern for its worker method: <code class="epub__literal">__attrnames</code>. As we learned earlier
+                in his chapter, Python automatically localizes any such name
+                to its enclosing class by expanding the attribute name to
+                include the class name (in this case, it becomes <code class="epub__literal">_ListInstance__attrnames</code>). This
+                holds true for both class attributes (like methods) and
+                instance attributes attached to <code class="epub__literal">self</code>. This behavior is useful in a
+                general tool like this, as it ensures that its names don’t
+                clash with any names used in its client subclasses.</p></li></ul>
+</div>
+<p>Because <code class="epub__literal">ListInstance</code>
+            defines a <code class="epub__literal">__str__</code> operator
+            overloading method, instances derived from this class display
+            their attributes automatically when printed, giving a bit more
+            information than a simple address. Here is the class in action, in
+            single-inheritance mode (this code works the same in both Python
+            3.0 and 2.6):</p><a id="I_programlisting6_d1e75824"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from lister import ListInstance</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class Spam(ListInstance):</code></strong>                    <em class="epub__lineannotation"><span class="epub__lineannotation"># Inherit a __str__ method</span></em>
+...     <strong class="epub__userinput"><code>def __init__(self):</code></strong>
+...         <strong class="epub__userinput"><code>self.data1 = 'food'</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = Spam()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(x)</code></strong>                                     <em class="epub__lineannotation"><span class="epub__lineannotation"># print() and str() run __str__</span></em>
+&lt;Instance of Spam, address 40240880:
+        name data1=food
+&gt;</pre>
+<p>You can also fetch the listing output as a string without
+            printing it with <code class="epub__literal">str</code>, and
+            interactive echoes still use the default format:</p><a id="I_programlisting6_d1e75856"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>str(x)</code></strong>
+'&lt;Instance of Spam, address 40240880:\n\tname data1=food\n&gt;'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x</code></strong>                                            <em class="epub__lineannotation"><span class="epub__lineannotation"># The __repr__ still is a default</span></em>
+&lt;__main__.Spam object at 0x026606F0&gt;</pre>
+<p>The <code class="epub__literal">ListInstance</code> class is
+            useful for any classes you write—even classes that already have
+            one or more superclasses. This is where <span class="epub__emphasis"><em>multiple
+            inheritance</em></span> comes in handy: by adding <code class="epub__literal">ListInstance</code> to the list of superclasses
+            in a class header (i.e., mixing it in), you get its <code class="epub__literal">__str__</code> “for free” while still
+            inheriting from the existing superclass(es). The file <em class="epub__filename">testmixin.py</em> demonstrates<a id="I_indexterm6_d1e75886"></a>:</p><a id="I_programlisting6_d1e75890"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># File testmixin.py</span></em>
+
+from lister import *                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Get lister tool classes</span></em>
+
+class Super:
+    def __init__(self):               <em class="epub__lineannotation"><span class="epub__lineannotation"># Superclass __init__</span></em>
+        self.data1 = 'spam'           <em class="epub__lineannotation"><span class="epub__lineannotation"># Create instance attrs</span></em>
+    def ham(self):
+        pass
+
+class Sub(Super, ListInstance):       <em class="epub__lineannotation"><span class="epub__lineannotation"># Mix in ham and a __str__</span></em>
+    def __init__(self):               <em class="epub__lineannotation"><span class="epub__lineannotation"># listers have access to self</span></em>
+        Super.__init__(self)
+        self.data2 = 'eggs'           <em class="epub__lineannotation"><span class="epub__lineannotation"># More instance attrs</span></em>
+        self.data3 = 42
+    def spam(self):                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Define another method here</span></em>
+        pass
+
+if __name__ == '__main__':
+    X = Sub()
+    print(X)                          <em class="epub__lineannotation"><span class="epub__lineannotation"># Run mixed-in __str__</span></em></pre>
+<p>Here, <code class="epub__literal">Sub</code> inherits names
+            from both <code class="epub__literal">Super</code> and <code class="epub__literal">ListInstance</code>; it’s a composite of its
+            own names and names in both its superclasses. When you make a
+            <code class="epub__literal">Sub</code> instance and print it, you
+            automatically get the custom representation mixed in from <code class="epub__literal">ListInstance</code> (in this case, this
+            script’s output is the same under both Python 3.0 and 2.6, except
+            for object addresses):</p><a id="I_programlisting6_d1e75935"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>C:\python30\python testmixin.py</code></strong>
+&lt;Instance of Sub, address 40962576:
+        name data1=spam
+        name data2=eggs
+        name data3=42
+&gt;</pre>
+<p><code class="epub__literal">ListInstance</code> works in any
+            class it’s mixed into because <code class="epub__literal">self</code> refers to an instance of the
+            subclass that pulls this class in, whatever that may be. In a
+            sense, mix-in classes are the class equivalent of modules—packages
+            of methods useful in a variety of clients. For example, here is
+            <code class="epub__literal">Lister</code> working again in
+            single-inheritance mode on a different class’s instances, with
+            <code class="epub__literal">import</code> and attributes set
+            outside the class:</p><a id="I_programlisting6_d1e75953"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>import lister</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class C(lister.ListInstance): pass</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = C()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.a = 1; x.b = 2; x.c = 3</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(x)</code></strong>
+&lt;Instance of C, address 40961776:
+        name a=1
+        name b=2
+        name c=3
+&gt;</pre>
+<p>Besides the utility they provide, mix-ins optimize code
+            maintenance, like all classes do. For example, if you later decide
+            to extend <code class="epub__literal">ListInstance</code>’s
+            <code class="epub__literal">__str__</code> to also print all the
+            class attributes that an instance inherits, you’re safe; because
+            it’s an inherited method, changing <code class="epub__literal">__str__</code> automatically updates the
+            display of each subclass that imports the class and mixes it in.
+            Since it’s now officially “later,” let’s move on to the next
+            section to see what such an extension might look <a id="I_indexterm6_d1e75981"></a>like.</p>
+</div>
+<div class="epub__sect3" title="Listing inherited attributes with dir"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="listing_inherited_attributes_with_dir"></a>Listing inherited attributes with dir</h3>
+</div>
+</div>
+</div>
+<p>As it is, <a id="I_indexterm6_d1e75989"></a>our <code class="epub__literal">Lister</code> mix-in
+            displays instance attributes only (i.e., names attached to the
+            instance object itself). It’s trivial to extend the class to
+            display all the attributes accessible from an instance,
+            though—both its own and those it inherits from its classes. The
+            trick is to use the <code class="epub__literal"><a id="I_indexterm6_d1e76001"></a>dir</code> built-in function instead of scanning
+            the instance’s <code class="epub__literal">__dict__</code>
+            dictionary; the latter holds instance attributes only, but the
+            former also collects all inherited attributes in Python 2.2 and
+            later.</p>
+<p>The following mutation codes this scheme; I’ve renamed it to
+            facilitate simple testing, but if this were to
+            <span class="epub__emphasis"><em>replace</em></span> the original version, all existing
+            clients would pick up the new display automatically:</p><a id="I_programlisting6_d1e76016"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># File lister.py, continued</span></em>
+
+class ListInherited:
+    """
+    Use dir() to collect both instance attrs and names
+    inherited from its classes; Python 3.0 shows more
+    names than 2.6 because of the implied object superclass
+    in the new-style class model; getattr() fetches inherited
+    names not in self.__dict__; use __str__, not __repr__,
+    or else this loops when printing bound methods!
+    """
+    def __str__(self):
+        return '&lt;Instance of %s, address %s:\n%s&gt;' % (
+                           self.__class__.__name__,         <em class="epub__lineannotation"><span class="epub__lineannotation"># My class's name</span></em>
+                           id(self),                        <em class="epub__lineannotation"><span class="epub__lineannotation"># My address</span></em>
+                           self.__attrnames())              <em class="epub__lineannotation"><span class="epub__lineannotation"># name=value list</span></em>
+    def __attrnames(self):
+        result = ''
+        for attr in dir(self):                              <em class="epub__lineannotation"><span class="epub__lineannotation"># Instance dir()</span></em>
+            if attr[:2] == '__' and attr[-2:] == '__':      <em class="epub__lineannotation"><span class="epub__lineannotation"># Skip internals</span></em>
+                result += '\tname %s=&lt;&gt;\n' % attr
+            else:
+                result += '\tname %s=%s\n' % (attr, getattr(self, attr))
+        return result</pre>
+<p>Notice that this code skips <code class="epub__literal">__</code><em class="epub__replaceable"><code>X</code></em><code class="epub__literal">__</code> names’ values; most of these are
+            internal names that we don’t generally care about in a generic
+            listing like this. This version also must use the <code class="epub__literal">getattr</code> built-in function to fetch
+            attributes by name string instead of using instance attribute
+            dictionary indexing—<code class="epub__literal">getattr</code>
+            employs the inheritance search protocol, and some of the names
+            we’re listing here are not stored on the instance itself.</p>
+<p>To test the new version, change the <em class="epub__filename">testmixin.py</em> file to use this new class
+            instead:</p><a id="I_programlisting6_d1e76055"></a>
+<pre class="epub__programlisting">class Sub(Super, ListInherited):                            <em class="epub__lineannotation"><span class="epub__lineannotation"># Mix in a __str__</span></em></pre>
+<p>This file’s output varies per release. In Python 2.6, we get
+            the following; notice the name mangling at work in the lister’s
+            method name (I shortened its full value display to fit on this
+            page):</p><a id="I_programlisting6_d1e76061"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python26\python testmixin.py</code></strong>
+&lt;Instance of Sub, address 40073136:
+        name _ListInherited__attrnames=&lt;bound method Sub.__attrnames of &lt;...<em class="epub__replaceable"><code>more</code></em>...&gt;&gt;
+        name __doc__=&lt;&gt;
+        name __init__=&lt;&gt;
+        name __module__=&lt;&gt;
+        name __str__=&lt;&gt;
+        name data1=spam
+        name data2=eggs
+        name data3=42
+        name ham=&lt;bound method Sub.ham of &lt;__main__.Sub instance at 0x026377B0&gt;&gt;
+        name spam=&lt;bound method Sub.spam of &lt;__main__.Sub instance at 0x026377B0&gt;&gt;
+&gt;</pre>
+<p>In Python 3.0, more attributes are displayed because all
+            classes are “new-style” and inherit names from the implied
+            <code class="epub__literal">object</code> superclass (more on this
+            in Chapter 31). Because so many
+            names are inherited from the default superclass, I’ve omitted many
+            here; run this on your own for the full listing:</p><a id="I_programlisting6_d1e76076"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python testmixin.py</code></strong>
+&lt;Instance of Sub, address 40831792:
+        name _ListInherited__attrnames=&lt;bound method Sub.__attrnames of &lt;...<em class="epub__replaceable"><code>more</code></em>...&gt;&gt;
+        name __class__=&lt;&gt;
+        name __delattr__=&lt;&gt;
+        name __dict__=&lt;&gt;
+        name __doc__=&lt;&gt;
+        name __eq__=&lt;&gt;
+        <em class="epub__replaceable"><code>...more names omitted...</code></em>
+        name __repr__=&lt;&gt;
+        name __setattr__=&lt;&gt;
+        name __sizeof__=&lt;&gt;
+        name __str__=&lt;&gt;
+        name __subclasshook__=&lt;&gt;
+        name __weakref__=&lt;&gt;
+        name data1=spam
+        name data2=eggs
+        name data3=42
+        name ham=&lt;bound method Sub.ham of &lt;__main__.Sub object at 0x026F0B30&gt;&gt;
+        name spam=&lt;bound method Sub.spam of &lt;__main__.Sub object at 0x026F0B30&gt;&gt;
+&gt;</pre>
+<p>One caution here—now that we’re displaying inherited methods
+            too, we have to use <code class="epub__literal">__str__</code>
+            instead of <code class="epub__literal">__repr__</code> to overload
+            printing. With <code class="epub__literal">__repr__</code>, this
+            code will <span class="epub__emphasis"><em>loop</em></span>—displaying the value of a
+            method triggers the <code class="epub__literal">__repr__</code> of
+            the method’s class, in order to display the class. That is, if the
+            lister’s <code class="epub__literal">__repr__</code> tries to
+            display a method, displaying the method’s class will trigger the
+            lister’s <code class="epub__literal">__repr__</code> again.
+            Subtle, but true! Change <code class="epub__literal">__str__</code> to <code class="epub__literal">__repr__</code> here to see this for yourself.
+            If you must use <code class="epub__literal">__repr__</code> in
+            such a context, you can avoid the loops by using <code class="epub__literal">isinstance</code> to compare the type of
+            attribute values against <code class="epub__literal">types.MethodType</code> in the standard
+            library, to know which items to skip.</p>
+</div>
+<div class="epub__sect3" title="Listing attributes per object in class trees"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="listing_attributes_per_object_in_class"></a>Listing attributes per object in class trees</h3>
+</div>
+</div>
+</div>
+<p>Let’s <a id="I_indexterm6_d1e76133"></a>code one last extension. As it is, our lister
+            doesn’t tell us which class an inherited name comes from. As we
+            saw in the <em class="epub__filename">classtree.py</em>
+            example near the end of Chapter 28,
+            though, it’s straightforward to climb class inheritance trees in
+            code. The following mix-in class makes use of this same technique
+            to display attributes grouped by the classes they live in—it
+            sketches the full class tree, displaying attributes attached to
+            each object along the way. It does so by traversing the
+            inheritance tree from an instance’s <code class="epub__literal">__class__</code> to its class, and then from
+            the class’s <code class="epub__literal">__bases__</code> to all
+            superclasses recursively, scanning object <code class="epub__literal">__dicts__</code>s along the way:</p><a id="I_programlisting6_d1e76156"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># File lister.py, continued</span></em>
+
+class ListTree:
+    """
+    Mix-in that returns an __str__ trace of the entire class
+    tree and all its objects' attrs at and above self;
+    run by print(), str() returns constructed string;
+    uses __X attr names to avoid impacting clients;
+    uses generator expr to recurse to superclasses;
+    uses str.format() to make substitutions clearer
+    """
+    def __str__(self):
+        self.__visited = {}
+        return '&lt;Instance of {0}, address {1}:\n{2}{3}&gt;'.format(
+                           self.__class__.__name__,
+                           id(self),
+                           self.__attrnames(self, 0),
+                           self.__listclass(self.__class__, 4))
+
+    def __listclass(self, aClass, indent):
+        dots = '.' * indent
+        if aClass in self.__visited:
+            return '\n{0}&lt;Class {1}:, address {2}: (see above)&gt;\n'.format(
+                           dots,
+                           aClass.__name__,
+                           id(aClass))
+        else:
+            self.__visited[aClass] = True
+            genabove = (self.__listclass(c, indent+4) for c in aClass.__bases__)
+            return '\n{0}&lt;Class {1}, address {2}:\n{3}{4}{5}&gt;\n'.format(
+                           dots,
+                           aClass.__name__,
+                           id(aClass),
+                           self.__attrnames(aClass, indent),
+                           ''.join(genabove),
+                           dots)
+
+    def __attrnames(self, obj, indent):
+        spaces = ' ' * (indent + 4)
+        result = ''
+        for attr in sorted(obj.__dict__):
+            if attr.startswith('__') and attr.endswith('__'):
+                result += spaces + '{0}=&lt;&gt;\n'.format(attr)
+            else:
+                result += spaces + '{0}={1}\n'.format(attr, getattr(obj, attr))
+        return result</pre>
+<p>Note the use of a <span class="epub__emphasis"><em><a id="I_indexterm6_d1e76163"></a>generator expression</em></span> to direct the
+            recursive calls for superclasses; it’s activated by the nested
+            string <code class="epub__literal">join</code> method. Also see
+            how this version uses the Python 3.0 and 2.6 string <code class="epub__literal">format</code> method instead of <code class="epub__literal">%</code> formatting expressions, to make
+            substitutions clearer; when many substitutions are applied like
+            this, explicit argument numbers may make the code easier to
+            decipher. In short, in this version we exchange the first of the
+            following lines for the second:</p><a id="I_programlisting6_d1e76177"></a>
+<pre class="epub__programlisting">        return '&lt;Instance of %s, address %s:\n%s%s&gt;' % (...)          <em class="epub__lineannotation"><span class="epub__lineannotation"># Expression</span></em>
+        return '&lt;Instance of {0}, address {1}:\n{2}{3}&gt;'.format(...)  <em class="epub__lineannotation"><span class="epub__lineannotation"># Method</span></em></pre>
+<p>Now, change <em class="epub__filename">testmixin.py</em> to inherit from this new
+            class again to test:</p><a id="I_programlisting6_d1e76189"></a>
+<pre class="epub__programlisting">class Sub(Super, ListTree):         <em class="epub__lineannotation"><span class="epub__lineannotation"># Mix in a __str__</span></em></pre>
+<p>The file’s tree-sketcher output in Python 2.6 is then as
+            follows:</p><a id="I_programlisting6_d1e76195"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python26\python testmixin.py</code></strong>
+&lt;Instance of Sub, address 40728496:
+    _ListTree__visited={}
+    data1=spam
+    data2=eggs
+    data3=42
+
+....&lt;Class Sub, address 40701168:
+        __doc__=&lt;&gt;
+        __init__=&lt;&gt;
+        __module__=&lt;&gt;
+        spam=&lt;unbound method Sub.spam&gt;
+
+........&lt;Class Super, address 40701120:
+            __doc__=&lt;&gt;
+            __init__=&lt;&gt;
+            __module__=&lt;&gt;
+            ham=&lt;unbound method Super.ham&gt;
+........&gt;
+
+........&lt;Class ListTree, address 40700688:
+            _ListTree__attrnames=&lt;unbound method ListTree.__attrnames&gt;
+            _ListTree__listclass=&lt;unbound method ListTree.__listclass&gt;
+            __doc__=&lt;&gt;
+            __module__=&lt;&gt;
+            __str__=&lt;&gt;
+........&gt;
+....&gt;
+&gt;</pre>
+<p>Notice in this output how methods are
+            <span class="epub__emphasis"><em>unbound</em></span> now under 2.6, because we fetch them
+            from classes directly, instead of from instances. Also observe how
+            the lister’s <code class="epub__literal">__visited</code> table has its name
+            mangled in the instance’s attribute dictionary; unless we’re very
+            unlucky, this won’t clash with other data there.</p>
+<p>Under Python 3.0, we get extra attributes and superclasses
+            again. Notice that unbound methods are simple
+            <span class="epub__emphasis"><em>functions</em></span> in 3.0, as described in an earlier
+            note in this chapter (and that again, I’ve deleted most built-in
+            attributes in <code class="epub__literal">object</code> to save
+            space here; run this on your own for the complete listing):</p><a id="I_programlisting6_d1e76218"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python testmixin.py</code></strong>
+&lt;Instance of Sub, address 40635216:
+    _ListTree__visited={}
+    data1=spam
+    data2=eggs
+    data3=42
+
+....&lt;Class Sub, address 40914752:
+        __doc__=&lt;&gt;
+        __init__=&lt;&gt;
+        __module__=&lt;&gt;
+        spam=&lt;function spam at 0x026D53D8&gt;
+
+........&lt;Class Super, address 40829952:
+            __dict__=&lt;&gt;
+            __doc__=&lt;&gt;
+            __init__=&lt;&gt;
+            __module__=&lt;&gt;
+            __weakref__=&lt;&gt;
+            ham=&lt;function ham at 0x026D5228&gt;
+
+............&lt;Class object, address 505114624:
+                __class__=&lt;&gt;
+                __delattr__=&lt;&gt;
+                __doc__=&lt;&gt;
+                __eq__=&lt;&gt;
+                <em class="epub__replaceable"><code>...more omitted...</code></em>
+                __repr__=&lt;&gt;
+                __setattr__=&lt;&gt;
+                __sizeof__=&lt;&gt;
+                __str__=&lt;&gt;
+                __subclasshook__=&lt;&gt;
+............&gt;
+........&gt;
+
+........&lt;Class ListTree, address 40829496:
+            _ListTree__attrnames=&lt;function __attrnames at 0x026D5660&gt;
+            _ListTree__listclass=&lt;function __listclass at 0x026D56A8&gt;
+            __dict__=&lt;&gt;
+            __doc__=&lt;&gt;
+            __module__=&lt;&gt;
+            __str__=&lt;&gt;
+            __weakref__=&lt;&gt;
+
+............&lt;Class object:, address 505114624: (see above)&gt;
+........&gt;
+....&gt;
+&gt;</pre>
+<p>This version avoids listing the same class object twice by
+            keeping a table of classes <span class="epub__emphasis"><em>visited</em></span> so far
+            (this is why an object’s <code class="epub__literal">id</code> is
+            included—to serve as a key for a previously displayed item). Like
+            the transitive module reloader of Chapter 24, a dictionary works to avoid
+            repeats and cycles here because class objects may be dictionary
+            keys; a set would provide similar functionality.</p>
+<p>This version also takes care to avoid large internal objects
+            by skipping <code class="epub__literal">__</code><em class="epub__replaceable"><code>X</code></em><code class="epub__literal">__</code> names again. If you comment out the
+            test for these names, their values will display normally. Here’s
+            an excerpt from the output in 2.6 with this temporary change made
+            (it’s much larger in its entirety, and it gets even worse in 3.0,
+            which is why these names are probably better skipped!):</p><a id="I_programlisting6_d1e76245"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python26\python testmixin.py</code></strong>
+<em class="epub__replaceable"><code>...more omitted...</code></em>
+
+........&lt;Class ListTree, address 40700688:
+            _ListTree__attrnames=&lt;unbound method ListTree.__attrnames&gt;
+            _ListTree__listclass=&lt;unbound method ListTree.__listclass&gt;
+            __doc__=
+    Mix-in that returns the __str__ trace of the entire class
+    tree and all its objects' attrs at and above self;
+    run by print, str returns constructed string;
+    uses __X attr names to avoid impacting clients;
+    uses generator expr to recurse to superclasses;
+    uses str.format() to make substitutions clearer
+
+            __module__=lister
+            __str__=&lt;unbound method ListTree.__str__&gt;
+........&gt;</pre>
+<p>For more fun, try mixing this class into something more
+            substantial, like the <code class="epub__literal">Button</code>
+            class of Python’s <code class="epub__literal">tkinter</code> GUI
+            toolkit module. In general, you’ll want to name <code class="epub__literal">ListTree</code> first (leftmost) in a <code class="epub__literal">class</code> header, so its <code class="epub__literal">__str__</code> is picked up; <code class="epub__literal">Button</code> has one, too, and the leftmost
+            superclass is searched first in multiple inheritance. The output
+            of the following is fairly
+            massive (18K characters), so run this code on your own to see the
+            full listing (and if you’re using Python 2.6, recall that you
+            should use <code class="epub__literal">Tkinter</code> for the module name instead of <code class="epub__literal">tkinter</code>):</p><a id="I_programlisting6_d1e76286"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from lister import ListTree</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from tkinter import Button</code></strong>                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Both classes have a __str__</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class MyButton(ListTree, Button): pass</code></strong>      <em class="epub__lineannotation"><span class="epub__lineannotation"># ListTree first: use its __str__</span></em>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>B = MyButton(text='spam')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>open('savetree.txt', 'w').write(str(B))</code></strong>     <em class="epub__lineannotation"><span class="epub__lineannotation"># Save to a file for later viewing</span></em>
+18247
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(B)</code></strong>                                    <em class="epub__lineannotation"><span class="epub__lineannotation"># Print the display here</span></em>
+&lt;Instance of MyButton, address 44355632:
+    _ListTree__visited={}
+    _name=44355632
+    _tclCommands=[]
+    <em class="epub__replaceable"><code>...much more omitted...</code></em>
+&gt;</pre>
+<p>Of course, there’s much more we could do here (sketching the
+            tree in a GUI might be a natural next step), but we’ll leave
+            further work as a suggested exercise. We’ll also extend this code
+            in the exercises at the end of this part of the book, to list
+            superclass names in parentheses at the start of instance and class
+            displays.</p>
+<p>The main point here is that OOP is all about code reuse, and
+            mix-in classes are a powerful example. Like almost everything else
+            in programming, multiple inheritance can be a useful device when
+            applied well. In practice, though, it is an advanced feature and
+            can become complicated if used carelessly or excessively. We’ll
+            revisit this topic as a gotcha at the end of the next chapter. In
+            that chapter, we’ll also meet the new-style class model, which
+            modifies the search order for one special multiple inheritance
+            case. For more ideas, see also Python manuals for the <code class="epub__literal">class.mro()</code> new-style class object
+            method, which returns a list giving the class tree search order
+            used by inheritance; this could be used by a class lister to show
+            attribute sources.</p><div class="epub__note" title="Note">
+<h3 class="epub__title">Note</h3>
+<p><span class="epub__emphasis"><em>Supporting slots</em></span>: <a id="I_indexterm6_d1e76331"></a>Because they scan instance dictionaries, the
+              <code class="epub__literal">ListInstance</code> and <code class="epub__literal">ListTree</code> classes presented here don’t
+              directly support attributes stored in
+              <span class="epub__emphasis"><em>slots</em></span>—a newer and relatively rarely used
+              option we’ll meet in the next chapter, where instance attributes
+              are declared in a <code class="epub__literal">__slots__</code>
+              class attribute. For example, if in <em class="epub__filename">textmixin.py</em> we assign <code class="epub__literal">__slots__=['data1']</code> in <code class="epub__literal">Super</code> and <code class="epub__literal">__slots__=['data3']</code> in <code class="epub__literal">Sub</code>, only the <code class="epub__literal">data2</code> attribute is displayed in the
+              instance by these two lister classes; <code class="epub__literal">ListTree</code> also displays <code class="epub__literal">data1</code> and <code class="epub__literal">data3</code>, but as attributes of the
+              <code class="epub__literal">Super</code> and <code class="epub__literal">Sub</code> class objects and with a special
+              format for their values (technically, they are class-level
+              descriptors).</p>
+<p>To better support slot attributes in these classes, change
+              the <code class="epub__literal">__dict__</code> scanning loops
+              to also iterate through <code class="epub__literal">__slots__</code> lists using code the next
+              chapter will present, and use the <code class="epub__literal">getattr</code> built-in function to fetch
+              values instead of <code class="epub__literal">__dict__</code>
+              indexing (<code class="epub__literal">ListTree</code> already
+              does). Since instances inherit only the lowest class’s <code class="epub__literal">__slots__</code>, you may also need to come
+              up with a policy when <code class="epub__literal">__slots__</code> lists appear in multiple
+              superclasses (<code class="epub__literal">ListTree</code> already displays
+              them as class attributes). <code class="epub__literal">ListInherited</code> is immune to all this,
+              because <code class="epub__literal">dir</code> results combine
+              both <code class="epub__literal">__dict__</code> names and all
+              classes’ <code class="epub__literal">__slots__</code>
+              names.</p>
+<p>Alternatively, as a policy we could simply let our code
+              handle slot-based attributes as it currently does, rather than
+              complicating it for a rare, advanced feature. Slots and normal
+              instance attributes are different kinds of names. We’ll
+              investigate slots further in the next chapter; I omitted
+              addressing them in these examples to avoid a forward
+              dependency (not counting
+              this note, of course!)—not exactly a valid design goal, but
+              reasonable for a <a id="I_indexterm6_d1e76429"></a><a id="I_indexterm6_d1e76431"></a><a id="I_indexterm6_d1e76433"></a>book.</p>
+</div>
+</div>
+</div>
+<div class="epub__sect1" title="Classes Are Objects: Generic Object Factories"><div class="epub__titlepage"><div>
+<div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

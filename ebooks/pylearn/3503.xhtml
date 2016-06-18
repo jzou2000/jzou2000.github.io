@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Exception Design Tips and Gotchas</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div><h1 class="epub__title"><a id="exception_design_tips_and_gotchas"></a>Exception Design Tips and Gotchas</h1>
+<p>I’m <a id="ch35excptndsgntipsgotchas"></a>lumping design tips and gotchas together in this
+        chapter, because it turns out that the most common gotchas largely
+        stem from design issues. By and large, exceptions are easy to use in
+        Python. The real art behind them is in deciding how specific or
+        general your <code class="epub__literal">except</code> clauses should
+        be and how much code to wrap up in <code class="epub__literal">try</code><a name="second of"></a> statements. Let’s address the second of
+        these concerns first.</p>
+<div class="epub__sect2" title="What Should Be Wrapped"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="what_should_be_wrapped"></a>What Should Be Wrapped</h2>
+</div>
+</div>
+</div>
+<p>In principle, <a id="I_indexterm4_d1e87047"></a>you could wrap every <a id="I_indexterm4_d1e87055"></a>statement in your script in its own <code class="epub__literal">try</code>, but that would just be silly (the
+          <code class="epub__literal">try</code> statements would then need to
+          be wrapped in <code class="epub__literal">try</code> statements!).
+          What to wrap is really a design issue that goes beyond the language
+          itself, and it will become more apparent with use. But for now, here
+          are a few rules of thumb:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p>Operations that commonly fail should generally be wrapped
+              in <code class="epub__literal">try</code> statements. For
+              example, operations that interface with system state (file
+              opens, socket calls, and the like) are prime candidates for
+              <code class="epub__literal">try</code>s.</p></li><li class="epub__listitem">
+<p>However, there are exceptions to the prior rule—in a
+              simple script, you may <span class="epub__emphasis"><em>want</em></span> failures of
+              such operations to kill your program instead of being caught and
+              ignored. This is especially true if the failure is a
+              showstopper. Failures in Python typically result in useful error
+              messages (not hard crashes), and this is often the best outcome
+              you could hope for.</p></li><li class="epub__listitem">
+<p>You should implement termination actions in <code class="epub__literal">try</code>/<code class="epub__literal">finally</code> statements to guarantee their
+              execution, unless a context manager is available as a <code class="epub__literal">with</code>/<code class="epub__literal">as</code> option. The <code class="epub__literal">try</code>/<code class="epub__literal">finally</code> statement form allows you to
+              run code whether exceptions occur or not in arbitrary
+              scenarios.</p></li><li class="epub__listitem">
+<p>It is sometimes more convenient to wrap the call to a
+              large function in a single <code class="epub__literal">try</code> statement, rather than littering
+              the function itself with many <code class="epub__literal">try</code> statements. That way, all
+              exceptions in the function percolate up to the <code class="epub__literal">try</code> around the call, and you reduce
+              the amount of code within the function.</p></li></ul>
+</div>
+<p>The types of programs you write will probably influence the
+          amount of exception handling you code as well. Servers, for
+          instance, must generally keep running persistently and so will
+          likely require <code class="epub__literal">try</code> statements to
+          catch and recover from exceptions. In-process testing programs of
+          the kind we saw in this chapter will probably handle exceptions as
+          well. Simpler one-shot scripts, though, will often ignore exception
+          handling completely because failure at any step requires script
+          shutdown.</p>
+</div>
+<div class="epub__sect2" title="Catching Too Much: Avoid Empty except and Exception"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="catching_too_much_colon_avoid_empty_exc"></a>Catching Too Much: Avoid Empty except and Exception</h2>
+</div>
+</div>
+</div>
+<p>On to <a id="I_indexterm4_d1e87128"></a>the issue of handler generality. Python lets you pick
+          and choose which exceptions to catch, but you sometimes have to be
+          careful to not be too inclusive. For example, you’ve seen that an
+          empty <code class="epub__literal"><a id="I_indexterm4_d1e87137"></a>except</code> clause catches
+          <span class="epub__emphasis"><em>every</em></span> exception that might be raised while the
+          code in the <code class="epub__literal">try</code> block
+          runs.</p>
+<p>That’s easy to code, and sometimes desirable, but you may also
+          wind up intercepting an error that’s expected by a <code class="epub__literal">try</code> handler higher up in the exception
+          nesting structure. For example, an exception handler such as the
+          following catches and stops every exception that reaches it,
+          regardless of whether another handler is waiting for it:</p><a id="I_programlisting4_d1e87155"></a>
+<pre class="epub__programlisting">def func():
+    try:
+        ...                      <em class="epub__lineannotation"><span class="epub__lineannotation"># IndexError is raised in here</span></em>
+    except:
+        ...                      <em class="epub__lineannotation"><span class="epub__lineannotation"># But everything comes here and dies!</span></em>
+try:
+    func()
+except IndexError:               <em class="epub__lineannotation"><span class="epub__lineannotation"># Exception should be processed here</span></em>
+    ...</pre>
+<p>Perhaps worse, such code might also catch unrelated system
+          exceptions. Even things like memory errors, genuine programming
+          mistakes, iteration stops, keyboard interrupts, and system exits
+          raise exceptions in Python. Such exceptions should not usually be
+          intercepted.</p>
+<p>For example, scripts normally exit when control falls off the
+          end of the top-level file. However, Python also provides a built-in
+          <code class="epub__literal"><a id="I_indexterm4_d1e87171"></a>sys.exit(statuscode)</code> call to allow early
+          terminations. This actually works by raising a built-in <code class="epub__literal">SystemExit</code> exception to end the program,
+          so that <code class="epub__literal">try</code>/<code class="epub__literal">finally</code> handlers run on the way out and
+          special types of programs can intercept the event.<sup>[79]</sup> Because of this, a <code class="epub__literal">try</code> with an empty <code class="epub__literal">except</code> might unknowingly prevent a crucial
+          exit, as in the following file (<em class="epub__filename">exiter.py</em>):</p><a id="I_programlisting4_d1e87214"></a>
+<pre class="epub__programlisting">import sys
+def bye():
+    sys.exit(40)                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Crucial error: abort now!</span></em>
+try:
+    bye()
+except:
+    print('got it')              <em class="epub__lineannotation"><span class="epub__lineannotation"># Oops--we ignored the exit</span></em>
+print('continuing...')
+
+% <strong class="epub__userinput"><code>python exiter.py</code></strong>
+got it
+continuing...</pre>
+<p>You simply might not expect all the kinds of exceptions that
+          could occur during an operation. Using the built-in exception
+          classes of the prior chapter can help in this particular case,
+          because the <code class="epub__literal">Exception</code> superclass
+          is not a superclass of <code class="epub__literal">SystemExit</code>:</p><a id="I_programlisting4_d1e87233"></a>
+<pre class="epub__programlisting">try:
+    bye()
+except Exception:                <em class="epub__lineannotation"><span class="epub__lineannotation"># Won't catch exits, but _will_ catch many others</span></em>
+    ...</pre>
+<p>In other cases, though, this scheme is no better than an empty
+          <code class="epub__literal">except</code> clause—because <a id="I_indexterm4_d1e87243"></a><code class="epub__literal">Exception</code> is a
+          superclass above all built-in exceptions except system-exit events,
+          it still has the potential to catch exceptions meant for elsewhere
+          in the program.</p>
+<p>Probably worst of all, both an empty <code class="epub__literal">except</code> and catching the <code class="epub__literal">Exception</code> class will also catch genuine
+          programming errors, which should be allowed to pass most of the
+          time. In fact, these two techniques can effectively <span class="epub__emphasis"><em>turn
+          off</em></span> Python’s error-reporting machinery, making it difficult to notice
+          mistakes in your code. Consider this code, for example:</p><a id="I_programlisting4_d1e87266"></a>
+<pre class="epub__programlisting">mydictionary = {...}
+...
+try:
+    x = myditctionary['spam']    <em class="epub__lineannotation"><span class="epub__lineannotation"># Oops: misspelled</span></em>
+except:
+    x = None                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Assume we got KeyError</span></em>
+...<em class="epub__replaceable"><code>continue here with x</code></em>...</pre>
+<p>The coder here assumes that the only sort of error that can
+          happen when indexing a dictionary is a missing key error. But
+          because the name <code class="epub__literal">myditctionary</code> is
+          misspelled (it should say <code class="epub__literal">mydictionary</code>), Python raises a <code class="epub__literal">NameError</code> instead for the undefined name
+          reference, which the handler will silently catch and ignore. The
+          event handler will incorrectly fill in a default for the dictionary
+          access, masking the program error. Moreover, catching <code class="epub__literal">Exception</code> here would have the exact same
+          effect as an empty <code class="epub__literal">except</code>. If
+          this happens in code that is far removed from the place where the
+          fetched values are used, it might make for a very interesting
+          debugging task!</p>
+<p>As a rule of thumb, be as specific in your handlers as you can
+          be—empty <code class="epub__literal">except</code> clauses and
+          <code class="epub__literal">Exception</code> catchers are handy, but
+          potentially error-prone. In the last example, for instance, you
+          would be better off saying <code class="epub__literal">except
+          KeyError:</code> to make your intentions explicit and avoid
+          intercepting unrelated events. In simpler scripts, the potential for
+          problems might not be significant enough to outweigh the convenience
+          of a catchall, but in general, general handlers are generally
+          trouble.</p>
+</div>
+<div class="epub__sect2" title="Catching Too Little: Use Class-Based Categories"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="catching_too_little_colon_use_class-bas"></a>Catching Too Little: Use Class-Based Categories</h2>
+</div>
+</div>
+</div>
+<p>On <a id="I_indexterm4_d1e87310"></a>the other hand, neither should handlers be too
+          specific. When you list specific exceptions in a <code class="epub__literal">try</code>, you catch only what you actually
+          list. This isn’t necessarily a bad thing, but if a system evolves to
+          raise other exceptions in the future, you may need to go back and
+          add them to exception lists elsewhere in your code.</p>
+<p>We saw this phenomenon at work in the prior chapter. For
+          instance, the following handler is written to treat <code class="epub__literal">MyExcept1</code> and <code class="epub__literal">MyExcept2</code> as normal cases and everything
+          else as an error. Therefore, if you add a <code class="epub__literal">MyExcept3</code> in the future, it will be
+          processed as an error unless you update the exception list:</p><a id="I_programlisting4_d1e87332"></a>
+<pre class="epub__programlisting">try:
+    ...
+except (MyExcept1, MyExcept2):   <em class="epub__lineannotation"><span class="epub__lineannotation"># Breaks if you add a MyExcept3</span></em>
+    ...                          <em class="epub__lineannotation"><span class="epub__lineannotation"># Non-errors</span></em>
+else:
+    ...                          <em class="epub__lineannotation"><span class="epub__lineannotation"># Assumed to be an error</span></em></pre>
+<p>Luckily, careful use of the class-based exceptions we
+          discussed in Chapter 33 can make
+          this trap go away completely. As we saw, if you catch a general
+          superclass, you can add and raise more specific subclasses in the
+          future without having to extend <code class="epub__literal">except</code> clause lists manually—the
+          superclass becomes an extendible exceptions category:</p><a id="I_programlisting4_d1e87349"></a>
+<pre class="epub__programlisting">try:
+    ...
+except SuccessCategoryName:      <em class="epub__lineannotation"><span class="epub__lineannotation"># OK if I add a myerror3 subclass</span></em>
+    ...                          <em class="epub__lineannotation"><span class="epub__lineannotation"># Non-errors</span></em>
+else:
+    ...                          <em class="epub__lineannotation"><span class="epub__lineannotation"># Assumed to be an error</span></em></pre>
+<p>In other words, a little design goes a long way. The moral of
+          the story is to be careful to be neither too general nor too
+          specific in exception handlers, and to pick the granularity of your
+          <code class="epub__literal">try</code> statement wrappings wisely.
+          Especially in larger systems, exception policies should be a part of
+          the overall <a id="I_indexterm4_d1e87364"></a>design.</p>
+</div>
+<div class="epub__sect1" title="Core Language Summary"><div class="epub__titlepage"><div>
+<div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

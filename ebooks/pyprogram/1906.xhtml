@@ -1,0 +1,933 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Custom Language Parsers</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Custom Language Parsers"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="custom_language_parsers"></a>Custom Language Parsers</h1>
+</div>
+</div>
+</div>
+<p>Although toolkits <a id="text19.7"></a><a id="I_indexterm3_d1e83928"></a><a id="wr19.7"></a>abound in this domain, Python’s status as a
+        general-purpose programming language also makes it a reasonable
+        vehicle for writing hand-coded parsers for custom language analysis
+        tasks. For instance<a id="I_indexterm3_d1e83941"></a><a id="I_indexterm3_d1e83944"></a>, <span class="epub__emphasis"><em>recursive descent parsing</em></span> is a
+        fairly well-known technique for analyzing language-based information.
+        Though not as powerful as some language tools, recursive descent
+        parses are sufficient for a wide variety of language-related
+        goals.</p>
+<p><a name="section develops"></a>To illustrate, this section develops a custom parser for a
+        simple grammar—it parses and evaluates arithmetic expression strings.
+        Though language analysis is the main topic here, this example also
+        demonstrates the utility of Python as a general-purpose programming
+        language. Although Python is often used as a frontend or rapid
+        development language in tactical modes, it’s also often useful for the
+        kinds of strategic work you may have formerly done in a systems
+        development language such as C or C++.</p>
+<div class="epub__sect2" title="The Expression Grammar"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_expression_grammar"></a>The Expression Grammar</h2>
+</div>
+</div>
+</div>
+<p>The grammar <a id="I_indexterm3_d1e83960"></a>that our parser will recognize can be described as
+          follows:</p><a id="I_programlisting3_d1e83968"></a>
+<pre class="epub__programlisting">goal -&gt; &lt;expr&gt; END                       [number, variable, ( ]
+goal -&gt; &lt;assign&gt; END                     [set]
+
+assign -&gt; 'set' &lt;variable&gt; &lt;expr&gt;        [set]
+
+expr -&gt; &lt;factor&gt; &lt;expr-tail&gt;             [number, variable, ( ]
+
+expr-tail -&gt; ^                           [END, ) ]
+expr-tail -&gt; '+' &lt;factor&gt; &lt;expr-tail&gt;    [+]
+expr-tail -&gt; '-' &lt;factor&gt; &lt;expr-tail&gt;    [-]
+
+factor -&gt; &lt;term&gt; &lt;factor-tail&gt;           [number, variable, ( ]
+
+factor-tail -&gt; ^                         [+, -, END, ) ]
+factor-tail -&gt; '*' &lt;term&gt; &lt;factor-tail&gt;  [*]
+factor-tail -&gt; '/' &lt;term&gt; &lt;factor-tail&gt;  [/]
+
+term -&gt; &lt;number&gt;                         [number]
+term -&gt; &lt;variable&gt;                       [variable]
+term -&gt; '(' &lt;expr&gt; ')'                   [(]
+
+tokens: (, ), num, var, -, +, /, *, set, end</pre>
+<p>This is a fairly typical grammar for a simple expression
+          language, and it allows for arbitrary expression nesting (some
+          example expressions appear at the end of the<a id="I_indexterm3_d1e83972"></a> <code class="epub__literal">testparser</code> module
+          listing in Example 19-15). Strings to be
+          parsed are either an expression or an assignment to a variable name
+          (<code class="epub__literal">set</code>). Expressions involve
+          numbers, variables, and the operators <code class="epub__literal">+</code>, <code class="epub__literal">−</code>,
+          <code class="epub__literal">*</code>, and <code class="epub__literal">/</code>. Because <code class="epub__literal">factor</code> is nested in <code class="epub__literal">expr</code> in the grammar, <code class="epub__literal">*</code> and <code class="epub__literal">/</code>
+          have higher precedence (i.e., they bind tighter) than <code class="epub__literal">+</code> and <code class="epub__literal">−</code>. Expressions can be enclosed in
+          parentheses to override precedence, and all operators are left
+          associative—that is, they group on the left (e.g., <code class="epub__literal">1-2-3</code> is treated the same as <code class="epub__literal">(1-2)-3</code>).</p>
+<p><span class="epub__emphasis"><em>Tokens</em></span> are just the most primitive
+          components of the expression language. Each grammar rule listed
+          earlier is followed in square brackets by a list of tokens used to
+          select it. In recursive descent parsing, we determine the set of
+          tokens that can possibly start a rule’s substring, and we use that
+          information to predict which rule will work ahead of time. For rules
+          that iterate (the <code class="epub__literal">-tail</code> rules),
+          we use the set of possibly following tokens to know when to stop.
+          Typically, tokens are recognized by a string processor (a
+          <span class="epub__emphasis"><em>scanner</em></span>), and a higher-level processor (a
+          <span class="epub__emphasis"><em>parser</em></span>) uses the token stream to predict and
+          step through grammar rules and substrings.</p>
+</div>
+<div class="epub__sect2" title="The Parser’s Code"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_parser_apostrophy_s_code"></a>The Parser’s Code</h2>
+</div>
+</div>
+</div>
+<p>The system is <a id="par19.7.2"></a>structured as two modules, holding two classes:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>The scanner handles low-level character-by-character
+              analysis.</p></li><li class="epub__listitem">
+<p>The parser embeds a scanner and handles higher-level
+              grammar analysis.</p></li></ul>
+</div>
+<p>The parser is also responsible for computing the expression’s
+          value and testing the system. In this version, the parser evaluates
+          the expression while it is being parsed. To use the system, we
+          create a parser with an input string and call its <code class="epub__literal">parse</code> method. We can also call <code class="epub__literal">parse</code> again later with a new expression
+          string.</p>
+<p>There’s a deliberate division of labor here. The scanner
+          extracts tokens from the string, but it knows nothing about the
+          grammar. The parser handles the grammar, but it is naive about the
+          string itself. This modular structure keeps the code relatively
+          simple. And it’s another example of the object-oriented programming
+          (OOP) composition relationship at work: parsers embed and delegate
+          to scanners.</p>
+<p>The module in Example 19-13 implements the
+          lexical analysis task—detecting the expression’s basic tokens by
+          scanning the text string left to right on demand. Notice that this
+          is all straightforward logic; such analysis can sometimes be
+          performed with regular expressions instead (described earlier), but
+          the pattern needed to detect and extract tokens in this example
+          would be too complex and fragile for my tastes. If your tastes vary,
+          try recoding this module with <code class="epub__literal">re</code>.</p><div class="epub__example"><a id="pp4e_reverse_solidus_lang_reverse-id12"></a>
+<p class="epub__title">Example 19-13. PP4E\Lang\Parser\scanner.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+###############################################################################
+the scanner (lexical analyser)
+###############################################################################
+"""
+
+import string
+class SyntaxError(Exception): pass           # local errors
+class LexicalError(Exception): pass          # used to be strings
+
+class Scanner:
+    def __init__(self, text):
+        self.next = 0
+        self.text = text + '\0'
+
+    def newtext(self, text):
+        Scanner.__init__(self, text)
+
+    def showerror(self):
+        print('=&gt; ', self.text)
+        print('=&gt; ', (' ' * self.start) + '^')
+
+    def match(self, token):
+        if self.token != token:
+            raise SyntaxError(token)
+        else:
+            value = self.value
+            if self.token != '\0':
+                self.scan()                  # next token/value
+            return value                     # return prior value
+
+    def scan(self):
+        self.value = None
+        ix = self.next
+        while self.text[ix] in string.whitespace:
+            ix += 1
+        self.start = ix
+
+        if self.text[ix] in ['(', ')', '-', '+', '/', '*', '\0']:
+            self.token = self.text[ix]
+            ix += 1
+
+        elif self.text[ix] in string.digits:
+            str = ''
+            while self.text[ix] in string.digits:
+                str += self.text[ix]
+                ix += 1
+            if self.text[ix] == '.':
+                str += '.'
+                ix += 1
+                while self.text[ix] in string.digits:
+                    str += self.text[ix]
+                    ix += 1
+                self.token = 'num'
+                self.value = float(str)
+            else:
+                self.token = 'num'
+                self.value = int(str)           # subsumes long() in 3.x
+
+        elif self.text[ix] in string.ascii_letters:
+            str = ''
+            while self.text[ix] in (string.digits + string.ascii_letters):
+                str += self.text[ix]
+                ix += 1
+            if str.lower() == 'set':
+                self.token = 'set'
+            else:
+                self.token = 'var'
+                self.value = str
+
+        else:
+            raise LexicalError()
+        self.next = ix</pre>
+</div>
+</div>
+<p>The parser module’s class creates and embeds a scanner for its
+          lexical chores and handles interpretation of the expression
+          grammar’s rules and evaluation of the expression’s result, as shown
+          in Example 19-14.</p><div class="epub__example"><a id="pp4e_reverse_solidus_lang_reverse-id13"></a>
+<p class="epub__title">Example 19-14. PP4E\Lang\Parser\parser1.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+################################################################################
+the parser (syntax analyser, evaluates during parse)
+################################################################################
+"""
+
+class UndefinedError(Exception): pass
+from scanner import Scanner, LexicalError, SyntaxError
+
+class Parser:
+    def __init__(self, text=''):
+        self.lex  = Scanner(text)              # embed a scanner
+        self.vars = {'pi': 3.14159}            # add a variable
+
+    def parse(self, *text):
+        if text:                               # main entry-point
+            self.lex.newtext(text[0])          # reuse this parser?
+        try:
+            self.lex.scan()                    # get first token
+            self.Goal()                        # parse a sentence
+        except SyntaxError:
+            print('Syntax Error at column:', self.lex.start)
+            self.lex.showerror()
+        except LexicalError:
+            print('Lexical Error at column:', self.lex.start)
+            self.lex.showerror()
+        except UndefinedError as E:
+            name = E.args[0]
+            print("'%s' is undefined at column:" % name, self.lex.start)
+            self.lex.showerror()
+
+    def Goal(self):
+        if self.lex.token in ['num', 'var', '(']:
+            val = self.Expr()
+            self.lex.match('\0')                    # expression?
+            print(val)
+        elif self.lex.token == 'set':               # set command?
+            self.Assign()
+            self.lex.match('\0')
+        else:
+            raise SyntaxError()
+
+    def Assign(self):
+        self.lex.match('set')
+        var = self.lex.match('var')
+        val = self.Expr()
+        self.vars[var] = val           # assign name in dict
+
+    def Expr(self):
+        left = self.Factor()
+        while True:
+            if self.lex.token in ['\0', ')']:
+                return left
+            elif self.lex.token == '+':
+                self.lex.scan()
+                left = left + self.Factor()
+            elif self.lex.token == '-':
+                self.lex.scan()
+                left = left - self.Factor()
+            else:
+                raise SyntaxError()
+
+    def Factor(self):
+        left = self.Term()
+        while True:
+            if self.lex.token in ['+', '-', '\0', ')']:
+                return left
+            elif self.lex.token == '*':
+                self.lex.scan()
+                left = left * self.Term()
+            elif self.lex.token == '/':
+                self.lex.scan()
+                left = left / self.Term()
+            else:
+                raise SyntaxError()
+
+    def Term(self):
+        if self.lex.token == 'num':
+            val = self.lex.match('num')               # numbers
+            return val
+        elif self.lex.token == 'var':
+            if self.lex.value in self.vars.keys():    # keys(): EIBTI!
+                val = self.vars[self.lex.value]       # look up name's value
+                self.lex.scan()
+                return val
+            else:
+                raise UndefinedError(self.lex.value)
+        elif self.lex.token == '(':
+            self.lex.scan()
+            val = self.Expr()                         # sub-expression
+            self.lex.match(')')
+            return val
+        else:
+            raise SyntaxError()
+
+if __name__ == '__main__':
+    import testparser                       # self-test code
+    testparser.test(Parser, 'parser1')      # test local Parser</pre>
+</div>
+</div>
+<p>If you study this code closely, you’ll notice that the parser
+          keeps a dictionary (<code class="epub__literal">self.vars</code>) to
+          manage variable names: they’re stored in the dictionary on a
+          <code class="epub__literal">set</code> command and are fetched from
+          it when they appear in an expression. Tokens are represented as
+          strings, with an optional associated value (a numeric value for
+          numbers and a string for variable names).</p>
+<p>The parser uses iteration (<code class="epub__literal">while</code> loops) rather than recursion for the
+          <code class="epub__literal">expr-tail</code> and <code class="epub__literal">factor-tail</code> rules. Other than this
+          optimization, the rules of the grammar map directly onto parser
+          methods: tokens become calls to the scanner, and nested rule
+          references become calls to other methods.</p>
+<p>When the file <span class="epub__emphasis"><em>parser1.py</em></span> is run as a
+          top-level program, its self-test code is executed, which in turn
+          simply runs a canned test in the module shown in Example 19-15. Notice how the
+          scanner converts numbers to strings with <code class="epub__literal">int</code>; this ensures that all integer math
+          invoked by the parser supports unlimited precision, simply because
+          it uses Python integers which always provide the extra precision if
+          needed (the separate Python 2.X <code class="epub__literal">long</code> type and syntax is no more).</p>
+<p>Also notice that mixed integer/floating-point operations cast
+          up to floating point since Python operators are used to do the
+          actual calculations along the way. The expression language’s
+          <code class="epub__literal">/</code> division operator also inherits
+          Python 3.X’s true division model which retains remainders and
+          returns floating point results regardless of operand types. We could
+          simply run a <code class="epub__literal">//</code> in our evaluation
+          logic to retain prior behavior (or allow for both <code class="epub__literal">/</code> and <code class="epub__literal">//</code> in our grammar), but we’ll follow
+          Python 3.X’s lead here.</p><div class="epub__example"><a id="pp4e_reverse_solidus_lang_reverse-id14"></a>
+<p class="epub__title">Example 19-15. PP4E\Lang\Parser\testparser.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+############################################################################
+parser test code
+############################################################################
+"""
+
+def test(ParserClass, msg):
+    print(msg, ParserClass)
+    x = ParserClass('4 / 2 + 3')            # allow different Parsers
+    x.parse()
+
+    x.parse('3 + 4 / 2')                    # like eval('3 + 4 / 2')...
+    x.parse('(3 + 4) / 2')                  # 3.X: / is now true div
+    x.parse('4 / (2 + 3)')                  # // is not supported (yet)
+    x.parse('4.0 / (2 + 3)')
+    x.parse('4 / (2.0 + 3)')
+    x.parse('4.0 / 2 * 3')
+    x.parse('(4.0 / 2) * 3')
+    x.parse('4.0 / (2 * 3)')
+    x.parse('(((3))) + 1')
+
+    y = ParserClass()
+    y.parse('set a 4 / 2 + 1')
+    y.parse('a * 3')
+    y.parse('set b 12 / a')
+    y.parse('b')
+
+    z = ParserClass()
+    z.parse('set a 99')
+    z.parse('set a a + 1')
+    z.parse('a')
+
+    z = ParserClass()
+    z.parse('pi')
+    z.parse('2 * pi')
+    z.parse('1.234 + 2.1')
+
+def interact(ParserClass):                     # command-line entry
+    print(ParserClass)
+    x = ParserClass()
+    while True:
+        cmd = input('Enter=&gt; ')
+        if cmd == 'stop':
+            break
+        x.parse(cmd)</pre>
+</div>
+</div>
+<p>Correlate the following results to print call statements in
+          the self-test module:</p><a id="I_programlisting3_d1e84140"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Lang\Parser&gt; <strong class="epub__userinput"><code>python parser1.py</code></strong>
+parser1 &lt;class '__main__.Parser'&gt;
+5.0
+5.0
+3.5
+0.8
+0.8
+0.8
+6.0
+6.0
+0.666666666667
+4
+9.0
+4.0
+100
+3.14159
+6.28318
+3.334</pre>
+<p>As usual, we can also test and use the system interactively to
+          work through more of its utility:</p><a id="I_programlisting3_d1e84147"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Lang\Parser&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import parser1</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = parser1.Parser()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.parse('1 + 2')</code></strong>
+3</pre>
+<p>Error cases are trapped and reported in a fairly friendly
+          fashion (assuming users think in zero-based terms):</p><a id="I_programlisting3_d1e84163"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>x.parse('1 + a')</code></strong>
+'a' is undefined at column: 4
+=&gt;  1 + a
+=&gt;      ^
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.parse('1+a+2')</code></strong>
+'a' is undefined at column: 2
+=&gt;  1+a+2
+=&gt;    ^
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.parse('1 * 2 $')</code></strong>
+Lexical Error at column: 6
+=&gt;  1 * 2 $
+=&gt;        ^
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.parse('1 * - 1')</code></strong>
+Syntax Error at column: 4
+=&gt;  1 * - 1
+=&gt;      ^
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.parse('1 * (9')</code></strong>
+Syntax Error at column: 6
+=&gt;  1 * (9
+=&gt;        ^
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.parse('1 + 2 / 3')</code></strong>           # 3.X division change
+1.66666666667
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.parse('1 + 2 // 3')</code></strong>
+Syntax Error at column: 7
+=&gt;  1 + 2 // 3
+=&gt;         ^</pre><div class="epub__sidebar"><a id="lesson_3_colon_divide_and_conquer"></a>
+<p class="epub__title">Lesson 3: Divide and Conquer</p>
+<p>As the custom parser system demonstrates, modular program
+            design is almost always a major win. By using Python’s program
+            structuring tools (functions, modules, classes, and so on), big
+            tasks can be broken down into small, manageable parts that can be
+            coded and tested independently.</p>
+<p>For instance, the scanner can be tested without the parser
+            by making an instance with an input string and calling its
+            <code class="epub__literal">scan</code> or <code class="epub__literal">match</code> methods repeatedly. We can even
+            test it like this interactively, from Python’s command line. When
+            we separate programs into logical components, they become easier
+            to understand and modify. Imagine what the parser would look like
+            if the scanner’s logic was embedded rather than called.</p>
+</div>
+<p>Pathologically big numbers are handled well, too, because
+          Python’s built-in objects and operators are used along the
+          way:</p><a id="I_programlisting3_d1e84203"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>x.parse('888888888888888888888888888888888888888888888.9999999')</code></strong>
+8.88888888889e+44
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.parse('99999999999999999999999999999999999999999 + 2')</code></strong>
+100000000000000000000000000000000000000001
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.parse('999999999999999999999999999999.88888888888 + 1.1')</code></strong>
+1e+30</pre>
+<p>In addition, there is an interactive loop interface in the
+          <code class="epub__literal">testparser</code> module if you want to
+          use the parser as a simple command-line calculator (or if you get
+          tired of typing parser method calls). Pass the <code class="epub__literal">Parser</code> class, so <code class="epub__literal">testparser</code> can make one of its own:</p><a id="I_programlisting3_d1e84225"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>import testparser</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>testparser.interact(parser1.Parser)</code></strong>
+&lt;class 'parser1.Parser'&gt;
+Enter=&gt; <strong class="epub__userinput"><code>4 * 3 + 5</code></strong>
+17
+Enter=&gt; <strong class="epub__userinput"><code>5 + 4 * 3</code></strong>
+17
+Enter=&gt; <strong class="epub__userinput"><code>(5 + 4) * 3</code></strong>
+27
+Enter=&gt; <strong class="epub__userinput"><code>set a 99</code></strong>
+Enter=&gt; <strong class="epub__userinput"><code>set b 66</code></strong>
+Enter=&gt; <strong class="epub__userinput"><code>a + b</code></strong>
+165
+Enter=&gt; <strong class="epub__userinput"><code># + 1</code></strong>
+Lexical Error at column: 0
+=&gt;  # + 1
+=&gt;  ^
+Enter=&gt; <strong class="epub__userinput"><code>a * b + c</code></strong>
+'c' is undefined at column: 8
+=&gt;  a * b + c
+=&gt;          ^
+Enter=&gt; <strong class="epub__userinput"><code>a * b * + c</code></strong>
+Syntax Error at column: 8
+=&gt;  a * b * + c
+=&gt;          ^
+Enter=&gt; <strong class="epub__userinput"><code>a</code></strong>
+99
+Enter=&gt; <strong class="epub__userinput"><code>a * a * a</code></strong>
+970299
+Enter=&gt; <strong class="epub__userinput"><code>stop</code></strong>
+&gt;&gt;&gt;</pre>
+</div>
+<div class="epub__sect2" title="Adding a Parse Tree Interpreter"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="adding_a_parse_tree_interpreter"></a>Adding a Parse Tree Interpreter</h2>
+</div>
+</div>
+</div>
+<p>One <a id="I_indexterm3_d1e84276"></a><a id="par19.7.3"></a>weakness in the <code class="epub__literal">parser1</code> program is that it embeds
+          expression evaluation logic in the parsing logic: the result is
+          computed while the string is being parsed. This makes evaluation
+          quick, but it can also make it difficult to modify the code,
+          especially in larger systems. To simplify, we could restructure the
+          program to keep expression parsing and evaluation separate. Instead
+          of evaluating the string, the parser can build up an intermediate
+          representation of it that can be evaluated later. As an added
+          incentive, building the representation separately makes it available
+          to other analysis tools (e.g., optimizers, viewers, and so on)—they
+          can be run as separate passes over the tree.</p>
+<p>Example 19-16
+          shows a variant of <code class="epub__literal">parser1</code> that
+          implements this idea. The parser analyzes the string and builds up a
+          <span class="epub__emphasis"><em>parse tree</em></span>—that is, a tree of class instances
+          that represents the expression and that may be evaluated in a
+          separate step. The parse tree is built from classes that “know” how
+          to evaluate themselves: to compute the expression, we just ask the
+          tree to evaluate itself. Root nodes in the tree ask their children
+          to evaluate themselves, and then combine the results by applying a
+          single operator. In effect, evaluation in this version is simply a
+          recursive traversal of a tree of embedded class instances
+          constructed by the parser.</p><div class="epub__example"><a id="pp4e_reverse_solidus_lang_reverse-id15"></a>
+<p class="epub__title">Example 19-16. PP4E\Lang\Parser\parser2.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Separate expression parsing from evaluation by building an explicit parse tree
+"""
+
+TraceDefault = False
+class UndefinedError(Exception): pass
+
+if __name__ == '__main__':
+    from scanner import Scanner, SyntaxError, LexicalError      # if run here
+else:
+    from .scanner import Scanner, SyntaxError, LexicalError     # from PyTree
+
+#################################################################################
+# the interpreter (a smart objects tree)
+#################################################################################
+
+class TreeNode:
+    def validate(self, dict):           # default error check
+        pass
+    def apply(self, dict):              # default evaluator
+        pass
+    def trace(self, level):             # default unparser
+        print('.' * level + '&lt;empty&gt;')
+
+# ROOTS
+
+class BinaryNode(TreeNode):
+    def __init__(self, left, right):            # inherited methods
+        self.left, self.right = left, right     # left/right branches
+    def validate(self, dict):
+        self.left.validate(dict)                # recurse down branches
+        self.right.validate(dict)
+    def trace(self, level):
+        print('.' * level + '[' + self.label + ']')
+        self.left.trace(level+3)
+        self.right.trace(level+3)
+
+class TimesNode(BinaryNode):
+    label = '*'
+    def apply(self, dict):
+        return self.left.apply(dict) * self.right.apply(dict)
+
+class DivideNode(BinaryNode):
+    label = '/'
+    def apply(self, dict):
+        return self.left.apply(dict) / self.right.apply(dict)
+
+class PlusNode(BinaryNode):
+    label = '+'
+    def apply(self, dict):
+        return self.left.apply(dict) + self.right.apply(dict)
+
+class MinusNode(BinaryNode):
+    label = '-'
+    def apply(self, dict):
+        return self.left.apply(dict) - self.right.apply(dict)
+
+# LEAVES
+
+class NumNode(TreeNode):
+    def __init__(self, num):
+        self.num = num                 # already numeric
+    def apply(self, dict):             # use default validate
+        return self.num
+    def trace(self, level):
+        print('.' * level + repr(self.num))   # as code, was 'self.num'
+
+class VarNode(TreeNode):
+    def __init__(self, text, start):
+        self.name   = text                    # variable name
+        self.column = start                   # column for errors
+    def validate(self, dict):
+        if not self.name in dict.keys():
+            raise UndefinedError(self.name, self.column)
+    def apply(self, dict):
+        return dict[self.name]                # validate before apply
+    def assign(self, value, dict):
+        dict[self.name] = value               # local extension
+    def trace(self, level):
+        print('.' * level + self.name)
+
+# COMPOSITES
+
+class AssignNode(TreeNode):
+    def __init__(self, var, val):
+        self.var, self.val = var, val
+    def validate(self, dict):
+        self.val.validate(dict)               # don't validate var
+    def apply(self, dict):
+        self.var.assign( self.val.apply(dict), dict )
+    def trace(self, level):
+        print('.' * level + 'set ')
+        self.var.trace(level + 3)
+        self.val.trace(level + 3)
+
+#################################################################################
+# the parser (syntax analyser, tree builder)
+#################################################################################
+
+class Parser:
+    def __init__(self, text=''):
+        self.lex     = Scanner(text)           # make a scanner
+        self.vars    = {'pi':3.14159}          # add constants
+        self.traceme = TraceDefault
+
+    def parse(self, *text):                    # external interface
+        if text:
+            self.lex.newtext(text[0])          # reuse with new text
+        tree = self.analyse()                  # parse string
+        if tree:
+            if self.traceme:                   # dump parse-tree?
+                print(); tree.trace(0)
+            if self.errorCheck(tree):          # check names
+                self.interpret(tree)           # evaluate tree
+
+    def analyse(self):
+        try:
+            self.lex.scan()                    # get first token
+            return self.Goal()                 # build a parse-tree
+        except SyntaxError:
+            print('Syntax Error at column:', self.lex.start)
+            self.lex.showerror()
+        except LexicalError:
+            print('Lexical Error at column:', self.lex.start)
+            self.lex.showerror()
+
+    def errorCheck(self, tree):
+        try:
+            tree.validate(self.vars)           # error checker
+            return 'ok'
+        except UndefinedError as instance:     # args is a tuple
+            varinfo = instance.args
+            print("'%s' is undefined at column: %d" % varinfo)
+            self.lex.start = varinfo[1]
+            self.lex.showerror()               # returns None
+
+    def interpret(self, tree):
+        result = tree.apply(self.vars)         # tree evals itself
+        if result != None:                     # ignore 'set' result
+            print(result)                      # ignores errors
+
+    def Goal(self):
+        if self.lex.token in ['num', 'var', '(']:
+            tree = self.Expr()
+            self.lex.match('\0')
+            return tree
+        elif self.lex.token == 'set':
+            tree = self.Assign()
+            self.lex.match('\0')
+            return tree
+        else:
+            raise SyntaxError()
+
+    def Assign(self):
+        self.lex.match('set')
+        vartree = VarNode(self.lex.value, self.lex.start)
+        self.lex.match('var')
+        valtree = self.Expr()
+        return AssignNode(vartree, valtree)               # two subtrees
+
+    def Expr(self):
+        left = self.Factor()                              # left subtree
+        while True:
+            if self.lex.token in ['\0', ')']:
+                return left
+            elif self.lex.token == '+':
+                self.lex.scan()
+                left = PlusNode(left, self.Factor())      # add root-node
+            elif self.lex.token == '-':
+                self.lex.scan()
+                left = MinusNode(left, self.Factor())     # grows up/right
+            else:
+                raise SyntaxError()
+
+    def Factor(self):
+        left = self.Term()
+        while True:
+            if self.lex.token in ['+', '-', '\0', ')']:
+                return left
+            elif self.lex.token == '*':
+                self.lex.scan()
+                left = TimesNode(left, self.Term())
+            elif self.lex.token == '/':
+                self.lex.scan()
+                left = DivideNode(left, self.Term())
+            else:
+                raise SyntaxError()
+
+    def Term(self):
+        if self.lex.token == 'num':
+            leaf = NumNode(self.lex.match('num'))
+            return leaf
+        elif self.lex.token == 'var':
+            leaf = VarNode(self.lex.value, self.lex.start)
+            self.lex.scan()
+            return leaf
+        elif self.lex.token == '(':
+            self.lex.scan()
+            tree = self.Expr()
+            self.lex.match(')')
+            return tree
+        else:
+            raise SyntaxError()
+
+#################################################################################
+# self-test code: use my parser, parser1's tester
+#################################################################################
+
+if __name__ == '__main__':
+    import testparser
+    testparser.test(Parser, 'parser2')    #  run with Parser class here</pre>
+</div>
+</div>
+<p>Notice the way we handle undefined name exceptions in <code class="epub__literal">errorCheck</code>. When exceptions are derived
+          from the built-in <code class="epub__literal">Exception</code>
+          class, their instances automatically return the arguments passed to
+          the exception constructor call as a tuple in their <code class="epub__literal">args</code> attribute—convenient for use in
+          string formatting here.</p>
+<p>Also notice that the new parser reuses the same scanner module
+          as well. To catch errors raised by the scanner, it also imports the
+          specific classes that identify the scanner’s exceptions. Both the
+          scanner and the parser can raise exceptions on errors (lexical
+          errors, syntax errors, and undefined name errors). They’re caught at
+          the top level of the parser, and they end the current parse. There’s
+          no need to set and check status flags to terminate the recursion.
+          Since math is done using integers, floating-point numbers, and
+          Python’s operators, there’s usually no need to trap numeric overflow
+          or underflow errors. But as is, the parser doesn’t handle errors
+          such as division by zero—such Python exceptions make the parser
+          system exit with a Python stack trace and message. Uncovering the
+          cause and fix for this is left as suggested exercise.</p>
+<p>When <code class="epub__literal">parser2</code> is run as a
+          top-level program, we get the same test code output as <span>for <code class="epub__literal">parser1</code>.</span> In fact, it reuses the
+          very same test code—both parsers pass in their parser class object
+          to <code class="epub__literal">testparser.test</code>. And since
+          classes are also objects, we can also pass <span>this version</span> of the parser
+          to<a id="I_indexterm3_d1e84333"></a> <code class="epub__literal">testparser</code>’s
+          interactive loop: <code class="epub__literal">testparser</code><code class="epub__literal">.</code><code class="epub__literal">interact</code><code class="epub__literal">(</code><code class="epub__literal">parser2</code><code class="epub__literal">.</code><code class="epub__literal">Parser</code><code class="epub__literal">)</code>.</p>
+<p>The new parser’s external behavior is identical to that of the
+          original, so I won’t repeat all its output here (run this live for a
+          firsthand look). Of note, though, this parser supports both use as a
+          top-level script, and package imports from other directories, such
+          as the PyTree viewer we’ll use in a moment. Python 3.X no longer
+          searches a module’s own directory on the import search path, though,
+          so we have to use package-relative import syntax for the latter
+          case, and import from another directory when testing <span>interactively</span>:</p><a id="I_programlisting3_d1e84363"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Lang\Parser&gt; <strong class="epub__userinput"><code>parser2.py</code></strong>
+parser2 &lt;class '__main__.Parser'&gt;
+5.0
+<em class="epub__lineannotation"><span class="epub__lineannotation">...rest is same as for parser1...</span></em>
+
+C:\...PP4E\Lang\Parser&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import parser2</code></strong>
+    from .scanner import Scanner, SyntaxError, LexicalError     # from PyTree
+ValueError: Attempted relative import in non-package
+
+C:\...\PP4E\Lang\Parser&gt; <strong class="epub__userinput"><code>cd ..</code></strong>
+C:\...\PP4E\Lang&gt; <strong class="epub__userinput"><code>Parser\parser2.py</code></strong>
+parser2 &lt;class '__main__.Parser'&gt;
+5.0
+<em class="epub__lineannotation"><span class="epub__lineannotation">...rest is same as for parser1...</span></em>
+
+C:\...\PP4E\Lang&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from Parser import parser2</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = parser2.Parser()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.parse('1 + 2 * 3 + 4')</code></strong>
+11
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import Parser.testparser</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>Parser.testparser.interact(parser2.Parser)</code></strong>
+&lt;class 'Parser.parser2.Parser'&gt;
+Enter=&gt; <strong class="epub__userinput"><code>4 * 3 + 5</code></strong>
+17
+Enter=&gt; <strong class="epub__userinput"><code>stop</code></strong>
+&gt;&gt;&gt;</pre>
+<p>Using full package import paths in <code class="epub__literal">parser2</code> instead of either package-relative
+          or unqualified imports:</p><a id="I_programlisting3_d1e84417"></a>
+<pre class="epub__programlisting">from PP4E.Lang.Parser import scanner</pre>
+<p>would suffice for all three use cases—script, and both same
+          and other directory <span>imports—</span>but requires the path to be
+          set properly, and seems overkill for importing a file in the same
+          directory as the <a id="I_indexterm3_d1e84425"></a>importer.</p>
+</div>
+<div class="epub__sect2" title="Parse Tree Structure"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="parse_tree_structure"></a>Parse Tree Structure</h2>
+</div>
+</div>
+</div>
+<p>Really, the <a id="I_indexterm3_d1e84433"></a>only tangible difference with this latest parser is
+          that it builds and uses trees to evaluate an expression internally
+          instead of evaluating as it parses. The intermediate representation
+          of an expression is a tree of class instances, whose shape reflects
+          the order of operator evaluation. This parser also has logic to
+          print an indented listing of the constructed parse tree if the
+          <code class="epub__literal">traceme</code> attribute is set to
+          <code class="epub__literal">True</code> (or <code class="epub__literal">1</code>). Indentation gives the nesting of
+          subtrees, and binary operators list left subtrees first. For
+          example:</p><a id="I_programlisting3_d1e84450"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Lang&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from Parser import parser2</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>p = parser2.Parser()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>p.traceme = True</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>p.parse('5 + 4 * 2')</code></strong>
+
+[+]
+...5
+...[*]
+......4
+......2
+13</pre>
+<p>When this tree is evaluated, the <code class="epub__literal">apply</code> method recursively evaluates
+          subtrees and applies root operators to their results. Here, <code class="epub__literal">*</code> is evaluated before <code class="epub__literal">+</code>, since it’s lower in the tree. The
+          <code class="epub__literal">Factor</code> method consumes the
+          <code class="epub__literal">*</code> substring before returning a
+          right subtree to <code class="epub__literal">Expr</code>. The next
+          tree takes a different shape:</p><a id="I_programlisting3_d1e84485"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>p.parse('5 * 4 - 2')</code></strong>
+
+[-]
+...[*]
+......5
+......4
+...2
+18</pre>
+<p>In this example, <code class="epub__literal">*</code> is
+          evaluated before <code class="epub__literal">-</code>. The <code class="epub__literal">Factor</code> method loops through a substring of
+          <code class="epub__literal">*</code> and <code class="epub__literal">/</code> expressions before returning the
+          resulting left subtree to <code class="epub__literal">Expr</code>.
+          The next example is more complex, but follows the same rules:</p><a id="I_programlisting3_d1e84511"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>p.parse('1 + 3 * (2 * 3 + 4)')</code></strong>
+
+[+]
+...1
+...[*]
+......3
+......[+]
+.........[*]
+............2
+............3
+.........4
+31</pre>
+<p>Trees are made of nested class instances. From an OOP
+          perspective, it’s another way to use composition. Since tree nodes
+          are just class instances, this tree could be created and evaluated
+          manually, too:</p><a id="I_programlisting3_d1e84518"></a>
+<pre class="epub__programlisting">PlusNode( NumNode(1),
+          TimesNode( NumNode(3),
+                     PlusNode( TimesNode(NumNode(2), NumNode(3)),
+                               NumNode(4) ))).apply({})</pre>
+<p>But we might as well let the parser build it for us (Python is
+          not that much like Lisp, despite what you may have heard).</p>
+</div>
+<div class="epub__sect2" title="Exploring Parse Trees with the PyTree GUI"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="exploring_parse_trees_with_the_pytree_gu"></a>Exploring Parse Trees with the PyTree GUI</h2>
+</div>
+</div>
+</div>
+<p>But wait—there is a <a id="par19.7.5"></a><a id="py19.7.5"></a>better way to explore parse tree structures. Figure 19-1 shows the
+          parse tree generated for the string <code class="epub__literal">1 + 3 *
+          (2 * 3 + 4)</code>, displayed in PyTree, the tree visualization
+          GUI described at the end of Chapter 18. This
+          works only because the <code class="epub__literal">parser2</code>
+          module builds the parse tree explicitly (<code class="epub__literal">parser1</code> evaluates during a parse instead)
+          and because PyTree’s code is generic and reusable.</p><div class="epub__figure-float"><div class="epub__figure"><a id="pytree_view_of_parse_tree_built_for_1_pl"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject3_d1e84555"></a><img alt="PyTree view of parse tree built for 1 + 3 * (2 * 3 + 4)" src="Images/getfile-55.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 19-1. PyTree view of parse tree built for 1 + 3 * (2 * 3 +
+            4)</p>
+</div>
+</div>
+<p>If you read the last chapter, you’ll recall that PyTree can
+          draw most any tree data structure, but it is preconfigured to handle
+          binary search trees and the expression parse trees we’re studying in
+          this chapter. For parse trees, clicking on nodes in a displayed
+          parse tree evaluates the subtree rooted there.</p>
+<p>PyTree makes it easy to learn about and experiment with the
+          parser. To determine the tree shape produced for a given expression,
+          start PyTree, click on its Parser radio button, type the expression
+          in the input field at the bottom right, and press “input” (or your
+          Enter key). The parser class is run to generate a tree from your
+          input, and the GUI displays the result. Depending on the operators
+          used within an expression, some very differently shaped trees yield
+          the same result when evaluated.</p>
+<p>Try running PyTree on your computer to get a better feel for
+          the parsing process. (I’d like to show more example trees, but I ran
+          out of page real estate at this point in <a id="I_indexterm3_d1e84566"></a><a id="I_indexterm3_d1e84568"></a>the book.)</p>
+</div>
+<div class="epub__sect2" title="Parsers Versus Python"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="parsers_versus_python"></a>Parsers Versus Python</h2>
+</div>
+</div>
+</div>
+<p>The handcoded custom <a id="I_indexterm3_d1e84576"></a>parser programs we’ve met in this section illustrate
+          some interesting concepts and underscore the power of Python for
+          general-purpose programming. Depending on your job description, they
+          may also be typical of the sort of thing you’d write regularly in a
+          traditional language such as C. Parsers are an important component
+          in a wide variety of applications, but in some cases, they’re not as
+          necessary as you might think. Let me explain why.</p>
+<p>So far, we started with an expression parser and added a parse
+          tree interpreter to make the code easier to modify. As is, the
+          parser works, but it may be slow compared to a C implementation. If
+          the parser is used frequently, we could speed it up by moving parts
+          to C extension modules. For instance, the scanner might be moved to
+          C initially, since it’s often called from the parser. Ultimately, we
+          might add components to the grammar that allow expressions to access
+          application-specific variables and functions.</p>
+<p>All of these steps constitute good engineering. But depending
+          on your application, this approach may not be the best one in
+          Python. Often the easiest way to evaluate input expressions in
+          Python is to let Python do it for us, by calling its <code class="epub__literal">eval</code> built-in function. In fact, we can
+          usually replace the entire expression evaluation program with this
+          one function call. The next section will show how this can be used
+          to simplify language-based systems in general.</p>
+<p>More important, the next section underscores a core idea
+          behind the language: if you already have an extensible, embeddable,
+          high-level language system, why invent another? Python itself can
+          often satisfy language-based <a id="I_indexterm3_d1e84593"></a><a id="I_indexterm3_d1e84595"></a>component needs.</p>
+</div>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,475 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Processing Fetched Mail</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Processing Fetched Mail"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="processing_fetched_mail"></a>Processing Fetched Mail</h1>
+</div>
+</div>
+</div>
+<p>At this point in our <a id="py16.6"></a>PyMailCGI web interaction, we are viewing an email
+        message (Figure 16-12) that was chosen from
+        the selection list page. On the message view page, selecting an action
+        from the pull-down list and clicking the Next button invokes the
+        script in Example 16-9 on
+        the server to perform a reply, forward, or delete operation for the
+        selected message viewed.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id105"></a>
+<p class="epub__title">Example 16-9. PP4E\Internet\Web\PyMailCgi\cgi-bin\onViewPageAction.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/bin/python
+"""
+################################################################################
+On submit in mail view window: action selected=(fwd, reply, delete);
+in 2.0+, we reuse the mailtools delete logic originally coded for PyMailGUI;
+################################################################################
+"""
+
+import cgi, commonhtml, secret
+from externs import mailtools, mailconfig
+from commonhtml import getfield
+
+def quotetext(form):
+    """
+    note that headers come from the prior page's form here,
+    not from parsing the mail message again; that means that
+    commonhtml.viewpage must pass along date as a hidden field
+    """
+    parser = mailtools.MailParser()
+    addrhdrs = ('From', 'To', 'Cc', 'Bcc')              # decode name only
+    quoted = '\n-----Original Message-----\n'
+    for hdr in ('From', 'To', 'Date'):
+        rawhdr = getfield(form, hdr)
+        if hdr not in addrhdrs:
+            dechdr = parser.decodeHeader(rawhdr)        # 3.0: decode for display
+        else:                                           # encoded on sends
+            dechdr = parser.decodeAddrHeader(rawhdr)    # email names only
+        quoted += '%s: %s\n' % (hdr, dechdr)
+    quoted += '\n' + getfield(form, 'text')
+    quoted =  '\n' + quoted.replace('\n', '\n&gt; ')
+    return quoted
+
+form = cgi.FieldStorage()  # parse form or URL data
+user, pswd, site = commonhtml.getstandardpopfields(form)
+pswd = secret.decode(pswd)
+
+try:
+    if form['action'].value   == 'Reply':
+        headers = {'From':    mailconfig.myaddress,    # 3.0: commonhtml decodes
+                   'To':      getfield(form, 'From'),
+                   'Cc':      mailconfig.myaddress,
+                   'Subject': 'Re: ' + getfield(form, 'Subject')}
+        commonhtml.editpage('Reply', headers, quotetext(form))
+
+    elif form['action'].value == 'Forward':
+        headers = {'From':    mailconfig.myaddress,    # 3.0: commonhtml decodes
+                   'To':      '',
+                   'Cc':      mailconfig.myaddress,
+                   'Subject': 'Fwd: ' + getfield(form, 'Subject')}
+        commonhtml.editpage('Forward', headers, quotetext(form))
+
+    elif form['action'].value == 'Delete':     # mnum field is required here
+        msgnum  = int(form['mnum'].value)      # but not eval(): may be code
+        fetcher = mailtools.SilentMailFetcher(site, user, pswd)
+        fetcher.deleteMessages([msgnum])
+        commonhtml.confirmationpage('Delete')
+
+    else:
+       assert False, 'Invalid view action requested'
+except:
+    commonhtml.errorpage('Cannot process view action')</pre>
+</div>
+</div>
+<p>This script receives all information about the selected message
+        as form input field data (some hidden and possibly encrypted, some
+        not) along with the selected action’s name. The next step in the
+        interaction depends upon the action selected:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Reply and Forward actions</em></span></span></dt><dd>
+<p>Generate a message edit page with the original message’s
+              lines automatically quoted with a leading <code class="epub__literal">&gt;</code>.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Delete actions</em></span></span></dt><dd>
+<p>Trigger immediate deletion of the email being viewed,
+              using a tool imported from the <code class="epub__literal">mailtools</code> module package from Chapter 13.</p></dd></dl>
+</div>
+<p>All these actions use data passed in from the prior page’s form,
+        but only the Delete action cares about the POP username and password
+        and must decode the password received (it arrives here from hidden
+        form input fields generated in <a id="I_indexterm5_d1e71815"></a>the prior page’s HTML).</p>
+<div class="epub__sect2" title="Reply and Forward"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="reply_and_forward"></a>Reply and Forward</h2>
+</div>
+</div>
+</div>
+<p>If you select <a id="I_indexterm5_d1e71823"></a>Reply as the next action, the message edit page in
+          Figure 16-16 is generated by the script.
+          Text on this page is editable, and pressing this page’s Send button
+          again triggers the send mail script we saw in Example 16-4. If all goes well,
+          we’ll receive the same confirmation page we got earlier when writing
+          new mail from scratch <span>(Figure 16-4).</span></p><div class="epub__figure"><a id="pymailcgi_reply_page"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e71842"></a><img alt="PyMailCGI reply page" src="Images/getfile_002-41.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-16. PyMailCGI reply page</p>
+</div>
+<p>Forward operations are virtually the same, except for a few
+          email header differences. All of this busy-ness comes “for free,”
+          because Reply and Forward pages are generated by calling <code class="epub__literal">commonhtml.editpage</code>, the same utility used
+          to create a new mail composition page. Here, we simply pass
+          preformatted header line strings to the utility (e.g., replies add
+          “Re:” to the subject text). We applied the same sort of reuse trick
+          in PyMailGUI, but in a different context. In PyMailCGI, one script
+          handles three pages; in PyMailGUI, one superclass and callback
+          method handles three buttons, but the architecture is similar in
+          spirit.</p>
+</div>
+<div class="epub__sect2" title="Delete"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="delete"></a>Delete</h2>
+</div>
+</div>
+</div>
+<p>Selecting the <a id="py16.6.2"></a>Delete action on a message view page and pressing Next
+          will cause the <code class="epub__literal">onViewPageAction</code>
+          script to immediately delete the message being viewed. Deletions are
+          performed by calling a reusable delete utility function coded in
+          Chapter 13’s <code class="epub__literal">mailtools</code> package. In a prior version, the
+          call to the utility was wrapped in a <code class="epub__literal">commonhtml.runsilent</code> call that prevents
+          <code class="epub__literal">print</code> call statements in the
+          utility from showing up in the HTML reply stream (they are just
+          status messages, not HTML code). In this version, we get the same
+          capability from the “Silent” classes in <code class="epub__literal">mailtools</code>. Figure 16-17 shows a Delete
+          operation in action.</p><div class="epub__figure-float"><div class="epub__figure"><a id="pymailcgi_view_page_comma_delete_selecte"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e71888"></a><img alt="PyMailCGI view page, Delete selected" src="Images/getfile_003-33.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-17. PyMailCGI view page, Delete selected</p>
+</div>
+</div>
+<p>By the way, notice the varied type of attachment parts on the
+          mail’s page in Figure 16-17. In version
+          3.0 we can send only text attachments due to the Python 3.1 CGI
+          uploads parsing regression described earlier, but we can still
+          <span class="epub__emphasis"><em>view</em></span> arbitrary attachment types in fetched
+          mails received from other senders. This includes images and PDFs.
+          Such attachments open according to your browser’s conventions; Figure 16-18 shows how
+          Chrome handles a click on the <em class="epub__filename">monkeys.jpg</em> link at the bottom of the
+          PyMailCGI page in Figure 16-17—it’s the same
+          image we sent by FTP in Chapter 13 and
+          via PyMailGUI in Chapter 14, but here
+          it has been extracted by a PyMailCGI CGI script and is being
+          returned by a locally running web server.</p><div class="epub__figure"><a id="image_attachment_part_selected_in_pymail"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e71915"></a><img alt="Image attachment part selected in PyMailCGI" src="Images/getfile-8.jpg"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-18. Image attachment part selected in PyMailCGI</p>
+</div>
+<p>Back to our pending deletion. As mentioned, Delete is the only
+          action that uses the POP account information (user, password, and
+          site) that was passed in from hidden fields on the prior message
+          view page. By contrast, the Reply and Forward actions format an edit
+          page, which ultimately sends a message to the SMTP server; no POP
+          information is needed or passed.</p>
+<p>But at this point in the interaction, the POP password has
+          racked up more than a few frequent flyer miles. In fact, it may have
+          crossed phone lines, satellite links, and continents on its journey
+          from machine to machine. Let’s trace through the voyage:</p><div class="epub__orderedlist"><ol class="epub__orderedlist"><li class="epub__listitem">
+<p>Input (client): The password starts life by being typed
+              into the login page on the client (or being embedded in an
+              explicit URL), unencrypted. If typed into the input form in a
+              web browser, each character is displayed as a star (<code class="epub__literal">*</code>).</p></li><li class="epub__listitem">
+<p>Fetch index (client to CGI server to POP server): It is
+              next passed from the client to the CGI script on the server,
+              which sends it on to your POP server in order to load a mail
+              index. The client sends only the password, unencrypted.</p></li><li class="epub__listitem">
+<p>List page URLs (CGI server to client): To direct the next
+              script’s behavior, the password is embedded in the mail
+              selection list web page itself as hyperlink URL query
+              parameters, encrypted (or otherwise obfuscated) and URL
+              encoded.</p></li><li class="epub__listitem">
+<p>Fetch message (client to CGI server to POP server): When
+              an email is selected from the list, the password is sent to the
+              next script named within the link’s URL; the CGI script decodes
+              it and passes it on to the POP server to fetch the selected
+              <span>message</span>.</p></li><li class="epub__listitem">
+<p>View page fields (CGI server to client): To direct the
+              next script’s behavior, the password is embedded in the view
+              page itself as HTML hidden input fields, encrypted or
+              obfuscated, and HTML escaped.</p></li><li class="epub__listitem">
+<p>Delete message (client to CGI server to POP server):
+              Finally, the password is again passed from client to CGI server,
+              this time as hidden form field values; the CGI script decodes it
+              and passes it to the POP server to delete.</p></li></ol>
+</div>
+<p>Along the way, scripts have passed the password between pages
+          as both a URL query parameter and an HTML hidden input field; either
+          way, they have always passed its encrypted or obfuscated string and
+          have never passed an unencoded password and username together in any
+          transaction. Upon a Delete request, the password must be decoded
+          here using the <code class="epub__literal">secret</code> module
+          before passing it to the POP server. If the script can access the
+          POP server again and delete the selected message, another
+          confirmation page appears, as shown in Figure 16-19 (there is currently no
+          verification for the delete, so be careful).</p><div class="epub__figure-float"><div class="epub__figure"><a id="pymailcgi_delete_confirmation"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject5_d1e71959"></a><img alt="PyMailCGI delete confirmation" src="Images/getfile-52.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 16-19. PyMailCGI delete confirmation</p>
+</div>
+</div>
+<p>One subtlety for replies and forwards: the <code class="epub__literal">onViewPageAction</code> mail action script builds
+          up a <code class="epub__literal">&gt;</code>-quoted representation
+          of the original message, with original “From:”, “To:”, and “Date:”
+          header lines prepended to the mail’s original text. Notice, though,
+          that the original message’s headers are fetched from the CGI form
+          input, not by reparsing the original mail (the mail is not readily
+          available at this point). In other words, the script gets mail
+          header values from the form input fields of the view page. Because
+          there is no “Date” field on the view page, the original message’s
+          date is also passed along to the action script as a hidden input
+          field to avoid reloading the message. Try tracing through the code
+          in this chapter’s listings ahead to see whether you can follow dates
+          from page to <a id="I_indexterm5_d1e71972"></a>page.</p>
+</div>
+<div class="epub__sect2" title="Deletions and POP Message Numbers"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="deletions_and_pop_message_numbers"></a>Deletions and POP Message Numbers</h2>
+</div>
+</div>
+</div>
+<p>Note that you <a id="py16.6.3"></a><a id="pop16.6.3"></a>probably <span class="epub__emphasis"><em>should</em></span> click the “Back
+          to root page” link in Figure 16-19 after a successful
+          deletion—don’t use your browser’s Back button to return to the
+          message selection list at this point because the delete has changed
+          the relative numbers of some messages in the list. The PyMailGUI
+          client program worked around this problem by automatically updating
+          its in-memory message cache and refreshing the index list on
+          deletions, but PyMailCGI doesn’t currently have a way to mark older
+          pages as obsolete.</p>
+<p>If your browser reruns server-side scripts as you press your
+          Back button, you’ll regenerate and hence refresh the list anyhow. If
+          your browser displays cached pages as you go back, though, you might
+          see the deleted message still present in the list. Worse, clicking
+          on a view link in an old selection list page may not bring up the
+          message you think it should, if it appears in the list after a
+          message that was deleted.</p>
+<p>This is a property of POP email in general, which we have
+          discussed before in this book: incoming mail simply adds to the mail
+          list with higher message numbers, but deletions remove mail from
+          arbitrary locations in the list and hence change message numbers for
+          all mail following the ones deleted.</p>
+<div class="epub__sect3" title="Inbox synchronization error potential"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="inbox_synchronization_error_potential"></a>Inbox synchronization error potential</h3>
+</div>
+</div>
+</div>
+<p>As we saw in Chapter 14, even
+            <a id="I_indexterm5_d1e72009"></a><a id="I_indexterm5_d1e72014"></a>the PyMailGUI client has the potential to get some
+            message numbers wrong if mail is deleted by another program while
+            the GUI is <span>open—</span><a name="second
+            PyMailGUI"></a>in a second
+            PyMailGUI instance, for example, or in a simultaneously running
+            <span>PyMailCGI</span> server session.
+            This can also occur if the email server automatically deletes a
+            message after the mail list has been loaded—for instance, moving
+            it from inbox to undeliverable on errors.</p>
+<p>This is why PyMailGUI went out of its way to detect server
+            inbox synchronization errors on loads and deletes, using <code class="epub__literal">mailtools</code> package utilities. Its
+            deletions, for instance, match saved email headers with those for
+            the corresponding message number in the server’s inbox, to ensure
+            accuracy. A similar test is performed on loads. On mismatches, the
+            mail index is automatically reloaded and updated. Unfortunately,
+            without additional state information, PyMailCGI cannot detect such
+            errors: it has no email list to compare against when messages are
+            viewed or deleted, only the message number in a link or hidden
+            form field.</p>
+<p>In the worst case, PyMailCGI cannot guarantee that deletes
+            remove the intended <span>mail—</span>it’s unlikely but not
+            impossible that a mail earlier in the list may have been deleted
+            between the time message numbers were fetched and a mail is
+            deleted at the server. Without extra state information on the
+            server, PyMailCGI cannot use the safe deletion or synchronization
+            error checks in the <code class="epub__literal">mailtools</code>
+            modules to check whether subject message numbers are still
+            valid.</p>
+<p>To guarantee safe deletes, PyMailCGI would require state
+            retention, which maps message numbers passed in pages to saved
+            mail headers fetched when the numbers were last determined, or a
+            broader policy, which sidesteps the issue completely. The next
+            three sections outline suggested improvements and potential
+            exercises.</p>
+</div>
+<div class="epub__sect3" title="Alternative: Passing header text in hidden input fields (PyMailCGI_2.1)"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="alternative_colon_passing_header_text_in"></a>Alternative: Passing header text in hidden input fields
+            (PyMailCGI_2.1)</h3>
+</div>
+</div>
+</div>
+<p>Perhaps the <a id="hid16.6.3.2"></a><a id="mes16.6.3.2"></a>simplest way to guarantee accurate deletions is to
+            embed the displayed message’s full header text in the message view
+            page itself, as hidden form fields, using the following
+            scheme:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">onViewListLink.py</code></span></dt><dd>
+<p>Embed the header text in hidden form fields, escaped
+                  per HTML conventions with <code class="epub__literal">cgi.escape</code> (with its <code class="epub__literal">quote</code> argument set to <code class="epub__literal">True</code> to translate any nested
+                  quotes in the header text).</p></dd><dt><span class="epub__term"><code class="epub__literal">onViewPageAction.py</code></span></dt><dd>
+<p>Retrieve the embedded header text from the form’s
+                  input fields, and pass it along to the safe deletion call in
+                  <code class="epub__literal">mailtools</code> for header
+                  matching.</p></dd></dl>
+</div>
+<p>This would be a small code change, but it might require an
+            extra headers fetch in the first of these scripts (it currently
+            loads the full mail text), and it would require building a phony
+            list to represent all mails’ headers (we would have headers for
+            and delete only one mail here). Alternatively, the header text
+            could be extracted from the fetched full mail text, by splitting
+            on the blank line that separates headers and message body
+            text.</p>
+<p>Moreover, this would increase the size of the data
+            transmitted both from client and server—mail header text is
+            commonly greater than 1 KB in size, and it may be larger. This is
+            a small amount of extra data in modern terms, but it’s possible
+            that this may run up against size limitations in some client or
+            server systems.</p>
+<p>And really, this scheme is incomplete. It addresses only
+            deletion accuracy and does nothing about other synchronization
+            errors in general. For example, the system still may fetch and
+            display the wrong message from a message list page, after
+            deletions of mails earlier in the inbox performed elsewhere. In
+            fact, this technique guarantees only that the message displayed in
+            a view window will be the one deleted for that view window’s
+            delete action. It does not ensure that the mail displayed or
+            deleted in the view window corresponds to the selection made by
+            the user in the mail index list.</p>
+<p>More specifically, because this scheme embeds headers in the
+            HTML of view windows, its header matching on deletion is useful
+            only if messages earlier in the inbox are deleted elsewhere
+            <span class="epub__emphasis"><em>after</em></span> a mail has already been opened for
+            viewing. If the inbox is changed elsewhere
+            <span class="epub__emphasis"><em>before</em></span> a mail is opened in a view window, the
+            wrong mail may be fetched from the index page. In that event, this
+            scheme avoids deleting a mail other than the one displayed in a
+            view window, but it assumes the user will catch the mistake and
+            avoid deleting if the wrong mail is loaded from the index page.
+            Though such cases are rare, this behavior is less than user
+            friendly.</p>
+<p>Even though it is incomplete, this change does at least
+            avoid deleting the wrong email if the server’s inbox changes while
+            a message is being viewed—the mail displayed will be the only one
+            deleted. A working but tentative implementation of this scheme is
+            implemented in the following directory of the book’s examples
+            distribution:</p><a id="I_programlisting5_d1e72100"></a>
+<pre class="epub__programlisting">PP4E\Internet\Web\dev\PyMailCGI_2.1</pre>
+<p>When developed, it worked under the Firefox web browser and
+            it requires just more than 10 lines of code changes among three
+            source files, listed here (search for “<span>#EXPERIMENTAL</span>” to find the changes
+            made in the source files yourself):</p><a id="I_programlisting5_d1e72107"></a>
+<pre class="epub__programlisting"><span class="epub__strong"><strong># onViewListLink.py</strong></span>
+    . . .
+    hdrstext = fulltext.split('\n\n')[0]                        # use blank line
+    commonhtml.viewpage(                                        # encodes passwd
+               msgnum, message, content, form, hdrstext, parts)
+
+<span class="epub__strong"><strong># commonhtml.py</strong></span>
+    . . .
+    def viewpage(msgnum, headers, text, form, hdrstext, parts=[]):
+        . . .
+        # delete needs hdrs text for inbox sync tests: can be multi-K large
+        hdrstext = cgi.escape(hdrstext, quote=True)   # escape '"' too
+        print('&lt;input type=hidden name=Hdrstext value="%s"&gt;' % hdrstext)
+
+<span class="epub__strong"><strong># onViewPageAction.py</strong></span>
+    . . .
+    fetcher = mailtools.SilentMailFetcher(site, user, pswd)
+    #fetcher.deleteMessages([msgnum])
+    hdrstext = getfield(form, 'Hdrstext') + '\n'
+    hdrstext = hdrstext.replace('\r\n', '\n')             # get \n from top
+    dummyhdrslist = [None] * msgnum                       # only one msg hdr
+    dummyhdrslist[msgnum-1] = hdrstext                    # in hidden field
+    fetcher.deleteMessagesSafely([msgnum], dummyhdrslist) # exc on sync err
+    commonhtml.confirmationpage('Delete')</pre>
+<p>To run this version locally, run the <code class="epub__literal">webserver</code> script from Example 15-1 (in Chapter 15) with the <code class="epub__literal">dev</code> subdirectory name, and a unique port
+            number if you want to run both the original and the experimental
+            versions. For instance:</p><a id="I_programlisting5_d1e72130"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Web&gt; <strong class="epub__userinput"><code>webserver.py dev\PyMailCGI_2.1 9000</code></strong>    <em class="epub__lineannotation"><span class="epub__lineannotation">command line</span></em>
+<strong class="epub__userinput"><code>http://localhost:9000/pymailcgi.html</code></strong>                             <em class="epub__lineannotation"><span class="epub__lineannotation">web browser URL</span></em></pre>
+<p>Although this version works on browsers tested, it is
+            considered tentative (and was not used for this chapter, and not
+            updated for Python 3.X in this edition) because it is an
+            incomplete solution. In those rare cases where the server’s inbox
+            changes in ways that invalidate message numbers after server
+            fetches, this version avoids inaccurate deletions, but index lists
+            may still become out of sync. Messages fetches may still be
+            inaccurate, and addressing this likely entails more sophisticated
+            state retention options.</p>
+<p>Note that in most cases, the <code class="epub__literal">message-id</code> header would be sufficient
+            for matching against mails to be deleted in the inbox, and it
+            might be all that is required to pass from page to page. However,
+            because this field is optional and can be forged to have any
+            value, this might not always be a reliable way to identify matched
+            messages; full header matching is necessary to be robust. See the
+            discussion of <code class="epub__literal">mailtools</code> in
+            Chapter 13 for more <a id="I_indexterm5_d1e72155"></a><a id="I_indexterm5_d1e72157"></a>details.</p>
+</div>
+<div class="epub__sect3" title="Alternative: Server-side files for headers"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="alternative_colon_server-side_files_for"></a>Alternative: Server-side files for headers</h3>
+</div>
+</div>
+</div>
+<p>The main limitation of the prior section’s technique is that
+            it addressed only deletions of already fetched emails. To catch
+            other kinds of inbox synchronization errors, we would have to also
+            record headers fetched when the index list page was
+            constructed.</p>
+<p>Since the index list page uses URL query parameters to
+            record state, adding large header texts as an additional parameter
+            on the URLs is not likely a viable option. In principle, the
+            header text of all mails in the list could be embedded in the
+            index page as a single hidden field, but this might add
+            prohibitive size and transmission overheads.</p>
+<p>As a perhaps more complete approach, each time the mail
+            index list page is generated in <code class="epub__literal">onViewPswdSubmit.py</code>, fetched headers of
+            all messages could be saved in a flat file on the server, with a
+            generated unique name (possibly from time, process ID, and
+            username). That file’s name could be passed along with message
+            numbers in pages as an extra hidden field or query
+            parameter.</p>
+<p>On deletions, the header’s filename could be used by
+            <code class="epub__literal">onViewPageAction.py</code> to load the
+            saved headers from the flat file, to be passed to the safe delete
+            call in <code class="epub__literal">mailtools</code>. On fetches,
+            the header file could also be used for general synchronization
+            tests to avoid loading and displaying the wrong mail. Some sort of
+            aging scheme would be required to delete the header save files
+            eventually (the index page script might clean up old files), and
+            we might also have to consider multiuser issues.</p>
+<p>This scheme essentially uses server-side files to emulate
+            PyMailGUI’s in-process memory, though it is complicated by the
+            fact that users may back up in their browser—deleting from view
+            pages fetched with earlier list pages, attempting to refetch from
+            an earlier list page and so on. In general, it may be necessary to
+            analyze all possible forward and backward flows through pages (it
+            is essentially a state machine). Header save files might also be
+            used to detect synchronization errors on fetches and may be
+            removed on deletions to effectively disable actions in prior page
+            states, though header matching may suffice to ensure deletion
+            accuracy.</p>
+</div>
+<div class="epub__sect3" title="Alternative: Delete on load"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="alternative_colon_delete_on_load"></a>Alternative: Delete on load</h3>
+</div>
+</div>
+</div>
+<p>As a final alternative, mail clients could delete all email
+            off the server as soon as it is downloaded, such that deletions
+            wouldn’t impact POP identifiers (Microsoft Outlook may use this
+            scheme by default, for instance). However, this requires
+            additional mechanisms for storing deleted email persistently for
+            later access, and it means you can view fetched mail only on the
+            machine to which it was downloaded. Since both PyMailGUI and
+            PyMailCGI are intended to be used on a variety of machines, mail
+            is kept on the POP server by <a id="I_indexterm5_d1e72187"></a><a id="I_indexterm5_d1e72189"></a>default.</p><div class="epub__warning" title="Warning"><h3 class="epub__title">Warning</h3>
+<p>Because of the current lack of inbox synchronization error
+              checks in PyMailCGI, you should not delete mails with it in an
+              important account, unless you employ one of the solution schemes
+              described or you use other tools to save mails to be deleted
+              before deletion. Adding state retention to ensure general inbox
+              synchronization may make an interesting exercise, but would also
+              add more code than we have space for here, especially if
+              generalized for multiple simultaneous site users.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

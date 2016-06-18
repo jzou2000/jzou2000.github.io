@@ -1,0 +1,953 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>11.16. *An Intermediate Django App: The TweetApprover</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">11.16. *An Intermediate Django App: The TweetApprover</h3>
+<p class="docText">Now that you have seen the basics of Django, let’s create a more realistic application that does something <span class="docEmphasis">useful</span>. This second half of our treatment on Django will show you how to perform the following tasks:</p>
+<div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Segment a larger Web app (project) in Django</p></div></li><li><div style="font-weight:normal"><p class="docList">Use third-party libraries</p></div></li><li><div style="font-weight:normal"><p class="docList">Use Django’s permissions system</p></div></li><li><div style="font-weight:normal"><p class="docList">Send e-mails from Django</p></div></li></ol></div>
+<p class="docText">This application will solve 
+an increasingly common use case: a company has a Twitter account and 
+wants regular employees to post updates to it about sales, new products,
+ etc. However, there is some business logic involved, too, and a manager
+ must approve all tweets before they are posted.</p>
+<p class="docText">When a reviewer 
+approves a tweet, it is then automatically posted to the company’s 
+Twitter account, but when the reviewer rejects a tweet, it is sent back 
+to the author with a note indicating why and/or suggestions to improve 
+if resubmission is desired or intended. You can see this workflow 
+illustrated in Figure 11-21.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 11-21. A target TweetApprover workflow.</h5>
+<p class="docText">
+<img alt="" border="0" height="491" id="" src="Images/getfile_011-3.jpg" width="350"/></p>
+</center><p></p><br/>
+<p class="docText">It would take considerable 
+effort to write this app from scratch. We’d have to build the data 
+model, write code to connect to the database to read and write data, map
+ data entities to Python classes, write code to handle Web requests, 
+dress up the data in HTML before it’s returned to the user, and so on. 
+With Django, all of this become easy. And even though Django doesn’t 
+have built-in functionality for communicating with Twitter, there are 
+Python libraries available that can do the job.</p>
+
+<h4 class="docSection2Title" id="title-ID0EP3AK">11.16.1. Creating the Project File Structure</h4>
+<p class="docText">When
+ designing a new Django application, the app structure is a good place 
+to start. With Django, you can split up a project into separate 
+applications. In our blog example, we only had one app (<tt>blog</tt>)
+ in our project, but as we mentioned early on in the chapter, you’re not
+ restricted to just one. Whenever you are writing a non-trivial 
+application, it is easier to manage multiple small applications as 
+opposed to a large, single, monolithic application.</p>
+<p class="docText">“TweetApprover” has two faces: 
+one for regular employees (who post tweets), and one for managers (who 
+approve tweets). We will build one Django app for each within the 
+TweetApprover project; the apps will be called <tt>poster</tt> and <tt>approver</tt>.</p>
+<p class="docText">First, let’s create the Django project. From the command-line, run the <tt>django-admin.py</tt> <tt>startproject</tt> command, similar to what we did earlier with our <tt>mysite</tt> project.</p>
+<div class="docText"><pre>$ django-admin.py startproject myproject</pre></div><br/>
+<p class="docText">To distinguish this project from our <tt>mysite</tt>
+ project earlier, we’ll call it “myproject,” instead—yeah... we’re not 
+exactly pushing the limits of creativity here. :-) Anyway, this creates 
+the <tt>myproject</tt> directory along with the standard boilerplate files, about which you already know.</p>
+<p class="docText">From the command line, jump into the <tt>myproject</tt> folder, in which we can create the two apps, <tt>poster</tt> and <tt>approver</tt>:</p>
+<div class="docText"><pre>$ manage.py startapp poster approver</pre></div><br/>
+<p class="docText">This creates the directories <tt>poster</tt> and <tt>approver</tt> within <tt>myproject</tt>, with those standard app boilerplate files in each. Your barebones file structure should now look like this:</p>
+<div class="docText"><pre>$ ls -l *
+-rw-r--r--  1 wesley  admin     0 Jan 11 10:13 __init__.py
+-rwxr-xr-x  1 wesley  admin   546 Jan 11 10:13 manage.py
+-rw-r--r--  1 wesley  admin  4790 Jan 11 10:13 settings.py
+-rw-r--r--  1 wesley  admin   494 Jan 11 10:13 urls.py
+
+approver:
+total 24
+-rw-r--r--  1 wesley  admin    0 Jan 11 10:14 __init__.py
+-rw-r--r--  1 wesley  admin   57 Jan 11 10:14 models.py
+-rw-r--r--  1 wesley  admin  514 Jan 11 10:14 tests.py
+-rw-r--r--  1 wesley  admin   26 Jan 11 10:14 views.py
+
+poster:
+total 24
+-rw-r--r--  1 wesley  admin    0 Jan 11 10:14 __init__.py
+-rw-r--r--  1 wesley  admin   57 Jan 11 10:14 models.py
+-rw-r--r--  1 wesley  admin  514 Jan 11 10:14 tests.py
+-rw-r--r--  1 wesley  admin   26 Jan 11 10:14 views.py</pre></div><br/>
+
+<h5 class="docSection3Title" id="title-ID0ETBBK">The Settings File</h5>
+<p class="docText">After you have created a new Django project, you usually open the <tt>settings.py</tt>
+ file and edit it for your installation. For TweetApprover, we need to 
+add a few settings that aren’t in the file by default. First, add a new 
+setting to specify who should be notified when new tweets are submitted 
+and need to be reviewed.</p>
+<div class="docText"><pre>TWEET_APPROVER_EMAIL = 'someone@mydomain.com'</pre></div><br/>
+<p class="docText">Note
+ that this is not a standard Django setting, but something only our app 
+needs. As the settings file is a standard Python file, we are free to 
+add our own settings. However, rather than putting this information in 
+each of the two apps, it’s simpler to have a single place for this 
+setting at the project level. Be sure to replace the example value above
+ with the <span class="docEmphasis">real</span> e-mail address of the manager assigned to review tweets.</p>
+<p class="docText">Similarly, we need to instruct 
+Django how to send e-mail. These settings are read by Django, but they 
+are not included in the settings file by default, so we need to add 
+them.</p>
+<div class="docText"><pre>EMAIL_HOST = 'smtp.mydomain.com'
+EMAIL_HOST_USER = 'username'
+EMAIL_HOST_PASSWORD = 'password'
+DEFAULT_FROM_EMAIL = 'username@mydomain.com'
+SERVER_EMAIL = 'username@mydomain.com'</pre></div><br/>
+<p class="docText">Replace the example values above
+ with valid ones for your e-mail server. If you don’t have access to a 
+mail server, feel free to skip these five e-mail settings and comment 
+out the code in TweetApprover that sends e-mails. I’ll remind you when 
+we get to that part. For details on all of Django’s settings, visit http://docs.djangoproject.com/en/dev/ref/settings.</p>
+<p class="docText">TweetApprover will publish tweets by using Twitter’s public API. To do that, the application needs to supply <span class="docEmphasis">OAuth</span>
+ credentials. (We’ll explain more about OAuth in the sidebar that’s 
+coming up.) OAuth credentials are similar to regular usernames and 
+passwords, except that one pair of credentials is needed for the 
+application (called “consumer” in OAuth) and one pair is needed for the 
+user.</p>
+<p class="docText">All four pieces of data must be sent to Twitter for the API calls to work. Just like <tt>TWEET_APPROVER_EMAIL</tt>
+ in our first example in this subsection, these settings are not 
+standard Django settings but are custom to the TweetApprover 
+application.</p>
+<div class="docText"><pre>TWITTER_CONSUMER_KEY = '. . .'
+TWITTER_CONSUMER_SECRET = '. . .'
+TWITTER_OAUTH_TOKEN = '. . .'
+TWITTER_OAUTH_TOKEN_SECRET = '. . .'</pre></div><br/>
+<p class="docText">Fortunately Twitter makes it easy to obtain these four values. Go to http://dev.twitter.com, sign in, and then click <span class="docEmphStrong">Your Apps</span>. Next, click <span class="docEmphStrong">Register New App</span>
+ if you don’t have an app yet, or select the app if you have one. For 
+creating a new app, fill out the form to match that shown in Figure 11-22. It does not matter what you put in the <span class="docEmphStrong">Application Website</span>
+ field. Note that in our illustrations for this chapter, we are using 
+the Tweet-Approver name, which is obviously taken already, so you will 
+need to create your own application name.</p>
+<p class="docText"></p><p></p><center>
+<h5 class="docFigureTitle">Figure 11-22. Registering a new application with Twitter.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="419" id="" src="Images/getfile_014.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<p class="docText">After you have filled out the form and clicked <span class="docEmphStrong">Save Application</span>, click the <span class="docEmphStrong">Application Details</span> button. On the details page, look for the <span class="docEmphStrong">OAuth 1.0a Settings</span>. From that section, copy the <span class="docEmphStrong">Consumer Key</span> and <span class="docEmphStrong">Consumer Secret</span> values into the variables <tt>TWITTER_CONSUMER_KEY</tt> and <tt>TWITTER_CONSUMER_SECRET</tt> variables, respectively, in your settings file.</p>
+<p class="docText">Finally, we need the values for <tt>TWITTER_OAUTH_TOKEN</tt> and <tt>TWITTER_ OAUTH_TOKEN_SECRET</tt>. Click the <span class="docEmphStrong">My Access Token</span> button and you will see a page similar to that depicted in Figure 11-23 that has these values.</p>
+<p class="docText"></p><p></p><center>
+<h5 class="docFigureTitle">Figure 11-23. Getting the OAuth token and OAuth token secret from Twitter.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="420" id="" src="Images/getfile_006-6.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<div class="docNote"><p class="docNoteTitle">Core Note: OAuth and Authorization vs. Authentication</p><p></p><table border="0" cellpadding="1" cellspacing="0" width="90%"><tbody><tr><td valign="top" width="60">
+<img align="LEFT" alt="" border="0" height="43" id="" src="Images/getfile_013-2.jpg" width="44"/>
+</td><td valign="top"><p class="docText">OAuth is an open <span class="docEmphasis">authorization</span>
+ protocol that provides for a safe and secure way of letting 
+applications access data on your behalf via an API. Not only does it 
+allow you to grant access to applications without revealing your 
+username and password, it also allows you to revoke access easily. An 
+increasing number of Web APIs are using OAuth, just like Twitter. You 
+can read more about how OAuth works at the following locations:</p><blockquote><p></p><p class="docList">http://hueniverse.com/oauth</p><p></p><p></p><p class="docList">http://oauth.net</p><p></p><p></p><p class="docList">http://en.wikipedia.org/wiki/Oauth</p><p></p></blockquote><p class="docText">Note that OAuth is an example of an authorization protocol, which is different from a protocol such as OpenID, which is an <span class="docEmphasis">authentication</span>
+ protocol. Rather than data access, the purpose of authentication is 
+identity, such as a username and password pair. An example in which both
+ play a part is an app that requires a user to authenticate via Twitter 
+but (the user) authorizes that app to (be able to) post a status update 
+to his Twitter stream.</p></td></tr></tbody></table><p></p></div><br/>
+<p class="docText">As usual, you should edit the <tt>DATABASES</tt>
+ variable to point to the database in which TweetApprover will store its
+ data. In our simple blog app, we used SQLite, but recall that we did 
+suggest you can use any supported database. If you want to stick with 
+SQLite, then just copy the appropriate settings from your blog app. 
+Don’t forget to run <tt>manage.py</tt> <tt>syncdb</tt> as you did before.</p>
+<p class="docText">Also, as we saw earlier, it’s
+ usually a good idea to enable Django’s admin for easy CRUD data access.
+ Earlier in our blog app, we mostly ran the admin with the development 
+server where the images and stylesheets for the admin pages are served 
+automatically. If you are running on an actual Web server, like Apache, 
+you need to ensure that the <tt>ADMIN_ MEDIA_PREFIX</tt> variable points to the Web directory in which these files reside. You can find more details on this at http://docs.djangoproject.com/en/dev/howto/deployment/modwsgi/#serving-the-admin-files</p>
+<p class="docText">You can also specify to Django 
+where to look for HTML templates for Web pages if they are not in the 
+normal place, which would be a <tt>templates</tt>
+ directory under each app. For example, if you want to create a single 
+unified place for them like we would for this app, then you need to 
+explicitly call this out in your <tt>settings.py</tt> file.</p>
+<p class="docText">For TweetApprover, we want to consolidate to a single <tt>templates</tt> folder in the <tt>myproject</tt> directory. To do this, edit <tt>settings.py</tt> and ensure that the <tt>TEMPLATE_DIRS</tt> variable points to that physical directory. On a POSIX computer, it would look similar to this:</p>
+<div class="docText"><pre>TEMPLATES_DIRS = (
+      '/home/username/myproject/templates',
+)</pre></div><br/>
+<p class="docText">On a Windows-based PC, your 
+directory path would look a little different because of the DOS filepath
+ names. If we were to add the project to our existing <tt>C:\py\django</tt> folder, the path would look like this:</p>
+<div class="docText"><pre>r'c:\py\django\myproject\templates',</pre></div><br/>
+<p class="docText">Recall that the leading “r” is to indicate a Python raw string, which is preferable here over requiring multiple backslashes.</p>
+<p class="docText">Finally, you need to inform Django about the two apps (<tt>poster</tt> and <tt>approver</tt>) you created. You do this by adding <tt>'myproject.approver'</tt> and <tt>'myproject.poster'</tt> to the <tt>INSTALLED_APPS</tt> variable in the settings file.</p>
+
+<h4 class="docSection2Title" id="title-ID0EQRBK">11.16.2. Installing the Twython Library</h4>
+<p class="docText">The TweetApprove app will 
+publish tweets to the world by using Twitter’s public API. Fortunately, 
+there are a couple of good libraries that make it really easy to call 
+this API. Twitter maintains a list of the most popular ones at http://dev.twitter.com/pages/libraries#python. The upcoming Web Services chapter features both the Twython and Tweepy libraries.</p>
+<p class="docText">
+<img alt="" border="0" height="35" id="" src="Images/getfile_003-17.jpg" width="54"/></p>
+<p class="docText">For this application, we will 
+use the Twython library to facilitate communication between our app and 
+Twitter. We’ll get it by using <tt>easy_install</tt>. (You can also install it by using <tt>pip</tt>.) <tt>easy_install</tt> will install <tt>twython</tt> as well as its dependencies, <tt>oauth2</tt>, <tt>httplib2</tt>, and <tt>simplejson</tt>. Unfortunately, due to naming conventions, although Python 2.6 and later comes with <tt>simplejson</tt>, it’s named as <tt>json</tt>, so <tt>easy_install</tt> will still install all three of these libraries, which <tt>twython</tt> is dependent on, as you can see from the following output:</p>
+<div class="docText"><pre class="preFixedHeight">$ sudo easy_install twython
+Password: ***********
+Searching for twython
+. . .
+Processing twython-1.3.4.tar.gz
+Running twython-1.3.4/setup.py -q bdist_egg --dist-dir /tmp/
+easy_install-QrkR6M/twython-1.3.4/egg-dist-tmp-PpJhMK
+. . .
+Adding twython 1.3.4 to easy-install.pth file
+. . .
+Processing dependencies for twython
+Searching for oauth2
+. . .
+Processing oauth2-1.2.0.tar.gz
+Running oauth2-1.2.0/setup.py -q bdist_egg --dist-dir /tmp/
+easy_install-br8On8/oauth2-1.2.0/egg-dist-tmp-cx3yEm
+Adding oauth2 1.2.0 to easy-install.pth file
+. . .
+Searching for simplejson
+. . .
+Processing simplejson-2.1.2.tar.gz
+Running simplejson-2.1.2/setup.py -q bdist_egg --dist-dir /tmp/
+easy_install-ZiTOri/simplejson-2.1.2/egg-dist-tmp-FWOza6
+Adding simplejson 2.1.2 to easy-install.pth file
+. . .
+Searching for httplib2
+. . .
+Processing httplib2-0.6.0.zip
+Running httplib2-0.6.0/setup.py -q bdist_egg --dist-dir /tmp/
+easy_install-rafDWd/httplib2-0.6.0/egg-dist-tmp-zqPmmT
+Adding httplib2 0.6.0 to easy-install.pth file
+. . .
+Finished processing dependencies for twython
+
+					  </pre></div><br/>
+<div class="docNote"><p class="docNoteTitle">Core Tip: Troubleshooting your installation</p><p></p><table border="0" cellpadding="1" cellspacing="0" width="90%"><tbody><tr><td valign="top" width="60">
+<img align="LEFT" alt="" border="0" height="37" id="" src="Images/getfile_009-4.jpg" width="37"/>
+</td><td valign="top"><p class="docText">Your installation of version 2.6 might not go as smoothly as we portray. Here are a couple of examples of what can go wrong:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">I ran into a situation installing <tt>simplejson</tt> on Python 2.5 on a Mac in which <tt>easy_install</tt>
+ just could not get it right, complained, and quit, leaving me hanging. 
+In this case, I resorted to doing it the old-fashioned way:</p><ul><li><p class="docList">Find and downloaded the tarball (in my case, <tt>simplejson</tt>)</p></li><li><p class="docList">Untar/unzip the distribution and go into the top-level directory</p></li><li><p class="docList">Run <tt>python</tt> <tt>setup.py</tt> <tt>install</tt></p></li></ul></div></li><li><div style="font-weight:normal"><p class="docList">Another reader discovered a problem when compiling the optional <tt>simplejson</tt>
+ speedups component. In this case, because it is a Python extension, it 
+requires you to have all the necessary tools to build Python extensions,
+ which includes <tt>Python.h</tt>, etc., accessible by your compiler. On a Linux system, you would just install the python-dev package.</p></div></li></ol></div><p class="docText">We’re
+ sure that there are other caveats out there, but if you run into 
+similar issues, hopefully this helps. Small incompatibilities are 
+everywhere; don’t get discouraged if it affects you. There is plenty of 
+help out there!</p></td></tr></tbody></table><p></p></div><br/>
+<p class="docText">Once everything has 
+been successfully installed, it’s time to decide which URLs 
+TweetApprover will use and how they will map to different user actions.</p>
+
+<h4 class="docSection2Title" id="title-ID0EOWBK">11.16.3. URL Structure</h4>
+<p class="docText">To create a consistent URI strategy, we’re going to name all functionality for the <tt>poster</tt> app with URLs that start with <tt>/post</tt>, and for the <tt>approver</tt> app, URLs that start with <tt>/approve</tt>. This means that if your copy of Tweet-Approver runs in your domain <tt>example.com</tt>, the <tt>poster</tt> URLs would start with <tt>http://example.com/post</tt>, and the <tt>approver</tt> URLs would start with <tt>http://example.com/approve</tt>.</p>
+<p class="docText">Now let’s go into more detail about the pages under <tt>/post</tt>
+ that are used to propose new tweets. We will need a page for submitting
+ a brand new tweet; let’s take the user to that page when we receive the
+ URL <tt>/post</tt> without anything after 
+it. Once the user has submitted a tweet, we’ll need a page that 
+acknowledges the submission; let’s put that at <tt>/post/thankyou</tt>. Finally, we will need a URL that takes the user to an existing tweet that needs to be edited; let’s put that under <tt>/post/edit/X</tt>, where <tt>X</tt> is the ID of the tweet that should be edited.</p>
+<p class="docText">The pages for the manager are under <tt>/approve</tt>;
+ let’s display a list of pending and published tweets when the user 
+accesses that URL. We will also need a page for reviewing one particular
+ tweet and leaving feedback on it; let’s put that under <tt>/approve/review/X</tt>, where <tt>X</tt> is the ID of the tweet.</p>
+<p class="docText">Finally, we have to decide what page is displayed when the user goes to the bare URL (<tt>example.com/</tt>). As most users of TweetApprover will be employees proposing new tweets, let’s make the bare URL point to the same page as <tt>/post</tt>.</p>
+<p class="docText">We have seen that Django uses configuration files to map URLs to code. At the project level, in the <tt>myproject</tt> directory, you will find the <tt>urls.py</tt> file that directs Django to which application in the project to route requests. Example 11-8 presents the file that implements the preceding URL structure:</p>
+<h5 class="docExampleTitle" id="title-ID0EJZBK">Example 11-8. The Project URLconf file (<tt>myproject/urls.py</tt>)</h5><p></p><div class="box">
+<p class="docText">As with the previous example, this project URLconf also goes to either our app or the admin site.</p>
+<pre>1    # urls.py
+2    <span class="docEmphStrong">from</span> django.conf.urls.defaults <span class="docEmphStrong">import</span> *
+3    <span class="docEmphStrong">from</span> django.contrib <span class="docEmphStrong">import</span> admin
+4    admin.autodiscover()
+5
+6    urlpatterns = patterns('',
+7        (r'^post/', include('myproject.poster.urls')),
+8        (r'^$', include('myproject.poster.urls')),
+9        (r'^approve/', include('myproject.approver.urls')),
+10       (r'^admin/', include(admin.site.urls)),
+11       (r'^login', 'django.contrib.auth.views.login',
+12           {'template_name': 'login.html'}),
+13       (r'^logout', 'django.contrib.auth.views.logout'),
+14   )</pre><br/>
+</div><p></p>
+
+<h5 class="docSection3Title" id="title-ID0EI1BK">Line-by-Line Explanation</h5>
+
+<h5 class="docSection4Title" id="title-ID0EQ1BK">Lines 1–4</h5>
+<p class="docText">The
+ first few lines represent boilerplate that always seem to show up in 
+URLconf files: the proper imports as well as the admin for development. 
+(When you’re done with development and/or don’t want the admin, it’s 
+easy to get rid of it.)</p>
+
+<h5 class="docSection4Title" id="title-ID0EE3BK">Lines 6–14</h5>
+<p class="docText">Things become interesting when we get to the <tt>urlpatterns</tt> variable. Line 7 instructs Django that for any URL that starts with <tt>post/</tt> (after the domain name) it should consult the URL configuration <tt>myproject.poster.urls</tt>. This configuration is in the file <tt>myproject/poster/urls.py</tt>. The next line (line 8) says that any empty URL (after the domain name) should also be handled per the <tt>poster</tt> application’s configuration. Line 9 directs Django to route URLs starting with <tt>approve/</tt> to the <tt>approver</tt> application.</p>
+<p class="docText">Finally, the file includes 
+directives for URLs leading to the admin (line 10) and login and logout 
+pages (lines 11 and 12). A lot of this functionality is part of Django, 
+so you will not need to write code for it. As yet, we haven’t discussed 
+authentication, but here it is as simple as including a few more 
+2-tuples in your URLconf. Django provides its own authentication system,
+ but you can create your own, as well. In Chapter 12, you’ll find that Google App Engine offers two authentication options: Google Accounts, or federated login using OpenID.</p>
+<p class="docText">To recap, the complete URL dispatching looks like what you see in Table 11-3.</p>
+<p></p><table cellpadding="5" cellspacing="0" frame="hsides" rules="groups"><caption><h5 class="docTableTitle">Table 11-3. The URLs Handled by This Project and Corresponding Actions</h5></caption><colgroup align="left" span="2"><col width="200"></col><col width="400"></col></colgroup><thead><tr><th align="left" class="docTableCell bottomBorder thead" scope="col" style="text-align:left" valign="top">URL</th><th align="left" class="docTableCell bottomBorder thead" scope="col" style="text-align:left" valign="top">Action</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top"><tt>/post</tt></td><td align="left" class="docTableCell" valign="top">Propose new tweet or post</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>/post/edit/X</tt></td><td align="left" class="docTableCell" valign="top">Edit post X</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>/post/thankyou</tt></td><td align="left" class="docTableCell" valign="top">Show acknowledgement after the user has submitted a post</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>/</tt></td><td align="left" class="docTableCell" valign="top">Same as <tt>/post</tt></td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>/approve</tt></td><td align="left" class="docTableCell" valign="top">List all pending and published tweets</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>/approve/review/X</tt></td><td align="left" class="docTableCell" valign="top">Review tweet X</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>/admin</tt></td><td align="left" class="docTableCell" valign="top">Go to the admin site for our project</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>/login</tt></td><td align="left" class="docTableCell" valign="top">Log the user in</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>/logout</tt></td><td align="left" class="docTableCell" valign="top">Log the user out</td></tr></tbody></table><p></p><br/>
+<p class="docText">As you can see in Table 11-3,
+ the main purpose of a project’s URLconf is to route requests to the 
+appropriate apps and their handlers, so we’re going to continue our 
+journey by looking at the app-level <tt>urls.py</tt> files. We will start with the <tt>poster</tt> application.</p>
+<p class="docText">As we just saw in the project’s URLconf, the URLs that match <tt>/post/</tt> or “<tt>/</tt>” will be redirected to the <tt>poster</tt> application’s URLconf, <tt>myproject/poster/urls.py</tt>. The job of this file in Example 11-9 is to map the rest of the URL to actual code that will be executed within the <tt>poster</tt> application.</p>
+<h5 class="docExampleTitle" id="title-ID0EEECK">Example 11-9. The <tt>poster</tt> Application’s <tt>urls.py</tt> URLconf file</h5><p></p><div class="box">
+<p class="docText">The URLconf for the <tt>poster</tt> app processes a poster’s actions.</p>
+<pre>1    <span class="docEmphStrong">from</span> django.conf.urls.defaults <span class="docEmphStrong">import</span> *
+2
+3    urlpatterns = patterns('myproject.poster.views',
+4        (r'^$', 'post_tweet'),
+5        (r'^thankyou', 'thank_you'),
+6        (r'^edit/(?P&lt;tweet_id&gt;\d+)', 'post_tweet'),
+7    )</pre><br/>
+</div><p></p>
+<p class="docText">The regular expressions in this file only see the part of the URL that follows after <tt>/post/</tt>, and based on the first parameter to <tt>patterns()</tt>, you can see that all view functions will be in <tt>myproject/poster/views.py</tt>. For the first URL pattern, if it’s empty (meaning the original request was either /<tt>post/</tt> or “<tt>/</tt>”), the <tt>post_tweet()</tt> view is called. If that part is <tt>thankyou</tt>, then <span class="docEmphStrong"><tt>thank_you()</tt></span> is called. Finally, if that part of the URL is <tt>edit/X</tt>, where <tt>X</tt> is a number, then <tt>post_tweet()</tt> is called and <tt>X</tt> is passed as the <tt>tweet_id</tt> parameter
+ to the method. Pretty nifty, isn’t it? If you’re unfamiliar with this 
+regular expression syntax assigning matches to variable names instead of
+ integers (the default), flip back to Chapter 1, “Regular Expressions,” for more information.</p>
+<p class="docText">Because we’ve segregated 
+our project into two distinct applications, the URLconf and view 
+function files are kept to a minimum. They are also simpler to digest 
+and easier to reuse. Now that we’re done looking at the setup for the <tt>poster</tt> application, let’s do the same for the <tt>approver</tt> application.</p>
+<p class="docText">By the same token as our analysis of the <tt>poster</tt> URLconf, the file <tt>myproject/approver/urls.py</tt> shown in Example 11-10 is consulted when Django sees a request for a URL that starts with <tt>/approve/</tt>. It calls <tt>list_tweets()</tt> if the path doesn’t continue beyond <tt>/approve/</tt>, and <tt>review_tweet(tweet_id=X)</tt> if the URL path matches <tt>/approve/review/X</tt>.</p>
+<h5 class="docExampleTitle" id="title-ID0ETICK">Example 11-10. The <tt>approver</tt> Application’s <tt>urls.py</tt> URLconf file</h5><p></p><div class="box">
+<p class="docText">The URLconf for the <tt>approver</tt> app processes an approver’s actions</p>
+<pre>1    <span class="docEmphStrong">from</span> django.conf.urls.defaults <span class="docEmphStrong">import</span> *
+2
+3    urlpatterns = patterns('myproject.approver.views',
+4        (r'^$', 'list_tweets'),
+5        (r'^review/(?P&lt;tweet_id&gt;\d+)$', 'review_tweet'),
+6    )</pre><br/>
+</div><p></p>
+<p class="docText">This URLconf is shorter because the <tt>approver</tt>
+ app consists of fewer actions. At this point, we know exactly where to 
+direct users based on the inbound URL path. Now we need to cover the 
+details about the data model used for our project.</p>
+
+<h4 class="docSection2Title" id="title-ID0EZJCK">11.16.4. The Data Model</h4>
+<p class="docText">TweetApprover needs to 
+store tweets in the database. When managers review tweets, they need to 
+be able to annotate them, so each tweet can have multiple comments. Both
+ tweets and comments need some data fields, as illustrated in Figure 11-24.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 11-24. The data model for TweetApprover.</h5>
+<p class="docText">
+<img alt="" border="0" height="346" id="" src="Images/getfile_005-8.jpg" width="148"/></p>
+</center><p></p><br/>
+<p class="docText">The state field will be used to store where in the life cycle each tweet is. Figure 11-25 demonstrates that there are three different states, and Django can help us to ensure that no tweets end up in any other states.</p>
+<p class="docText"></p><p></p><center>
+<h5 class="docFigureTitle">Figure 11-25. The state model for tweets in TweetApprover.</h5>
+<p class="docText">
+<img alt="" border="0" height="230" id="" src="Images/getfile_008-5.jpg" width="460"/></p>
+</center><p></p><br/>
+<p class="docText">As we have seen, Django makes it really easy to create the right tables in the database and to read and write <tt>Tweet</tt> and <tt>Comment</tt> objects. In this case, the data model can go in either <tt>myproject/poster/models.py</tt> or in <tt>myproject/</tt><tt>approver/models.py</tt>. As shown in Example 11-11, we chose, somewhat arbitrarily, to put it in the first place. Not to worry, the <tt>approver</tt> app will still be able to access the data model.</p>
+<p class="docText"></p><h5 class="docExampleTitle" id="title-ID0ETMCK">Example 11-11. The <tt>models.py</tt> Data Models File for the <tt>poster</tt> app</h5><p></p><div class="box">
+<p class="docText">The data model’s file for the <tt>poster</tt> app contains classes for posts (<tt>Tweet</tt>) as well as feedback (<tt>Comment</tt>).</p>
+<pre class="preFixedHeight">1    <span class="docEmphStrong">from</span> django.db <span class="docEmphStrong">import</span> models
+2
+3    <span class="docEmphStrong">class</span> Tweet(models.Model):
+4        text = models.CharField(max_length=140)
+5        author_email = models.CharField(max_length=200)
+6        created_at = models.DateTimeField(auto_now_add=True)
+7        published_at = models.DateTimeField(null=True)
+8        STATE_CHOICES = (
+9            ('pending',    'pending'),
+10           ('published',  'published'),
+11           ('rejected',   'rejected'),
+12       )
+13       state = models.CharField(max_length=15, choices=STATE_CHOICES)
+14
+15       <span class="docEmphStrong">def</span> __unicode__(self):
+16           <span class="docEmphStrong">return</span> self.text
+17
+18       <span class="docEmphStrong">class</span> Meta:
+19           permissions = (
+20               ("can_approve_or_reject_tweet",
+21               "Can approve or reject tweets"),
+22           )
+23
+24   <span class="docEmphStrong">class</span> Comment(models.Model):
+25       tweet = models.ForeignKey(Tweet)
+26       text = models.CharField(max_length=300)
+27       created_at = models.DateTimeField(auto_now_add=True)
+28
+29       <span class="docEmphStrong">def</span> __unicode__(self):
+30           <span class="docEmphStrong">return</span> self.text
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">The first data model is the <tt>Tweet</tt> class. This represents the message, commonly called a <span class="docEmphasis">post</span> or <span class="docEmphasis">tweet</span>, that authors are trying to submit to the Twitter service, and the ones which the administrator or manager must approve. <tt>Tweet</tt> objects can be commented on by administrators/managers, so <tt>Comment</tt> objects are meant to represent the zero or more comments a <tt>Tweet</tt> can have. Let’s go into some detail about these classes and their attributes.</p>
+<p class="docText">The <tt>text</tt> field and <tt>author_email</tt> field of the <tt>Tweet</tt>
+ class are limited to 140 and 200 characters, respectively. Tweets are 
+limited to the maximum length of short message service [SMS] or text 
+messages on mobile phones, and most regular e-mail addresses are shorter
+ than 200 characters long.</p>
+<p class="docText">For the <tt>created_at</tt> field, we use Django’s handy <tt>auto_now_add</tt> feature. This means that whenever we create a new tweet and save it to the database, the <tt>created_at</tt> field will contain the current date and time, unless we explicitly set it. Another <tt>DateTimeField</tt>, <tt>published_at</tt>, is allowed to have a null value. This will be used for tweets that haven’t been published to Twitter yet.</p>
+<p class="docText">After that, we see an enumeration of states and a definition of the <tt>state</tt> field. By calling out the states like this and binding the state variable to them, Django will not allow <tt>Tweet</tt> objects to have any other but one of the three allowed states. The definition of the <tt>__unicode__()</tt> method instructs Django to display each <tt>Tweet</tt> object’s <tt>text</tt> attribute in the administration Web site—remember earlier in this chapter how <tt>BlogPost</tt> object wasn’t very useful? Well, neither is <tt>Tweet</tt> object, especially when there are more than one listed with the exact same label.</p>
+<p class="docText">We were introduced to the <tt>Meta</tt>
+ inner class earlier, but as a reminder, you can use it to inform Django
+ about other special requirements on a data entity. In this case, it is 
+used to alert Django about a new permission flag. By default, Django 
+creates permission flags for adding, changing, and deleting all entities
+ in the data model. The application can check if the currently logged-in
+ user has permission to add a <tt>Tweet</tt> object; with the Django admin, the site administrator can assign permissions to registered users.</p>
+<p class="docText">This is all fine, 
+but the TweetApprover app needs a special permission flag for publishing
+ a tweet to Twitter. This is slightly different from adding, changing, 
+or deleting <tt>Tweet</tt> objects. By adding this flag to the <tt>Meta</tt>
+ class, Django will create the appropriate flags in the database. We 
+will see later how to read this flag to ensure that only managers can 
+approve or reject tweets.</p>
+<p class="docText">The <tt>Comment</tt><a name="secondary but"></a> class is secondary but worth discussing anyway. It has a <tt>ForeignKey</tt> field that points to the <tt>Tweet</tt> class. This directs Django to create a one-to-many relationship between <tt>Tweet</tt> and <tt>Comment</tt> objects in the database. Like <tt>Tweet</tt> objects, <tt>Comment</tt> records also have <tt>text</tt> and <tt>created_at</tt> fields, which have identical meanings as their <tt>Tweet</tt> brethren.</p>
+<p class="docText">Once the model file is in place, we can run the <tt>syncdb</tt> command to create the tables in the database and create a super-user login:</p>
+<div class="docText"><pre>$ ./manage.py syncdb</pre></div><br/>
+<p class="docText">Finally, as presented in Example 11-12, we need to add the <tt>myproject/poster/admin.py</tt> file to instruct Django to allow editing of <tt>Tweet</tt> and <tt>Comment</tt> objects within the admin.</p>
+<p class="docText"></p><h5 class="docExampleTitle" id="title-ID0EXVCK">Example 11-12. Register Models with the Admin (<tt>admin.py</tt>)</h5><p></p><div class="box">
+<p class="docText">The URLconf for the <tt>poster</tt> app processes a poster’s actions</p>
+<pre>1    <span class="docEmphStrong">from</span> django.contrib <span class="docEmphStrong">import</span> admin
+2    <span class="docEmphStrong">from</span> models <span class="docEmphStrong">import</span> *
+3
+4    admin.site.register(Tweet)
+5    admin.site.register(Comment)</pre><br/>
+</div><p></p>
+<p class="docText">All the pieces are now in 
+place for Django to auto-generate an administration Web site for this 
+application. If you want to try the admin Web site right now, before you
+ have written the approver and poster views, you need to temporarily 
+comment out lines 6–8 in Example 11-13 (<tt>myproject/urls.py</tt>) that reference these views. Then you can access the admin Web site (see Figure 11-26) with the <tt>/admin</tt> URL. Remember to uncomment these lines again once you have created <tt>poster/views.py</tt> and <tt>approver/views.py</tt>.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 11-26. The built-in Django administration site.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="245" id="" src="Images/getfile-48.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<h5 class="docExampleTitle" id="title-ID0EUZCK">Example 11-13. The (Temporary) Project URLconf File (<tt>myproject/urls.py</tt>)</h5><p></p><div class="box">
+<p class="docText">References to views we haven’t written yet have been taken out, so we can try out Django’s admin Web site.</p>
+<pre>1    <span class="docEmphStrong">from</span> django.conf.urls.defaults <span class="docEmphStrong">import</span> *
+2    <span class="docEmphStrong">from</span> django.contrib <span class="docEmphStrong">import</span> admin
+3    admin.autodiscover()
+4
+5    urlpatterns = patterns('',
+6        #(r'^post/', include('myproject.poster.urls')),
+7        #(r'^$', include('myproject.poster.urls')),
+8        #(r'^approve/', include('myproject.approver.urls')),
+9        (r'^admin/', include(admin.site.urls)),
+10       (r'^login', 'django.contrib.auth.views.login',
+11           {'template_name': 'login.html'}),
+12       (r'^logout', 'django.contrib.auth.views.logout'),
+13   )</pre><br/>
+</div><p></p>
+<p class="docText">Figure 11-27 shows that when you create a new user, you see the custom permission flag for <span class="docEmphStrong">Can approve or reject tweets</span>.
+ Create a user and grant the new user this permission; you will need it 
+when testing out Tweet-Approver later. After you create a new user, you 
+will be able to edit the user’s profile and set custom permissions. (You
+ won’t be able to set those permissions while you’re creating the new 
+user.)</p>
+<p class="docText"></p><p></p><center>
+<h5 class="docFigureTitle">Figure 11-27. Assigning our custom permission for a new user.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="357" id="" src="Images/getfile_007-6.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<div class="docNote"><p class="docNoteTitle">Core Note: Minimizing the amount of code</p><p></p><table border="0" cellpadding="1" cellspacing="0" width="90%"><tbody><tr><td valign="top" width="60">
+<img align="LEFT" alt="" border="0" height="43" id="" src="Images/getfile_013-3.jpg" width="44"/>
+</td><td valign="top"><p class="docText">So
+ far we’ve done a lot of configuration and very little actual 
+programming. One of the advantages of Django is that if you do the 
+configuration correctly, you don’t have to write a lot of code. Yes, 
+it’s somewhat ironic to think that developing code is discouraged. 
+However, you need to keep in mind that Django was created at a company 
+where the majority of users were journalists, not Web developers. 
+Empowering writers and other newspaper staff who know how to use a 
+computer is great because now you’re giving them some Web development 
+skills, but not to the point of overwhelming them and trying to change 
+their careers. This (non-developer) user-friendliness is the approach 
+employed by Django.</p></td></tr></tbody></table><p></p></div><br/>
+
+<h4 class="docSection2Title" id="title-ID0ES4CK">11.16.5. Submitting New Tweets for Review</h4>
+<p class="docText">When you created the <tt>poster</tt> application, Django generated the near-empty file <tt>views.py</tt> in that application’s directory. This is where the methods referenced in the URL configuration files should be defined. Example 11-14 represents what our complete <tt>myproject/poster/views.py</tt> file should look like.</p>
+<h5 class="docExampleTitle" id="title-ID0EJ5CK">Example 11-14. The <tt>poster</tt> Application View Functions (<tt>views.py</tt>)</h5><p></p><div class="box">
+<p class="docText">The core logic for the <tt>poster</tt> app resides here.</p>
+<pre class="preFixedHeight">1    # poster/views.py
+2    <span class="docEmphStrong">from</span> django <span class="docEmphStrong">import</span> forms
+3    <span class="docEmphStrong">from</span> django.forms <span class="docEmphStrong">import</span> ModelForm
+4    <span class="docEmphStrong">from</span> django.core.mail <span class="docEmphStrong">import</span> send_mail
+5    <span class="docEmphStrong">from</span> django.db.models <span class="docEmphStrong">import</span> Count
+6    <span class="docEmphStrong">from</span> django.http <span class="docEmphStrong">import</span> HttpResponseRedirect
+7    <span class="docEmphStrong">from</span> django.shortcuts <span class="docEmphStrong">import</span> get_object_or_404
+8    <span class="docEmphStrong">from</span> django.views.generic.simple <span class="docEmphStrong">import</span> direct_to_template
+9    <span class="docEmphStrong">from</span> myproject <span class="docEmphStrong">import</span> settings
+10   <span class="docEmphStrong">from</span> models <span class="docEmphStrong">import</span> Tweet
+11
+12   <span class="docEmphStrong">class</span> TweetForm(forms.ModelForm):
+13       <span class="docEmphStrong">class</span> Meta:
+14           model = Tweet
+15           fields = ('text', 'author_email')
+16           widgets = {
+17               'text': forms.Textarea(attrs={'cols': 50, 'rows': 3}),
+18           }
+19
+20   <span class="docEmphStrong">def</span> post_tweet(request, tweet_id=None):
+21       tweet = None
+22       <span class="docEmphStrong">if</span> tweet_id:
+23           tweet = get_object_or_404(Tweet, id=tweet_id)
+24       <span class="docEmphStrong">if</span> request.method == 'POST':
+25           form = TweetForm(request.POST, instance=tweet)
+26           <span class="docEmphStrong">if</span> form.is_valid():
+27               new_tweet = form.save(commit=False)
+28               new_tweet.state = 'pending'
+29               new_tweet.save()
+30               send_review_email()
+31               <span class="docEmphStrong">return</span> HttpResponseRedirect('/post/thankyou')
+32       <span class="docEmphStrong">else</span>:
+33           form = TweetForm(instance=tweet)
+34       <span class="docEmphStrong">return</span> direct_to_template(request, 'post_tweet.html',
+35           {'form': TweetForm(instance=tweet)})
+36
+37   <span class="docEmphStrong">def</span> send_review_email():
+38       subject = 'Action required: review tweet'
+39       body = ('A new tweet has been submitted for approval. '
+40           'Please review it as soon as possible.')
+41       send_mail(subject, body, settings.DEFAULT_FROM_EMAIL,
+42           [settings.TWEET_APPROVER_EMAIL])
+43
+44   <span class="docEmphStrong">def</span> thank_you(request):
+45       tweets_in_queue = Tweet.objects.filter(
+46           state='pending').aggregate(Count('id')).values()[0]
+47       <span class="docEmphStrong">return</span> direct_to_template(request, 'thank_you.html',
+48           {'tweets_in_queue': tweets_in_queue})
+
+					  </pre><br/>
+</div><p></p>
+
+<h5 class="docSection3Title" id="title-ID0E2BDK">Line-by-Line Explanation</h5>
+
+<h5 class="docSection4Title" id="title-ID0EDCDK">Lines 1–10</h5>
+<p class="docText">These are nothing more than the normal import statements with which we bring in the needed Django functionality.</p>
+
+<h5 class="docSection4Title" id="title-ID0EYCDK">Lines 12–18</h5>
+<p class="docText">After all the import statements, a <tt>TweetForm</tt> is defined, based on the <tt>Tweet</tt> entity. The <tt>TweetForm</tt> is defined as containing only the fields <tt>text</tt> and <tt>author_email</tt>,
+ as the rest are not visible to users. It also specifies that the text 
+field should be displayed as an HTML textarea (multi-line text box) 
+widget instead of a long, single text field. This form definition will 
+be used in the <tt>post_tweet()</tt> method.</p>
+
+<h5 class="docSection4Title" id="title-ID0EQDDK">Lines 20–36</h5>
+<p class="docText">The <tt>post_tweet()</tt> method is called when the URL <tt>/post</tt> or <tt>/post/edit/X</tt>
+ is accessed. This behavior was defined in the previous URL 
+configuration files. The method does one of four things, as is depicted 
+in Figure 11-28.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 11-28. The behavior of the <tt>post_tweet()</tt> method.</h5>
+<p class="docText">
+<img alt="" border="0" height="351" id="" src="Images/getfile_016.jpg" width="497"/></p>
+</center><p></p><br/>
+<p class="docText">The user starts in one of the 
+top boxes and then moves to the box below by clicking the form’s submit 
+button. This use case and this pattern of <span class="docEmphStrong"><tt>if</tt></span>
+ statements is common in Django view methods that deal with forms. When 
+all the main processing is done in this method, it calls the <tt>post_tweet.html</tt> template and passes it a <tt>TweetForm</tt> instance. Also, note that an e-mail is sent to the reviewer by calling the <tt>send_review_email()</tt>
+ method. Remove this line if you don’t have access to a mail server and 
+didn’t enter any mail server details in the settings file.</p>
+<p class="docText">This block of code also features a new function that we haven’t seen before, the <tt>get_object_or_404()</tt>
+ shortcut. There are some who might think there’s too much magic going 
+on here, but it really is a convenience that developers often need. It 
+takes a data model class and a primary key and attempts to fetch an 
+object of that type with the given ID. If the object is found, it’s 
+assigned to the tweet variable. Otherwise, an HTTP 404 error (not found)
+ is thrown. We want this behavior to control unruly users who manipulate
+ the URL by hand—users should get this error in the browser in such 
+cases, whether malicious or otherwise.</p>
+
+<h5 class="docSection4Title" id="title-ID0EEGDK">Lines 38–42</h5>
+<p class="docText">The <tt>send_review_email()</tt>
+ method is a simple helper that’s used to send an e-mail to the manager 
+when a new tweet has been submitted for review or if an existing tweet 
+has been updated. It uses Django’s <tt>send_mail()</tt> method, which sends e-mail by using the server and credentials you provided in the settings files.</p>
+
+<h5 class="docSection4Title" id="title-ID0EGHDK">Lines 44–48</h5>
+<p class="docText">The <tt>thank_you()</tt> method shown in Example 11-16 is called when the user is redirected to <tt>/post/thankyou/</tt> after submitting the <tt>TweetForm</tt>. The method uses Django’s built-in data access functionality to query the database for the number of <tt>Tweet</tt> objects that are currently in the <tt>pending</tt>
+ state. Those of you who come from a relational database background will
+ no doubt recognize that the Django ORM will issue SQL a command that 
+might look something like: <span class="docEmphStrong"><tt>SELECT</tt></span> <tt>COUNT(id)</tt> <span class="docEmphStrong"><tt>FROM</tt></span> <tt>Tweet</tt> <span class="docEmphStrong"><tt>WHERE</tt></span> <tt>state= "pending"</tt>.
+ The great thing about an ORM is that those who do not know SQL can just
+ come up with object-flavored chained method calls such as the code you 
+see here; the ORM magically issues the SQL on the developer’s behalf.</p>
+<p class="docText">Once the number of pending posts is obtained, the app then calls up the <tt>thank_you.html</tt> template and sends that total to it. As shown in Figure 11-30, this template displays one message if there are several pending tweets, and another if there is only one. Example 11-15 and 11-16 display the template files used by the <tt>poster</tt> app.</p>
+<h5 class="docExampleTitle" id="title-ID0EEJDK">Example 11-15. Template with the Submission Form (<tt>post_tweet.html</tt>)</h5><p></p><div class="box">
+<p class="docText">The submission form for the <tt>poster</tt> app seems bare because all of the goods are handled by the TweetForm model.</p>
+<pre>1    &lt;html&gt;
+2        &lt;body&gt;
+3            &lt;form action="" method="post"&gt;{% csrf_token %}
+4                &lt;table&gt;{{ form }}&lt;/table&gt;
+5                &lt;input type="submit" value="Submit" /&gt;
+6            &lt;/form&gt;
+7        &lt;/body&gt;
+8    &lt;/html&gt;</pre><br/>
+</div><p></p>
+<p class="docText"></p><h5 class="docExampleTitle" id="title-ID0E2JDK">Example 11-16. The <tt>thank_you()</tt> Template After Submission (<tt>thank_you.html</tt>)</h5><p></p><div class="box">
+<p class="docText">The “thank you” form for the <tt>poster</tt> app features logic to tell the user where they stand.</p>
+<pre>1    &lt;html&gt;
+2        &lt;body&gt;
+3            Thank you for your tweet submission. An email has been sent
+4            to the assigned approver.
+5            &lt;hr&gt;
+6            {% if tweets_in_queue &gt; 1 %}
+7                There are currently {{ tweets_in_queue }} tweets waiting
+8                for approval.
+9            {% else %}
+10               Your tweet is the only one waiting for approval.
+11           {% endif %}
+12       &lt;/body&gt;
+13   &lt;/html&gt;</pre><br/>
+</div><p></p>
+<p class="docText">The <tt>post_tweet.html</tt> template is simple: it only displays the form in an HTML table and adds a submit button below it. Compare the template in Example 11-15 to the form we used in our blog application earlier; you could <span class="docEmphasis">almost</span> reuse this. I know we’re always encouraging code reuse, but sharing HTML goes above and beyond the call of duty.</p>
+<p class="docText">Figure 11-29
+ shows the template output, which presents the input form for users 
+intending on making a post/tweet. Now we’ll look at the template 
+generating the “thanks for your submission” page that the users sees 
+afterward, which is depicted in Figure 11-30.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 11-29. The form for submitting new tweets, available at <tt>/post</tt>.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="244" id="" src="Images/getfile_002-35.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<p class="docText"></p><p></p><center>
+<h5 class="docFigureTitle">Figure 11-30. The thank you page, as seen after submitting a new tweet.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="246" id="" src="Images/getfile_010-4.jpg" width="500"/><p></p>
+</center><p></p><br/>
+
+<h4 class="docSection2Title" id="title-ID0EENDK">11.16.6. Reviewing Tweets</h4>
+<p class="docText">Now that we have gone through the <tt>poster</tt> application, it’s time for the <tt>approver</tt> application. The file <tt>myproject/approver/urls.py</tt> calls the methods <tt>list_tweets()</tt> and <tt>review_tweet()</tt> in <tt>myproject/approver/views.py</tt>. You can see the entire file in Example 11-17.</p>
+<h5 class="docExampleTitle" id="title-ID0EZPDK">Example 11-17. The <tt>approver</tt> App View Functions (<tt>views.py</tt>)</h5><p></p><div class="box">
+<p class="docText">The core functionality for the <tt>approver</tt> app includes the form, displays posts pending review, and helps process decisions.</p>
+<pre class="preFixedHeight">1    # approver/views.py
+2    <span class="docEmphStrong">from</span> datetime <span class="docEmphStrong">import</span> datetime
+3    <span class="docEmphStrong">from</span> django <span class="docEmphStrong">import</span> forms
+4    <span class="docEmphStrong">from</span> django.core.mail <span class="docEmphStrong">import</span> send_mail
+5    <span class="docEmphStrong">from</span> django.core.urlresolvers <span class="docEmphStrong">import</span> reverse
+6    <span class="docEmphStrong">from</span> django.contrib.auth.decorators <span class="docEmphStrong">import</span> permission_required
+7    <span class="docEmphStrong">from</span> django.http <span class="docEmphStrong">import</span> HttpResponseRedirect
+8    <span class="docEmphStrong">from</span> django.shortcuts <span class="docEmphStrong">import</span> get_object_or_404
+9    <span class="docEmphStrong">from</span> django.views.generic.simple <span class="docEmphStrong">import</span> direct_to_template
+10   <span class="docEmphStrong">from</span> twython <span class="docEmphStrong">import</span> Twython
+11   <span class="docEmphStrong">from</span> myproject <span class="docEmphStrong">import</span> settings
+12   <span class="docEmphStrong">from</span> myproject.poster.views <span class="docEmphStrong">import</span> *
+13   <span class="docEmphStrong">from</span> myproject.poster.models <span class="docEmphStrong">import</span> Tweet, Comment
+14
+15   @permission_required('poster.can_approve_or_reject_tweet',
+16      login_url='/login')
+17   <span class="docEmphStrong">def</span> list_tweets(request):
+18       pending_tweets = Tweet.objects.filter(state=
+19           'pending').order_by('created_at')
+20       published_tweets = Tweet.objects.filter(state=
+21           'published').order_by('-published_at')
+22       <span class="docEmphStrong">return</span> direct_to_template(request, 'list_tweets.html',
+23           {'pending_tweets': pending_tweets,
+24           'published_tweets': published_tweets})
+25
+26   <span class="docEmphStrong">class</span> ReviewForm(forms.Form):
+27       new_comment = forms.CharField(max_length=300,
+28           widget=forms.Textarea(attrs={'cols': 50, 'rows': 6}),
+29           required=False)
+30       APPROVAL_CHOICES = (
+31           ('approve', 'Approve this tweet and post it to Twitter'),
+32           ('reject',
+33           'Reject this tweet and send it back to the author with your
+   comment'),
+34       )
+35       approval = forms.ChoiceField(
+36           choices=APPROVAL_CHOICES, widget=forms.RadioSelect)
+37
+38   @permission_required('poster.can_approve_or_reject_tweet',
+39      login_url='/login')
+40   <span class="docEmphStrong">def</span> review_tweet(request, tweet_id):
+41       reviewed_tweet = get_object_or_404(Tweet, id=tweet_id)
+42       <span class="docEmphStrong">if</span> request.method == 'POST':
+43           form = ReviewForm(request.POST)
+44           <span class="docEmphStrong">if</span> form.is_valid():
+45               new_comment = form.cleaned_data['new_comment']
+46               <span class="docEmphStrong">if</span> form.cleaned_data['approval'] == 'approve':
+47                   publish_tweet(reviewed_tweet)
+48                   send_approval_email(reviewed_tweet, new_comment)
+49                   reviewed_tweet.published_at = datetime.now()
+50                   reviewed_tweet.state = 'published'
+51               <span class="docEmphStrong">else</span>:
+52                   link = request.build_absolute_uri(
+53                       reverse(post_tweet, args=[reviewed_tweet.id]))
+54                   send_rejection_email(reviewed_tweet, new_comment,
+55                       link)
+56                   reviewed_tweet.state = 'rejected'
+57               reviewed_tweet.save()
+58               <span class="docEmphStrong">if</span> new_comment:
+59                   c = Comment(tweet=reviewed_tweet, text=new_comment)
+60                   c.save()
+61               <span class="docEmphStrong">return</span> HttpResponseRedirect('/approve/')
+62       <span class="docEmphStrong">else</span>:
+63           form = ReviewForm()
+64       <span class="docEmphStrong">return</span> direct_to_template(request, 'review_tweet.html', {
+65           'form': form, 'tweet': reviewed_tweet,
+66           'comments': reviewed_tweet.comment_set.all()})
+67
+68   <span class="docEmphStrong">def</span> send_approval_email(tweet, new_comment):
+69       body = ['Your tweet (%r) was approved &amp; published on Twitter.'\
+70           % tweet.text]
+71       <span class="docEmphStrong">if</span> new_comment:
+72           body.append(
+73               'The reviewer gave this feedback: %r.' % new_comment)
+74       send_mail('Tweet published', '%s\r\n' % ' '.join(
+75           body), settings.DEFAULT_FROM_EMAIL, [tweet.author_email])
+76
+77   <span class="docEmphStrong">def</span> send_rejection_email(tweet, new_comment, link):
+78       body = ['Your tweet (%r) was rejected.' % tweet.text]
+79       <span class="docEmphStrong">if</span> new_comment:
+80           body.append(
+81               'The reviewer gave this feedback: %r.' % new_comment)
+82       body.append('To edit your proposed tweet, go to %s.' % link)
+83       send_mail('Tweet rejected', '%s\r\n' % (' '.join(
+84           body), settings.DEFAULT_FROM_EMAIL, [tweet.author_email]))
+85
+86   <span class="docEmphStrong">def</span> publish_tweet(tweet):
+87       twitter = Twython(
+88           twitter_token=settings.TWITTER_CONSUMER_KEY,
+89           twitter_secret=settings.TWITTER_CONSUMER_SECRET,
+90           oauth_token=settings.TWITTER_OAUTH_TOKEN,
+91           oauth_token_secret=settings.TWITTER_OAUTH_TOKEN_SECRET,
+92       )
+93       twitter.updateStatus(status=tweet.text.encode("utf-8"))
+
+					  </pre><br/>
+</div><p></p>
+
+<h5 class="docSection3Title" id="title-ID0EMUDK">Line-by-Line Explanation</h5>
+
+<h5 class="docSection4Title" id="title-ID0EUUDK">Lines 1–24</h5>
+<p class="docText">After all the imports, the first method we come across is <tt>list_tweet()</tt>. Its job is to return a list of pending and published tweets to the user. Right above the method header is the decorator <tt>@permission_required</tt>. This informs Django that only logged-in users with the permission <tt>poster.can_approve_</tt> <tt>or_reject_tweet</tt> are allowed to access the method. This is the custom permission we declared in <tt>myproject/poster/models.py</tt>. Users who are not logged in or who are logged in but don’t have the correct permission are sent to <tt>/login</tt>. (If you’ve forgotten what decorators are, you can review them in the Functions chapter of <span class="docEmphasis">Core Python Programming</span> or <span class="docEmphasis">Core Python Language Fundamentals</span>.)</p>
+<p class="docText">If the user has the 
+proper permission, the method executes. It uses Django data access 
+functionality to pull out a list of all tweets pending approval and a list of all published tweets. Then it hands off those two lists to the <tt>list_tweets.html</tt> template and lets that template render the result. See the following for more details on this template file.</p>
+
+<h5 class="docSection4Title" id="title-ID0EHYDK">Lines 26–36</h5>
+<p class="docText">Next, in <tt>myproject/approver/views.py</tt>, we notice the definition of <tt>Review-Form</tt>. There are two ways to define forms in Django. In <tt>myproject/poster/views.py</tt>, a <tt>TweetForm</tt> was defined on the basis of the <tt>Tweet</tt>
+ entity. Here, a form is defined as a collection of fields, instead, 
+without any underlying data entity. The form will be used by managers to
+ approve or reject pending tweets, and there is no data entity that 
+represents a review decision. The form uses a choice collection to 
+define the approve/reject choice that the reviewer needs to make and 
+represents it as a list of radio buttons.</p>
+
+<h5 class="docSection4Title" id="title-ID0E4YDK">Line 38–66</h5>
+<p class="docText">After that comes the <tt>review_tweet()</tt> method (see Figure 11-31 for the flow). It is similar to the form-handling method in <tt>myproject/poster/views.py</tt>, but it assumes <tt>tweet_id</tt> is always defined. There is no use case that involves reviewing a non-existing tweet.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 11-31. Form handling in the <tt>review_tweet()</tt> method.</h5>
+<p class="docText">
+<img alt="" border="0" height="337" id="" src="Images/getfile_004-13.jpg" width="497"/></p>
+</center><p></p><br/>
+<p class="docText">The code needs to read what data the user submitted in the form. With Django, you can do that by using the <tt>form.cleaned_data[]</tt> array, which will contain the values submitted through the form by the user, converted to Python data types.</p>
+<p class="docText">Notice how the <tt>build_absolute_uri()</tt> method is called on the <tt>request</tt> object in the <tt>review_tweet()</tt>
+ view function. This method is called to get the link to the form for 
+editing the tweet. This link will be sent in the rejection e-mail to the
+ author so that he can take note of the manager’s feedback and reword 
+the tweet. The <tt>build_absolute_uri()</tt> method returns the URL that corresponds to a specific method, in this case, <tt>post_tweet()</tt>. We know this URL is <tt>/poster/edit/X</tt>, where <tt>X</tt> is the tweet’s ID. Why not simply use a string containing that URL?</p>
+<p class="docText">Well, if we ever decide that this URL should change to <tt>/poster/change/X</tt>, we would have to remember all the places where we hardcoded the URL pattern <tt>/poster/edit/X</tt>
+ and update them to the new URL. This breaks the DRY principle behind 
+Django. You can read more about DRY and other Django design principles 
+at http://docs.djangoproject.com/en/dev/misc/design-philosophies.</p>
+<p class="docText">This situation just described is different from hardcoding a flat URL without any variable component, as in <tt>/post/thankyou</tt>,
+ where 1) there aren’t many of them, 2) they aren’t likely to change, 
+and 3) there’s no view function necessarily associated with it. To help 
+us <span class="docEmphasis">not</span> hardcode a URL for our situation, we use another tool, <tt>django.core.urlresolvers.reverse()</tt>
+ in place of a hardcoded URL. What does this do? Well, we usually start 
+off with a URL and find a view function to which to dispatch the 
+request. In this case, we know what view function we want but desire to 
+build a URL from it, hence the tool’s name. A view function is passed to
+ <tt>reverse()</tt> along with any arguments, and a URL is returned. You can find another example by using <tt>reverse()</tt> in the Django tutorial at https://docs.djangoproject.com/en/dev/intro/tutorial04/#write-a-simple-form.</p>
+
+<h5 class="docSection4Title" id="title-ID0EY4DK">Lines 68–84</h5>
+<p class="docText">The two helper methods, <tt>send_approval_email()</tt> and <tt>send_rejection_email()</tt>, send e-mails to the tweet’s author by using Django’s <tt>send_mail()</tt> function. Again, remove the calls to these methods from <tt>review_tweet()</tt> if you are running this example without access to a mail server.</p>
+
+<h5 class="docSection4Title" id="title-ID0EM5DK">Lines 86–93</h5>
+<p class="docText">The method <tt>publish_tweet()</tt> is also a helper. It calls the <tt>updateStatus()</tt>
+ method found in the Twython package to publish a new tweet to Twitter. 
+Note that it uses the four Twitter credentials you added earlier in the <tt>settings.py</tt> file. Also, note that it encodes the tweet by using the UTF-8 character encoding, because that is the way Twitter wants it.</p>
+<p class="docText">Now we can look at the 
+template files. We’ll start with the status page first, followed by the 
+login because the former is surely more interesting than the latter. Example 11-18
+ shows the template used for the status page. The output page itself is 
+divided into two main sections for the user: the set of posts that are 
+awaiting a decision as well as those which have been approved and 
+published.</p>
+<h5 class="docExampleTitle" id="title-ID0ESAEK">Example 11-18. Template Used to Display Post Status (<tt>list_tweets.html</tt>)</h5><p></p><div class="box">
+<p class="docText">The template for the <tt>poster</tt> app’s status page features two main sections: pending and published posts.</p>
+<pre class="preFixedHeight">1    &lt;html&gt;
+2      &lt;head&gt;
+3        &lt;title&gt;
+4          Pending and published tweets
+5        &lt;/title&gt;
+6        &lt;style type=text/css&gt;
+7          tr.evenrow {
+8            background: #FFFFFF;
+9       }
+10      tr.oddrow {
+11            background: #DDDDDD;
+12      }
+13      &lt;/style&gt;
+14     &lt;/head&gt;
+15     &lt;table&gt;
+16       &lt;tr&gt;
+17         &lt;td colspan=2 align=center&gt;
+18           &lt;b&gt;Pending tweets&lt;/b&gt;
+19         &lt;/td&gt;
+20       &lt;/tr&gt;
+21       &lt;tr&gt;
+22         &lt;td&gt;
+23           Tweet text
+24         &lt;/td&gt;
+25         &lt;td&gt;
+26           Submitted
+27         &lt;/td&gt;
+28       &lt;/tr&gt;
+29       {% for tweet in pending_tweets %}
+30         &lt;tr class="{% cycle 'oddrow' 'evenrow' %}"&gt;
+31           &lt;td&gt;
+32             &lt;a href="/approve/review/{{ tweet.id }}"&gt;{{ tweet.text }}&lt;/a&gt;
+33           &lt;/td&gt;
+34           &lt;td&gt;
+35             {{ tweet.created_at|timesince }} ago
+36           &lt;/td&gt;
+37         &lt;/tr&gt;
+38       {% endfor %}
+39     &lt;/table&gt;
+40     &lt;hr&gt;
+41     &lt;table&gt;
+42       &lt;tr&gt;
+43         &lt;td colspan=2 align=center&gt;
+44           &lt;b&gt;Published tweets&lt;/b&gt;
+45         &lt;/td&gt;
+46       &lt;/tr&gt;
+47       &lt;tr&gt;
+48         &lt;td&gt;
+49           Tweet text
+50         &lt;/td&gt;
+51         &lt;td&gt;
+52           Published
+53         &lt;/td&gt;
+54       &lt;/tr&gt;
+55       {% for tweet in published_tweets %}
+56         &lt;tr class="{% cycle 'oddrow' 'evenrow' %}"&gt;
+57           &lt;td&gt;
+58             {{ tweet.text }}
+59           &lt;/td&gt;
+60           &lt;td&gt;
+61             {{ tweet.published_at|timesince }} ago
+62           &lt;/td&gt;
+63         &lt;/tr&gt;
+64       {% endfor %}
+65     &lt;/table&gt;
+66   &lt;/html&gt;
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">This template is interesting in that it is the first one we have seen that contains a loop. It iterates over the collection <tt>pending_tweets</tt> and then <tt>published_tweets</tt>. It then renders a table row for each tweet, using the <tt>cycle</tt> construct to give every other row a gray background, as illustrated in Figure 11-32. It also makes the text of each pending tweet a link to the page <tt>/approve/review/X</tt>, where <tt>X</tt> is the tweet’s ID. Finally, it uses Django’s <tt>timesince</tt>
+ filter to display the time elapsed since the tweet was created, rather 
+than displaying the raw date and time. This makes the list a little 
+easier to read and it makes more sense for users who might be spread out
+ over multiple time zones.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 11-32. A list of pending and published tweets.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="397" id="" src="Images/getfile_012-3.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<p class="docText">Once the approver selects a 
+potential post on which to make a decision, they’ll see an isolated view
+ of that post in question, as shown in Figure 11-33.</p>
+<p class="docText"></p><p></p><center>
+<h5 class="docFigureTitle">Figure 11-33. Approving a pending tweet.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="303" id="" src="Images/getfile_015.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<p class="docText">The template that renders the pending tweet form is <tt>review_tweet.html</tt>, which is presented in Example 11-19.</p>
+<h5 class="docExampleTitle" id="title-ID0EMGEK">Example 11-19. <tt>myproject/templates/review_tweet.html</tt></h5><p></p><div class="box">
+<p class="docText">The template for the <tt>poster</tt> app’s tweet review page.</p>
+<pre class="preFixedHeight">1    &lt;html&gt;
+2        &lt;body&gt;
+3            &lt;form action="" method="post"&gt;{% csrf_token %}
+4                &lt;table&gt;
+5                    &lt;tr&gt;
+6                        &lt;td&gt;
+7                            &lt;b&gt;Proposed tweet:&lt;/b&gt;
+8                        &lt;/td&gt;
+9                        &lt;td&gt;
+10                           &lt;b&gt;{{ tweet.text }}&lt;/b&gt;
+11                       &lt;/td&gt;
+12                   &lt;/tr&gt;
+13                   &lt;tr&gt;
+14                       &lt;td&gt;
+15                           &lt;b&gt;Author:&lt;/b&gt;
+16                       &lt;/td&gt;
+17                       &lt;td&gt;
+18                           &lt;b&gt;{{ tweet.author_email }}&lt;/b&gt;
+19                       &lt;/td&gt;
+20                   &lt;/tr&gt;
+21                   {{ form.as_table }}
+22               &lt;/table&gt;
+23               &lt;input type="submit" value="Submit" /&gt;
+24           &lt;/form&gt;
+25           &lt;hr&gt;
+26           &lt;b&gt;History&lt;/b&gt;
+27           &lt;hr&gt;
+28           {% for comment in comments %}
+29               &lt;i&gt;{{ comment.created_at|timesince }} ago:&lt;/i&gt;
+30               {{ comment.text }}
+31               &lt;hr&gt;
+32           {% endfor %}
+33       &lt;/body&gt;
+34   &lt;/html&gt;
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">What about the <tt>login/</tt> URL that users are sent to if they aren’t logged in or don’t have the appropriate permission? In <tt>myproject/urls.py</tt>, Django was instructed to run the code in the method <tt>django.contrib. auth.views.login</tt>, which comes with Django and handles logging in so that we don’t have to. All we have to do is write the <tt>login.html</tt> template. Example 11-20
+ presents the simple one used in this application. To find out more 
+about Django’s authentication system, check the documentation at https://docs.djangoproject.com/en/dev/topics/auth/.</p>
+<p class="docText"></p><h5 class="docExampleTitle" id="title-ID0EUHEK">Example 11-20. <tt>myproject/templates/login.html</tt></h5><p></p><div class="box">
+<p class="docText">The template for the <tt>poster</tt> app’s login page takes advantage of Django’s authentication system.</p>
+<pre class="preFixedHeight">1    &lt;html&gt;
+2      {% if form.errors %}
+3        Your username and password didn't match. Please try again.
+4      {% endif %}
+5
+6      &lt;form method="post"
+7        action="{% url django.contrib.auth.views.login %}"&gt;
+8      {% csrf_token %}
+9      &lt;table&gt;
+10     &lt;tr&gt;
+11       &lt;td&gt;{{ form.username.label_tag }}&lt;/td&gt;
+12       &lt;td&gt;{{ form.username }}&lt;/td&gt;
+13     &lt;/tr&gt;
+14     &lt;tr&gt;
+15       &lt;td&gt;{{ form.password.label_tag }}&lt;/td&gt;
+16       &lt;td&gt;{{ form.password }}&lt;/td&gt;
+17     &lt;/tr&gt;
+18     &lt;/table&gt;
+19
+20     &lt;input type="submit" value="login" /&gt;
+21     &lt;input type="hidden" name="next" value="{{ next }}" /&gt;
+22     &lt;/form&gt;
+23   &lt;/html&gt;
+
+					  </pre><br/>
+</div><p></p>
+
+<h5 class="docSection3Title" id="title-ID0EJIEK">Take <tt>TweetApprover</tt> for a Spin</h5>
+<p class="docText">Now that all the pieces are in 
+place, go back to your URLconf and uncomment all the action you just 
+added. If you haven’t created a user with permission “Can approve or 
+reject tweets” yet, do so now. Go to <tt>/post</tt> (within your domain) with your Web browser, and then enter a new tweet. Finally, go to <tt>/approve</tt>
+ and reject or accept the tweet. After you have accepted a tweet, go to 
+Twitter’s Web site and verify that the tweet was published.</p>
+<p class="docText">You can download the complete project source code at this book’s Web site at http://corepython.com.</p>
+</div>
+</body>
+</html>

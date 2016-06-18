@@ -1,0 +1,880 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Utility Modules</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Utility Modules"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="utility_modules"></a>Utility Modules</h1>
+</div>
+</div>
+</div>
+<p>This section <a id="I_indexterm5_d1e72200"></a>presents the source code of the utility modules imported
+        and used by the page scripts shown earlier. As installed, all of these
+        modules live in the same directory as the CGI scripts, to make imports
+        simple—they are found in the current working directory. There aren’t
+        any new screenshots to see here because these are utilities, not CGI
+        scripts. Moreover, these modules aren’t all that useful to study in
+        isolation and are included here primarily to be referenced as you go
+        through the CGI scripts’ code listed previously. See earlier in this
+        chapter for additional details not repeated here.</p>
+<div class="epub__sect2" title="External Components and Configuration"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="external_components_and_configuration"></a>External Components and Configuration</h2>
+</div>
+</div>
+</div>
+<p>When running <a id="I_indexterm5_d1e72213"></a><a id="I_indexterm5_d1e72220"></a>PyMailCGI out of its own directory in the book
+          examples distribution tree, it relies on a number of external
+          modules that are potentially located elsewhere. Because all of these
+          are accessible from the <span class="epub__emphasis"><em>PP4E</em></span> package root, they
+          can be imported with dotted-path names as usual, relative to the
+          root. In case this setup ever changes, though, the module in Example 16-10 encapsulates the
+          location of all external dependencies; if they ever move, this is
+          the only file that must be changed.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id106"></a>
+<p class="epub__title">Example 16-10. PP4E\Internet\Web\PyMailCgi\cgi-bin\externs.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+isolate all imports of modules that live outside of the PyMailCgi
+directory, so that their location must only be changed here if moved;
+we reuse the mailconfig settings that were used for pymailgui2 in ch13;
+PP4E/'s container must be on sys.path to use the last import here;
+"""
+
+import sys
+#sys.path.insert(0, r'C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples')
+sys.path.insert(0, r'..\..\..\..')                       # relative to script dir
+
+import mailconfig                                        # local version
+from PP4E.Internet.Email import mailtools                # mailtools package</pre>
+</div>
+</div>
+<p>This module simply preimports all external names needed by
+          PyMailCGI into its own namespace. See Chapter 13 for more on the <code class="epub__literal">mailtools</code> package modules’ source code
+          imported and reused here; as for PyMailGUI, much of the magic behind
+          PyMailCGI is actually implemented in <code class="epub__literal">mailtools</code>.</p>
+<p>This version of PyMailCGI has its own local copy of the
+          <code class="epub__literal">mailconfig</code> module we coded in
+          Chapter 13 and expanded in Chapter 14, but it simply loads all
+          attributes from the version we wrote in Chapter 13 to avoid redundancy, and
+          customizes as desired; the local version is listed in Example 16-11.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id107"></a>
+<p class="epub__title">Example 16-11. PP4E\Internet\Email\PyMailCgi\cgi-bin\mailconfig.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+user configuration settings for various email programs (PyMailCGI version);
+email scripts get their server names and other email config options from
+this module: change me to reflect your machine names, sig, and preferences;
+"""
+
+from PP4E.Internet.Email.mailconfig import *     # reuse ch13 configs
+fetchlimit = 50    # 4E: maximum number headers/emails to fetch on loads (dflt=25)</pre>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="POP Mail Interface"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="pop_mail_interface"></a>POP Mail Interface</h2>
+</div>
+</div>
+</div>
+<p>Our next utility module, <a id="I_indexterm5_d1e72271"></a><a id="pop16.7.2"></a>the <code class="epub__literal">loadmail</code> file
+          in Example 16-12, depends
+          on external files and encapsulates access to mail on the remote POP
+          server machine. It currently exports one function, <code class="epub__literal">loadmailhdrs</code>, which returns a list of the
+          header text (only) of all mail in the specified POP account; callers
+          are unaware of whether this mail is fetched over the Net, lives in
+          memory, or is loaded from a persistent storage medium on the CGI
+          server machine. That is by design—because <code class="epub__literal">loadmail</code> changes won’t impact its clients,
+          it is mostly a hook for future expansion.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id108"></a>
+<p class="epub__title">Example 16-12. PP4E\Internet\Web\PyMailCgi\cgi-bin\loadmail.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+mail list loader; future--change me to save mail list between CGI script runs,
+to avoid reloading all mail each time;  this won't impact clients that use the
+interfaces here if done well;  for now, to keep this simple, reloads all mail
+for each list page;  2.0+: we now only load message headers (via TOP), not full
+msg, but still fetch all hdrs for each index list--in-memory caches don't work
+in a stateless CGI script, and require a real (likely server-side) database;
+"""
+
+from commonhtml import runsilent         # suppress prints (no verbose flag)
+from externs    import mailtools         # shared with PyMailGUI
+
+# load all mail from number 1 up
+# this may trigger an exception
+
+import sys
+def progress(*args):  # not used
+    sys.stderr.write(str(args) + '\n')
+
+def loadmailhdrs(mailserver, mailuser, mailpswd):
+    fetcher = mailtools.SilentMailFetcher(mailserver, mailuser, mailpswd)
+    hdrs, sizes, full = fetcher.downloadAllHeaders()     # get list of hdr text
+    return hdrs</pre>
+</div>
+</div>
+<p>This module is not much to look at—just an interface and calls
+          to other modules. The <code class="epub__literal">mailtools.SilentMailFetcher</code> class (reused
+          here from Chapter 13) uses the
+          Python<a id="I_indexterm5_d1e72307"></a> <code class="epub__literal">poplib</code> module to
+          fetch mail over sockets. The silent class prevents <code class="epub__literal">mailtools</code> print call statements from going
+          to the HTML reply stream (although any exceptions are allowed to
+          propagate there normally).</p>
+<p>In this version, <code class="epub__literal">loadmail</code>
+          loads just the header text portions of all incoming email to
+          generate the selection list page. However, it still reloads headers
+          every time you refetch the selection list page. As mentioned
+          earlier, this scheme is better than the prior version, but it can
+          still be slow if you have lots of email sitting on your server.
+          Server-side database techniques, combined with a scheme for
+          invalidating message lists on deletions and new receipts, might
+          alleviate some of this bottleneck. Because the interface exported by
+          <code class="epub__literal">loadmail</code> would likely not need to
+          change to introduce a caching mechanism, clients of this module
+          would likely still work unchanged.</p>
+</div>
+<div class="epub__sect2" title="POP Password Encryption"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="pop_password_encryption"></a>POP Password Encryption</h2>
+</div>
+</div>
+</div>
+<p>We <a id="py16.7.3"></a><a id="pass16.7.3"></a><a id="en16.7.3"></a>discussed PyMailCGI’s <a id="se16.7.3"></a>security protocols in the abstract earlier in this
+          chapter. Here, we look at their concrete implementation. PyMailCGI
+          passes user and password state information from page to page using
+          hidden form fields and URL query parameters embedded in HTML reply
+          pages. We studied these techniques in the prior chapter. Such data
+          is transmitted as simple text over network sockets—within the HTML
+          reply stream from the server, and as parameters in the request from
+          the client. As such, it is subject to security issues.</p>
+<p>This isn’t a concern if you are running a local web server on
+          your machine, as all our examples do. The data is being shipped back
+          and forth between two programs running on your computer, and it is
+          not accessible to the outside world. If you want to install
+          PyMailCGI on a remote web server machine, though, this can be an
+          issue. Because this data is sensitive, we’d ideally like some way to
+          hide it in transit and prevent it from being viewed in server logs.
+          The policies used to address this have varied across this book’s
+          lifespan, as options have come and gone:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>The second edition of this book developed a custom
+              encryption module using the standard library’s <code class="epub__literal">rotor</code> encryption module. This module
+              was used to encrypt data inserted into the server’s reply
+              stream, and then to later decrypt it when it was returned as a
+              parameter from the client. Unfortunately, in Python 2.4 and
+              later, the <code class="epub__literal">rotor</code> module is no
+              longer available in the standard library; it was withdrawn due
+              to security concerns. This seems a somewhat extreme measure
+              (<code class="epub__literal">rotor</code> was adequate for
+              simpler applications), but <code class="epub__literal">rotor</code> is no longer a usable solution
+              in recent releases.</p></li><li class="epub__listitem">
+<p>The third edition of this book extended the model of the
+              second, by adding support for encrypting passwords with the
+              third-party and open source<a id="I_indexterm5_d1e72375"></a> PyCrypto system. Regrettably, this system is
+              available for Python 2.X but still not for 3.X as I write these
+              words for the fourth edition in mid-2010 (though some progress
+              on a 3.X port has been made). Moreover, the Python web server
+              classes used by the locally running server deployed for this
+              book still does not support HTTPS in <span>Python 3.1—</span>the ultimate solution
+              to web security, which I’ll say more about in a moment.</p></li><li class="epub__listitem">
+<p>Because of all the foregoing, this fourth edition has
+              legacy support for both <code class="epub__literal">rotor</code>
+              and PyCrypto if they are installed, but falls back on a
+              simplistic password obfuscator which may be different at each
+              PyMailCGI installation. Since this release is something of a
+              prototype in general, further refinement of this model,
+              including support for HTTPS under more robust web servers, is
+              left as exercise.</p></li></ul>
+</div>
+<p>In general, there are a variety of approaches to encrypting
+          information transferred back and forth between client and server.
+          Unfortunately again, none is easily implemented for this chapter’s
+          example, none is universally applicable, and most involve tools or
+          techniques that are well beyond the scope and size constraints of
+          this text. To sample some of the available options, though, the
+          sections that follow contain a brief rundown of some of the common
+          techniques in this domain.</p>
+<div class="epub__sect3" title="Manual data encryption: rotor (defunct)"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="manual_data_encryption_colon_rotor_open"></a>Manual data encryption: rotor (defunct)</h3>
+</div>
+</div>
+</div>
+<p>In principle, CGI scripts can manually encrypt any sensitive
+            data they insert into reply streams, as PyMailCGI did in this
+            book’s second edition. With the removal of the<a id="I_indexterm5_d1e72395"></a> <code class="epub__literal">rotor</code> module,
+            though, Python 2.4’s standard library has no encryption tools for
+            this task. Moreover, using the original <code class="epub__literal">rotor</code> module’s code is not advisable
+            from a maintenance perspective and would not be straightforward,
+            since it was coded in the C language (it’s not a simple matter of
+            copying a <span class="epub__emphasis"><em>.py</em></span> file from a prior release).
+            Unless you are using an older version of Python, <code class="epub__literal">rotor</code> is not a real option.</p>
+<p>Mostly for historical interest and comparison today, this
+            module was used as follows. It was based on an Enigma-style
+            encryption scheme: we make a new rotor object with a key (and
+            optionally, a rotor count) and call methods to encrypt and
+            decrypt:</p><a id="I_programlisting5_d1e72413"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>import rotor</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>r = rotor.newrotor('pymailcgi')</code></strong>        # (key, [,numrotors])
+&gt;&gt;&gt; <strong class="epub__userinput"><code>r.encrypt('abc123')</code></strong>                    # may return nonprintable chars
+' \323an\021\224'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = r.encrypt('spam123')</code></strong>               # result is same len as input
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x</code></strong>
+'* _\344\011pY'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>len(x)</code></strong>
+7
+&gt;&gt;&gt; <strong class="epub__userinput"><code>r.decrypt(x)</code></strong>
+'spam123'</pre>
+<p>Notice that the same <code class="epub__literal">rotor</code> object can encrypt multiple
+            strings, that the result may contain nonprintable characters
+            (printed as <code class="epub__literal">\ascii</code> escape codes
+            when displayed), and that the result is always the same length as
+            the original string. Most important, a string encrypted with
+            <code class="epub__literal">rotor</code> can be decrypted in a
+            different process (e.g., in a later CGI script) if we re-create
+            the <code class="epub__literal">rotor</code> object:</p><a id="I_programlisting5_d1e72451"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>import rotor</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>r = rotor.newrotor('pymailcgi')</code></strong>        # can be decrypted in new process
+&gt;&gt;&gt; <strong class="epub__userinput"><code>r.decrypt('* _\344\011pY')</code></strong>             # use "\ascii" escapes for two chars
+'spam123'</pre>
+<p>Our <code class="epub__literal">secret</code> module by
+            default simply used <code class="epub__literal">rotor</code> to
+            encrypt and did no additional encoding of its own. It relies on
+            URL encoding when the password is embedded in a URL parameter and
+            on HTML escaping when the password is embedded in hidden form
+            fields. For URLs, the following sorts of calls occur:</p><a id="I_programlisting5_d1e72470"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from secret import encode, decode</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = encode('abc$#&lt;&gt;&amp;+')</code></strong>                 # CGI scripts do this
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x</code></strong>
+' \323a\016\317\326\023\0163'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import urllib.parse</code></strong>                     # urlencode does this
+&gt;&gt;&gt; <strong class="epub__userinput"><code>y = urllib.parse.quote_plus(x)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>y</code></strong>
+'+%d3a%0e%cf%d6%13%0e3'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>a = urllib.parse.unquote_plus(y)</code></strong>        # cgi.FieldStorage does this
+&gt;&gt;&gt; <strong class="epub__userinput"><code>a</code></strong>
+' \323a\016\317\326\023\0163'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>decode(a)</code></strong>                               # CGI scripts do this
+'abc$#&lt;&gt;&amp;+'</pre>
+<p>Although <code class="epub__literal">rotor</code> itself is
+            not a widely viable option today, these same techniques can be
+            used with other encryption schemes.</p>
+</div>
+<div class="epub__sect3" title="Manual data encryption: PyCrypto"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="manual_data_encryption_colon_pycrypto"></a>Manual data encryption: PyCrypto</h3>
+</div>
+</div>
+</div>
+<p>A variety of encryption tools are available in the
+            third-party public domain, including the popular Python
+            Cryptography Toolkit, also known as<a id="I_indexterm5_d1e72510"></a> PyCrypto. This package adds built-in modules for
+            private and public key algorithms such as AES, DES, IDEA, and RSA
+            encryption, provides a Python module for reading and decrypting
+            PGP files, and much more. Here is an example of using AES
+            encryption, run after installing PyCrypto on my machine with a
+            Windows self-installer:</p><a id="I_programlisting5_d1e72514"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from Crypto.Cipher import AES&gt;&gt;&gt; AES.block_size16</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>mykey   = 'pymailcgi'.ljust(16, '-')</code></strong>      # key must be 16, 24, or 32 bytes
+&gt;&gt;&gt; <strong class="epub__userinput"><code>mykey</code></strong>
+'pymailcgi-------'
+&gt;&gt;&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>password   = 'Already got one.'</code></strong>           # length must be multiple of 16
+&gt;&gt;&gt; <strong class="epub__userinput"><code>aesobj1    = AES.new(mykey, AES.MODE_ECB)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>cyphertext = aesobj1.encrypt(password)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>cyphertext</code></strong>
+'\xfez\x95\xb7\x07_"\xd4\xb6\xe3r\x07g~X]'
+&gt;&gt;&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>aesobj2  = AES.new(mykey, AES.MODE_ECB)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>aesobj2.decrypt(cyphertext)</code></strong>
+'Already got one.'</pre>
+<p>This interface is similar to that of the original <code class="epub__literal">rotor</code> module, but it uses better
+            encryption algorithms. AES is a popular private key encryption
+            algorithm. It requires a fixed length key and a data string to
+            have a length that is a multiple of 16 bytes.</p>
+<p>Unfortunately, this is not part of standard Python, may be
+            subject to U.S. (and other countries’) export controls in binary
+            form at this writing, and is too large and complex a topic for us
+            to address in this text. This makes it less than universally
+            applicable; at the least, shipping its binary installer with this
+            book’s examples package may require legal expertise. And since
+            data encryption is a core requirement of PyMailCGI, this seems too
+            strong an external dependency.</p>
+<p>The real showstopper for this book’s fourth edition, though,
+            is that PyCrypto is a 2.X-only system not yet available for Python
+            3.X today; this makes it unusable with the examples in this book.
+            Still, if you are able to install and learn PyCrypto, this can be
+            a powerful solution. For more details, search for PyCrypto on the
+            Web.</p>
+</div>
+<div class="epub__sect3" title="HTTPS: Secure HTTP transmissions"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="https_colon_secure_http_transmissions"></a>HTTPS: Secure HTTP transmissions</h3>
+</div>
+</div>
+</div>
+<p><a name="secure HTTP"></a>Provided you are using a server that supports secure HTTP,
+            you can simply write HTML and delegate the encryption to the web
+            server and browser. As long as both ends of the transmission
+            support this protocol, it is probably the ultimate encrypting
+            solution for web security. In fact, it is used by most e-commerce
+            sites on the Web today.</p>
+<p>Secure HTTP (HTTPS) <a id="I_indexterm5_d1e72560"></a>is designated in URLs by using the protocol name
+            <code class="epub__literal">https://</code> rather than <code class="epub__literal">http://</code>. Under HTTPS, data is still sent
+            with the usual HTTP protocol, but it is encrypted with the SSL
+            secure sockets layer. HTTPS is supported by most web browsers and
+            can be configured in most web servers, including Apache and the
+            <span class="epub__keep-together">webserver.py</span> script that
+            we are running locally in this chapter. If SSL support is compiled
+            into your Python, Python sockets support it with <code class="epub__literal">ssl</code> module socket wrappers, and the
+            client-side module <code class="epub__literal">urllib.request</code> we met in Chapter 13 supports HTTPS.</p>
+<p>Unfortunately, enabling secure HTTP in a web server requires
+            more configuration and background knowledge than we can cover
+            here, and it may require installing tools outside the standard
+            Python release. If you want to explore this issue further, search
+            the Web for resources on setting up a Python-coded HTTPS server
+            that supports SSL secure communications. As one possible lead, see
+            the third-party <a id="I_indexterm5_d1e72584"></a>M2Crypto package’s OpenSSL wrapper support for
+            password encryption, HTTPS in urllib, and more; this could be a
+            viable alternative to manual encryption, but it is not yet
+            available for Python 3.X at this writing.</p>
+<p>Also see the Web for more details on HTTPS in general. It is
+            not impossible that some of the HTTPS extensions for Python’s
+            standard web server classes may make their way into the Python
+            standard library in the future, but they have not in recent years,
+            perhaps reflecting the classes’ intended roles—they provide
+            limited functionality for use in locally running servers oriented
+            toward testing, not deployment.</p>
+</div>
+<div class="epub__sect3" title="Secure cookies"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="secure_cookies"></a>Secure cookies</h3>
+</div>
+</div>
+</div>
+<p>It’s possible to <a id="I_indexterm5_d1e72595"></a>replace the form fields and query parameter
+            PyMailCGI currently generates with client-side cookies marked as
+            secure. Such cookies are automatically encrypted when sent.
+            Unfortunately again, marking a cookie as secure simply means that
+            it can be transmitted only if the communications channel with the
+            host is secure. It does not provide any additional encryption.
+            Because of this, this option really just begs the question; it
+            still requires an HTTPS server.</p>
+</div>
+<div class="epub__sect3" title="The secret.py module"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="the_secret.py_module"></a>The secret.py module</h3>
+</div>
+</div>
+</div>
+<p>As you can probably tell, web security is a larger topic
+            than we have time to address here. Because of that, the <code class="epub__literal">secret.py</code> module in Example 16-13 finesses the
+            issue, by trying a variety of approaches in turn:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>If you are able to fetch and install the third-party
+                PyCrypto system described earlier, the module will use that
+                package’s AES tools to manually encrypt password data when
+                transmitted together with a username.</p></li><li class="epub__listitem">
+<p>If not, it will try <code class="epub__literal">rotor</code> next, if you’re able to find
+                and install the original rotor module in the version of Python
+                that you’re using.</p></li><li class="epub__listitem">
+<p>And finally, it falls back on a very simplistic default
+                character code shuffling obfuscation scheme, which you can
+                replace with one of your own if you install this program on
+                the Internet at large.</p></li></ul>
+</div>
+<p>See Example 16-13
+            for more details; it uses function definitions nested in <code class="epub__literal">if</code> statements to generate the selected
+            encryption scheme’s functions at run time.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id109"></a>
+<p class="epub__title">Example 16-13. PP4E\Internet\Web\PyMailCgi\cgi-bin\secret.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+###############################################################################
+PyMailCGI encodes the POP password whenever it is sent to/from client over
+the Net with a username, as hidden text fields or explicit URL params; uses
+encode/decode functions in this module to encrypt the pswd--upload your own
+version of this module to use a different encryption mechanism or key; pymail
+doesn't save the password on the server, and doesn't echo pswd as typed,
+but this isn't 100% safe--this module file itself might be vulnerable;
+HTTPS may be better and simpler but Python web server classes don't support;
+###############################################################################
+"""
+
+import sys, time
+dayofweek = time.localtime(time.time())[6]    # for custom schemes
+forceReadablePassword = False
+
+###############################################################################
+# string encoding schemes
+###############################################################################
+
+if not forceReadablePassword:
+    ###########################################################
+    # don't do anything by default: the urllib.parse.quote
+    # or cgi.escape calls in commonhtml.py will escape the
+    # password as needed to embed in URL or HTML; the
+    # cgi module undoes escapes automatically for us;
+    ###########################################################
+
+    def stringify(old):   return old
+    def unstringify(old): return old
+
+else:
+    ###########################################################
+    # convert encoded string to/from a string of digit chars,
+    # to avoid problems with some special/nonprintable chars,
+    # but still leave the result semi-readable (but encrypted);
+    # some browsers had problems with escaped ampersands, etc.;
+    ###########################################################
+
+    separator = '-'
+
+    def stringify(old):
+        new = ''
+        for char in old:
+            ascii = str(ord(char))
+            new   = new + separator + ascii       # '-ascii-ascii-ascii'
+        return new
+
+    def unstringify(old):
+        new = ''
+        for ascii in old.split(separator)[1:]:
+            new = new + chr(int(ascii))
+        return new
+
+###############################################################################
+# encryption schemes: try PyCrypto, then rotor, then simple/custom scheme
+###############################################################################
+
+useCrypto = useRotor = True
+try:
+   import Crypto
+except:
+    useCrypto = False
+    try:
+        import rotor
+    except:
+        useRotor = False
+
+if useCrypto:
+    #######################################################
+    # use third-party pycrypto package's AES algorithm
+    # assumes pswd has no '\0' on the right: used to pad
+    # change the private key here if you install this
+    #######################################################
+
+    sys.stderr.write('using PyCrypto\n')
+    from Crypto.Cipher import AES
+    mykey = 'pymailcgi3'.ljust(16, '-')       # key must be 16, 24, or 32 bytes
+
+    def do_encode(pswd):
+        over = len(pswd) % 16
+        if over: pswd += '\0' * (16-over)     # pad: len must be multiple of 16
+        aesobj = AES.new(mykey, AES.MODE_ECB)
+        return aesobj.encrypt(pswd)
+
+    def do_decode(pswd):
+        aesobj = AES.new(mykey, AES.MODE_ECB)
+        pswd   = aesobj.decrypt(pswd)
+        return pswd.rstrip('\0')
+
+elif useRotor:
+    #######################################################
+    # use the standard lib's rotor module to encode pswd
+    # this does a better job of encryption than code above
+    # unfortunately, it is no longer available in Py 2.4+
+    #######################################################
+
+    sys.stderr.write('using rotor\n')
+    import rotor
+    mykey = 'pymailcgi3'
+
+    def do_encode(pswd):
+        robj = rotor.newrotor(mykey)              # use enigma encryption
+        return robj.encrypt(pswd)
+
+    def do_decode(pswd):
+        robj = rotor.newrotor(mykey)
+        return robj.decrypt(pswd)
+
+else:
+    #######################################################
+    # use our own custom scheme as a last resort
+    # shuffle characters in some reversible fashion
+    # caveat: very simple -- replace with one of your own
+    #######################################################
+
+    sys.stderr.write('using simple\n')
+    adder = 1
+
+    def do_encode(pswd):
+        pswd = 'vs' + pswd + '48'
+        res = ''
+        for char in pswd:
+            res += chr(ord(char) + adder)    # inc each ASCII code
+        return str(res)
+
+    def do_decode(pswd):
+        pswd = pswd[2:-2]
+        res = ''
+        for char in pswd:
+            res += chr(ord(char) - adder)
+        return res
+
+###############################################################################
+# top-level entry points
+###############################################################################
+
+def encode(pswd):
+    return stringify(do_encode(pswd))       # encrypt plus string encode
+
+def decode(pswd):
+    return do_decode(unstringify(pswd))</pre>
+</div>
+</div>
+<p>In addition to encryption, this module also implements an
+            encoding method for already encrypted strings, which transforms
+            them to and from printable characters. By default, the encoding
+            functions do nothing, and the system relies on straight URL or
+            HTML encoding of the encrypted string. An optional encoding scheme
+            translates the encrypted string to a string of ASCII code digits
+            separated by dashes. Either encoding method makes nonprintable
+            characters in the encrypted string printable.</p>
+<p>To illustrate, let’s test this module’s tools interactively.
+            For this test, we set <code class="epub__literal">force</code><code class="epub__literal">Readable</code><code class="epub__literal">Password</code> to <code class="epub__literal">True</code>. The top-level entry points encode
+            and decode into printable characters (for illustration purposes,
+            this test reflects a Python 2.X installation where PyCrypto is
+            installed):</p><a id="I_programlisting5_d1e72652"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from secret import *</code></strong>
+using PyCrypto
+&gt;&gt;&gt; <strong class="epub__userinput"><code>data = encode('spam@123+')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>data</code></strong>
+'-47-248-2-170-107-242-175-18-227-249-53-130-14-140-163-107'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>decode(data)</code></strong>
+'spam@123+'</pre>
+<p>But there are actually two steps to this—encryption and
+            printable encoding:</p><a id="I_programlisting5_d1e72668"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>raw = do_encode('spam@123+')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>raw</code></strong>
+'/\xf8\x02\xaak\xf2\xaf\x12\xe3\xf95\x82\x0e\x8c\xa3k'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>text = stringify(raw)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>text</code></strong>
+'-47-248-2-170-107-242-175-18-227-249-53-130-14-140-163-107'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>len(raw), len(text)</code></strong>
+(16, 58)</pre>
+<p>Here’s what the encoding looks like without the extra
+            printable encoding:</p><a id="I_programlisting5_d1e72688"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>raw = do_encode('spam@123+')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>raw</code></strong>
+'/\xf8\x02\xaak\xf2\xaf\x12\xe3\xf95\x82\x0e\x8c\xa3k'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>do_decode(raw)</code></strong>
+'spam@123+'</pre>
+</div>
+<div class="epub__sect3" title="Rolling your own encryptor"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="rolling_your_own_encryptor"></a>Rolling your own encryptor</h3>
+</div>
+</div>
+</div>
+<p>As is, PyMailCGI avoids ever passing the POP account
+            username and password across the Net together in a single
+            transaction, unless the password is encrypted or obfuscated
+            according to the module <code class="epub__literal">secret.py</code> on the server. This module can
+            be different everywhere PyMailCGI is installed, and it can be
+            uploaded anew in the future—encrypted passwords aren’t persistent
+            and live only for the duration of one mail-processing interaction
+            session. Provided you don’t publish your encryption code or its
+            private keys, your data will be as secure as the custom encryption
+            module you provide on your own server.</p>
+<p>If you wish to use this system on the general Internet,
+            you’ll want to tailor this code. Ideally, you’ll install PyCrypto
+            and change the private key string. Barring that, replace Example 16-13 with a custom
+            encryption coding scheme of your own or deploy one of the general
+            techniques mentioned earlier, such as an HTTPS-capable web server.
+            In any event, this software makes no guarantees; the security of
+            your password is ultimately up to you to ensure.</p>
+<p>For additional information on security tools and techniques,
+            search the Web and consult books geared exclusively toward web
+            programming techniques. As this system is a prototype at large,
+            security is just one of a handful of limitations which would have
+            to be more fully addressed in a robust production-grade <a id="I_indexterm5_d1e72713"></a><a id="I_indexterm5_d1e72715"></a><a id="I_indexterm5_d1e72717"></a><a id="I_indexterm5_d1e72719"></a><a id="I_indexterm5_d1e72721"></a>version.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p>Because the encryption schemes used by PyMailCGI are
+              reversible, it is possible to reconstruct my email account’s
+              password if you happen to see its encrypted form in a
+              screenshot, unless the private key listed in <code class="epub__literal">secret.py</code> was different when the tests
+              shown were run. To sidestep this issue, the email account used
+              in all of this book’s examples is temporary and will be deleted
+              by the time you read these words. Please use an email account of
+              your own to test-drive the system.</p>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="Common Utilities Module"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="common_utilities_module"></a>Common Utilities Module</h2>
+</div>
+</div>
+</div>
+<p>Finally, the file<a id="py16.7.4"></a> <span class="epub__emphasis"><em>commonhtml.py</em></span> in Example 16-14 is the Grand
+          Central Station of this application—its code is used and reused by
+          just about every other file in the system. Most of it is
+          self-explanatory, and we’ve already met most of its core idea
+          earlier, in conjunction with the CGI scripts that use it.</p>
+<p>I haven’t talked about its <span class="epub__emphasis"><em>debugging</em></span>
+          support, though. Notice that this module assigns <code class="epub__literal">sys.stderr</code> to <code class="epub__literal">sys.stdout</code>, in an attempt to force the
+          text of Python error messages to show up in the client’s browser
+          (remember, uncaught exceptions print details to <code class="epub__literal">sys.stderr</code>). <a id="I_indexterm5_d1e72762"></a><a id="I_indexterm5_d1e72767"></a>That works sometimes in PyMailCGI, but not always—the
+          error text shows up in a web page only if a <code class="epub__literal">page_header</code> call has already printed a
+          response preamble. If you want to see all error messages, make sure
+          you call <code class="epub__literal">page_header</code> (or print
+          <code class="epub__literal">Content-type:</code> lines manually)
+          before any other processing.</p>
+<p>This module also defines functions that dump raw CGI
+          environment information to the browser (<code class="epub__literal">dumpstatepage</code>), and that wrap calls to
+          functions that print status messages so that their output isn’t
+          added to the HTML stream (<code class="epub__literal">runsilent</code>). A version 3.0 addition also
+          attempts to work around the fact that built-in print calls can fail
+          in Python 3.1 for some types of Unicode text (e.g., non-ASCII
+          character sets in Internationalized headers), by forcing binary mode
+          and bytes for the output stream (<code class="epub__literal">print</code>).</p>
+<p>I’ll leave the discovery of any remaining magic in the code in
+          Example 16-14 up to you,
+          the reader. You are hereby admonished to go forth and read, refer,
+          and reuse.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id110"></a>
+<p class="epub__title">Example 16-14. PP4E\Internet\Web\PyMailCgi\cgi-bin\commonhtml.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/bin/python
+"""
+##################################################################################
+generate standard page header, list, and footer HTML;  isolates HTML generation
+related details in this file;  text printed here goes over a socket to the client,
+to create parts of a new web page in the web browser;  uses one print per line,
+instead of string blocks;  uses urllib to escape params in URL links auto from a
+dict, but cgi.escape to put them in HTML hidden fields;  some tools here may be
+useful outside pymailcgi;  could also return the HTML generated here instead of
+printing it, so it could be included in other pages;  could also structure as a
+single CGI script that gets and tests a next action name as a hidden form field;
+caveat: this system works, but was largely written during a two-hour layover at
+the Chicago O'Hare airport: there is much room for improvement and optimization;
+##################################################################################
+"""
+
+import cgi, urllib.parse, sys, os
+
+# 3.0: Python 3.1 has issues printing some decoded str as text to stdout
+import builtins
+bstdout = open(sys.stdout.fileno(), 'wb')
+def print(*args, end='\n'):
+    try:
+        builtins.print(*args, end=end)
+        sys.stdout.flush()
+    except:
+        for arg in args:
+            bstdout.write(str(arg).encode('utf-8'))
+        if end: bstdout.write(end.encode('utf-8'))
+        bstdout.flush()
+
+sys.stderr = sys.stdout           # show error messages in browser
+from externs import mailconfig    # from a package somewhere on server
+from externs import mailtools     # need parser for header decoding
+parser = mailtools.MailParser()   # one per process in this module
+
+# my cgi address root
+#urlroot = 'http://starship.python.net/~lutz/PyMailCgi/'
+#urlroot = 'http://localhost:8000/cgi-bin/'
+
+urlroot  = ''  # use minimal, relative paths
+
+def pageheader(app='PyMailCGI', color='#FFFFFF', kind='main', info=''):
+    print('Content-type: text/html\n')
+    print('&lt;html&gt;&lt;head&gt;&lt;title&gt;%s: %s page (PP4E)&lt;/title&gt;&lt;/head&gt;' % (app, kind))
+    print('&lt;body bgcolor="%s"&gt;&lt;h1&gt;%s %s&lt;/h1&gt;&lt;hr&gt;' % (color, app, (info or kind)))
+
+def pagefooter(root='pymailcgi.html'):
+    print('&lt;/p&gt;&lt;hr&gt;&lt;a href="http://www.python.org"&gt;')
+    print('&lt;img src="../PythonPoweredSmall.gif" ')
+    print('align=left alt="[Python Logo]" border=0 hspace=15&gt;&lt;/a&gt;')
+    print('&lt;a href="../%s"&gt;Back to root page&lt;/a&gt;' % root)
+    print('&lt;/body&gt;&lt;/html&gt;')
+
+def formatlink(cgiurl, parmdict):
+    """
+    make "%url?key=val&amp;key=val" query link from a dictionary;
+    escapes str() of all key and val with %xx, changes ' ' to +
+    note that URL escapes are different from HTML (cgi.escape)
+    """
+    parmtext = urllib.parse.urlencode(parmdict)     # calls parse.quote_plus
+    return '%s?%s' % (cgiurl, parmtext)             # urllib does all the work
+
+def pagelistsimple(linklist):                       # show simple ordered list
+    print('&lt;ol&gt;')
+    for (text, cgiurl, parmdict) in linklist:
+        link = formatlink(cgiurl, parmdict)
+        text = cgi.escape(text)
+        print('&lt;li&gt;&lt;a href="%s"&gt;\n    %s&lt;/a&gt;' % (link, text))
+    print('&lt;/ol&gt;')
+
+def pagelisttable(linklist):                        # show list in a table
+    print('&lt;p&gt;&lt;table border&gt;')                      # escape text to be safe
+    for (text, cgiurl, parmdict) in linklist:
+        link = formatlink(cgiurl, parmdict)
+        text = cgi.escape(text)
+        print('&lt;tr&gt;&lt;th&gt;&lt;a href="%s"&gt;View&lt;/a&gt;&lt;td&gt;\n %s' % (link, text))
+    print('&lt;/table&gt;')
+
+def listpage(linkslist, kind='selection list'):
+    pageheader(kind=kind)
+    pagelisttable(linkslist)         # [('text', 'cgiurl', {'parm':'value'})]
+    pagefooter()
+
+def messagearea(headers, text, extra=''):               # extra for readonly
+    addrhdrs = ('From', 'To', 'Cc', 'Bcc')              # decode names only
+    print('&lt;table border cellpadding=3&gt;')
+    for hdr in ('From', 'To', 'Cc', 'Subject'):
+        rawhdr = headers.get(hdr, '?')
+        if hdr not in addrhdrs:
+            dechdr = parser.decodeHeader(rawhdr)        # 3.0: decode for display
+        else:                                           # encoded on sends
+            dechdr = parser.decodeAddrHeader(rawhdr)    # email names only
+        val = cgi.escape(dechdr, quote=1)
+        print('&lt;tr&gt;&lt;th align=right&gt;%s:' % hdr)
+        print('    &lt;td&gt;&lt;input type=text ')
+        print('    name=%s value="%s" %s size=60&gt;' % (hdr, val, extra))
+    print('&lt;tr&gt;&lt;th align=right&gt;Text:')
+    print('&lt;td&gt;&lt;textarea name=text cols=80 rows=10 %s&gt;' % extra)
+    print('%s\n&lt;/textarea&gt;&lt;/table&gt;' % (cgi.escape(text) or '?'))  # if has &lt;/&gt;s
+
+def viewattachmentlinks(partnames):
+    """
+    create hyperlinks to locally saved part/attachment files
+    when clicked, user's web browser will handle opening
+    assumes just one user, only valid while viewing 1 msg
+    """
+    print('&lt;hr&gt;&lt;table border cellpadding=3&gt;&lt;tr&gt;&lt;th&gt;Parts:')
+    for filename in partnames:
+        basename = os.path.basename(filename)
+        filename  = filename.replace('\\', '/') # Windows hack
+        print('&lt;td&gt;&lt;a href=../%s&gt;%s&lt;/a&gt;' % (filename, basename))
+    print('&lt;/table&gt;&lt;hr&gt;')
+
+def viewpage(msgnum, headers, text, form, parts=[]):
+    """
+    on View + select (generated link click)
+    very subtle thing: at this point, pswd was URL encoded in the
+    link, and then unencoded by CGI input parser; it's being embedded
+    in HTML here, so we use cgi.escape; this usually sends nonprintable
+    chars in the hidden field's HTML, but works on ie and ns anyhow:
+    in url:  ?user=lutz&amp;mnum=3&amp;pswd=%8cg%c2P%1e%f0%5b%c5J%1c%f3&amp;...
+    in html: &lt;input type=hidden name=pswd value="...nonprintables.."&gt;
+    could urllib.parse.quote html field here too, but must urllib.parse.unquote
+    in next script (which precludes passing the inputs in a URL instead
+    of the form); can also fall back on numeric string fmt in secret.py
+    """
+    pageheader(kind='View')
+    user, pswd, site = list(map(cgi.escape, getstandardpopfields(form)))
+    print('&lt;form method=post action="%sonViewPageAction.py"&gt;' % urlroot)
+    print('&lt;input type=hidden name=mnum value="%s"&gt;' % msgnum)
+    print('&lt;input type=hidden name=user value="%s"&gt;' % user)    # from page|url
+    print('&lt;input type=hidden name=site value="%s"&gt;' % site)    # for deletes
+    print('&lt;input type=hidden name=pswd value="%s"&gt;' % pswd)    # pswd encoded
+    messagearea(headers, text, 'readonly')
+    if parts: viewattachmentlinks(parts)
+
+    # onViewPageAction.quotetext needs date passed in page
+    print('&lt;input type=hidden name=Date value="%s"&gt;' % headers.get('Date','?'))
+    print('&lt;table&gt;&lt;tr&gt;&lt;th align=right&gt;Action:')
+    print('&lt;td&gt;&lt;select name=action&gt;')
+    print('    &lt;option&gt;Reply&lt;option&gt;Forward&lt;option&gt;Delete&lt;/select&gt;')
+    print('&lt;input type=submit value="Next"&gt;')
+    print('&lt;/table&gt;&lt;/form&gt;')                     # no 'reset' needed here
+    pagefooter()
+
+def sendattachmentwidgets(maxattach=3):
+    print('&lt;p&gt;&lt;b&gt;Attach:&lt;/b&gt;&lt;br&gt;')
+    for i in range(1, maxattach+1):
+        print('&lt;input size=80 type=file name=attach%d&gt;&lt;br&gt;' % i)
+    print('&lt;/p&gt;')
+
+def editpage(kind, headers={}, text=''):
+    # on Send, View+select+Reply, View+select+Fwd
+    pageheader(kind=kind)
+    print('&lt;p&gt;&lt;form enctype="multipart/form-data" method=post', end=' ')
+    print('action="%sonEditPageSend.py"&gt;' % urlroot)
+    if mailconfig.mysignature:
+        text = '\n%s\n%s' % (mailconfig.mysignature, text)
+    messagearea(headers, text)
+    sendattachmentwidgets()
+    print('&lt;input type=submit value="Send"&gt;')
+    print('&lt;input type=reset  value="Reset"&gt;')
+    print('&lt;/form&gt;')
+    pagefooter()
+
+def errorpage(message, stacktrace=True):
+    pageheader(kind='Error')                        # was sys.exc_type/exc_value
+    exc_type, exc_value, exc_tb = sys.exc_info()
+    print('&lt;h2&gt;Error Description&lt;/h2&gt;&lt;p&gt;', message)
+    print('&lt;h2&gt;Python Exception&lt;/h2&gt;&lt;p&gt;',  cgi.escape(str(exc_type)))
+    print('&lt;h2&gt;Exception details&lt;/h2&gt;&lt;p&gt;', cgi.escape(str(exc_value)))
+    if stacktrace:
+        print('&lt;h2&gt;Exception traceback&lt;/h2&gt;&lt;p&gt;&lt;pre&gt;')
+        import traceback
+        traceback.print_tb(exc_tb, None, sys.stdout)
+        print('&lt;/pre&gt;')
+    pagefooter()
+
+def confirmationpage(kind):
+    pageheader(kind='Confirmation')
+    print('&lt;h2&gt;%s operation was successful&lt;/h2&gt;' % kind)
+    print('&lt;p&gt;Press the link below to return to the main page.&lt;/p&gt;')
+    pagefooter()
+
+def getfield(form, field, default=''):
+    # emulate dictionary get method
+    return (field in form and form[field].value) or default
+
+def getstandardpopfields(form):
+    """
+    fields can arrive missing or '' or with a real value
+    hardcoded in a URL; default to mailconfig settings
+    """
+    return (getfield(form, 'user', mailconfig.popusername),
+            getfield(form, 'pswd', '?'),
+            getfield(form, 'site', mailconfig.popservername))
+
+def getstandardsmtpfields(form):
+    return  getfield(form, 'site', mailconfig.smtpservername)
+
+def runsilent(func, args):
+    """
+    run a function without writing stdout
+    ex: suppress print's in imported tools
+    else they go to the client/browser
+    """
+    class Silent:
+        def write(self, line): pass
+    save_stdout = sys.stdout
+    sys.stdout  = Silent()                        # send print to dummy object
+    try:                                          # which has a write method
+        result = func(*args)                      # try to return func result
+    finally:                                      # but always restore stdout
+        sys.stdout = save_stdout
+    return result
+
+def dumpstatepage(exhaustive=0):
+    """
+    for debugging: call me at top of a CGI to
+    generate a new page with CGI state details
+    """
+    if exhaustive:
+        cgi.test()                       # show page with form, environ, etc.
+    else:
+        pageheader(kind='state dump')
+        form = cgi.FieldStorage()        # show just form fields names/values
+        cgi.print_form(form)
+        pagefooter()
+    sys.exit()
+
+def selftest(showastable=False):                    # make phony web page
+    links = [                                       # [(text, url, {parms})]
+        ('text1', urlroot + 'page1.cgi', {'a':1}),
+        ('text2', urlroot + 'page1.cgi', {'a':2, 'b':'3'}),
+        ('text3', urlroot + 'page2.cgi', {'x':'a b', 'y':'a&lt;b&amp;c', 'z':'?'}),
+        ('te&lt;&gt;4', urlroot + 'page2.cgi', {'&lt;x&gt;':'', 'y':'&lt;a&gt;', 'z':None})]
+    pageheader(kind='View')
+    if showastable:
+        pagelisttable(links)
+    else:
+        pagelistsimple(links)
+    pagefooter()
+
+if __name__ == '__main__':                          # when run, not imported
+    selftest(len(sys.argv) &gt; 1)                     # HTML goes to stdout</pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

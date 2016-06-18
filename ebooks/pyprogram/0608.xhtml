@@ -1,0 +1,735 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Visitor: Walking Directories “++”</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Visitor: Walking Directories “++”"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="visitor_colon_walking_directories_quotat"></a>Visitor: Walking Directories “++”</h1>
+</div>
+</div>
+</div>
+<p>Laziness is the <a id="dir6.9"></a><a id="sys6.9"></a>mother of many a framework. Armed with the
+        portable<a id="I_indexterm5_d1e24242"></a> <code class="epub__literal">search_all</code> script
+        from Example 6-17, I was
+        able to better pinpoint files to be edited every time I changed the
+        book examples tree content or structure. At least initially, in one
+        window I ran <code class="epub__literal">search_all</code> to pick out
+        suspicious files and edited each along the way by hand in another
+        window.</p>
+<p>Pretty soon, though, this became tedious, too. Manually typing
+        filenames into editor commands is no fun, especially when the number
+        of files to edit is large. Since I occasionally have better things to
+        do than manually start dozens of text editor sessions, I started
+        looking for a way to <span class="epub__emphasis"><em>automatically</em></span> run an editor
+        on each suspicious file.</p>
+<p>Unfortunately, <code class="epub__literal">search_all</code>
+        simply prints results to the screen. Although that text could be
+        intercepted with <code class="epub__literal">os.popen</code> and
+        parsed by another program, a more direct approach that spawns edit
+        sessions during the search may be simpler. That would require major
+        changes to the tree search script as currently coded, though, and make
+        it useful for just one specific purpose. At this point, three thoughts
+        came to mind:</p><div class="epub__variablelist"><dl><dt><span class="epub__term">Redundancy</span></dt><dd>
+<p>After writing a few directory walking utilities, it became
+              clear that I was rewriting the same sort of code over and over
+              again. Traversals could be even further simplified by wrapping
+              common details for reuse. Although the <code class="epub__literal">os.walk</code> tool avoids having to write
+              recursive functions, its model tends to foster redundant
+              operations and code (e.g., directory name joins, tracing
+              prints).</p></dd><dt><span class="epub__term">Extensibility</span></dt><dd>
+<p>Past experience informed me that it would be better in the
+              long run to add features to a general directory searcher as
+              external components, rather than changing the original script
+              itself. Because editing files was just one possible extension
+              (what about automating text replacements, too?), a more general,
+              customizable, and reusable approach seemed the way to go.
+              Although <code class="epub__literal">os.walk</code> is
+              straightforward to use, its nested loop-based structure doesn’t
+              quite lend itself to customization the way a class can.</p></dd><dt><span class="epub__term">Encapsulation</span></dt><dd>
+<p>Based on past experience, I also knew that it’s a
+              generally good idea to insulate programs from implementation
+              details as much as possible. While <code class="epub__literal">os.walk</code> hides the details of recursive
+              traversal, it still imposes a very specific interface on its
+              clients, which is prone to change over time. Indeed it has—as
+              I’ll explain further at the end of this section, one of Python’s
+              tree walkers was removed altogether in 3.X, instantly breaking
+              code that relied upon it. It would be better to hide such
+              dependencies behind a more neutral interface, so that clients
+              won’t break as our needs change.</p></dd></dl>
+</div>
+<p>Of course, if you’ve studied Python in any depth, you know that
+        all these goals point to using an <span class="epub__emphasis"><em>object-oriented
+        framework</em></span> for traversals and searching. Example 6-18 is a concrete
+        realization of these goals. It exports a general<a id="file6.9"></a> <code class="epub__literal">FileVisitor</code> class
+        that mostly just wraps <code class="epub__literal">os.walk</code> for
+        easier use and extension, as well as a generic<a id="se6.9"></a> <code class="epub__literal">SearchVisitor</code> class
+        that generalizes the notion of directory searches.</p>
+<p>By itself, <code class="epub__literal">SearchVisitor</code>
+        simply does what <code class="epub__literal">search_all</code> did,
+        but it also opens up the search process to customization—bits of its
+        behavior can be modified by overloading its methods in subclasses.
+        Moreover, its core search logic can be reused everywhere we need to
+        search. Simply define a subclass that adds extensions for a specific
+        task. The same goes for <code class="epub__literal">FileVisitor</code>—by redefining its methods and
+        using its attributes, we can tap into tree search using OOP coding
+        techniques. As is usual in programming, once you repeat
+        <span class="epub__emphasis"><em>tactical</em></span> tasks often enough, they tend to inspire
+        this kind of <span class="epub__emphasis"><em>strategic</em></span> <span>thinking</span>.</p><div class="epub__example"><a id="pp4e_reverse_solidus_tools_reverse-id5"></a>
+<p class="epub__title">Example 6-18. PP4E\Tools\visitor.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+####################################################################################
+Test: "python ...\Tools\visitor.py dir testmask [string]".  Uses classes and
+subclasses to wrap some of the details of os.walk call usage to walk and search;
+testmask is an integer bitmask with 1 bit per available self-test; see also:
+visitor_*/.py subclasses use cases; frameworks should generally use__X pseudo
+private names, but all names here are exported for use in subclasses and clients;
+redefine reset to support multiple independent walks that require subclass updates;
+####################################################################################
+"""
+
+import os, sys
+
+class FileVisitor:
+    """
+    Visits all nondirectory files below startDir (default '.');
+    override visit* methods to provide custom file/dir handlers;
+    context arg/attribute is optional subclass-specific state;
+    trace switch: 0 is silent, 1 is directories, 2 adds files
+    """
+    def __init__(self, context=None, trace=2):
+        self.fcount   = 0
+        self.dcount   = 0
+        self.context  = context
+        self.trace    = trace
+
+    def run(self, startDir=os.curdir, reset=True):
+        if reset: self.reset()
+        for (thisDir, dirsHere, filesHere) in os.walk(startDir):
+            self.visitdir(thisDir)
+            for fname in filesHere:                          # for non-dir files
+                fpath = os.path.join(thisDir, fname)         # fnames have no path
+                self.visitfile(fpath)
+
+    def reset(self):                                         # to reuse walker
+        self.fcount = self.dcount = 0                        # for independent walks
+
+    def visitdir(self, dirpath):                             # called for each dir
+        self.dcount += 1                                     # override or extend me
+        if self.trace &gt; 0: print(dirpath, '...')
+
+    def visitfile(self, filepath):                           # called for each file
+        self.fcount += 1                                     # override or extend me
+        if self.trace &gt; 1: print(self.fcount, '=&gt;', filepath)
+
+
+class SearchVisitor(FileVisitor):
+    """
+    Search files at and below startDir for a string;
+    subclass: redefine visitmatch, extension lists, candidate as needed;
+    subclasses can use testexts to specify file types to search (but can
+    also redefine candidate to use mimetypes for text content: see ahead)
+    """
+
+    skipexts = []
+    testexts = ['.txt', '.py', '.pyw', '.html', '.c', '.h']  # search these exts
+   #skipexts = ['.gif', '.jpg', '.pyc', '.o', '.a', '.exe']  # or skip these exts
+
+    def __init__(self, searchkey, trace=2):
+        FileVisitor.__init__(self, searchkey, trace)
+        self.scount = 0
+
+    def reset(self):                                         # on independent walks
+        self.scount = 0
+
+    def candidate(self, fname):                              # redef for mimetypes
+        ext = os.path.splitext(fname)[1]
+        if self.testexts:
+            return ext in self.testexts                      # in test list
+        else:                                                # or not in skip list
+            return ext not in self.skipexts
+
+    def visitfile(self, fname):                              # test for a match
+        FileVisitor.visitfile(self, fname)
+        if not self.candidate(fname):
+            if self.trace &gt; 0: print('Skipping', fname)
+        else:
+            text = open(fname).read()                        # 'rb' if undecodable
+            if self.context in text:                         # or text.find() != −1
+                self.visitmatch(fname, text)
+                self.scount += 1
+
+    def visitmatch(self, fname, text):                       # process a match
+        print('%s has %s' % (fname, self.context))           # override me lower
+
+
+if __name__ == '__main__':
+    # self-test logic
+    dolist   = 1
+    dosearch = 2    # 3=do list and search
+    donext   = 4    # when next test added
+
+    def selftest(testmask):
+        if testmask &amp; dolist:
+           visitor = FileVisitor(trace=2)
+           visitor.run(sys.argv[2])
+           print('Visited %d files and %d dirs' % (visitor.fcount, visitor.dcount))
+
+        if testmask &amp; dosearch:
+           visitor = SearchVisitor(sys.argv[3], trace=0)
+           visitor.run(sys.argv[2])
+           print('Found in %d files, visited %d' % (visitor.scount, visitor.fcount))
+
+    selftest(int(sys.argv[1]))    # e.g., 3 = dolist | dosearch</pre>
+</div>
+</div>
+<p>This module primarily serves to export classes for external use,
+        but it does something useful when run standalone, too. If you invoke
+        it as a script with a test mask of <code class="epub__literal">1</code> and a root directory name, it makes and
+        runs a <code class="epub__literal">FileVisitor</code> object and
+        prints an exhaustive listing of every file and directory at and below
+        the root:</p><a id="I_programlisting5_d1e24354"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>visitor.py 1 C:\temp\PP3E\Examples</code></strong>
+C:\temp\PP3E\Examples ...
+1 =&gt; C:\temp\PP3E\Examples\README-root.txt
+C:\temp\PP3E\Examples\PP3E ...
+2 =&gt; C:\temp\PP3E\Examples\PP3E\echoEnvironment.pyw
+3 =&gt; C:\temp\PP3E\Examples\PP3E\LaunchBrowser.pyw
+4 =&gt; C:\temp\PP3E\Examples\PP3E\Launcher.py
+5 =&gt; C:\temp\PP3E\Examples\PP3E\Launcher.pyc
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more output omitted (pipe into more or a file)...</span></em>
+1424 =&gt; C:\temp\PP3E\Examples\PP3E\System\Threads\thread-count.py
+1425 =&gt; C:\temp\PP3E\Examples\PP3E\System\Threads\thread1.py
+C:\temp\PP3E\Examples\PP3E\TempParts ...
+1426 =&gt; C:\temp\PP3E\Examples\PP3E\TempParts\109_0237.JPG
+1427 =&gt; C:\temp\PP3E\Examples\PP3E\TempParts\lawnlake1-jan-03.jpg
+1428 =&gt; C:\temp\PP3E\Examples\PP3E\TempParts\part-001.txt
+1429 =&gt; C:\temp\PP3E\Examples\PP3E\TempParts\part-002.html
+Visited 1429 files and 186 dirs</pre>
+<p>If you instead invoke this script with a <code class="epub__literal">2</code> as its first command-line argument, it
+        makes and runs a <code class="epub__literal">SearchVisitor</code>
+        object using the third argument as the search key. This form is
+        similar to running the <span class="epub__emphasis"><em>search_all.py</em></span> script we
+        met earlier, but it simply reports each matching file without
+        pausing:</p><a id="I_programlisting5_d1e24374"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>visitor.py 2 C:\temp\PP3E\Examples mimetypes</code></strong>
+C:\temp\PP3E\Examples\PP3E\extras\LosAlamosAdvancedClass\day1-system\data.txt ha
+s mimetypes
+C:\temp\PP3E\Examples\PP3E\Internet\Email\mailtools\mailParser.py has mimetypes
+C:\temp\PP3E\Examples\PP3E\Internet\Email\mailtools\mailSender.py has mimetypes
+C:\temp\PP3E\Examples\PP3E\Internet\Ftp\mirror\downloadflat.py has mimetypes
+C:\temp\PP3E\Examples\PP3E\Internet\Ftp\mirror\downloadflat_modular.py has mimet
+ypes
+C:\temp\PP3E\Examples\PP3E\Internet\Ftp\mirror\ftptools.py has mimetypes
+C:\temp\PP3E\Examples\PP3E\Internet\Ftp\mirror\uploadflat.py has mimetypes
+C:\temp\PP3E\Examples\PP3E\System\Media\playfile.py has mimetypes
+Found in 8 files, visited 1429</pre>
+<p>Technically, passing this script a first argument of <code class="epub__literal">3</code> runs <span class="epub__emphasis"><em>both</em></span> a <code class="epub__literal">FileVisitor</code> and a <code class="epub__literal">SearchVisitor</code> (two separate traversals are
+        performed). The first argument is really used as a bit mask to select
+        one or more supported self-tests; if a test’s bit is on in the binary
+        value of the argument, the test will be run. Because 3 is 011 in
+        binary, it selects both a search (010) and a listing (001). In a more
+        user-friendly system, we might want to be more symbolic about that
+        (e.g., check for <code class="epub__literal">-search</code> and
+        <code class="epub__literal">-list</code> arguments), but bit masks
+        work just as well for this script’s scope.</p>
+<p>As usual, this module can also be used interactively. The
+        following is one way to determine how many files and directories you
+        have in specific directories; the last command walks over your entire
+        drive (after a generally noticeable delay!). See also the “biggest
+        file” example at the start of this chapter for issues such as
+        potential repeat visits not handled by this walker:</p><a id="I_programlisting5_d1e24402"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from visitor import FileVisitor</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V = FileVisitor(trace=0)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V.run(r'C:\temp\PP3E\Examples')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V.dcount, V.fcount</code></strong>
+(186, 1429)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V.run('..')</code></strong>                        # independent walk (reset counts)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V.dcount, V.fcount</code></strong>
+(19, 181)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V.run('..', reset=False)</code></strong>           # accumulative walk (keep counts)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V.dcount, V.fcount</code></strong>
+(38, 362)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V = FileVisitor(trace=0)</code></strong>           # new independent walker (own counts)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V.run(r'C:\\')</code></strong>                     # entire drive: try '/' on Unix-en
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V.dcount, V.fcount</code></strong>
+(24992, 198585)</pre>
+<p>Although the visitor module is useful by itself for listing and
+        searching trees, it was really designed to be extended. In the rest of
+        this section, let’s quickly step through a handful of visitor clients
+        which add more specific tree operations, using normal OO customization
+        <a id="I_indexterm5_d1e24444"></a><a id="I_indexterm5_d1e24446"></a>techniques.</p>
+<div class="epub__sect2" title="Editing Files in Directory Trees (Visitor)"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="editing_files_in_directory_trees_open_pa"></a>Editing Files in Directory Trees (Visitor)</h2>
+</div>
+</div>
+</div>
+<p>After genericizing tree <a id="dir6.9.1"></a><a id="files6.9.1"></a><a id="edit6.9.1"></a>traversals and searches, it’s easy to add automatic
+          file editing in a brand-new, separate component. Example 6-19 defines a
+          new<a id="I_indexterm5_d1e24470"></a> <code class="epub__literal">EditVisitor</code> class
+          that simply customizes the <code class="epub__literal">visitmatch</code> method of the <code class="epub__literal">SearchVisitor</code> class to open a text editor
+          on the matched file. Yes, this is the complete program—it needs to
+          do something special only when visiting matched files, and so it
+          needs to provide only that behavior. The rest of the traversal and
+          search logic is unchanged and inherited.</p><div class="epub__example"><a id="pp4e_reverse_solidus_tools_reverse-id6"></a>
+<p class="epub__title">Example 6-19. PP4E\Tools\visitor_edit.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Use: "python ...\Tools\visitor_edit.py string rootdir?".
+Add auto-editor startup to SearchVisitor in an external subclass component;
+Automatically pops up an editor on each file containing string as it traverses;
+can also use editor='edit' or 'notepad' on Windows; to use texteditor from
+later in the book, try r'python Gui\TextEditor\textEditor.py'; could also
+send a search command to go to the first match on start in some editors;
+"""
+
+import os, sys
+from visitor import SearchVisitor
+
+class EditVisitor(SearchVisitor):
+    """
+    edit files at and below startDir having string
+    """
+    editor = r'C:\cygwin\bin\vim-nox.exe'  # ymmv!
+
+    def visitmatch(self, fpathname, text):
+        os.system('%s %s' % (self.editor, fpathname))
+
+if __name__  == '__main__':
+    visitor = EditVisitor(sys.argv[1])
+    visitor.run('.' if len(sys.argv) &lt; 3 else sys.argv[2])
+    print('Edited %d files, visited %d' % (visitor.scount, visitor.fcount))</pre>
+</div>
+</div>
+<p>When we make and run an <code class="epub__literal">EditVisitor</code>, a text editor is started with
+          the <code class="epub__literal">os.system</code> command-line spawn
+          call, which usually blocks its caller until the spawned program
+          finishes. As coded, when run on my machines, each time this script
+          finds a matched file during the traversal, it starts up the vi text
+          editor within the console window where the script was started;
+          exiting the editor resumes the tree walk.</p>
+<p>Let’s find and edit some files. When run as a script, we pass
+          this program the search string as a command argument (here, the
+          string <code class="epub__literal">mimetypes</code> is the search
+          key). The root directory passed to the <code class="epub__literal">run</code> method is either the second argument
+          or “.” (the current run directory) by default. Traversal status
+          messages show up in the console, but each matched file now
+          automatically pops up in a text editor along the way. In the
+          following, the editor is started eight times—try this with an editor
+          and tree of your own to get a better feel for how it works:</p><a id="I_programlisting5_d1e24505"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; visitor<strong class="epub__userinput"><code>_edit.py mimetypes C:\temp\PP3E\Examples</code></strong>
+C:\temp\PP3E\Examples ...
+1 =&gt; C:\temp\PP3E\Examples\README-root.txt
+C:\temp\PP3E\Examples\PP3E ...
+2 =&gt; C:\temp\PP3E\Examples\PP3E\echoEnvironment.pyw
+3 =&gt; C:\temp\PP3E\Examples\PP3E\LaunchBrowser.pyw
+4 =&gt; C:\temp\PP3E\Examples\PP3E\Launcher.py
+5 =&gt; C:\temp\PP3E\Examples\PP3E\Launcher.pyc
+Skipping C:\temp\PP3E\Examples\PP3E\Launcher.pyc
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more output omitted...</span></em>
+1427 =&gt; C:\temp\PP3E\Examples\PP3E\TempParts\lawnlake1-jan-03.jpg
+Skipping C:\temp\PP3E\Examples\PP3E\TempParts\lawnlake1-jan-03.jpg
+1428 =&gt; C:\temp\PP3E\Examples\PP3E\TempParts\part-001.txt
+1429 =&gt; C:\temp\PP3E\Examples\PP3E\TempParts\part-002.html
+Edited 8 files, visited 1429</pre>
+<p>This, finally, is the exact tool I was looking for to simplify
+          global book examples tree maintenance. After major changes to things
+          such as shared modules and file and directory names, I run this
+          script on the examples root directory with an appropriate search
+          string and edit any files it pops up as needed. I still need to
+          change files by hand in the editor, but that’s often safer than
+          blind global <a id="I_indexterm5_d1e24515"></a><a id="I_indexterm5_d1e24517"></a><a id="I_indexterm5_d1e24519"></a>replacements.</p>
+</div>
+<div class="epub__sect2" title="Global Replacements in Directory Trees (Visitor)"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="global_replacements_in_directory_trees_o"></a>Global Replacements in Directory Trees (Visitor)</h2>
+</div>
+</div>
+</div>
+<p>But since I brought it up: <a id="dir6.9.2"></a>given a general tree traversal class, it’s easy to
+          code a global search-and-replace subclass, too. The<a id="I_indexterm5_d1e24533"></a> <code class="epub__literal">ReplaceVisitor</code>
+          class in Example 6-20
+          is a <code class="epub__literal">SearchVisitor</code> subclass that
+          customizes the <code class="epub__literal">visitfile</code> method
+          to globally replace any appearances of one string with another, in
+          all text files at and below a root directory. It also collects the
+          names of all files that were changed in a list just in case you wish
+          to go through and verify the automatic edits applied (a text editor
+          could be automatically popped up on each changed file, for
+          instance).</p><div class="epub__example"><a id="pp4e_reverse_solidus_tools_reverse-id7"></a>
+<p class="epub__title">Example 6-20. PP4E\Tools\visitor_replace.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Use: "python ...\Tools\visitor_replace.py rootdir fromStr toStr".
+Does global search-and-replace in all files in a directory tree: replaces
+fromStr with toStr in all text files; this is powerful but dangerous!!
+visitor_edit.py runs an editor for you to verify and make changes, and so
+is safer; use visitor_collect.py to simply collect matched files list;
+listonly mode here is similar to both SearchVisitor and CollectVisitor;
+"""
+
+import sys
+from visitor import SearchVisitor
+
+class ReplaceVisitor(SearchVisitor):
+    """
+    Change fromStr to toStr in files at and below startDir;
+    files changed available in obj.changed list after a run
+    """
+    def __init__(self, fromStr, toStr, listOnly=False, trace=0):
+        self.changed  = []
+        self.toStr    = toStr
+        self.listOnly = listOnly
+        SearchVisitor.__init__(self, fromStr, trace)
+
+    def visitmatch(self, fname, text):
+        self.changed.append(fname)
+        if not self.listOnly:
+            fromStr, toStr = self.context, self.toStr
+            text = text.replace(fromStr, toStr)
+            open(fname, 'w').write(text)
+
+if __name__  == '__main__':
+    listonly = input('List only?') == 'y'
+    visitor  = ReplaceVisitor(sys.argv[2], sys.argv[3], listonly)
+    if listonly or input('Proceed with changes?') == 'y':
+        visitor.run(startDir=sys.argv[1])
+        action = 'Changed' if not listonly else 'Found'
+        print('Visited %d files'  % visitor.fcount)
+        print(action, '%d files:' % len(visitor.changed))
+        for fname in visitor.changed: print(fname)</pre>
+</div>
+</div>
+<p>To run this script over a directory tree, run the following
+          sort of command line with appropriate “from” and “to” strings. On my
+          shockingly underpowered netbook machine, doing this on a 1429-file
+          tree and changing 101 files along the way takes roughly three
+          seconds of real clock time when the system isn’t particularly
+          busy.</p><a id="I_programlisting5_d1e24556"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>visitor_replace.py C:\temp\PP3E\Examples PP3E PP4E</code></strong>
+List only?<strong class="epub__userinput"><code>y</code></strong>
+Visited 1429 files
+Found 101 files:
+C:\temp\PP3E\Examples\README-root.txt
+C:\temp\PP3E\Examples\PP3E\echoEnvironment.pyw
+C:\temp\PP3E\Examples\PP3E\Launcher.py
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more matching filenames omitted...</span></em>
+
+C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>visitor_replace.py C:\temp\PP3E\Examples PP3E PP4E</code></strong>
+List only?<strong class="epub__userinput"><code>n</code></strong>
+Proceed with changes?<strong class="epub__userinput"><code>y</code></strong>
+Visited 1429 files
+Changed 101 files:
+C:\temp\PP3E\Examples\README-root.txt
+C:\temp\PP3E\Examples\PP3E\echoEnvironment.pyw
+C:\temp\PP3E\Examples\PP3E\Launcher.py
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more changed filenames omitted...</span></em>
+
+C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>visitor_replace.py C:\temp\PP3E\Examples PP3E PP4E</code></strong>
+List only?<strong class="epub__userinput"><code>n</code></strong>
+Proceed with changes?<strong class="epub__userinput"><code>y</code></strong>
+Visited 1429 files
+Changed 0 files:</pre>
+<p>Naturally, we can also check our work by running the visitor
+          script (and <code class="epub__literal">Search</code><code class="epub__literal">Visitor</code> superclass):</p><a id="I_programlisting5_d1e24596"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>visitor.py 2 C:\temp\PP3E\Examples PP3E</code></strong>
+Found in 0 files, visited 1429
+
+C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>visitor.py 2 C:\temp\PP3E\Examples PP4E</code></strong>
+C:\temp\PP3E\Examples\README-root.txt has PP4E
+C:\temp\PP3E\Examples\PP3E\echoEnvironment.pyw has PP4E
+C:\temp\PP3E\Examples\PP3E\Launcher.py has PP4E
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more matching filenames omitted...</span></em>
+Found in 101 files, visited 1429</pre>
+<p>This is both wildly powerful and dangerous. If the string to
+          be replaced can show up in places you didn’t anticipate, you might
+          just ruin an entire tree of files by running the <code class="epub__literal">ReplaceVisitor</code> object defined here. On the
+          other hand, if the string is something very specific, this object
+          can obviate the need to manually edit suspicious files. For
+          instance, website addresses in HTML files are likely too specific to
+          show up in other places by <a id="I_indexterm5_d1e24612"></a>chance.</p>
+</div>
+<div class="epub__sect2" title="Counting Source Code Lines (Visitor)"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="counting_source_code_lines_open_parenthe"></a>Counting Source Code Lines (Visitor)</h2>
+</div>
+</div>
+</div>
+<p>The two <a id="I_indexterm5_d1e24620"></a><a id="I_indexterm5_d1e24625"></a><a id="I_indexterm5_d1e24628"></a>preceding <code class="epub__literal">visitor</code>
+          module clients were both search-oriented, but it’s just as easy to
+          extend the basic walker class for more specific goals. Example 6-21, for instance,
+          extends <code class="epub__literal">FileVisitor</code> to count the
+          number of lines in program source code files of various types
+          throughout an entire tree. The effect is much like calling the
+          <code class="epub__literal">visitfile</code> method of this class
+          for each filename returned by the <code class="epub__literal">find</code> tool we wrote earlier in this
+          chapter, but the OO structure here is arguably more flexible and
+          extensible.</p><div class="epub__example"><a id="pp4e_reverse_solidus_tools_reverse-id8"></a>
+<p class="epub__title">Example 6-21. PP4E\Tools\visitor_sloc.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Count lines among all program source files in a tree named on the command
+line, and report totals grouped by file types (extension).  A simple SLOC
+(source lines of code) metric: skip blank and comment lines if desired.
+"""
+
+import sys, pprint, os
+from visitor import FileVisitor
+
+class LinesByType(FileVisitor):
+    srcExts = [] # define in subclass
+
+    def __init__(self, trace=1):
+        FileVisitor.__init__(self, trace=trace)
+        self.srcLines = self.srcFiles = 0
+        self.extSums = {ext: dict(files=0, lines=0) for ext in self.srcExts}
+
+    def visitsource(self, fpath, ext):
+        if self.trace &gt; 0: print(os.path.basename(fpath))
+        lines = len(open(fpath, 'rb').readlines())
+        self.srcFiles += 1
+        self.srcLines += lines
+        self.extSums[ext]['files'] += 1
+        self.extSums[ext]['lines'] += lines
+
+    def visitfile(self, filepath):
+        FileVisitor.visitfile(self, filepath)
+        for ext in self.srcExts:
+            if filepath.endswith(ext):
+                self.visitsource(filepath, ext)
+                break
+
+class PyLines(LinesByType):
+    srcExts = ['.py', '.pyw']   # just python files
+
+class SourceLines(LinesByType):
+    srcExts = ['.py', '.pyw', '.cgi', '.html', '.c', '.cxx', '.h', '.i']
+
+if __name__ == '__main__':
+    walker = SourceLines()
+    walker.run(sys.argv[1])
+    print('Visited %d files and %d dirs' % (walker.fcount, walker.dcount))
+    print('-'*80)
+    print('Source files=&gt;%d, lines=&gt;%d'  % (walker.srcFiles, walker.srcLines))
+    print('By Types:')
+    pprint.pprint(walker.extSums)
+
+    print('\nCheck sums:', end=' ')
+    print(sum(x['lines'] for x in walker.extSums.values()), end=' ')
+    print(sum(x['files'] for x in walker.extSums.values()))
+
+    print('\nPython only walk:')
+    walker = PyLines(trace=0)
+    walker.run(sys.argv[1])
+    pprint.pprint(walker.extSums)</pre>
+</div>
+</div>
+<p>When run as a script, we get trace messages during the walk
+          (omitted here to save space), and a report with line counts grouped
+          by file type. Run this on trees of your own to watch its progress;
+          my tree has 907 source files and 48K source lines, including 783
+          files and 34K lines of “.py” Python code:</p><a id="I_programlisting5_d1e24654"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>visitor_sloc.py C:\temp\PP3E\Examples</code></strong>
+Visited 1429 files and 186 dirs
+--------------------------------------------------------------------------------
+Source files=&gt;907, lines=&gt;48047
+By Types:
+{'.c': {'files': 45, 'lines': 7370},
+ '.cgi': {'files': 5, 'lines': 122},
+ '.cxx': {'files': 4, 'lines': 2278},
+ '.h': {'files': 7, 'lines': 297},
+ '.html': {'files': 48, 'lines': 2830},
+ '.i': {'files': 4, 'lines': 49},
+ '.py': {'files': 783, 'lines': 34601},
+ '.pyw': {'files': 11, 'lines': 500}}
+
+Check sums: 48047 907
+
+Python only walk:
+{'.py': {'files': 783, 'lines': 34601}, '.pyw': {'files': 11, 'lines': 500}}</pre>
+</div>
+<div class="epub__sect2" title="Recoding Copies with Classes (Visitor)"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="recoding_copies_with_classes_open_parent"></a>Recoding Copies with Classes (Visitor)</h2>
+</div>
+</div>
+</div>
+<p>Let’s peek <a id="sys6.9.4"></a>at one more visitor use case. When I first wrote the
+          <code class="epub__literal">cpall.py</code> script earlier in this
+          chapter, I couldn’t see a way that the <code class="epub__literal">visitor</code> class hierarchy we met earlier
+          would help. <span class="epub__emphasis"><em>Two</em></span> directories needed to be
+          traversed in parallel (the original and the copy), and <code class="epub__literal">visitor</code> is based on walking just one tree
+          with <code class="epub__literal">os.walk</code>. There seemed no
+          easy way to keep track of where the script was in the copy
+          directory.</p>
+<p>The trick I eventually stumbled onto is not to keep track at
+          all. Instead, the script in Example 6-22 simply replaces
+          the “from” directory path string with the “to” directory path
+          string, at the front of all directory names and pathnames passed in
+          from <code class="epub__literal">os.walk</code>. The results of the
+          string replacements are the paths to which the original files and
+          directories are to be copied.</p><div class="epub__example"><a id="pp4e_reverse_solidus_tools_reverse-id9"></a>
+<p class="epub__title">Example 6-22. PP4E\Tools\visitor_cpall.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Use: "python ...\Tools\visitor_cpall.py fromDir toDir trace?"
+Like System\Filetools\cpall.py, but with the visitor classes and os.walk;
+does string replacement of fromDir with toDir at the front of all the names
+that the walker passes in; assumes that the toDir does not exist initially;
+"""
+
+import os
+from visitor import FileVisitor                       # visitor is in '.'
+from PP4E.System.Filetools.cpall import copyfile      # PP4E is in a dir on path
+
+class CpallVisitor(FileVisitor):
+    def __init__(self, fromDir, toDir, trace=True):
+        self.fromDirLen = len(fromDir) + 1
+        self.toDir      = toDir
+        FileVisitor.__init__(self, trace=trace)
+
+    def visitdir(self, dirpath):
+        toPath = os.path.join(self.toDir, dirpath[self.fromDirLen:])
+        if self.trace: print('d', dirpath, '=&gt;', toPath)
+        os.mkdir(toPath)
+        self.dcount += 1
+
+    def visitfile(self, filepath):
+        toPath = os.path.join(self.toDir, filepath[self.fromDirLen:])
+        if self.trace: print('f', filepath, '=&gt;', toPath)
+        copyfile(filepath, toPath)
+        self.fcount += 1
+
+if __name__ == '__main__':
+    import sys, time
+    fromDir, toDir = sys.argv[1:3]
+    trace = len(sys.argv) &gt; 3
+    print('Copying...')
+    start = time.clock()
+    walker = CpallVisitor(fromDir, toDir, trace)
+    walker.run(startDir=fromDir)
+    print('Copied', walker.fcount, 'files,', walker.dcount, 'directories', end=' ')
+    print('in', time.clock() - start, 'seconds')</pre>
+</div>
+</div>
+<p>This version accomplishes roughly the same goal as the
+          original, but it has made a few assumptions to keep the code simple.
+          The “to” directory is assumed not to exist initially, and exceptions
+          are not ignored along the way. Here it is copying the book examples
+          tree from the prior edition again on Windows:</p><a id="I_programlisting5_d1e24701"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>set PYTHONPATH</code></strong>
+PYTHONPATH=C:\Users\Mark\Stuff\Books\4E\PP4E\dev\Examples
+
+C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>rmdir /S copytemp</code></strong>
+copytemp, Are you sure (Y/N)? <strong class="epub__userinput"><code>y</code></strong>
+
+C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>visitor_cpall.py C:\temp\PP3E\Examples copytemp</code></strong>
+Copying...
+Copied 1429 files, 186 directories in 11.1722033777 seconds
+
+C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>fc /B copytemp\PP3E\Launcher.py</code></strong>
+                         <strong class="epub__userinput"><code>C:\temp\PP3E\Examples\PP3E\Launcher.py</code></strong>
+Comparing files COPYTEMP\PP3E\Launcher.py and C:\TEMP\PP3E\EXAMPLES\PP3E\LAUNCHER.PY
+FC: no differences encountered</pre>
+<p>Despite the extra string slicing going on, this version seems
+          to run just as fast as the original (the actual difference can be
+          chalked up to system load variations). For tracing purposes, this
+          version also prints all the “from” and “to” copy paths during the
+          traversal if you pass in a third argument on the command <a id="I_indexterm5_d1e24724"></a>line:</p><a id="I_programlisting5_d1e24727"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>rmdir /S copytemp</code></strong>
+copytemp, Are you sure (Y/N)? <strong class="epub__userinput"><code>y</code></strong>
+
+C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>visitor_cpall.py C:\temp\PP3E\Examples copytemp 1</code></strong>
+Copying...
+d C:\temp\PP3E\Examples =&gt; copytemp\
+f C:\temp\PP3E\Examples\README-root.txt =&gt; copytemp\README-root.txt
+d C:\temp\PP3E\Examples\PP3E =&gt; copytemp\PP3E
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more lines omitted: try this on your own for the full output...</span></em></pre>
+</div>
+<div class="epub__sect2" title="Other Visitor Examples (External)"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="other_visitor_examples_open_parenthesis"></a>Other Visitor Examples (External)</h2>
+</div>
+</div>
+</div>
+<p>Although the <a id="I_indexterm5_d1e24745"></a>visitor is widely applicable, we don’t have space to
+          explore additional subclasses in this book. For more example clients
+          and use cases, see the following examples in book’s examples
+          distribution package described in the Preface:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p><em class="epub__filename">Tools\visitor_collect.py</em> collects
+              and/or prints files containing a search string</p></li><li class="epub__listitem">
+<p><em class="epub__filename">Tools\visitor_poundbang.py</em> replaces
+              directory paths in “#!” lines at the top of Unix scripts</p></li><li class="epub__listitem">
+<p><em class="epub__filename">Tools\visitor_cleanpyc.py</em> is a
+              visitor-based recoding of our earlier bytecode cleanup
+              scripts</p></li><li class="epub__listitem">
+<p><em class="epub__filename">Tools\visitor_bigpy.py</em> is a
+              visitor-based version of the “biggest file” example at the start
+              of this chapter</p></li></ul>
+</div>
+<p>Most of these are almost as trivial as the <em class="epub__filename">visitor_edit.py</em> code in Example 6-19, because the
+          visitor framework handles walking details automatically. The
+          collector, for instance, simply appends to a list as a search
+          visitor detects matched files and allows the default list of text
+          filename extensions in the search visitor to be overridden per
+          <span>instance—</span>it’s roughly like a
+          combination of <code class="epub__literal">find</code> and <code class="epub__literal">grep</code> on Unix:</p><a id="I_programlisting5_d1e24791"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from visitor_collect import CollectVisitor</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V = CollectVisitor('mimetypes', testexts=['.py', '.pyw'], trace=0)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V.run(r'C:\temp\PP3E\Examples')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for name in V.matches: print(name)</code></strong>        # .py and .pyw files with 'mimetypes'
+...
+C:\temp\PP3E\Examples\PP3E\Internet\Email\mailtools\mailParser.py
+C:\temp\PP3E\Examples\PP3E\Internet\Email\mailtools\mailSender.py
+C:\temp\PP3E\Examples\PP3E\Internet\Ftp\mirror\downloadflat.py
+C:\temp\PP3E\Examples\PP3E\Internet\Ftp\mirror\downloadflat_modular.py
+C:\temp\PP3E\Examples\PP3E\Internet\Ftp\mirror\ftptools.py
+C:\temp\PP3E\Examples\PP3E\Internet\Ftp\mirror\uploadflat.py
+C:\temp\PP3E\Examples\PP3E\System\Media\playfile.py
+
+C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>visitor_collect.py mimetypes C:\temp\PP3E\Examples</code></strong>   # as script</pre>
+<p>The core logic of the biggest-file visitor is similarly
+          straightforward, and harkens back to chapter start:</p><a id="I_programlisting5_d1e24810"></a>
+<pre class="epub__programlisting">class BigPy(FileVisitor):
+    def __init__(self, trace=0):
+        FileVisitor.__init__(self, context=[], trace=trace)
+
+    def visitfile(self, filepath):
+        FileVisitor.visitfile(self, filepath)
+        if filepath.endswith('.py'):
+            self.context.append((os.path.getsize(filepath), filepath))</pre>
+<p>And the bytecode-removal visitor brings us back full circle,
+          showing an additional alternative to those we met earlier in this
+          chapter. It’s essentially the same code, but it runs <code class="epub__literal">os.remove</code> on “.pyc” file visits.</p>
+<p>In the end, while the visitor classes are really just simple
+          wrappers for <code class="epub__literal">os.walk</code>, they
+          further automate walking chores and provide a general framework and
+          alternative class-based structure which may seem more natural to
+          some than simple unstructured loops. They’re also representative of
+          how Python’s OOP support maps well to real-world structures like
+          file systems. Although <code class="epub__literal">os.walk</code>
+          works well for one-off scripts, the better extensibility, reduced
+          redundancy, and greater encapsulation possible with OOP can be a
+          major asset in real work as our needs change and evolve over
+          <a id="I_indexterm5_d1e24825"></a><a id="I_indexterm5_d1e24827"></a>time.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p>In fact, those needs <span class="epub__emphasis"><em>have</em></span> changed over
+            time. Between the third and fourth editions of this book, the
+            original <code class="epub__literal">os.path.walk</code> call was
+            removed in Python 3.X, and <code class="epub__literal">os.walk</code> became the only automated way to
+            perform tree walks in the standard library. Examples from the
+            prior edition that used <code class="epub__literal">os.path.walk</code> were effectively broken. By
+            contrast, although the visitor classes used this call, too, its
+            clients did not. Because updating the visitor classes to use
+            <code class="epub__literal">os.walk</code> internally did not
+            alter those classes’ interfaces, visitor-based tools continued to
+            work unchanged.</p>
+<p>This seems a prime example of the benefits of OOP’s support
+            for encapsulation. Although the future is never completely
+            predictable, in practice, user-defined tools like visitor tend to
+            give you more control over changes than standard library tools
+            like <code class="epub__literal">os.walk</code>. Trust me on that;
+            as someone who has had to update three Python books over the last
+            15 years, I can say with some certainty that Python change is a
+            constant!</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

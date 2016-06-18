@@ -1,0 +1,894 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Transferring Files to Clients and Servers</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Transferring Files to Clients and Servers"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="transferring_files_to_clients_and_server"></a>Transferring Files to Clients and Servers</h1>
+</div>
+</div>
+</div>
+<p>It’s time to explain a <a id="files15.9"></a><a id="client15.9"></a><a id="tran15.9"></a><a id="server15.9"></a>bit of HTML code that’s been lurking in the shadows. Did
+        you notice those hyperlinks on the language selector examples’ main
+        pages for showing the CGI script’s source code (the links I told you
+        to ignore)? Normally, we can’t see such script source code, because
+        accessing a CGI script makes it execute—we can see only its HTML
+        output, generated to make the new page. The script in Example 15-26, referenced by a
+        hyperlink in the main <code class="epub__literal">language.html</code>
+        page, works around that by opening the source file and sending its
+        text as part of the HTML response. The text is marked with <code class="epub__literal">&lt;PRE&gt;</code> as preformatted text and is
+        escaped for transmission inside HTML with <code class="epub__literal">cgi.escape</code>.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id92"></a>
+<p class="epub__title">Example 15-26. PP4E\Internet\Web\cgi-bin\languages-src.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/bin/python
+"Display languages.py script code without running it."
+
+import cgi
+filename = 'cgi-bin/languages.py'
+
+print('Content-type: text/html\n')          # wrap up in HTML
+print('&lt;TITLE&gt;Languages&lt;/TITLE&gt;')
+print("&lt;H1&gt;Source code: '%s'&lt;/H1&gt;" % filename)
+print('&lt;HR&gt;&lt;PRE&gt;')
+print(cgi.escape(open(filename).read()))    # decode per platform default
+print('&lt;/PRE&gt;&lt;HR&gt;')</pre>
+</div>
+</div>
+<p>Here again, the <code class="epub__literal">filename</code> is
+        relative to the server’s directory for our web server on Windows (see
+        the prior discussion of this, and delete the <code class="epub__literal">cgi-bin</code> portion of its path on other
+        platforms). When we visit this script on the Web via the first source
+        hyperlink in Example 15-17 or
+        a manually typed URL, the script delivers a response to the client
+        that includes the text of the CGI script source file. It’s captured in
+        Figure 15-27.</p><div class="epub__figure-float"><div class="epub__figure"><a id="source_code_viewer_page"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e68981"></a><img alt="Source code viewer page" src="Images/getfile_003-30.png" width="486"/>
+</div>
+</div>
+<p class="epub__title">Figure 15-27. Source code viewer page</p>
+</div>
+</div>
+<p>Note that here, too, it’s crucial to format the text of the file
+        with <code class="epub__literal">cgi.escape</code>, because it is
+        embedded in the HTML code of the reply. If we don’t, any characters in
+        the text that mean something in HTML code are interpreted as HTML
+        tags. For example, the C++ <code class="epub__literal">&lt;</code>
+        operator character within this file’s text may yield bizarre results
+        if not properly escaped. The <code class="epub__literal">cgi.escape</code> utility converts it to the
+        standard sequence <code class="epub__literal">&lt;</code> for safe
+        <span>embedding</span>.</p>
+<div class="epub__sect2" title="Displaying Arbitrary Server Files on the Client"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="displaying_arbitrary_server_files_on_the"></a>Displaying Arbitrary Server Files on the Client</h2>
+</div>
+</div>
+</div>
+<p>Almost immediately after writing the languages source code
+          viewer script in the preceding example, it occurred to me that it
+          wouldn’t be much more work, and would be much more useful, to write
+          a generic version—one that could use a passed-in filename to display
+          <span class="epub__emphasis"><em>any</em></span> file on the site. It’s a straightforward
+          mutation on the server side; we merely need to allow a filename to
+          be passed in as an input. The <span class="epub__emphasis"><em>getfile.py</em></span> Python
+          script in Example 15-27
+          implements this generalization. It assumes the filename is either
+          typed into a web page form or appended to the end of the URL as a
+          parameter. Remember that Python’s <code class="epub__literal">cgi</code> module handles both cases
+          transparently, so there is no code in this script that notices any
+          difference.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id93"></a>
+<p class="epub__title">Example 15-27. PP4E\Internet\Web\cgi-bin\getfile.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/bin/python
+"""
+##################################################################################
+Display any CGI (or other) server-side file without running it. The filename can
+be passed in a URL param or form field (use "localhost" as the server if local):
+
+    http://servername/cgi-bin/getfile.py?filename=somefile.html
+    http://servername/cgi-bin/getfile.py?filename=cgi-bin\somefile.py
+    http://servername/cgi-bin/getfile.py?filename=cgi-bin%2Fsomefile.py
+
+Users can cut-and-paste or "View Source" to save file locally.  On IE, running the
+text/plain version (formatted=False) sometimes pops up Notepad, but end-lines are
+not always in DOS format;  Netscape shows the text correctly in the browser page
+instead.  Sending the file in text/HTML mode works on both browsers--text is
+displayed in the browser response page correctly. We also check the filename here
+to try to avoid showing private files; this may or may not prevent access to such
+files in general: don't install this script if you can't otherwise secure source!
+##################################################################################
+"""
+
+import cgi, os, sys
+formatted = True                                  # True=wrap text in HTML
+privates  = ['PyMailCgi/cgi-bin/secret.py']       # don't show these
+
+try:
+    samefile = os.path.samefile                   # checks device, inode numbers
+except:
+    def samefile(path1, path2):                   # not available on Windows
+        apath1 = os.path.abspath(path1).lower()   # do close approximation
+        apath2 = os.path.abspath(path2).lower()   # normalizes path, same case
+        return apath1 == apath2
+
+html = """
+&lt;html&gt;&lt;title&gt;Getfile response&lt;/title&gt;
+&lt;h1&gt;Source code for: '%s'&lt;/h1&gt;
+&lt;hr&gt;
+&lt;pre&gt;%s&lt;/pre&gt;
+&lt;hr&gt;&lt;/html&gt;"""
+
+def restricted(filename):
+    for path in privates:
+        if samefile(path, filename):           # unify all paths by os.stat
+            return True                        # else returns None=false
+
+try:
+    form = cgi.FieldStorage()
+    filename = form['filename'].value          # URL param or form field
+except:
+    filename = 'cgi-bin\getfile.py'            # else default filename
+
+try:
+    assert not restricted(filename)            # load unless private
+    filetext = open(filename).read()           # platform unicode encoding
+except AssertionError:
+    filetext = '(File access denied)'
+except:
+    filetext = '(Error opening file: %s)' % sys.exc_info()[1]
+
+if not formatted:
+    print('Content-type: text/plain\n')        # send plain text
+    print(filetext)                            # works on NS, not IE?
+else:
+    print('Content-type: text/html\n')         # wrap up in HTML
+    print(html % (filename, cgi.escape(filetext)))</pre>
+</div>
+</div>
+<p>This Python server-side script simply extracts the filename
+          from the parsed CGI inputs object and reads and prints the text of
+          the file to send it to the client browser. Depending on the <code class="epub__literal">formatted</code> global variable setting, it
+          sends the file in either plain text mode (using <code class="epub__literal">text/plain</code> in the response header) or
+          wrapped up in an HTML page definition (<code class="epub__literal">text/html</code>).</p>
+<p>Both modes (and others) work in general under most browsers,
+          but Internet Explorer doesn’t handle the plain text mode as
+          gracefully as Netscape does—during testing, it popped up the Notepad
+          text editor to view the downloaded text, but end-of-line characters
+          in Unix format made the file appear as one long line. (Netscape
+          instead displays the text correctly in the body of the response web
+          page itself.) HTML display mode works more portably with current
+          browsers. More on this script’s restricted file logic in a
+          moment.</p>
+<p>Let’s launch this script by typing its URL at the top of a
+          browser, along with a desired filename appended after the script’s
+          name. Figure 15-28 shows the
+          page we get by visiting the following URL (the second source link in
+          the language selector page of Example 15-17 has a similar effect
+          but a different file):</p><a id="I_programlisting4_d1e69043"></a>
+<pre class="epub__programlisting">http://localhost/cgi-bin/getfile.py?filename=cgi-bin\languages-src.py</pre><div class="epub__figure"><a id="generic_source_code_viewer_page"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e69048"></a><img alt="Generic source code viewer page" src="Images/getfile_010-7.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 15-28. Generic source code viewer page</p>
+</div>
+<p>The body of this page shows the text of the server-side file
+          whose name we passed at the end of the URL; once it arrives, we can
+          view its text, cut-and-paste to save it in a file on the client, and
+          so on. In fact, now that we have this generalized source code
+          viewer, we could replace the hyperlink to the script
+          <span class="epub__emphasis"><em>languages-src.py</em></span> in <span class="epub__keep-together">language.html</span>, with a URL of this
+          form (I included both for illustration):</p><a id="I_programlisting4_d1e69061"></a>
+<pre class="epub__programlisting">http://localhost/cgi-bin/getfile.py?filename=cgi-bin\languages.py</pre>
+<p>Subtle thing: notice that the query parameter in this URL and
+          others in this book use a backslash as the Windows directory
+          separator. On Windows, and using both the local Python web server of
+          Example 15-1 and Internet
+          Explorer, we can also use the two URL-escaped forms at the start of
+          the following, but the literal forward slash of the last in
+          following fails (in URL escapes, <code class="epub__literal">%5C</code> is <code class="epub__literal">\</code> and <code class="epub__literal">%2F</code> is <code class="epub__literal">/</code>):</p><a id="I_programlisting4_d1e69080"></a>
+<pre class="epub__programlisting">http://localhost/cgi-bin/getfile.py?filename=cgi-bin%5Clanguages.py     <em class="epub__lineannotation"><span class="epub__lineannotation">OK too</span></em>
+http://localhost/cgi-bin/getfile.py?filename=cgi-bin%2Flanguages.py     <em class="epub__lineannotation"><span class="epub__lineannotation">OK too</span></em>
+http://localhost/cgi-bin/getfile.py?filename=cgi-bin/languages.py       <em class="epub__lineannotation"><span class="epub__lineannotation">fails</span></em></pre>
+<p>This reflects a change since the prior edition of this book
+          (which used the last of these for portability), and may or may not
+          be ideal behavior (though like working directory contexts, this is
+          one of a set of server and platform differences you’re likely to
+          encounter when working on the Web). It seems to stem from the fact
+          that the <code class="epub__literal">urllib.parse</code> module’s
+          <code class="epub__literal">quote</code> considers <code class="epub__literal">/</code> safe, but <code class="epub__literal">quote_plus</code> no longer does. If you care
+          about URL portability in this context, the second of the preceding
+          forms may be better, though arguably cryptic to remember if you have
+          to type it manually (escaping tools can automate this). If not, you
+          may have to double-up on backslashes to avoid clashes with other
+          string escapes, because of the way URL parameter data is handled;
+          see the links to this script in Example 15-20 for an example
+          involving <code class="epub__literal">\f</code>.</p>
+<p>From a higher perspective, URLs like these are really direct
+          calls (albeit across the Web) to our Python script, with filename
+          parameters passed explicitly—we’re using the script much like a
+          subroutine located elsewhere in cyberspace which returns the text of
+          a file we wish to view. As we’ve seen, parameters passed in URLs are
+          treated the same as field inputs in forms; for convenience, let’s
+          also write a simple web page that allows the desired file to be
+          typed directly into a form, as shown in Example 15-28.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id94"></a>
+<p class="epub__title">Example 15-28. PP4E\Internet\Web\getfile.html</p><div class="epub__example-contents">
+<pre class="epub__programlisting">&lt;html&gt;&lt;title&gt;Getfile: download page&lt;/title&gt;
+&lt;body&gt;
+&lt;form method=get action="cgi-bin/getfile.py"&gt;
+  &lt;h1&gt;Type name of server file to be viewed&lt;/h1&gt;
+  &lt;p&gt;&lt;input type=text size=50 name=filename&gt;
+  &lt;p&gt;&lt;input type=submit value=Download&gt;
+&lt;/form&gt;
+&lt;hr&gt;&lt;a href="cgi-bin/getfile.py?filename=cgi-bin\getfile.py"&gt;View script code&lt;/a&gt;
+&lt;/body&gt;&lt;/html&gt;</pre>
+</div>
+</div>
+<p>Figure 15-29 shows the
+          page we receive when we visit this file’s URL. We need to type only
+          the filename in this page, not the full CGI script address; notice
+          that I can use forward slashes here because the browser will escape
+          on transmission and Python’s open allows either type of slash on
+          Windows (in query parameters created manually, it’s up to coders or
+          generators to do the right thing).</p><div class="epub__figure-float"><div class="epub__figure"><a id="source_code_viewer_selection_page"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e69125"></a><img alt="Source code viewer selection page" src="Images/getfile_006-15.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 15-29. Source code viewer selection page</p>
+</div>
+</div>
+<p>When we press this page’s Download button to submit the form,
+          the filename is transmitted to the server, and we get back the same
+          page as before, when the filename was appended to the URL (it’s the
+          same as Figure 15-28, albeit
+          with a different directory separator slash). In fact, the filename
+          <span class="epub__emphasis"><em>will</em></span> be appended to the URL here, too; the
+          <code class="epub__literal">get</code> method in the form’s HTML
+          instructs the browser to append the filename to the URL, exactly as
+          if we had done so manually. It shows up at the end of the URL in the
+          response page’s address field, even though we really typed it into a
+          form. Clicking the link at the bottom of Figure 15-29 opens the file-getter
+          script’s source in the same way, though the URL is
+          explicit.<sup>[65]</sup></p>
+<div class="epub__sect3" title="Handling private files and errors"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="handling_private_files_and_errors"></a>Handling private files and errors</h3>
+</div>
+</div>
+</div>
+<p>As long as CGI scripts <a id="I_indexterm4_d1e69153"></a><a id="I_indexterm4_d1e69158"></a><a id="files15.9.1.1"></a>have permission to open the desired server-side
+            file, this script can be used to view and locally save
+            <span class="epub__emphasis"><em>any</em></span> file on the server. For instance, Figure 15-30 shows the page
+            we’re served after asking for the file path <em class="epub__filename">PyMailCgi/pymailcgi.html</em>—an HTML text
+            file in another application’s subdirectory, nested within the
+            parent directory of this script (we explore PyMailCGI in the next
+            chapter). Users can specify both relative and absolute paths to
+            reach a file—any path syntax the server understands will
+            do.</p><div class="epub__figure-float"><div class="epub__figure"><a id="viewing_files_with_relative_paths"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e69180"></a><img alt="Viewing files with relative paths" src="Images/getfile_002-38.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 15-30. Viewing files with relative paths</p>
+</div>
+</div>
+<p>More generally, this script will display any file path for
+            which the username under which the CGI script runs has read
+            access. On some servers, this is often the user <span>“nobody”—</span>a predefined username with
+            limited permissions. Just about every server-side file used in web
+            applications will be accessible, though, or else they couldn’t be
+            referenced from browsers in the first place. When running our
+            local web server, every file on the computer can be inspected:
+            <em class="epub__filename">C:\Users\mark\Stuff\Websites\public_html\index.html</em>
+            works fine when entered in the form of Figure 15-29 on my laptop, for
+            example.</p>
+<p>That makes for a flexible tool, but it’s also potentially
+            dangerous if you are running a server on a remote machine. What if
+            we don’t want users to be able to view some files on the server?
+            For example, in the next chapter, we will implement an encryption
+            module for email account passwords. On our server, it is in fact
+            addressable as <em class="epub__filename">PyMailCgi/cgi-bin/secret.py</em>.
+            Allowing users to view that module’s source code would make
+            encrypted passwords shipped over the Net much more vulnerable to
+            cracking.</p>
+<p>To minimize this potential, the <code class="epub__literal">getfile</code> <a id="I_indexterm4_d1e69205"></a>script keeps a list, <code class="epub__literal">privates</code>, of restricted filenames, and
+            uses the <code class="epub__literal">os.path.samefile</code>
+            built-in to check whether a requested filename path points to one
+            of the names on <code class="epub__literal">privates</code>. The
+            <code class="epub__literal">samefile</code> call checks to see
+            whether the<a id="I_indexterm4_d1e69224"></a> <code class="epub__literal">os.stat</code> built-in
+            returns the same identifying information (device and inode
+            numbers) for both file paths. As a result, pathnames that look
+            different syntactically but reference the same file are treated as
+            identical. For example, on the server used for this book’s second
+            edition, the following paths to the encryptor module were
+            different strings, but yielded a true result from <code class="epub__literal">os.path.samefile</code>:</p><a id="I_programlisting4_d1e69236"></a>
+<pre class="epub__programlisting">../PyMailCgi/secret.py
+/home/crew/lutz/public_html/PyMailCgi/secret.py</pre>
+<p>Unfortunately, the <code class="epub__literal">os.path.samefile</code> <a id="I_indexterm4_d1e69243"></a>call is supported on Unix, Linux, and Macs, but not
+            on Windows. To emulate its behavior in Windows, we expand file
+            paths to be absolute, convert to a common case, and compare (I
+            shortened paths in the following with <code class="epub__literal">...</code> for display here):</p><a id="I_programlisting4_d1e69252"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>import os</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>os.path.samefile</code></strong>
+AttributeError: 'module' object has no attribute 'samefile'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>os.getcwd()</code></strong>
+'C:\\...\\PP4E\\dev\\Examples\\PP4E\\Internet\\Web'
+&gt;&gt;&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = os.path.abspath('../Web/PYMailCgi/cgi-bin/secret.py').lower()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>y = os.path.abspath('PyMailCgi/cgi-bin/secret.py').lower()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>z = os.path.abspath('./PYMailCGI/cgi-bin/../cgi-bin/SECRET.py').lower()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x</code></strong>
+'c:\\...\\pp4e\\dev\\examples\\pp4e\\internet\\web\\pymailcgi\\cgi-bin\\secret.py'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>y</code></strong>
+'c:\\...\\pp4e\\dev\\examples\\pp4e\\internet\\web\\pymailcgi\\cgi-bin\\secret.py'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>z</code></strong>
+'c:\\...\\pp4e\\dev\\examples\\pp4e\\internet\\web\\pymailcgi\\cgi-bin\\secret.py'
+&gt;&gt;&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x == y, y == z</code></strong>
+(True, True)</pre>
+<p>Accessing any of the three paths expanded here generates an
+            error page like that in Figure 15-31. Notice how the names of
+            secret files are global data in this module, on the assumption
+            that they pertain to files viewable across an entire site; though
+            we could allow for customization per site, changing the script’s
+            globals per site is likely just as convenient as changing a
+            per-site customization files.</p>
+<p>Also notice that bona fide file errors are handled
+            differently. Permission problems and attempts to access
+            nonexistent files, for example, are trapped by a different
+            exception handler clause, and they display the exception’s
+            message—fetched using Python’s <code class="epub__literal">sys.exc_info</code>—to give additional context.
+            Figure 15-32 shows one such error
+            page.</p><div class="epub__figure-float"><div class="epub__figure"><a id="accessing_private_files"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e69300"></a><img alt="Accessing private files" src="Images/getfile_007-9.png" width="513"/>
+</div>
+</div>
+<p class="epub__title">Figure 15-31. Accessing private files</p>
+</div>
+</div><div class="epub__figure-float"><div class="epub__figure"><a id="file_errors_display"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e69308"></a><img alt="File errors display" src="Images/getfile_005-18.png" width="513"/>
+</div>
+</div>
+<p class="epub__title">Figure 15-32. File errors display</p>
+</div>
+</div>
+<p>As a general rule of thumb, file-processing exceptions
+            should always be reported in detail, especially during script
+            debugging. If we catch such exceptions in our scripts, it’s up to
+            us to display the details (assigning <code class="epub__literal">sys.stderr</code> to <code class="epub__literal">sys.stdout</code> won’t help if Python doesn’t
+            print an error message). The current exception’s type, data, and
+            traceback objects are always available in the <code class="epub__literal">sys</code> module for manual <a id="I_indexterm4_d1e69324"></a>display.</p><div class="epub__warning" title="Warning"><h3 class="epub__title">Warning</h3>
+<p>Do not install the <span class="epub__emphasis"><em>getfile.py</em></span> script
+              if you truly wish to keep your files private! The private files
+              list check it uses attempts to prevent the encryption module
+              from being viewed directly with this script, but it may or may
+              not handle all possible attempts, especially on Windows. This
+              book isn’t about security, so we won’t go into further details
+              here, except to say that on the Internet, a little paranoia is
+              often a good thing. Especially for systems installed on the
+              general Internet at large, you should generally assume that the
+              worst case scenario might eventually happen.</p>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="Uploading Client Files to the Server"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="uploading_client_files_to_the_server"></a>Uploading Client Files to the Server</h2>
+</div>
+</div>
+</div>
+<p>The <code class="epub__literal">getfile</code> script lets us
+          <a id="I_indexterm4_d1e69341"></a>view server files on the client, but in some sense, it
+          is a general-purpose file download tool. Although not as direct as
+          fetching a file by FTP or over raw sockets, it serves similar
+          purposes. Users of the script can either cut-and-paste the displayed
+          code right off the web page or use their browser’s View Source
+          option to view and cut. As described earlier, scripts that contact
+          the script with <code class="epub__literal">urllib</code> can also
+          extract the file’s text with Python’s HTML parser module.</p>
+<p>But what about going the other way—uploading a file from the
+          client machine to the server? For instance, suppose you are writing
+          a web-based email system, and you need a way to allow users to
+          upload mail attachments. This is not an entirely hypothetical
+          scenario; we will actually implement this idea in the next chapter,
+          when we develop the PyMailCGI webmail site.</p>
+<p>As we saw in Chapter 13, uploads
+          are easy enough to accomplish with a client-side script that uses
+          Python’s FTP support module. Yet such a solution doesn’t really
+          apply in the context of a web browser; we can’t usually ask all of
+          our program’s clients to start up a Python FTP script in another
+          window to accomplish an upload. Moreover, there is no simple way for
+          the server-side script to request the upload explicitly, unless an
+          FTP server happens to be running on the client machine (not at all
+          the usual case). Users can email files separately, but this can be
+          inconvenient, especially for email <span>attachments</span>.</p>
+<p>So is there no way to write a web-based program that lets its
+          users upload files to a common server? In fact, there is, though it
+          has more to do with HTML than with Python itself. HTML <code class="epub__literal">&lt;input&gt;</code> tags also support a <code class="epub__literal">type=file</code> option, which produces an input
+          field, along with a button that pops up a file-selection dialog. The
+          name of the client-side file to be uploaded can either be typed into
+          the control or selected with the pop-up dialog. To demonstrate, the
+          HTML file in Example 15-29
+          defines a page that allows any client-side file to be selected and
+          uploaded to the server-side script named in the form’s <code class="epub__literal">action</code> option.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id95"></a>
+<p class="epub__title">Example 15-29. PP4E\Internet\Web\putfile.html</p><div class="epub__example-contents">
+<pre class="epub__programlisting">&lt;html&gt;&lt;title&gt;Putfile: upload page&lt;/title&gt;
+&lt;body&gt;
+&lt;form enctype="multipart/form-data"
+      method=post
+      action="cgi-bin/putfile.py"&gt;
+  &lt;h1&gt;Select client file to be uploaded&lt;/h1&gt;
+  &lt;p&gt;&lt;input type=file size=50 name=clientfile&gt;
+  &lt;p&gt;&lt;input type=submit value=Upload&gt;
+&lt;/form&gt;
+&lt;hr&gt;&lt;a href="cgi-bin/getfile.py?filename=cgi-bin\putfile.py"&gt;View script code&lt;/a&gt;
+&lt;/body&gt;&lt;/html&gt;</pre>
+</div>
+</div>
+<p>One constraint worth noting: forms that use <code class="epub__literal">file</code> type inputs should also specify a
+          <code class="epub__literal">multipart/form-data</code> encoding type
+          and the <code class="epub__literal">post</code> submission method,
+          as shown in this file; <code class="epub__literal">get</code>-style
+          URLs don’t work for uploading files (adding their contents to the
+          end of the URL doesn’t make sense). When we visit this HTML file,
+          the page shown in Figure 15-33 is
+          delivered. Pressing its Browse button opens a standard
+          file-selection dialog, while Upload sends the file.</p><div class="epub__figure-float"><div class="epub__figure"><a id="file_upload_selection_page"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e69396"></a><img alt="File upload selection page" src="Images/getfile_009-8.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 15-33. File upload selection page</p>
+</div>
+</div>
+<p>On the client side, when we press this page’s Upload button,
+          the browser opens and reads the selected file and packages its
+          contents with the rest of the form’s input fields (if any). When
+          this information reaches the server, the Python script named in the
+          form <code class="epub__literal">action</code> tag is run as always,
+          as listed in Example 15-30.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id96"></a>
+<p class="epub__title">Example 15-30. PP4E\Internet\Web\cgi-bin\putfile.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/bin/python
+"""
+##################################################################################
+extract file uploaded by HTTP from web browser;  users visit putfile.html to
+get the upload form page, which then triggers this script on server;  this is
+very powerful, and very dangerous: you will usually want to check the filename,
+etc;  this may only work if file or dir is writable: a Unix 'chmod 777 uploads'
+may suffice;  file pathnames may arrive in client's path format: handle here;
+
+caveat: could open output file in text mode to wite receiving platform's line
+ends since file content always str from the cgi module, but this is a temporary
+solution anyhow--the cgi module doesn't handle binary file uploads in 3.1 at all;
+##################################################################################
+"""
+
+import cgi, os, sys
+import posixpath, ntpath, macpath      # for client paths
+debugmode    = False                   # True=print form info
+loadtextauto = False                   # True=read file at once
+uploaddir    = './uploads'             # dir to store files
+
+sys.stderr = sys.stdout                # show error msgs
+form = cgi.FieldStorage()              # parse form data
+print("Content-type: text/html\n")     # with blank line
+if debugmode: cgi.print_form(form)     # print form fields
+
+# html templates
+
+html = """
+&lt;html&gt;&lt;title&gt;Putfile response page&lt;/title&gt;
+&lt;body&gt;
+&lt;h1&gt;Putfile response page&lt;/h1&gt;
+%s
+&lt;/body&gt;&lt;/html&gt;"""
+
+goodhtml = html % """
+&lt;p&gt;Your file, '%s', has been saved on the server as '%s'.
+&lt;p&gt;An echo of the file's contents received and saved appears below.
+&lt;/p&gt;&lt;hr&gt;
+&lt;p&gt;&lt;pre&gt;%s&lt;/pre&gt;
+&lt;/p&gt;&lt;hr&gt;
+"""
+
+# process form data
+
+def splitpath(origpath):                              # get file at end
+    for pathmodule in [posixpath, ntpath, macpath]:   # try all clients
+        basename = pathmodule.split(origpath)[1]      # may be any server
+        if basename != origpath:
+            return basename                           # lets spaces pass
+    return origpath                                   # failed or no dirs
+
+def saveonserver(fileinfo):                           # use file input form data
+    basename = splitpath(fileinfo.filename)           # name without dir path
+    srvrname = os.path.join(uploaddir, basename)      # store in a dir if set
+    srvrfile = open(srvrname, 'wb')                   # always write bytes here
+    if loadtextauto:
+        filetext = fileinfo.value                     # reads text into string
+        if isinstance(filetext, str):                 # Python 3.1 hack
+            filedata = filetext.encode()
+        srvrfile.write(filedata)                      # save in server file
+    else:                                             # else read line by line
+        numlines, filetext = 0, ''                    # e.g., for huge files
+        while True:                                   # content always str here
+            line = fileinfo.file.readline()           # or for loop and iterator
+            if not line: break
+            if isinstance(line, str):                 # Python 3.1 hack
+                line = line.encode()
+            srvrfile.write(line)
+            filetext += line.decode()                 # ditto
+            numlines += 1
+        filetext = ('[Lines=%d]\n' % numlines) + filetext
+    srvrfile.close()
+    os.chmod(srvrname, 0o666)   # make writable: owned by 'nobody'
+    return filetext, srvrname
+
+def main():
+    if not 'clientfile' in form:
+        print(html % 'Error: no file was received')
+    elif not form['clientfile'].filename:
+        print(html % 'Error: filename is missing')
+    else:
+        fileinfo = form['clientfile']
+        try:
+            filetext, srvrname = saveonserver(fileinfo)
+        except:
+            errmsg = '&lt;h2&gt;Error&lt;/h2&gt;&lt;p&gt;%s&lt;p&gt;%s' % tuple(sys.exc_info()[:2])
+            print(html % errmsg)
+        else:
+            print(goodhtml % (cgi.escape(fileinfo.filename),
+                              cgi.escape(srvrname),
+                              cgi.escape(filetext)))
+main()</pre>
+</div>
+</div>
+<p>Within this script, the Python-specific interfaces for
+          handling uploaded files are employed. They aren’t very new, really;
+          the file comes into the script as an entry in the parsed form object
+          returned by <code class="epub__literal">cgi.FieldStorage</code>, as
+          usual; its key is <code class="epub__literal">clientfile</code>, the
+          input control’s <code class="epub__literal">name</code> in the HTML
+          page’s code.</p>
+<p>This time, though, the entry has additional attributes for the
+          file’s name on the client. Moreover, accessing the <code class="epub__literal">value</code> attribute of an uploaded file input
+          object will automatically read the file’s contents all at once into
+          a string on the server. For very large files, we can instead read
+          line by line (or in chunks of bytes) to avoid overflowing memory
+          space. Internally, Python’s <code class="epub__literal">cgi</code>
+          module stores uploaded files in temporary files automatically;
+          reading them in our script simply reads from that temporary file. If
+          they are very large, though, they may be too long to store as a
+          single string in memory all at once.</p>
+<p>For illustration purposes, the script implements either
+          scheme: based on the setting of the <code class="epub__literal">loadtextauto</code> global variable, it either
+          asks for the file contents as a string or reads it line by line. In
+          general, the CGI module gives us back objects with the following
+          attributes for file upload controls:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">filename</code></span></dt><dd>
+<p>The name of the file as specified on the client</p></dd><dt><span class="epub__term"><code class="epub__literal">file</code></span></dt><dd>
+<p>A file object from which the uploaded file’s contents
+                can be read</p></dd><dt><span class="epub__term"><code class="epub__literal">value</code></span></dt><dd>
+<p>The contents of the uploaded file (read from the file on
+                attribute access)</p></dd></dl>
+</div>
+<p>Additional attributes are not used by our script. Files
+          represent a third input field object; as we’ve also seen, the
+          <code class="epub__literal">value</code> attribute is a
+          <span class="epub__emphasis"><em>string</em></span> for simple input fields, and we may
+          receive a <span class="epub__emphasis"><em>list</em></span> of objects for
+          multiple-selection controls.</p>
+<p>For uploads to be saved on the server, CGI scripts (run by the
+          user “nobody” on some servers) must have write access to the
+          enclosing directory if the file doesn’t yet exist, or to the file
+          itself if it does. To help isolate uploads, the script stores all
+          uploads in whatever server directory is named in the <code class="epub__literal">uploaddir</code> global. On one Linux server, I
+          had to give this directory a mode of 777 (universal
+          read/write/execute permissions) with <code class="epub__literal">chmod</code> to make uploads work in general.
+          This is a nonissue with the local web server used in this chapter,
+          but your mileage may vary; be sure to check permissions if this
+          script fails.</p>
+<p>The script also calls <code class="epub__literal">os.chmod</code> to set the permission on the
+          server file such that it can be read and written by everyone. If it
+          is created anew by an upload, the file’s owner will be “nobody” on
+          some servers, which means anyone out in cyberspace can view and
+          upload the file. On one Linux server, though, the file will also be
+          writable only by the user “nobody” by default, which might be
+          inconvenient when it comes time to change that file outside the Web
+          (naturally, the degree of pain can vary per file operation).</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p>Isolating client-side file uploads by placing them in a
+            single directory on the server helps minimize security risks:
+            existing files can’t be overwritten arbitrarily. But it may
+            require you to copy files on the server after they are uploaded,
+            and it still doesn’t prevent all security <span>risks—</span><span>mischievous</span> clients can still upload
+            huge files, which we would need to trap with additional logic not
+            present in this script as is. Such traps may be needed only in
+            scripts open to the Internet at large.</p>
+</div>
+<p>If both client and server do their parts, the CGI script
+          presents us with the response page shown in Figure 15-34, after it has stored the contents
+          of the client file in a new or existing file on the server. For
+          verification, the response gives the client and server file paths,
+          as well as an echo of the uploaded file, with a line count in
+          line-by-line reader mode.</p>
+<p>Notice that this echo display assumes that the file’s content
+          is text. It turns out that this is a safe assumption to make,
+          because the <code class="epub__literal">cgi</code> module always
+          returns file content as <code class="epub__literal">str</code>
+          strings, not <code class="epub__literal">bytes</code>. Less happily,
+          this also stems from the fact that binary file uploads are not
+          supported in the <code class="epub__literal">cgi</code> module in
+          3.1 (more on this limitation in an upcoming note).</p><div class="epub__figure"><a id="putfile_response_page"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e69513"></a><img alt="Putfile response page" src="Images/getfile_004-23.png" width="486"/>
+</div>
+</div>
+<p class="epub__title">Figure 15-34. Putfile response page</p>
+</div>
+<p>This file uploaded and saved in the uploads directory is
+          identical to the original (run an <code class="epub__literal">fc</code> command on Windows to verify this).
+          Incidentally, we can also verify the upload with the <code class="epub__literal">getfile</code> program we wrote in the prior
+          section. Simply access the selection page to type the pathname of
+          the file on the server, as shown in Figure 15-35.</p><div class="epub__figure"><a id="verifying_putfile_with_getfilemselection"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e69532"></a><img alt="Verifying putfile with getfile—selection" src="Images/getfile-47.png" width="486"/>
+</div>
+</div>
+<p class="epub__title">Figure 15-35. Verifying putfile with getfile—selection</p>
+</div>
+<p>If the file upload is successful, the resulting viewer page we
+          will obtain looks like Figure 15-36. Since the user
+          “nobody” (CGI scripts) was able to write the file, “nobody” should
+          be able to view it as well (bad grammar perhaps, but true
+          nonetheless).</p><div class="epub__figure"><a id="verifying_putfile_with_getfilemresponse"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e69544"></a><img alt="Verifying putfile with getfile—response" src="Images/getfile_008-8.png" width="486"/>
+</div>
+</div>
+<p class="epub__title">Figure 15-36. Verifying putfile with getfile—response</p>
+</div>
+<p>Notice the URL in this page’s address field—the browser
+          translated the <code class="epub__literal">/</code> character we
+          typed into the selection page to a <code class="epub__literal">%2F</code> hexadecimal escape code before adding
+          it to the end of the URL as a parameter. We met URL escape codes
+          like this earlier in this chapter. In this case, the browser did the
+          translation for us, but the end result is as if we had manually
+          called one of the <code class="epub__literal">urllib.parse</code>
+          quoting functions on the file path string.</p>
+<p>Technically, the <code class="epub__literal">%2F</code> escape
+          code here represents the standard URL translation for non-ASCII
+          characters, under the default encoding scheme browsers employ.
+          Spaces are usually translated to <code class="epub__literal">+</code> characters as well. We can often get
+          away without manually translating most non-ASCII characters when
+          sending paths explicitly (in typed URLs). But as we saw earlier, we
+          sometimes need to be careful to escape characters (e.g., <code class="epub__literal">&amp;</code>) that have special meaning within
+          URL strings with <code class="epub__literal">urllib.parse</code>
+          tools.</p>
+<div class="epub__sect3" title="Handling client path formats"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="handling_client_path_formats"></a>Handling client path formats</h3>
+</div>
+</div>
+</div>
+<p>In the end, the <span class="epub__emphasis"><em>putfile.py</em></span> script
+            stores the uploaded file on the server within a hardcoded
+            <span class="epub__emphasis"><em>uploaddir</em></span> directory, under the filename at
+            the end of the file’s path on the client (i.e., less its
+            client-side directory path). Notice, though, that the <code class="epub__literal">splitpath</code> function in this script needs
+            to do extra work to extract the base name of the file on the
+            right. Some browsers may send up the filename in the directory
+            path format used on the <span class="epub__emphasis"><em>client</em></span> machine; this
+            path format may not be the same as that used on the server where
+            the CGI script runs. This can vary per browser, but it should be
+            addressed for portability.</p>
+<p>The standard way to split up paths, <code class="epub__literal">os.path.split</code>, knows how to extract the
+            base name, but only recognizes path separator characters used on
+            the platform on which it is running. That is, if we run this CGI
+            script on a Unix machine, <code class="epub__literal">os.path.split</code> chops up paths around a
+            <code class="epub__literal">/</code> separator. If a user uploads
+            from a DOS or Windows machine, however, the separator in the
+            passed filename is <code class="epub__literal">\</code>, not
+            <code class="epub__literal">/</code>. Browsers running on some
+            Macintosh platforms may send a path that is more different
+            still.</p>
+<p>To handle client paths generically, this script imports
+            platform-specific path-processing modules from the Python library
+            for each client it wishes to support, and tries to split the path
+            with each until a filename on the right is found. For instance,
+            <code class="epub__literal">posixpath</code> handles paths sent
+            from Unix-style platforms, and <code class="epub__literal">ntpath</code> recognizes DOS and Windows client
+            paths. We usually don’t import these modules directly <a id="I_indexterm4_d1e69616"></a>since <code class="epub__literal">os.path.split</code> is automatically loaded
+            with the correct one for the underlying platform, but in this
+            case, we need to be specific since the path comes from another
+            machine. Note that we could have instead coded the path splitter
+            logic like this to avoid some split calls:</p><a id="I_programlisting4_d1e69625"></a>
+<pre class="epub__programlisting">def splitpath(origpath):                                    # get name at end
+    basename = os.path.split(origpath)[1]                   # try server paths
+    if basename == origpath:                                # didn't change it?
+        if '\\' in origpath:
+            basename = origpath.split('\\')[-1]             # try DOS clients
+        elif '/' in origpath:
+            basename = origpath.split('/')[-1]              # try Unix clients
+    return basename</pre>
+<p>But this alternative version may fail for some path formats
+            (e.g., DOS paths with a drive but no backslashes). As is, both
+            options waste time if the filename is already a base name (i.e.,
+            has no directory paths on the left), but we need to allow for the
+            more complex cases generically.</p>
+<p>This upload script works as planned, but a few caveats are
+            worth pointing out before we close the book on this
+            example:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Firstly, <code class="epub__literal">putfile</code>
+                doesn’t do anything about cross-platform incompatibilities in
+                <span>file</span><span>names</span> themselves. For instance,
+                spaces in a filename shipped from a DOS client are not
+                translated to nonspace characters; they will wind up as spaces
+                in the server-side file’s name, which may be legal but are
+                difficult to process in some scenarios.</p></li><li class="epub__listitem">
+<p>Secondly, reading line by line means that this CGI
+                script is biased toward uploading text files, not binary
+                datafiles. It uses a <code class="epub__literal">wb</code>
+                output open mode to retain the binary content of the uploaded
+                file, but it assumes the data is text in other places,
+                including the reply page. See Chapter 4 for more about binary
+                file modes. This is all largely a moot point in Python 3.1,
+                though, as binary file uploads do not work at all (see ); in
+                future release, though, this would need to be
+                addressed.</p></li></ul>
+</div>
+<p>If you run into any of these limitations, you will have
+            crossed over into the domain of suggested exercises.</p><div class="epub__sidebar"><a id="CGI_file_upload"></a>
+<p class="epub__title">CGI File Upload Limitations in 3.1</p>
+<p>Regrettably, I need to document the fact that Python’s
+              standard library support for CGI file uploads is partially
+              broken in Python 3.1, the version used for this edition. In
+              short, the <code class="epub__literal">cgi</code> module’s
+              internal parsing step fails today with an exception if any
+              binary file data or incompatible text file data is uploaded.
+              This exception occurs before the script has a chance to
+              intervene, making simple workarounds nonviable. CGI uploads
+              worked in Python 2.X because strings handled bytes, but fail in
+              3.X today.</p>
+<p>This regression stems in part from the fact that the
+              <code class="epub__literal">cgi</code> module uses the <code class="epub__literal">email</code> package’s parser to extract
+              incoming multipart data for files, and is thus crippled by some
+              of the very same <code class="epub__literal">email</code>
+              package issues we explored in detail in Chapter 13—its email parser requires
+              <code class="epub__literal">str</code> for the full text of a
+              message to be parsed, but this is invalid for some CGI upload
+              data. As mentioned in Chapter 13,
+              the data transmitted for CGI file uploads might have
+              <span class="epub__emphasis"><em>mixed</em></span> text and binary data—including raw
+              binary data that is <span class="epub__emphasis"><em>not</em></span> <span>MIME-encoded</span>, text of any
+              encoding, and even arbitrary combinations of these. The current
+              <code class="epub__literal">email</code> package’s requirement
+              to decode this to <code class="epub__literal">str</code> for
+              parsing is utterly incompatible, though the <code class="epub__literal">cgi</code> module’s own code seems suspect
+              for some cases as well.</p>
+<p>If you want to see for yourself how data is actually
+              uploaded by browsers, see and run the HTML and Python files
+              named <em class="epub__filename">test-cgi-uploads-bug*</em>
+              in the examples package to upload text, binary, and mixed type
+              files:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p><em class="epub__filename">test-cgi-uploads-bug.html/py</em>
+                  attempts to parse normally, which works for some text files
+                  but always fails for binary files with a Unicode decoding
+                  error</p></li><li class="epub__listitem">
+<p><em class="epub__filename">test-cgi-uploads-bug0.html/py</em>
+                  tries binary mode for the input stream, but always fails
+                  with type errors for both text and binary because of
+                  <code class="epub__literal">email</code>’s <code class="epub__literal">str</code> requirement</p></li><li class="epub__listitem">
+<p><em class="epub__filename">test-cgi-uploads-bug1.html/py</em>
+                  saves the input stream for a single file</p></li><li class="epub__listitem">
+<p><em class="epub__filename">test-cgi-uploads-bug2.html/py</em>
+                  saves the input stream for multiple files</p></li></ul>
+</div>
+<p>The last two of these scripts simply read the data in
+              binary mode and save it in binary mode to a file for inspection,
+              and display two headers passed in environment variables which
+              are used for parsing (a “multipart/form-data” content type and
+              boundary, along with a content length). Trying to parse the
+              saved input data with the <code class="epub__literal">cgi</code>
+              module fails unless the data is entirely text that is compatible
+              with that module’s encoding assumptions. Really, because the
+              data can mix text and raw binary arbitrarily, a correct parser
+              will need to read it as bytes and switch between text and binary
+              processing freely.</p>
+<p>It seems likely that this will be improved in the future,
+              but perhaps not until Python 3.3 or later. Nearly two years
+              after 3.0’s release, though, this book project has found itself
+              playing the role of beta tester more often than it probably
+              should. This primarily derives from the fact that implications
+              of the Python 3.X <code class="epub__literal">str</code>/<code class="epub__literal">bytes</code> dichotomy were not fully
+              resolved in Python’s own libraries prior to release. This isn’t
+              meant to disparage people who have contributed much time and
+              effort to 3.X already, of course. As someone who remembers 0.X,
+              though, this situation seems less than ideal.</p>
+<p>Writing a replacement for the <code class="epub__literal">cgi</code> module and the <code class="epub__literal">email</code> package code it uses—the only
+              true viable workaround—is not practical given this book
+              project’s constraints. For now, the CGI scripts that perform
+              file uploads in this book will only work with text files, and
+              then only with text files of compatible encodings. This extends
+              to email attachments uploaded to the PyMailCGI webmail case
+              study of the next chapter—yet another reason why that example
+              was not expanded with new functionality in this edition as much
+              as the preceding chapter’s PyMailGUI. Being unable to attach
+              images to emails this way is a severe functional limitation,
+              which limits scope in general.</p>
+<p>For updates on the probable fix for this issue in the
+              future, watch this book’s website (described in the Preface). A fix seems likely to be incompatible
+              with current library module APIs, but short of writing every new
+              system from scratch, such is reality in the real world of
+              software development. (And no, “running away more” is not an
+              option…)</p>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="More Than One Way to Push Bits over the Net"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="more_than_one_way_to_push_bits_over_the"></a>More Than One Way to Push Bits over the Net</h2>
+</div>
+</div>
+</div>
+<p>Finally, let’s discuss some context. We’ve seen three <code class="epub__literal">getfile</code> scripts at this point in the book.
+          The one in this chapter is different from the other two we wrote in
+          earlier chapters, but it accomplishes a similar goal:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>This chapter’s <code class="epub__literal">getfile</code>
+              is <a id="I_indexterm4_d1e69774"></a>a server-side CGI script that displays files over
+              the HTTP protocol (on port 80).</p></li><li class="epub__listitem">
+<p>In Chapter 12, we built a
+              client- and server-side <code class="epub__literal">getfile</code> to transfer with raw sockets
+              (on port 50001).</p></li><li class="epub__listitem">
+<p>In Chapter 13, we
+              implemented a client-side <code class="epub__literal">getfile</code> to ship over FTP (on port
+              21).</p></li></ul>
+</div>
+<p>Really, the <code class="epub__literal">getfile</code> CGI
+          script in this chapter simply displays files only, but it can be
+          considered a download tool when augmented with cut-and-paste
+          operations in a web browser. Moreover, the CGI- and HTTP-based
+          <code class="epub__literal">putfile</code> script here is also
+          different from the FTP-based <code class="epub__literal">putfile</code> in Chapter 13, but it can be considered an
+          alternative to both socket and FTP uploads.</p>
+<p>The point to notice is that there are a variety of ways to
+          ship files around the <span>Internet—</span>sockets, FTP, and HTTP (web
+          pages) can move files between computers. Technically speaking, we
+          can transfer files with other techniques and protocols, too—Post
+          Office Protocol (POP) email, <a id="I_indexterm4_d1e69814"></a><a id="I_indexterm4_d1e69817"></a>Network News Transfer Protocol (NNTP) news, Telnet,
+          and <span>so on</span>.</p>
+<p>Each technique has unique properties but does similar work in
+          the end: moving bits over the Net. All ultimately run over sockets
+          on a particular port, but protocols like FTP and HTTP add additional
+          structure to the socket layer, and application models like CGI add
+          both structure and programmability.</p>
+<p>In the next chapter, we’re going to use what we’ve learned
+          here to build a more substantial application that runs entirely on
+          the Web—PyMailCGI, a web-based email tool, which allows us to send
+          and view emails in a browser, process email attachments, and more.
+          At the end of the day, though, it’s mostly just bytes over sockets,
+          with a user <a id="I_indexterm4_d1e69828"></a><a id="I_indexterm4_d1e69830"></a><a id="I_indexterm4_d1e69832"></a><a id="I_indexterm4_d1e69834"></a>interface.</p><div class="epub__sidebar"><a id="cgi_downloads_colon_forcing_the_issue"></a>
+<p class="epub__title">CGI Downloads: Forcing the Issue</p>
+<p>In Example 15-27, we
+            wrote a script named <span class="epub__emphasis"><em>getfile.py</em></span>, a Python CGI
+            program designed to display any public server-side file, within a
+            web browser (or other recipient) on the requesting client machine.
+            It uses a Content type of <code class="epub__literal">text/plain</code> or <code class="epub__literal">text/html</code> to make the requested file’s
+            text show up properly inside a browser. In the description, we
+            compared <span class="epub__emphasis"><em>getfile.py</em></span> to a generalized CGI
+            download tool, when augmented with cut-and-paste or save-as
+            interactions.</p>
+<p>While true, <span class="epub__emphasis"><em>getfile.py</em></span> was intended to
+            mostly be a file display tool only, not a CGI download demo. If
+            you want to truly and directly download a file by CGI (instead of
+            displaying it in a browser or opening it with an application), you
+            can usually force the browser to pop up a Save As dialog for the
+            file on the client by supplying the appropriate Content-type line
+            in the CGI reply.</p>
+<p>Browsers decide what to do with a file using either the
+            file’s suffix (e.g., <span class="epub__emphasis"><em>xxx.jpg</em></span> is interpreted
+            as an image), or the Content-type line (e.g., <code class="epub__literal">text/html</code> is HTML code). By using
+            various MIME header line settings, you can make the datatype
+            unknown and effectively render the browser clueless about data
+            handling. For instance, a Content type of <code class="epub__literal">application/octet-stream</code> in the CGI
+            reply generally triggers the standard Save As dialog box in a
+            browser.</p>
+<p>This strategy is sometimes frowned on, though, because it
+            leaves the true nature of the file’s data ambiguous—it’s usually
+            better to let the user/client decide how to handle downloaded
+            data, rather than force the Save As behavior. It also has very
+            little to do with Python; for more details, consult a CGI-specific
+            text, or try a web search on “CGI download.”</p>
+</div>
+</div><div class="epub__footnotes"><br/><hr/><div class="epub__footnote">
+<p><sup>[65] </sup>You may notice another difference in the response pages
+              produced by the form and an explicitly typed URL: for the form,
+              the value of the “filename” parameter at the end of the URL in
+              the response may contain URL escape codes for some characters in
+              the file path you typed. Browsers automatically translate some
+              non-ASCII characters into URL escapes (just like <code class="epub__literal">urllib.parse.quote</code>). URL escapes were
+              discussed earlier in this chapter; we’ll see an example of this
+              automatic browser escaping at work in an upcoming
+              screenshot.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

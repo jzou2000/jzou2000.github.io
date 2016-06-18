@@ -1,0 +1,734 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Example: “Private” and “Public” Attributes</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div><h1 class="epub__title"><a id="example_colon_quotation_mark_private"></a>Example: “Private” and “Public” Attributes</h1>
+<p><a id="I_indexterm3_d1e101620"></a>The <a id="I_indexterm3_d1e99485"></a>final two sections of this chapter present larger
+        examples of decorator use. Both are presented with minimal
+        description, partly because this chapter has exceeded its size limits,
+        but mostly because you should already understand decorator basics well
+        enough to study these on your own. Being general-purpose tools, these
+        examples give us a chance to see how decorator concepts come together
+        in more useful code.</p>
+<div class="epub__sect2" title="Implementing Private Attributes"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="implementing_private_attributes"></a>Implementing Private Attributes</h2>
+</div>
+</div>
+</div>
+<p>The following <span class="epub__emphasis"><em><a id="ch3861clssdecprivattimplem"></a>class decorator</em></span> implements a <code class="epub__literal">Private</code> declaration for class instance
+          attributes—that is, attributes stored on an instance, or inherited
+          from one of its classes. It disallows fetch and change access to
+          such attributes from <span class="epub__emphasis"><em>outside</em></span> the decorated
+          class, but still allows the class itself to access those names
+          freely within its methods. It’s not exactly C++ or Java, but it
+          provides similar access control as an option in Python.</p>
+<p>We saw an incomplete first-cut implementation of instance
+          attribute privacy for changes only in Chapter 29. The version here extends this
+          concept to validate attribute fetches too, and it uses delegation
+          instead of inheritance to implement the model. In fact, in a sense
+          this is just an extension to the attribute tracer class decorator we
+          met earlier.</p>
+<p>Although this example utilizes the new syntactic sugar of
+          class decorators to code attribute privacy, its attribute
+          interception is ultimately still based upon the <code class="epub__literal">__getattr__</code> and
+          <code class="epub__literal">__setattr__</code> operator overloading
+          methods we met in prior chapters. When a private attribute access is
+          detected, this version uses the <code class="epub__literal">raise</code> statement to raise an exception,
+          along with an error message; the exception may be caught in a
+          <code class="epub__literal">try</code> or allowed to terminate the
+          script.</p>
+<p>Here is the code, along with a self test at the bottom of the
+          file. It will work under both Python 2.6 and 3.0 because it employs
+          3.0 <code class="epub__literal">print</code> and <code class="epub__literal">raise</code> syntax, though it catches operator
+          overloading method attributes in 2.6 only (more on this in a
+          moment):</p><a id="I_programlisting3_d1e99538"></a>
+<pre class="epub__programlisting">"""
+Privacy for attributes fetched from class instances.
+See self-test code at end of file for a usage example.
+Decorator same as: Doubler = Private('data', 'size')(Doubler).
+Private returns onDecorator, onDecorator returns onInstance,
+and each onInstance instance embeds a Doubler instance.
+"""
+
+traceMe = False
+def trace(*args):
+    if traceMe: print('[' + ' '.join(map(str, args)) + ']')
+
+def Private(*privates):                          <em class="epub__lineannotation"><span class="epub__lineannotation"># privates in enclosing scope</span></em>
+    def onDecorator(aClass):                     <em class="epub__lineannotation"><span class="epub__lineannotation"># aClass in enclosing scope</span></em>
+        class onInstance:                        <em class="epub__lineannotation"><span class="epub__lineannotation"># wrapped in instance attribute</span></em>
+            def __init__(self, *args, **kargs):
+                self.wrapped = aClass(*args, **kargs)
+            def __getattr__(self, attr):         <em class="epub__lineannotation"><span class="epub__lineannotation"># My attrs don't call getattr</span></em>
+                trace('get:', attr)              <em class="epub__lineannotation"><span class="epub__lineannotation"># Others assumed in wrapped</span></em>
+                if attr in privates:
+                    raise TypeError('private attribute fetch: ' + attr)
+                else:
+                    return getattr(self.wrapped, attr)
+            def __setattr__(self, attr, value):             <em class="epub__lineannotation"><span class="epub__lineannotation"># Outside accesses</span></em>
+                trace('set:', attr, value)                  <em class="epub__lineannotation"><span class="epub__lineannotation"># Others run normally</span></em>
+                if attr == 'wrapped':                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Allow my attrs</span></em>
+                    self.__dict__[attr] = value             <em class="epub__lineannotation"><span class="epub__lineannotation"># Avoid looping</span></em>
+                elif attr in privates:
+                    raise TypeError('private attribute change: ' + attr)
+                else:
+                    setattr(self.wrapped, attr, value)      <em class="epub__lineannotation"><span class="epub__lineannotation"># Wrapped obj attrs</span></em>
+        return onInstance                                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Or use __dict__</span></em>
+    return onDecorator
+
+
+if __name__ == '__main__':
+    traceMe = True
+
+    @Private('data', 'size')                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Doubler = Private(...)(Doubler)</span></em>
+    class Doubler:
+        def __init__(self, label, start):
+            self.label = label                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Accesses inside the subject class</span></em>
+            self.data  = start                 <em class="epub__lineannotation"><span class="epub__lineannotation"># Not intercepted: run normally</span></em>
+        def size(self):
+            return len(self.data)              <em class="epub__lineannotation"><span class="epub__lineannotation"># Methods run with no checking</span></em>
+        def double(self):                      <em class="epub__lineannotation"><span class="epub__lineannotation"># Because privacy not inherited</span></em>
+            for i in range(self.size()):
+                self.data[i] = self.data[i] * 2
+        def display(self):
+            print('%s =&gt; %s' % (self.label, self.data))
+
+    X = Doubler('X is', [1, 2, 3])
+    Y = Doubler('Y is', [−10, −20, −30])
+
+    # The followng all succeed
+    print(X.label)                             <em class="epub__lineannotation"><span class="epub__lineannotation"># Accesses outside subject class</span></em>
+    X.display(); X.double(); X.display()       <em class="epub__lineannotation"><span class="epub__lineannotation"># Intercepted: validated, delegated</span></em>
+    print(Y.label)
+    Y.display(); Y.double()
+    Y.label = 'Spam'
+    Y.display()
+
+    <em class="epub__lineannotation"><span class="epub__lineannotation"># The following all fail properly</span></em>
+    """
+    print(X.size())          <em class="epub__lineannotation"><span class="epub__lineannotation"># prints "TypeError: private attribute fetch: size"</span></em>
+    print(X.data)
+    X.data = [1, 1, 1]
+    X.size = lambda S: 0
+    print(Y.data)
+    print(Y.size())
+    """</pre>
+<p>When <code class="epub__literal">traceMe</code> is <code class="epub__literal">True</code>, the module file’s self-test code
+          produces the following output. Notice how the decorator catches and
+          validates both attribute fetches and assignments run outside of the
+          wrapped class, but does not catch attribute accesses inside the
+          class itself:</p><a id="I_programlisting3_d1e99611"></a>
+<pre class="epub__programlisting">[set: wrapped &lt;__main__.Doubler object at 0x02B2AAF0&gt;]
+[set: wrapped &lt;__main__.Doubler object at 0x02B2AE70&gt;]
+[get: label]
+X is
+[get: display]
+X is =&gt; [1, 2, 3]
+[get: double]
+[get: display]
+X is =&gt; [2, 4, 6]
+[get: label]
+Y is
+[get: display]
+Y is =&gt; [−10, −20, −30]
+[get: double]
+[set: label Spam]
+[get: display]
+Spam =&gt; [−20, −40, −60]</pre>
+</div>
+<div class="epub__sect2" title="Implementation Details I"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="implementation_details_i"></a>Implementation Details I</h2>
+</div>
+</div>
+</div>
+<p>This code is a bit complex, and you’re probably best off
+          tracing through it on your own to see how it works. To help you
+          study, though, here are a few highlights worth mentioning.</p>
+<div class="epub__sect3" title="Inheritance versus delegation"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="inheritance_versus_delegation"></a>Inheritance versus delegation</h3>
+</div>
+</div>
+</div>
+<p>The first-cut privacy example shown in Chapter 29 used
+            <span class="epub__emphasis"><em>inheritance</em></span> to mix in a <code class="epub__literal">__setattr__</code> to catch accesses.
+            Inheritance makes this difficult, however, because differentiating
+            between accesses from inside or outside the class is not
+            straightforward (inside access should be allowed to run normally,
+            and outside access should be restricted). To work around this, the
+            Chapter 29 example requires
+            inheriting classes to use <code class="epub__literal">__dict__</code> assignments to set
+            attributes—an incomplete solution at best.</p>
+<p>The version here uses <span class="epub__emphasis"><em>delegation</em></span>
+            (embedding one object inside another) instead of inheritance; this
+            pattern is better suited to our task, as it makes it much easier
+            to distinguish between accesses inside and outside of the subject
+            class. Attribute accesses from outside the subject class are
+            intercepted by the wrapper layer’s overloading methods and
+            delegated to the class if valid; accesses inside the class itself
+            (i.e., through <code class="epub__literal">self</code> inside its
+            methods’ code) are not intercepted and are allowed to run normally
+            without checks, because privacy is not inherited here.</p>
+</div>
+<div class="epub__sect3" title="Decorator arguments"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="decorator_arguments_I"></a>Decorator arguments</h3>
+</div>
+</div>
+</div>
+<p>The class decorator used here accepts any number of
+            arguments, to name private attributes. What really happens,
+            though, is that the arguments are passed to the <code class="epub__literal">Private</code> function, and <code class="epub__literal">Private</code> returns the decorator function
+            to be applied to the subject class. So, the arguments are used
+            before decoration ever occurs; <code class="epub__literal">Private</code> returns the decorator, which in
+            turn “remembers” the privates list as an enclosing scope
+            reference.</p>
+</div>
+<div class="epub__sect3" title="State retention and enclosing scopes"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="state_retention_and_enclosing_scopes"></a>State retention and enclosing scopes</h3>
+</div>
+</div>
+</div>
+<p>Speaking of enclosing scopes, there are actually three
+            levels of state retention at work in this code:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p>The arguments to <code class="epub__literal">Private</code> are used before decoration
+                occurs and are retained as an enclosing scope reference for
+                use in both <code class="epub__literal">onDecorator</code> and
+                <code class="epub__literal">onInstance</code>.</p></li><li class="epub__listitem">
+<p>The class argument to <code class="epub__literal">onDecorator</code> is used at decoration
+                time and is retained as an enclosing scope reference for use
+                at instance construction time.</p></li><li class="epub__listitem">
+<p>The wrapped instance object is retained as an instance
+                attribute in <code class="epub__literal">onInstance</code>,
+                for use when attributes are later accessed from outside the
+                class.</p></li></ul>
+</div>
+<p>This all works fairly naturally, given Python’s scope and
+            namespace rules.</p>
+</div>
+<div class="epub__sect3" title="Using __dict__ and __slots__"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="using_underscore_underscore_dict_unders"></a>Using __dict__ and __slots__</h3>
+</div>
+</div>
+</div>
+<p>The <code class="epub__literal">__setattr__</code> in this
+            code relies on an instance object’s <code class="epub__literal">__dict__</code> attribute namespace dictionary
+            in order to set <code class="epub__literal">onInstance</code>’s
+            own <code class="epub__literal">wrapped</code> attribute. As we
+            learned in the prior chapter, it cannot assign an attribute
+            directly without looping. However, it uses the <code class="epub__literal">setattr</code> built-in instead of <code class="epub__literal">__dict__</code> to set attributes in the
+            wrapped object itself. Moreover, <code class="epub__literal">getattr</code> is used to fetch attributes in
+            the wrapped object, since they may be stored in the object itself
+            or inherited by it.</p>
+<p>Because of that, this code will work for most classes. You
+            may recall from Chapter 31 that
+            new-style classes with <code class="epub__literal">__slots__</code> <a id="I_indexterm3_d1e99727"></a>may not store attributes in a <code class="epub__literal">__dict__</code>. However, because we only rely
+            on a <code class="epub__literal">__dict__</code> at the <code class="epub__literal">onInstance</code> level here, not in the
+            wrapped instance, and because <code class="epub__literal">setattr</code> and <code class="epub__literal">getattr</code> apply to attributes based on
+            both <code class="epub__literal">__dict__</code> and <code class="epub__literal">__slots__</code>, our decorator applies to
+            classes using either storage <a id="I_indexterm3_d1e99755"></a>scheme.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Generalizing for Public Declarations, Too"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="generalizing_for_public_declarations_to"></a>Generalizing for Public Declarations, Too</h2>
+</div>
+</div>
+</div>
+<p>Now <a id="ch3863clssdecpubattimpl"></a>that we have a <code class="epub__literal">Private</code> implementation, it’s
+          straightforward to generalize the code to allow for <code class="epub__literal">Public</code> declarations too—they are
+          essentially the inverse of <code class="epub__literal">Private</code> declarations, so we need only
+          negate the inner test. The example listed in this section allows a
+          class to use decorators to define a set of either <code class="epub__literal">Private</code> or <code class="epub__literal">Public</code> instance attributes (attributes
+          stored on an instance or inherited from its classes), with the
+          following semantics:</p><div class="epub__itemizedlist">
+<ul class="epub__itemizedlist">
+<li class="epub__listitem">
+<p><code class="epub__literal">Private</code> declares
+              attributes of a class’s instances that cannot be fetched or
+              assigned, except from within the code of the class’s methods.
+              That is, any name declared <code class="epub__literal">Private</code> cannot be accessed from
+              outside the class, while any name not declared <code class="epub__literal">Private</code> can be freely fetched or
+              assigned from outside the class.</p></li><li class="epub__listitem">
+<p><code class="epub__literal">Public</code> declares
+              attributes of a class’s instances that can be fetched or
+              assigned from both outside the class and within the class’s
+              methods. That is, any name declared <code class="epub__literal">Public</code> can be freely accessed
+              anywhere, while any name not declared <code class="epub__literal">Public</code> cannot be accessed from outside
+              the class.</p></li></ul>
+</div>
+<p><code class="epub__literal">Private</code> and <code class="epub__literal">Public</code> declarations are intended to be
+          mutually exclusive: when using <code class="epub__literal">Private</code>, all undeclared names are
+          considered <code class="epub__literal">Public</code>, and when using
+          <code class="epub__literal">Public</code>, all undeclared names are
+          considered <code class="epub__literal">Private</code>. They are
+          essentially inverses, though undeclared names not created by class
+          methods behave slightly differently—they can be assigned and thus
+          created outside the class under <code class="epub__literal">Private</code> (all undeclared names are
+          accessible), but not under <code class="epub__literal">Public</code>
+          (all undeclared names are inaccessible).</p>
+<p>Again, study this code on your own to get a feel for how this
+          works. Notice that this scheme adds an additional <span class="epub__emphasis"><em>fourth
+          level of state retention</em></span> at the top, beyond that
+          described in the preceding section: the test functions used by the
+          <code class="epub__literal">lambda</code>s are saved in an extra
+          enclosing scope. This example is coded to run under either Python
+          2.6 or 3.0, though it comes with a caveat when run under 3.0
+          (explained briefly in the file’s docstring and expanded on after the
+          code):</p><a id="I_programlisting3_d1e99845"></a>
+<pre class="epub__programlisting">"""
+Class decorator with Private and Public attribute declarations.
+Controls access to attributes stored on an instance, or inherited
+by it from its classes. Private declares attribute names that
+cannot be fetched or assigned outside the decorated class, and
+Public declares all the names that can. Caveat: this works in
+3.0 for normally named attributes only: __X__ operator overloading
+methods implicitly run for built-in operations do not trigger
+either __getattr__ or __getattribute__ in new-style classes.
+Add __X__ methods here to intercept and delegate built-ins.
+"""
+
+traceMe = False
+def trace(*args):
+    if traceMe: print('[' + ' '.join(map(str, args)) + ']')
+
+def accessControl(failIf):
+    def onDecorator(aClass):
+        class onInstance:
+            def __init__(self, *args, **kargs):
+                self.__wrapped = aClass(*args, **kargs)
+            def __getattr__(self, attr):
+                trace('get:', attr)
+                if failIf(attr):
+                    raise TypeError('private attribute fetch: ' + attr)
+                else:
+                    return getattr(self.__wrapped, attr)
+            def __setattr__(self, attr, value):
+                trace('set:', attr, value)
+                if attr == '_onInstance__wrapped':
+                    self.__dict__[attr] = value
+                elif failIf(attr):
+                    raise TypeError('private attribute change: ' + attr)
+                else:
+                    setattr(self.__wrapped, attr, value)
+        return onInstance
+    return onDecorator
+
+def Private(*attributes):
+    return accessControl(failIf=(lambda attr: attr in attributes))
+
+def Public(*attributes):
+    return accessControl(failIf=(lambda attr: attr not in attributes))</pre>
+<p>See the prior example’s self-test code for a usage example.
+          Here’s a quick look at these class decorators in action at the
+          interactive prompt (they work the same in 2.6 and 3.0); as
+          advertised, non-<code class="epub__literal">Private</code> or
+          <code class="epub__literal">Public</code> names can be fetched and
+          changed from outside the subject class, but <code class="epub__literal">Private</code> or non-<code class="epub__literal">Public</code> names cannot:</p><a id="I_programlisting3_d1e99861"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from access import Private, Public</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>@Private('age')</code></strong>                             <em class="epub__lineannotation"><span class="epub__lineannotation"># Person = Private('age')(Person)</span></em>
+... <strong class="epub__userinput"><code>class Person:</code></strong>                               <em class="epub__lineannotation"><span class="epub__lineannotation"># Person = onInstance with state</span></em>
+...     <strong class="epub__userinput"><code>def __init__(self, name, age):</code></strong>
+...         <strong class="epub__userinput"><code>self.name = name</code></strong>
+...         <strong class="epub__userinput"><code>self.age  = age</code></strong>                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Inside accesses run normally</span></em>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X = Person('Bob', 40)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X.name</code></strong>                                      <em class="epub__lineannotation"><span class="epub__lineannotation"># Outside accesses validated</span></em>
+'Bob'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X.name = 'Sue'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X.name</code></strong>
+'Sue'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X.age</code></strong>
+TypeError: private attribute fetch: age
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X.age = 'Tom'</code></strong>
+TypeError: private attribute change: age
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>@Public('name')</code></strong>
+... <strong class="epub__userinput"><code>class Person:</code></strong>
+...     <strong class="epub__userinput"><code>def __init__(self, name, age):</code></strong>
+...         <strong class="epub__userinput"><code>self.name = name</code></strong>
+...         <strong class="epub__userinput"><code>self.age  = age</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X = Person('bob', 40)</code></strong>                       <em class="epub__lineannotation"><span class="epub__lineannotation"># X is an onInstance</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X.name</code></strong>                                      <em class="epub__lineannotation"><span class="epub__lineannotation"># onInstance embeds Person</span></em>
+'bob'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X.name = 'Sue'</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X.name</code></strong>
+'Sue'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X.age</code></strong>
+TypeError: private attribute fetch: age
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X.age = 'Tom'</code></strong>
+TypeError: private attribute change: age</pre>
+</div>
+<div class="epub__sect2" title="Implementation Details II"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="implementation_details_ii"></a>Implementation Details II</h2>
+</div>
+</div>
+</div>
+<p>To help you analyze the code, here are a few final notes on
+          this version. Since this is just a generalization of the preceding
+          section’s example, most of the notes there apply here as
+          well.</p>
+<div class="epub__sect3" title="Using __X pseudoprivate names"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="using_underscore_underscore_x_pseudopri"></a>Using __X pseudoprivate names</h3>
+</div>
+</div>
+</div>
+<p>Besides generalizing, this version also makes use of
+            Python’s <code class="epub__literal">__</code><em class="epub__replaceable"><code>X</code></em>
+            pseudoprivate name mangling feature (which we met in Chapter 30) to localize the <code class="epub__literal">wrapped</code> attribute to the control class,
+            by automatically prefixing it with the class name. This avoids the
+            prior version’s risk for collisions with a <code class="epub__literal">wrapped</code> attribute that may be used by
+            the real, wrapped class, and it’s useful in a general tool like
+            this. It’s not quite “privacy,” though, because the mangled name
+            can be used freely outside the class. Notice that we also have to
+            use the fully expanded name string (<code class="epub__literal">'_onInstance__wrapped'</code>) in <code class="epub__literal">__setattr__</code>, because that’s what Python
+            changes it to.</p>
+</div>
+<div class="epub__sect3" title="Breaking privacy"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="breaking_privacy"></a>Breaking privacy</h3>
+</div>
+</div>
+</div>
+<p>Although this example does implement access controls for
+            attributes of an instance and its classes, it is possible to
+            subvert these controls in various ways—for instance, by going
+            through the expanded version of the <code class="epub__literal">wrapped</code> attribute explicitly (<code class="epub__literal">bob.pay</code> might not work, but the fully
+            mangled <code class="epub__literal">bob._onInstance__wrapped.pay</code> could!). If
+            you have to explicitly try to do so, though, these controls are
+            probably sufficient for normal intended use. Of course, privacy
+            controls can generally be subverted in any language if you try
+            hard enough (<code class="epub__literal">#define private
+            public</code> may work in some C++ implementations, too).
+            Although access controls can reduce accidental changes, much of
+            this is up to programmers in any language; whenever source code
+            may be changed, access control will always be a bit of a pipe
+            dream.</p>
+</div>
+<div class="epub__sect3" title="Decorator tradeoffs"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="decorator_tradeoffs"></a>Decorator tradeoffs</h3>
+</div>
+</div>
+</div>
+<p>We could again achieve the same results without decorators,
+            by using manager functions or coding the name rebinding of
+            decorators manually; the decorator syntax, however, makes this
+            consistent and a bit more obvious in the code. The chief potential
+            downsides of this and any other wrapper-based approach are that
+            attribute access incurs an extra call, and instances of decorated
+            classes are not really instances of the original decorated
+            class—if you test their type with <code class="epub__literal">X.__class__</code> or <code class="epub__literal">isinstance(X, C)</code>, for example, you’ll
+            find that they are instances of the <span class="epub__emphasis"><em>wrapper</em></span>
+            class. Unless you plan to do introspection on objects’ types,
+            though, the type issue is probably <a id="I_indexterm3_d1e100018"></a>irrelevant.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Open Issues"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="open_issues"></a>Open Issues</h2>
+</div>
+</div>
+</div>
+<p>As is, <a id="ch3865decfunanclsssmanopeniss"></a>this example works as planned under Python 2.6 and 3.0
+          (provided operator overloading methods to be delegated are redefined
+          in the wrapper). As with most software, though, there is always room
+          for improvement.</p>
+<div class="epub__sect3" title="Caveat: operator overloading methods fail to delegate under 3.0"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="caveat_colon_operator_overloading_metho"></a>Caveat: operator overloading methods fail to delegate under
+            3.0</h3>
+</div>
+</div>
+</div>
+<p>Like all delegation-based classes that use <code class="epub__literal">__getattr__</code>, this decorator works
+            cross-version for normally
+            named attributes only; operator overloading methods like <code class="epub__literal">__str__</code> and <code class="epub__literal">__add__</code> work differently for new-style
+            classes and so fail to reach the embedded object if defined there
+            when this runs under 3.0.</p>
+<p>As we learned in the prior chapter, classic classes look up
+            operator overloading names in instances at runtime normally, but
+            new-style classes do not—they skip the instance entirely and look
+            up such methods in classes. Hence, the <code class="epub__literal">__</code><em class="epub__replaceable"><code>X</code></em><code class="epub__literal">__</code> operator overloading methods
+            implicitly run for built-in operations do <span class="epub__emphasis"><em>not</em></span>
+            trigger either <code class="epub__literal">__getattr__</code> or
+            <code class="epub__literal">__getattribute__</code> in new-style
+            classes in 2.6 and all classes in 3.0; such attribute fetches skip
+            our <code class="epub__literal">onInstance.__getattr__</code>
+            altogether, so they cannot be validated or delegated.</p>
+<p>Our decorator’s class is not coded as new-style (by deriving
+            from <code class="epub__literal">object</code>), so it will catch
+            operator overloading methods if run under 2.6. Since all classes
+            are new-style automatically in 3.0, though, such methods will
+            <span class="epub__emphasis"><em>fail</em></span> if they are coded on the embedded
+            object. The simplest workaround in 3.0 is to redefine redundantly
+            in <code class="epub__literal">onInstance</code> all the operator
+            overloading methods that can possibly be used in wrapped objects.
+            Such extra methods can be added by hand, by tools that partly
+            automate the task (e.g., with class decorators or the metaclasses
+            discussed in the next chapter), or by definition in superclasses.</p>
+<p>To see the difference yourself, try applying the decorator
+            to a class that uses operator overloading methods under 2.6;
+            validations work as before, and both the <code class="epub__literal">__str__</code> method used by printing and the
+            <code class="epub__literal">__add__</code> method run for <code class="epub__literal">+</code> invoke the decorator’s <code class="epub__literal">__getattr__</code> and hence wind up being
+            validated and delegated to the subject <code class="epub__literal">Person</code> object correctly:</p><a id="I_programlisting3_d1e100104"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python26\python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from access import Private</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>@Private('age')</code></strong>
+... <strong class="epub__userinput"><code>class Person:</code></strong>
+...     <strong class="epub__userinput"><code>def __init__(self):</code></strong>
+...         <strong class="epub__userinput"><code>self.age = 42</code></strong>
+...     <strong class="epub__userinput"><code>def __str__(self):</code></strong>
+...         <strong class="epub__userinput"><code>return 'Person: ' + str(self.age)</code></strong>
+...     <strong class="epub__userinput"><code>def __add__(self, yrs):</code></strong>
+...         <strong class="epub__userinput"><code>self.age += yrs</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X = Person()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X.age</code></strong>                                   <em class="epub__lineannotation"><span class="epub__lineannotation"># Name validations fail correctly</span></em>
+TypeError: private attribute fetch: age
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(X)</code></strong>                                <em class="epub__lineannotation"><span class="epub__lineannotation"># __getattr__ =&gt; runs Person.__str__</span></em>
+Person: 42
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X + 10</code></strong>                                  <em class="epub__lineannotation"><span class="epub__lineannotation"># __getattr__ =&gt; runs Person.__add__</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(X)</code></strong>                                <em class="epub__lineannotation"><span class="epub__lineannotation"># __getattr__ =&gt; runs Person.__str__</span></em>
+Person: 52</pre>
+<p>When the same code is run under Python 3.0, though, the
+            implicitly invoked <code class="epub__literal">__str__</code> and
+            <code class="epub__literal">__add__</code> skip the decorator’s
+            <code class="epub__literal">__getattr__</code> and look for
+            definitions in or above the decorator class itself; <code class="epub__literal">print</code> winds up finding the default
+            display inherited from the class type (technically, from the
+            implied <code class="epub__literal">object</code> superclass in
+            3.0), and <code class="epub__literal">+</code> generates an error
+            because no default is inherited:</p><a id="I_programlisting3_d1e100187"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from access import Private</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>@Private('age')</code></strong>
+... <strong class="epub__userinput"><code>class Person:</code></strong>
+...     <strong class="epub__userinput"><code>def __init__(self):</code></strong>
+...         <strong class="epub__userinput"><code>self.age = 42</code></strong>
+...     <strong class="epub__userinput"><code>def __str__(self):</code></strong>
+...         <strong class="epub__userinput"><code>return 'Person: ' + str(self.age)</code></strong>
+...     <strong class="epub__userinput"><code>def __add__(self, yrs):</code></strong>
+...         <strong class="epub__userinput"><code>self.age += yrs</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X = Person()</code></strong>                            <em class="epub__lineannotation"><span class="epub__lineannotation"># Name validations still work</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X.age</code></strong>                                   <em class="epub__lineannotation"><span class="epub__lineannotation"># But 3.0 fails to delegate built-ins!</span></em>
+TypeError: private attribute fetch: age
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(X)</code></strong>
+&lt;access.onInstance object at 0x025E0790&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X + 10</code></strong>
+TypeError: unsupported operand type(s) for +: 'onInstance' and 'int'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>print(X)</code></strong>
+&lt;access.onInstance object at 0x025E0790&gt;</pre>
+<p>Using the alternative <code class="epub__literal">__getattribute__</code> method won’t help
+            here—although it is defined to catch every attribute reference
+            (not just undefined names), it is also not run by built-in
+            operations. Python’s <code class="epub__literal">property</code>
+            feature, which we met in Chapter 37,
+            won’t help here either; recall that properties are automatically
+            run code associated with <span class="epub__emphasis"><em>specific</em></span> attributes defined when a class is
+            written, and are not designed to handle arbitrary attributes in
+            wrapped objects.</p>
+<p>As mentioned earlier, the most straightforward solution
+            under 3.0 is to redundantly redefine operator overloading names
+            that may appear in embedded objects in delegation-based classes like our
+            decorator. This isn’t ideal because it creates some code
+            redundancy, especially compared to 2.6 solutions. However, it
+            isn’t too major a coding effort, can be automated to some extent
+            with tools or superclasses, suffices to make our decorator work in
+            3.0, and allows operator overloading names to be declared <code class="epub__literal">Private</code> or <code class="epub__literal">Public</code> too (assuming each overloading
+            method runs the <code class="epub__literal">failIf</code> test
+            internally):</p><a id="I_programlisting3_d1e100275"></a>
+<pre class="epub__programlisting">def accessControl(failIf):
+    def onDecorator(aClass):
+        class onInstance:
+            def __init__(self, *args, **kargs):
+                self.__wrapped = aClass(*args, **kargs)
+
+            <em class="epub__lineannotation"><span class="epub__lineannotation"># Intercept and delegate operator overloading methods</span></em>
+            <span class="epub__strong"><strong>def __str__(self):</strong></span>
+                <span class="epub__strong"><strong>return str(self.__wrapped)</strong></span>
+            <span class="epub__strong"><strong>def __add__(self, other):</strong></span>
+                <span class="epub__strong"><strong>return self.__wrapped + other</strong></span>
+            <span class="epub__strong"><strong>def __getitem__(self, index):</strong></span>
+                <strong class="epub__userinput"><code>return self.__wrapped[index]</code></strong>         <em class="epub__lineannotation"><span class="epub__lineannotation"># If needed</span></em>
+            <span class="epub__strong"><strong>def __call__(self, *args, **kargs):</strong></span>
+                <strong class="epub__userinput"><code>return self.__wrapped(*arg, *kargs)</code></strong>  <em class="epub__lineannotation"><span class="epub__lineannotation"># If needed</span></em>
+            <span class="epub__strong"><strong>...plus any others needed...</strong></span>
+
+            <em class="epub__lineannotation"><span class="epub__lineannotation"># Intercept and delegate named attributes</span></em>
+            def __getattr__(self, attr):
+                ...
+            def __setattr__(self, attr, value):
+                ...
+        return onInstance
+    return onDecorator</pre>
+<p>With such operator overloading methods added, the prior
+            example with <code class="epub__literal">__str__</code> and
+            <code class="epub__literal">__add__</code> works the same under
+            2.6 and 3.0, although a substantial amount of extra code may be
+            required to accommodate 3.0—in principle,
+            <span class="epub__emphasis"><em>every</em></span> operator overloading method that is not
+            run automatically will need to be defined redundantly for 3.0 in a
+            general tool class like this (which is why this extension is
+            omitted in our code). Since every class is new-style in 3.0,
+            delegation-based code is more difficult (though not impossible) in
+            this release.</p>
+<p>On the other hand, delegation wrappers could simply inherit
+            from a common superclass that redefines operator overloading
+            methods once, with standard delegation code. Moreover, tools such
+            as additional class decorators or metaclasses might automate some
+            of the work of adding such methods to delegation classes (see the
+            class augmentation examples in Chapter 39
+            for details). Though still not as simple as the 2.6 solution, such
+            techniques might help make 3.0 delegation classes more
+            general.</p>
+</div>
+<div class="epub__sect3" title="Implementation alternatives: __getattribute__ inserts, call stack inspection"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="implementation_alternatives_colon_under"></a>Implementation alternatives: __getattribute__ inserts, call
+            stack inspection</h3>
+</div>
+</div>
+</div>
+<p>Although redundantly defining operator overloading methods
+            in wrappers is probably the most straightforward workaround to
+            Python 3.0 dilemma outlined in the prior section, it’s not
+            necessarily the only one. We don’t have space to explore this
+            issue much further here, so investigating other potential
+            solutions is relegated to a suggested exercise. Because one
+            dead-end alternative underscores class concepts well, though, it
+            merits a brief mention.</p>
+<p>One downside of this example is that instance objects are
+            not truly instances of the original class—they are instances of
+            the wrapper instead. In some programs that rely on type testing,
+            this might matter. To support such cases, we might try to achieve
+            similar effects by <span class="epub__emphasis"><em>inserting</em></span> a <code class="epub__literal">__getattribute__</code> method into the
+            original class, to catch <span class="epub__emphasis"><em>every</em></span> attribute
+            reference made on its instances. This inserted method would pass
+            valid requests up to its
+            superclass to avoid loops, using the techniques we studied in the
+            prior chapter. Here is the potential change to our class
+            decorator’s code:</p><a id="I_programlisting3_d1e100353"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation"># trace support as before</span></em>
+
+def accessControl(failIf):
+    def onDecorator(aClass):
+        def getattributes(self, attr):
+            trace('get:', attr)
+            if failIf(attr):
+                raise TypeError('private attribute fetch: ' + attr)
+            else:
+                return object.__getattribute__(self, attr)
+        aClass.__getattribute__ = getattributes
+        return aClass
+    return onDecorator
+
+def Private(*attributes):
+    return accessControl(failIf=(lambda attr: attr in attributes))
+
+def Public(*attributes):
+    return accessControl(failIf=(lambda attr: attr not in attributes))</pre>
+<p>This alternative addresses the type-testing issue but
+            suffers from others. For example, it handles only attribute
+            <span class="epub__emphasis"><em>fetches</em></span>—as is, this version allows private
+            names to be <span class="epub__emphasis"><em>assigned</em></span> freely. Intercepting
+            assignments would still have to use <code class="epub__literal">__setattr__</code>, and either an instance
+            wrapper object or another class method insertion. Adding an
+            instance wrapper to catch assignments would change the type again,
+            and inserting methods fails if the original class is using a
+            <code class="epub__literal">__setattr__</code> of its own (or a
+            <code class="epub__literal">__getattribute__</code>, for that
+            matter!). An inserted <code class="epub__literal">__setattr__</code> would also have to allow for
+            a <code class="epub__literal">__slots__</code> in the client
+            class.</p>
+<p>In addition, this scheme does not address the
+            <span class="epub__emphasis"><em>built-in</em></span> operation attributes issue described in the prior section, since
+            <code class="epub__literal">__getattribute__</code> is not run in
+            these contexts, either. In our case, if <code class="epub__literal">Person</code> had a <code class="epub__literal">__str__</code> it would be run by print
+            operations, but only because it was actually present in that
+            class. As before, the <code class="epub__literal">__str__</code>
+            attribute would <span class="epub__emphasis"><em>not</em></span> be routed to the inserted
+            <code class="epub__literal">__getattribute__</code> method
+            generically—printing would bypass this method altogether and call
+            the class’s <code class="epub__literal">__str__</code>
+            directly.</p>
+<p>Although this is probably better than not supporting
+            operator overloading methods in a wrapped object at all (barring
+            redefinition, at least), this scheme still cannot intercept and
+            validate <code class="epub__literal">__</code><em class="epub__replaceable"><code>X</code></em><code class="epub__literal">__</code> methods, making it impossible for any
+            of them to be <code class="epub__literal">Private</code>. Although
+            most operator overloading methods are meant to be public, some
+            might not be.</p>
+<p>Much worse, because this nonwrapper approach works by adding
+            a <code class="epub__literal">__getattribute__</code> to the decorated
+            class, it also intercepts attribute accesses made <span class="epub__emphasis"><em>by the
+            class itself</em></span> and validates them the same as accesses
+            made from outside—this means the class’s method won’t be able to
+            use <code class="epub__literal">Private</code> names,
+            either!</p>
+<p>In fact, inserting methods this way is functionally
+            equivalent to <span class="epub__emphasis"><em>inheriting</em></span> them, and implies
+            the same constraints as our original Chapter 29 privacy code. To know whether an
+            attribute access originated inside or outside the class, our
+            method might need to inspect frame objects on the Python
+            <span class="epub__emphasis"><em>call stack</em></span>. This might ultimately yield a
+            solution (replace private attributes with properties or
+            descriptors that check the stack, for example), but it would slow
+            access further and is far too dark a magic for us to explore
+            here.</p>
+<p>While interesting, and possibly relevant for some other use
+            cases, this method insertion technique doesn’t meet our goals. We
+            won’t explore this option’s coding pattern further here because we
+            will study class augmentation techniques in the next chapter, in
+            conjunction with metaclasses. As we’ll see there, metaclasses are
+            not strictly required for changing classes this way, because class
+            decorators can often serve the same <a id="I_indexterm3_d1e100446"></a>role.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Python Isn’t About Control"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="python_isn_apostrophy_t_about_control"></a>Python Isn’t About Control</h2>
+</div>
+</div>
+</div>
+<p>Now that I’ve gone to such great lengths to add <code class="epub__literal">Private</code> and <code class="epub__literal">Public</code> attribute declarations for Python
+          code, I must again remind you that it is not entirely
+          <span class="epub__emphasis"><em>Pythonic</em></span> to add access controls to your classes
+          like this. In fact, most Python programmers will probably find this
+          example to be largely or totally irrelevant, apart from serving as a
+          demonstration of decorators in action. Most large Python programs
+          get by successfully without any such controls at all. If you do wish
+          to regulate attribute access in order to eliminate coding mistakes,
+          though, or happen to be a soon-to-be-ex-C++-or-Java programmer, most
+          things are possible with Python’s operator overloading and
+          introspection tools.</p>
+</div>
+<div class="epub__sect1" title="Example: Validating Function Arguments"><div class="epub__titlepage"><div>
+<div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

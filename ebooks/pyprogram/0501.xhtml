@@ -1,0 +1,419 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Forking Processes</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Forking Processes"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="forking_processes"></a>Forking Processes</h1>
+</div>
+</div>
+</div>
+<p>Forked <a id="par5.2"></a><a id="fork5.2"></a>processes are a traditional way to structure parallel
+        tasks, and they are a fundamental part of the Unix tool set. Forking
+        is a straightforward way to start an independent program, whether it
+        is different from the calling program or not. Forking is based on the
+        notion of <span class="epub__emphasis"><em>copying</em></span> programs: when a program calls
+        the fork routine, the operating system makes a new copy of that
+        program and its process in memory and starts running that copy in
+        parallel with the original. Some systems don’t really copy the
+        original program (it’s an expensive operation), but the new copy works
+        as if it were a literal copy.</p>
+<p>After a fork operation, the original copy of the program is
+        called the<a id="I_indexterm4_d1e15313"></a> <span class="epub__emphasis"><em>parent</em></span> process, and the copy
+        created by<a id="I_indexterm4_d1e15320"></a> <code class="epub__literal">os.fork</code> is called
+        the<a id="I_indexterm4_d1e15331"></a> <span class="epub__emphasis"><em>child</em></span> process. In general, parents
+        can make any number of children, and children can create child
+        processes of their own; all forked processes run independently and in
+        parallel under the operating system’s control, and children may
+        continue to run after their parent exits.</p>
+<p>This is probably simpler in practice than in theory, though. The
+        Python script in Example 5-1
+        forks new child processes until you type the letter
+        <span class="epub__emphasis"><em>q</em></span> at the console.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id15"></a>
+<p class="epub__title">Example 5-1. PP4E\System\Processes\fork1.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"forks child processes until you type 'q'"
+
+import os
+
+def child():
+    print('Hello from child',  os.getpid())
+    os._exit(0)  # else goes back to parent loop
+
+def parent():
+    while True:
+        newpid = os.fork()
+        if newpid == 0:
+            child()
+        else:
+            print('Hello from parent', os.getpid(), newpid)
+        if input() == 'q': break
+
+parent()</pre>
+</div>
+</div>
+<p>Python’s process forking tools, available in the<a id="I_indexterm4_d1e15355"></a> <code class="epub__literal">os</code> module, are
+        simply thin wrappers over standard forking calls in the system library
+        also used by C language programs. To start a new, parallel process,
+        call the <code class="epub__literal">os.fork</code> built-in function.
+        Because this function generates a copy of the calling program, it
+        returns a different value in each copy: zero in the child process and
+        the process ID of the new child in the parent.</p>
+<p>Programs generally test this result to begin different
+        processing in the child only; this script, for instance, runs the
+        <code class="epub__literal">child</code> function in child processes
+        only.<sup>[13]</sup></p>
+<p>Because forking is ingrained in the <a id="I_indexterm4_d1e15384"></a>Unix programming model, this script works well on Unix,
+        Linux, and modern Macs. Unfortunately, this script won’t work on the
+        standard version of Python for Windows today, because <code class="epub__literal">fork</code> is too much at odds with the Windows
+        model. Python scripts can always spawn threads on Windows, and the
+        <code class="epub__literal">multiprocessing</code> module described
+        later in this chapter provides an alternative for running processes
+        portably, which can obviate the need for process forks on Windows in
+        contexts that conform to its constraints (albeit at some potential
+        cost in low-level control).</p>
+<p>The script in Example 5-1 does work on Windows,
+        however, if you use the Python shipped with the Cygwin
+        system<a id="I_indexterm4_d1e15400"></a> (or build one of your own from source-code with
+        Cygwin’s libraries). Cygwin is a free, open source system that
+        provides full Unix-like functionality for Windows (and is described
+        further in More on Cygwin Python for Windows). You
+        can fork with Python on Windows under Cygwin, even though its behavior
+        is not exactly the same as true Unix forks. Because it’s close enough
+        for this book’s examples, though, let’s use it to run our script
+        live:</p><a id="I_programlisting4_d1e15408"></a>
+<pre class="epub__programlisting">[C:\...\PP4E\System\Processes]$ <strong class="epub__userinput"><code>python fork1.py</code></strong>
+Hello from parent 7296 7920
+Hello from child 7920
+
+Hello from parent 7296 3988
+Hello from child 3988
+
+Hello from parent 7296 6796
+Hello from child 6796
+<strong class="epub__userinput"><code>q</code></strong></pre>
+<p>These messages represent three forked child processes; the
+        unique identifiers of all the processes involved are fetched and
+        displayed with the<a id="I_indexterm4_d1e15418"></a> <code class="epub__literal">os.getpid</code> call. A
+        subtle point: the <code class="epub__literal">child</code> process
+        function is also careful to exit explicitly with an <code class="epub__literal">os._exit</code> call. We’ll discuss this call in
+        more detail later in this chapter, but if it’s not made, the child
+        process would live on after the <code class="epub__literal">child</code> function returns (remember, it’s just
+        a copy of the original process). The net effect is that the child
+        would go back to the loop in <code class="epub__literal">parent</code>
+        and start forking children of its own (i.e., the parent would have
+        grandchildren). If you delete the exit call and rerun, you’ll likely
+        have to type more than one q to stop, because multiple processes are
+        running in the <code class="epub__literal">parent</code>
+        function.</p>
+<p>In Example 5-1, each
+        process exits very soon after it starts, so there’s little overlap in
+        time. Let’s do something slightly more sophisticated to better
+        illustrate multiple forked processes running in parallel. Example 5-2 starts up 5 copies of
+        itself, each copy counting up to 5 with a one-second delay between
+        iterations. The<a id="I_indexterm4_d1e15449"></a> <code class="epub__literal">time.sleep</code> standard
+        library call simply pauses the calling process for a number of seconds
+        (you can pass a floating-point value to pause for fractions of
+        seconds).</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id16"></a>
+<p class="epub__title">Example 5-2. PP4E\System\Processes\fork-count.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+fork basics: start 5 copies of this program running in parallel with
+the original; each copy counts up to 5 on the same stdout stream--forks
+copy process memory, including file descriptors; fork doesn't currently
+work on Windows without Cygwin: use os.spawnv or multiprocessing on
+Windows instead; spawnv is roughly like a fork+exec combination;
+"""
+
+import os, time
+
+def counter(count):                                    # run in new process
+    for i in range(count):
+        time.sleep(1)                                  # simulate real work
+        print('[%s] =&gt; %s' % (os.getpid(), i))
+
+for i in range(5):
+    pid = os.fork()
+    if pid != 0:
+        print('Process %d spawned' % pid)              # in parent: continue
+    else:
+        counter(5)                                     # else in child/new process
+        os._exit(0)                                    # run function and exit
+
+print('Main process exiting.')                         # parent need not wait</pre>
+</div>
+</div>
+<p>When run, this script starts 5 processes immediately and exits.
+        All 5 forked processes check in with their first count display one
+        second later and every second thereafter. Notice that child processes
+        continue to run, even if the parent process that created them
+        terminates:</p><a id="I_programlisting4_d1e15465"></a>
+<pre class="epub__programlisting">[C:\...\PP4E\System\Processes]$ <strong class="epub__userinput"><code>python fork-count.py</code></strong>
+Process 4556 spawned
+Process 3724 spawned
+Process 6360 spawned
+Process 6476 spawned
+Process 6684 spawned
+Main process exiting.
+[4556] =&gt; 0
+[3724] =&gt; 0
+[6360] =&gt; 0
+[6476] =&gt; 0
+[6684] =&gt; 0
+[4556] =&gt; 1
+[3724] =&gt; 1
+[6360] =&gt; 1
+[6476] =&gt; 1
+[6684] =&gt; 1
+[4556] =&gt; 2
+[3724] =&gt; 2
+[6360] =&gt; 2
+[6476] =&gt; 2
+[6684] =&gt; 2
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more output omitted...</span></em></pre>
+<p>The output of all of these processes shows up on the same
+        screen, because all of them share the standard output stream (and a
+        system prompt may show up along the way, too). Technically, a forked
+        process gets a copy of the original process’s global memory, including
+        open file descriptors. Because of that, global objects like files
+        start out with the same values in a child process, so all the
+        processes here are tied to the same single stream. But it’s important
+        to remember that global memory is copied, not shared; if a child
+        process changes a global object, it changes only its own copy. (As
+        we’ll see, this works differently in threads, the topic of the next
+        <a id="I_indexterm4_d1e15474"></a>section.)</p>
+<div class="epub__sect2" title="The fork/exec Combination"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_fork_solidus_exec_combination"></a>The fork/exec Combination</h2>
+</div>
+</div>
+</div>
+<p>In Examples 5-1 and 5-2, child processes simply ran a
+          function within the <a id="fork5.2.1"></a><a id="os5.2.1a"></a><a id="os5.2.1b"></a>Python program and then exited. On Unix-like
+          platforms, forks are often the basis of starting independently
+          running programs that are completely different from the program that
+          performed the <code class="epub__literal">fork</code> call. For
+          instance, Example 5-3 forks
+          new processes until we type <span class="epub__emphasis"><em>q</em></span> again, but child
+          processes run a brand-new program instead of calling a function in
+          the same file.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id17"></a>
+<p class="epub__title">Example 5-3. PP4E\System\Processes\fork-exec.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"starts programs until you type 'q'"
+
+import os
+
+parm = 0
+while True:
+    parm += 1
+    pid = os.fork()
+    if pid == 0:                                             # copy process
+        os.execlp('python', 'python', 'child.py', str(parm)) # overlay program
+        assert False, 'error starting program'               # shouldn't return
+    else:
+        print('Child is', pid)
+        if input() == 'q': break</pre>
+</div>
+</div>
+<p>If you’ve done much Unix development, the <code class="epub__literal">fork</code>/<code class="epub__literal">exec</code> combination will probably look
+          familiar. The main thing to notice is the <code class="epub__literal">os.execlp</code> call in this code. In a
+          nutshell, this call replaces (overlays) the program running in the
+          current process with a brand new program. Because of that, the
+          <span class="epub__emphasis"><em>combination</em></span> of <code class="epub__literal">os.fork</code> and <code class="epub__literal">os.execlp</code> means start a new process and
+          run a new program in that process—in other words, launch a new
+          program in parallel with the original program.</p>
+<div class="epub__sect3" title="os.exec call formats"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="os.exec_call_formats"></a>os.exec call formats</h3>
+</div>
+</div>
+</div>
+<p>The arguments <a id="I_indexterm4_d1e15544"></a>to <code class="epub__literal">os.execlp</code>
+            specify the program to be run by giving command-line arguments
+            used to start the program (i.e., what Python scripts know as
+            <code class="epub__literal">sys.argv</code>). If successful, the
+            new program begins running and the call to <code class="epub__literal">os.execlp</code> itself never returns (since
+            the original program has been replaced, there’s really nothing to
+            return to). If the call does return, an error has occurred, so we
+            code an <code class="epub__literal">assert</code> after it that
+            will always raise an exception if reached.</p>
+<p>There are a handful of <code class="epub__literal">os.exec</code> variants in the Python standard
+            library; some allow us to configure environment variables for the
+            new program, pass command-line arguments in different forms, and
+            so on. All are available on both Unix and Windows, and they
+            replace the calling program (i.e., the Python interpreter).
+            <code class="epub__literal">exec</code> comes in eight flavors,
+            which can be a bit confusing unless you generalize:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">os.execv(</code><em class="epub__replaceable"><code>program,
+                commandlinesequence</code></em><code class="epub__literal">)</code></span></dt><dd>
+<p>The basic “v” <code class="epub__literal">exec</code>
+                  form is <a id="I_indexterm4_d1e15585"></a>passed an executable program’s name, along
+                  with a list or tuple of command-line argument strings used
+                  to run the executable (that is, the words you would normally
+                  type in a shell to start a program).</p></dd><dt><span class="epub__term"><code class="epub__literal">os.execl(</code><em class="epub__replaceable"><code>program,
+                cmdarg1, cmdarg2,... cmdargN</code></em><code class="epub__literal">)</code></span></dt><dd>
+<p>The basic “l” <code class="epub__literal">exec</code>
+                  form is <a id="I_indexterm4_d1e15605"></a>passed an executable’s name, followed by one
+                  or more command-line arguments passed as individual function
+                  arguments. This is the same as <code class="epub__literal">os.execv(</code><em class="epub__replaceable"><code>program,</code></em>
+<code class="epub__literal">(</code><em class="epub__replaceable"><code>cmdarg1,
+                  cmdarg2,...</code></em><code class="epub__literal">))</code>.</p></dd><dt><span class="epub__term"><code class="epub__literal">os.execlp</code><br/></span><span class="epub__term"><code class="epub__literal">os.execvp</code></span></dt><dd>
+<p>Adding the <a id="I_indexterm4_d1e15633"></a><a id="I_indexterm4_d1e15638"></a>letter p to the <code class="epub__literal">execv</code> and <code class="epub__literal">execl</code> names means that Python will
+                  locate the executable’s directory using your system
+                  search-path setting (i.e., <code class="epub__literal">PATH</code>).</p></dd><dt><span class="epub__term"><code class="epub__literal">os.execle</code><br/></span><span class="epub__term"><code class="epub__literal">os.execve</code></span></dt><dd>
+<p>Adding a <a id="I_indexterm4_d1e15663"></a><a id="I_indexterm4_d1e15668"></a>letter e to the <code class="epub__literal">execv</code> and <code class="epub__literal">execl</code> names means an extra,
+                  <span class="epub__emphasis"><em>last</em></span> argument is a dictionary
+                  containing shell environment variables to send to the
+                  program.</p></dd><dt><span class="epub__term"><code class="epub__literal">os.execvpe</code><br/></span><span class="epub__term"><code class="epub__literal">os.execlpe</code></span></dt><dd>
+<p>Adding the <a id="I_indexterm4_d1e15693"></a><a id="I_indexterm4_d1e15698"></a>letters p and e to the basic <code class="epub__literal">exec</code> names means to use the search
+                  path <span class="epub__emphasis"><em>and</em></span> to accept a shell environment
+                  settings dictionary.</p></dd></dl>
+</div>
+<p>So when the script in Example 5-3 calls <code class="epub__literal">os.execlp</code>, individually passed
+            parameters specify a command line for the program to be run on,
+            and the word <span class="epub__emphasis"><em>python</em></span> maps to an executable
+            file according to the underlying system search-path setting
+            environment variable (<code class="epub__literal">PATH</code>).
+            It’s as if we were running a command of the form <code class="epub__literal">python child.py 1</code> in a shell, but with a
+            different command-line argument on the end each time.</p>
+</div>
+<div class="epub__sect3" title="Spawned child program"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="spawned_child_program"></a>Spawned child program</h3>
+</div>
+</div>
+</div>
+<p>Just as when <a id="I_indexterm4_d1e15731"></a><a id="I_indexterm4_d1e15736"></a>typed at a shell, the string of arguments passed to
+            <code class="epub__literal">os.execlp</code> by the <code class="epub__literal">fork-exec</code> script in Example 5-3 starts another
+            Python program file, as shown in Example 5-4.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id18"></a>
+<p class="epub__title">Example 5-4. PP4E\System\Processes\child.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">import os, sys
+print('Hello from child', os.getpid(), sys.argv[1])</pre>
+</div>
+</div>
+<p>Here is this code in action on Linux. It doesn’t look much
+            different from the original <span class="epub__emphasis"><em>fork1.py</em></span>, but
+            it’s really running a new <span class="epub__emphasis"><em>program</em></span> in each
+            forked process. More observant readers may notice that the child
+            process ID displayed is the same in the parent program and the
+            launched <span class="epub__emphasis"><em>child.py</em></span> program; <code class="epub__literal">os.execlp</code> simply overlays a program in
+            the same process:</p><a id="I_programlisting4_d1e15771"></a>
+<pre class="epub__programlisting">[C:\...\PP4E\System\Processes]$ <strong class="epub__userinput"><code>python fork-exec.py</code></strong>
+Child is 4556
+Hello from child 4556 1
+
+Child is 5920
+Hello from child 5920 2
+
+Child is 316
+Hello from child 316 3
+<strong class="epub__userinput"><code>q</code></strong></pre>
+<p>There are other ways to start up programs in Python besides
+            the fork/exec combination. For example, the <code class="epub__literal">os.system</code> and <code class="epub__literal">os.popen</code> calls and <code class="epub__literal">subprocess</code> module which we explored in
+            Chapters 2 and 3 allow us to spawn shell
+            commands. And the <code class="epub__literal">os.spawnv</code>
+            call and <code class="epub__literal">multiprocessing</code>
+            module, which we’ll meet later in this chapter, allow us to start
+            independent programs and processes more portably. In fact, we’ll
+            see later that <code class="epub__literal">multiprocessing</code>’s process spawning model
+            can be used as a sort of portable replacement for <code class="epub__literal">os.fork</code> in some contexts (albeit a less
+            efficient one) and used in conjunction with the <code class="epub__literal">os.exec*</code> calls shown here to achieve a
+            similar effect in standard Windows Python.</p>
+<p>We’ll see more process fork examples later in this chapter,
+            especially in the program exits and process communication
+            sections, so we’ll forego additional examples here. We’ll also
+            discuss additional process topics in later chapters of this book.
+            For instance, forks are revisited in Chapter 12 to deal with servers and their
+            <span class="epub__emphasis"><em>zombies</em></span>—dead processes lurking in system
+            tables after their demise. For now, let’s move on to threads, a
+            subject which at least some programmers find to be substantially
+            less <a id="I_indexterm4_d1e15816"></a><a id="I_indexterm4_d1e15818"></a><a id="I_indexterm4_d1e15820"></a><a id="I_indexterm4_d1e15822"></a>frightening…</p><div class="epub__sidebar"><a id="more_on_cygwin_python_for_windows"></a>
+<p class="epub__title">More on Cygwin Python for Windows</p>
+<p>As mentioned, the <code class="epub__literal">os.fork</code> call is present in the
+              <a id="I_indexterm4_d1e15834"></a>Cygwin version of Python on Windows. Even though
+              this call is missing in the standard version of Python for
+              Windows, you can fork processes on Windows with Python if you
+              install and use Cygwin. However, the Cygwin fork call is not as
+              efficient and does not work exactly the same as a fork on true
+              Unix systems.</p>
+<p>Cygwin is a free, open source package which includes a
+              library that attempts to provide a Unix-like API for use on
+              Windows machines, along with a set of command-line tools that
+              implement a Unix-like environment. It makes it easier to apply
+              Unix skills and code on Windows computers.</p>
+<p>According to its FAQ documentation, though, “Cygwin fork()
+              essentially works like a noncopy on write version of fork()
+              (like old Unix versions used to do). Because of this it can be a
+              little slow. In most cases, you are better off using the spawn
+              family of calls if possible.” Since this book’s fork examples
+              don’t need to care about performance, Cygwin’s fork
+              suffices.</p>
+<p>In addition to the fork call, Cygwin provides other Unix
+              tools that would otherwise not be available on all flavors of
+              Windows, including <code class="epub__literal">os.mkfifo</code>
+              (discussed later in this chapter). It also comes with a <code class="epub__literal">gcc</code> compiler environment for building
+              C extensions for Python on Windows that will be familiar to Unix
+              developers. As long as you’re willing to use Cygwin libraries to
+              build your application and power your Python, it’s very close to
+              Unix on Windows.</p>
+<p>Like all third-party libraries, though, Cygwin adds an
+              extra dependency to your systems. Perhaps more critically,
+              Cygwin currently uses the GNU GPL license, which adds
+              distribution requirements beyond those of standard Python.
+              Unlike using Python itself, shipping a program that uses Cygwin
+              libraries may require that your program’s source code be made
+              freely available (though RedHat offers a “buy-out” option which
+              can relieve you of this requirement). Note that this is a
+              complex legal issue, and you should study Cygwin’s license on
+              your own if this may impact your programs. Its license does,
+              however, impose more constraints than Python’s (Python uses a
+              “BSD”-style license, not the GPL).</p>
+<p>Despite licensing issue, Cygwin still can be a great way
+              to get Unix-like functionality on Windows without installing a
+              completely different operating system such as <span>Linux—</span>a more complete but
+              generally more complex option. For more details, see http://cygwin.com or run a search for Cygwin on
+              the Web.</p>
+<p>See also the standard library’s <code class="epub__literal">multiprocessing</code> module and <code class="epub__literal">os.spawn</code> family of calls, covered
+              later in this chapter, for alternative way to start parallel
+              tasks and programs on Unix and Windows that do not require fork
+              and exec calls. To run a simple function call in parallel on
+              Windows (rather than on an external program), also see the
+              section on standard library threads later in this chapter.
+              Threads, <code class="epub__literal">multiprocessing</code>, and
+              <code class="epub__literal">os.spawn</code> calls work on
+              Windows in standard Python.</p>
+<p><span class="epub__emphasis"><em>Fourth Edition
+              Update</em></span>: As I was updating this chapter in February
+              2010, Cygwin’s official Python was still Python 2.5.2. To get
+              Python 3.1 under Cygwin, it had to be built from its source
+              code. If this is still required when you read this, make sure
+              you have <code class="epub__literal">gcc</code> and <code class="epub__literal">make</code> installed on your Cygwin, then
+              fetch Python’s source code package from python.org, unpack it,
+              and build Python with the usual commands:</p><a id="I_programlisting4_d1e15886"></a>
+<pre class="epub__programlisting">    ./configure
+    make
+    make test
+    sudo make install</pre>
+<p>This will install Python as <code class="epub__literal">python3</code>. The same procedure works on
+              all Unix-like platforms; on OS X and Cygwin, the executable is
+              called <code class="epub__literal">python.exe</code>; elsewhere
+              it’s named <code class="epub__literal">python</code>. You can
+              generally skip the last two of the above steps if you’re willing
+              to run Python 3.1 out of your own build directory. Be sure to
+              also check if Python 3.X is a standard Cygwin package by the
+              time you read this; when building from source you may have to
+              tweak a few files (I had to comment-out a <code class="epub__literal">#define</code> in <code class="epub__literal">Modules/main.c</code>), but these are too
+              specific and temporal to get into here.</p>
+</div>
+</div>
+</div><div class="epub__footnotes"><br/><hr/><div class="epub__footnote">
+<p><sup>[13] </sup>At least in the current Python implementation, calling
+            <code class="epub__literal">os.fork</code> in a Python script
+            actually copies the Python interpreter process (if you look at
+            your process list, you’ll see two Python entries after a fork).
+            But since the Python interpreter records everything about your
+            running script, it’s OK to think of <code class="epub__literal">fork</code> as copying your program directly.
+            It really will if Python scripts are ever compiled to binary
+            machine code.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

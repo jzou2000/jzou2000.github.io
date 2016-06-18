@@ -1,0 +1,236 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>A Simple C Extension Module</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="A Simple C Extension Module"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="a_simple_c_extension_module"></a>A Simple C Extension Module</h1>
+</div>
+</div>
+</div>
+<p>At least that’s <a id="I_indexterm4_d1e85778"></a>the short story; C modules require C code, and C types
+        require more of it than we can reasonably present in this chapter.
+        Although this book can’t teach you C development skills if you don’t
+        already have them, we need to turn to some code to make this domain
+        more concrete. Because C modules are simpler, and because C types
+        generally export a C module with an instance constructor function,
+        let’s start off by exploring the basics of C module coding with a
+        quick example.</p>
+<p>As mentioned, when you add new or existing C components to
+        Python in the traditional integration model, you need to code an
+        interface (“glue”) logic layer in C that handles cross-language
+        dispatching and data translation. The C source file in Example 20-1 shows how to code one by
+        hand. It implements a simple C extension module named <code class="epub__literal">hello</code> for use in Python scripts, with a
+        function named <code class="epub__literal">message</code> that simply
+        returns its input string argument with extra text prepended. Python
+        scripts will call this function as usual, but this one is coded in C,
+        not in Python.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate"></a>
+<p class="epub__title">Example 20-1. PP4E\Integrate\Extend\Hello\hello.c</p><div class="epub__example-contents">
+<pre class="epub__programlisting">/********************************************************************
+ * A simple C extension module for Python, called "hello"; compile
+ * this into a ".so" on python path, import and call hello.message;
+ ********************************************************************/
+
+#include &lt;Python.h&gt;
+#include &lt;string.h&gt;
+
+/* module functions */
+static PyObject *                                 /* returns object */
+message(PyObject *self, PyObject *args)           /* self unused in modules */
+{                                                 /* args from Python call */
+    char *fromPython, result[1024];
+    if (! PyArg_Parse(args, "(s)", &amp;fromPython))  /* convert Python -&gt; C */
+        return NULL;                              /* null=raise exception */
+    else {
+        strcpy(result, "Hello, ");                /* build up C string */
+        strcat(result, fromPython);               /* add passed Python string */
+        return Py_BuildValue("s", result);        /* convert C -&gt; Python */
+    }
+}
+
+/* registration table  */
+static PyMethodDef hello_methods[] = {
+    {"message",  message, METH_VARARGS, "func doc"},    /* name, &amp;func, fmt, doc */
+    {NULL, NULL, 0, NULL}                               /* end of table marker */
+};
+
+/* module definition structure */
+static struct PyModuleDef hellomodule = {
+   PyModuleDef_HEAD_INIT,
+   "hello",         /* name of module */
+   "mod doc",       /* module documentation, may be NULL */
+   −1,              /* size of per-interpreter module state, −1=in global vars */
+   hello_methods    /* link to methods table */
+};
+
+/* module initializer */
+PyMODINIT_FUNC
+PyInit_hello()                         /* called on first import */
+{                                      /* name matters if loaded dynamically */
+    return PyModule_Create(&amp;hellomodule);
+}</pre>
+</div>
+</div>
+<p>This C module has a 4-part standard structure described by its
+        comments, which all C modules follow, and which has changed noticeably
+        in Python 3.X. Ultimately, Python code will call this C file’s
+        <code class="epub__literal">message</code> function, passing in a
+        string object and getting back a new string object. First, though, it
+        has to be somehow linked into the Python interpreter. To use this C
+        file in a Python script, compile it into a dynamically loadable object
+        file (e.g., <span class="epub__emphasis"><em>hello.so</em></span> on Linux,
+        <span class="epub__emphasis"><em>hello.dll</em></span> under <a id="I_indexterm4_d1e85810"></a>Cygwin on Windows) with a makefile like the one listed
+        in Example 20-2, and drop the
+        resulting object file into a directory listed on your module import
+        search path exactly as though it were a <span class="epub__emphasis"><em>.py</em></span> or
+        <span class="epub__emphasis"><em>.pyc</em></span> file.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id1"></a>
+<p class="epub__title">Example 20-2. PP4E\Integrate\Extend\Hello\makefile.hello</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#############################################################
+# Compile hello.c into a shareable object file on Cygwin,
+# to be loaded dynamically when first imported by Python.
+#############################################################
+
+PYLIB = /usr/local/bin
+PYINC = /usr/local/include/python3.1
+
+hello.dll: hello.c
+        gcc hello.c -g -I$(PYINC) -shared -L$(PYLIB) -lpython3.1 -o hello.dll
+
+clean:
+        rm -f hello.dll core</pre>
+</div>
+</div>
+<p>This is a Cygwin makefile that uses <code class="epub__literal">gcc</code> to <a id="I_indexterm4_d1e85835"></a>compile our C code on Windows; other platforms are
+        analogous but will vary. As we learned in Chapter 5, Cygwin provides a Unix-like
+        environment and libraries on Windows. To work along with the examples
+        here, either install Cygwin on your Windows platform, or change the
+        makefiles listed per your compiler and platform requirements. Be sure
+        to include the path to Python’s install directory with <code class="epub__literal">-I</code> flags to access Python include (a.k.a.
+        header) files, as well as the path to the Python binary library file
+        with <code class="epub__literal">-L</code> flags, if needed; mine
+        point to <span>Python 3.1’s</span> location
+        on my laptop after building it from its source. Also note that you’ll
+        need tabs for the indentation in makefile rules if a cut-and-paste
+        from an ebook substituted or dropped spaces.</p>
+<p>Now, to use the makefile in Example 20-2 to build the extension
+        module in Example 20-1, simply
+        type a standard <code class="epub__literal">make</code> command at
+        your shell (the Cygwin shell is used here, and I add a line break for
+        clarity):</p><a id="I_programlisting4_d1e85860"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Extend/Hello$ <strong class="epub__userinput"><code>make -f makefile.hello</code></strong>
+gcc hello.c -g -I/usr/local/include/python3.1 -shared
+               -L/usr/local/bin -lpython3.1 -o hello.dll</pre>
+<p>This generates a shareable object file—a
+        <span class="epub__emphasis"><em>.dll</em></span> under Cygwin on Windows. When compiled this
+        way, Python automatically loads and links the C module when it is
+        first imported by a Python script. At import time, the
+        <span class="epub__emphasis"><em>.dll</em></span> binary library file will be located in a
+        directory on the Python import search path, just like a
+        <span class="epub__emphasis"><em>.py</em></span> file. Because Python always searches the
+        current working directory on imports, this chapter’s examples will run
+        from the directory you compile them in (.) without any file copies or
+        moves. In larger systems, you will generally place compiled extensions
+        in a directory listed in <code class="epub__literal">PYTHONPATH</code>
+        or <span class="epub__emphasis"><em>.pth</em></span> files instead, or use Python’s
+        <span class="epub__emphasis"><em>distutils</em></span> to install them in the site-packages
+        subdirectory of the standard library.</p>
+<p>Finally, to call the C function from a Python program, simply
+        import the module <code class="epub__literal">hello</code> and call
+        its <code class="epub__literal">hello.message</code> function with a
+        string; you’ll get back a normal Python string:</p><a id="I_programlisting4_d1e85895"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Extend/Hello$ <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import hello</code></strong>                                   # import a C module
+&gt;&gt;&gt; <strong class="epub__userinput"><code>hello.message('world')</code></strong>                         # call a C function
+'Hello, world'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>hello.message('extending')</code></strong>
+'Hello, extending'</pre>
+<p>And that’s it—you’ve just called an integrated C module’s
+        function from Python. The most important thing to notice here is that
+        the C function looks exactly as if it were coded in Python. Python
+        callers send and receive normal string objects from the call; the
+        Python interpreter handles routing calls to the C function, and the C
+        function itself handles Python/C data conversion chores.</p>
+<p>In fact, there is little to distinguish <code class="epub__literal">hello</code> as a C extension module at all, apart
+        from its filename. Python code imports the module and fetches its
+        attributes as if it had been written in Python. C extension modules
+        even respond to <code class="epub__literal">dir</code> calls as usual
+        and have the standard module and filename attributes, though the
+        filename doesn’t end in a <span class="epub__emphasis"><em>.py</em></span> or
+        <span class="epub__emphasis"><em>.pyc</em></span> this time around—the only obvious way you
+        can tell it’s a C library:</p><a id="I_programlisting4_d1e85925"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>dir(hello)</code></strong>                                     # C module attributes
+['__doc__', '__file__', '__name__', '__package__', 'message']
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>hello.__name__, hello.__file__</code></strong>
+('hello', 'hello.dll')
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>hello.message</code></strong>                                  # a C function object
+&lt;built-in function message&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>hello</code></strong>                                          # a C module object
+&lt;module 'hello' from 'hello.dll'&gt;
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>hello.__doc__</code></strong>                                  # docstrings in C code
+'mod doc'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>hello.message.__doc__</code></strong>
+'func doc'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>hello.message()</code></strong>                                # errors work too
+TypeError: argument must be sequence of length 1, not 0</pre>
+<p>Like any module in Python, you can also access the C extension
+        from a script file. The Python file in Example 20-3, for instance, imports
+        and uses the C extension module in Example 20-1.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id2"></a>
+<p class="epub__title">Example 20-3. PP4E\Integrate\Extend\Hello\hellouse.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"import and use a C extension library module"
+
+import hello
+print(hello.message('C'))
+print(hello.message('module ' + hello.__file__))
+
+for i in range(3):
+    reply = hello.message(str(i))
+    print(reply)</pre>
+</div>
+</div>
+<p>Run this script as any other—when the script first imports the
+        module <code class="epub__literal">hello</code>, Python automatically
+        finds the C module’s <span class="epub__emphasis"><em>.dll</em></span> object file in a
+        directory on the module search path and links it into the process
+        dynamically. All of this script’s output represents strings returned
+        from the C function in the file <span class="epub__emphasis"><em>hello.c</em></span>:</p><a id="I_programlisting4_d1e85971"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Extend/Hello$ <strong class="epub__userinput"><code>python hellouse.py</code></strong>
+Hello, C
+Hello, module /cygdrive/c/.../PP4E/Integrate/Extend/Hello/hello.dll
+Hello, 0
+Hello, 1
+Hello, 2</pre>
+<p>See Python’s manuals for more details on the code in our C
+        module, as well as tips for compilation and linkage. Of note, as an
+        alternative to makefiles, also see the <em class="epub__filename">disthello.py</em> and <em class="epub__filename">disthello-alt.py</em> files in the examples
+        package. Here’s a quick peek at the source code of the first of
+        these:</p><a id="I_programlisting4_d1e85984"></a>
+<pre class="epub__programlisting"># to build: python disthello.py build
+# resulting dll shows up in build subdir
+
+from distutils.core import setup, Extension
+setup(ext_modules=[Extension('hello', ['hello.c'])])</pre>
+<p>This is a Python script that specifies compilation of the C
+        extension using tools in the<a id="I_indexterm4_d1e85988"></a> <code class="epub__literal">distutils</code> package—a
+        standard part of Python that is used to build, install, and distribute
+        Python extensions coded in Python or C. <code class="epub__literal">distutil</code>’s larger goal is automated and
+        portable builds and installs for distributed packages, but it also
+        knows how to build C extensions portably. Systems generally include a
+        <em class="epub__filename">setup.py</em> which installs in
+        <em class="epub__filename">site-</em><em class="epub__filename">packages</em> of the standard library.
+        Regrettably, <code class="epub__literal">distutils</code> is also too
+        large to have survived the cleaver applied to this chapter’s material;
+        see its two manuals in Python’s manuals set for more <a id="I_indexterm4_d1e86010"></a><a id="I_indexterm4_d1e86012"></a>details.</p>
+</div>
+</div>
+</body>
+</html>

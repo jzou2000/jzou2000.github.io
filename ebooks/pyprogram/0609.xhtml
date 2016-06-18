@@ -1,0 +1,459 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Playing Media Files</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Playing Media Files"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="playing_media_files"></a>Playing Media Files</h1>
+</div>
+</div>
+</div>
+<p>We have <a id="sys6.10"></a><a id="me6.10"></a>space for just one last, quick example in this chapter,
+        so we’ll close with a bit of fun. Did you notice how the file
+        extensions for text and binary file types were hard-coded in the
+        directory search scripts of the prior two sections? That approach
+        works for the trees they were applied to, but it’s not necessarily
+        complete or portable. It would be better if we could deduce file type
+        from file name automatically. That’s exactly what Python’s<a id="mime6.10"></a> <code class="epub__literal">mimetypes</code> module can
+        do for us. In this section, we’ll use it to build a script that
+        attempts to launch a file based upon its media type, and in the
+        process develop general tools for opening media portably with specific
+        or generic players.</p>
+<p>As we’ve seen, on Windows this task is trivial—the <code class="epub__literal">os.startfile</code> call opens files per the
+        Windows registry, a system-wide mapping of file extension types to
+        handler programs. On other platforms, we can either run specific media
+        handlers per media type, or fall back on a resident web browser to
+        open the file generically using Python’s<a id="web6.10"></a> <code class="epub__literal">webbrowser</code> module.
+        Example 6-23 puts these ideas
+        into code.</p><div class="epub__example"><a id="pp4e_reverse_solidus_system-id62"></a>
+<p class="epub__title">Example 6-23. PP4E\System\Media\playfile.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/local/bin/python
+"""
+##################################################################################
+Try to play an arbitrary media file.  Allows for specific players instead of
+always using general web browser scheme.  May not work on your system as is;
+audio files use filters and command lines on Unix, and filename associations
+on Windows via the start command (i.e., whatever you have on your machine to
+run .au files--an audio player, or perhaps a web browser).  Configure and
+extend as needed.  playknownfile assumes you know what sort of media you wish
+to open, and playfile tries to determine media type automatically using Python
+mimetypes module; both try to launch a web browser with Python webbrowser module
+as a last resort when mimetype or platform unknown.
+##################################################################################
+"""
+
+import os, sys, mimetypes, webbrowser
+
+helpmsg = """
+Sorry: can't find a media player for '%s' on your system!
+Add an entry for your system to the media player dictionary
+for this type of file in playfile.py, or play the file manually.
+"""
+
+def trace(*args): print(*args)   # with spaces between
+
+##################################################################################
+# player techniques: generic and otherwise: extend me
+##################################################################################
+
+class MediaTool:
+    def __init__(self, runtext=''):
+        self.runtext = runtext
+    def run(self, mediafile, **options):            # most ignore options
+        fullpath = os.path.abspath(mediafile)       # cwd may be anything
+        self.open(fullpath, **options)
+
+class Filter(MediaTool):
+    def open(self, mediafile, **ignored):
+        media  = open(mediafile, 'rb')
+        player = os.popen(self.runtext, 'w')        # spawn shell tool
+        player.write(media.read())                  # send to its stdin
+
+class Cmdline(MediaTool):
+    def open(self, mediafile, **ignored):
+        cmdline = self.runtext % mediafile          # run any cmd line
+        os.system(cmdline)                          # use %s for filename
+
+class Winstart(MediaTool):                          # use Windows registry
+    def open(self, mediafile, wait=False, **other): # or os.system('start file')
+        if not wait:                                # allow wait for curr media
+            os.startfile(mediafile)
+        else:
+            os.system('start /WAIT ' + mediafile)
+
+class Webbrowser(MediaTool):
+    # file:// requires abs path
+    def open(self, mediafile, **options):
+        webbrowser.open_new('file://%s' % mediafile, **options)
+
+##################################################################################
+# media- and platform-specific policies: change me, or pass one in
+##################################################################################
+
+# map platform to player: change me!
+
+audiotools = {
+    'sunos5':  Filter('/usr/bin/audioplay'),             # os.popen().write()
+    'linux2':  Cmdline('cat %s &gt; /dev/audio'),           # on zaurus, at least
+    'sunos4':  Filter('/usr/demo/SOUND/play'),           # yes, this is that old!
+    'win32':   Winstart()                                # startfile or system
+   #'win32':   Cmdline('start %s')
+    }
+
+videotools = {
+    'linux2':  Cmdline('tkcVideo_c700 %s'),              # zaurus pda
+    'win32':   Winstart(),                               # avoid DOS pop up
+    }
+
+imagetools = {
+    'linux2':  Cmdline('zimager %s'),                    # zaurus pda
+    'win32':   Winstart(),
+    }
+
+texttools = {
+    'linux2':  Cmdline('vi %s'),                         # zaurus pda
+    'win32':   Cmdline('notepad %s')                     # or try PyEdit?
+    }
+
+apptools = {
+    'win32':   Winstart()   # doc, xls, etc: use at your own risk!
+    }
+
+# map mimetype of filenames to player tables
+
+mimetable = {'audio':       audiotools,
+             'video':       videotools,
+             'image':       imagetools,
+             'text':        texttools,                   # not html text: browser
+             'application': apptools}
+
+##################################################################################
+# top-level interfaces
+##################################################################################
+
+def trywebbrowser(filename, helpmsg=helpmsg, **options):
+    """
+    try to open a file in a web browser
+    last resort if unknown mimetype or platform, and for text/html
+    """
+    trace('trying browser', filename)
+    try:
+        player = Webbrowser()                            # open in local browser
+        player.run(filename, **options)
+    except:
+        print(helpmsg % filename)                        # else nothing worked
+
+def playknownfile(filename, playertable={}, **options):
+    """
+    play media file of known type: uses platform-specific
+    player objects, or spawns a web browser if nothing for
+    this platform; accepts a media-specific player table
+    """
+    if sys.platform in playertable:
+        playertable[sys.platform].run(filename, **options)     # specific tool
+    else:
+        trywebbrowser(filename, **options)                     # general scheme
+
+def playfile(filename, mimetable=mimetable, **options):
+    """
+    play media file of any type: uses mimetypes to guess media
+    type and map to platform-specific player tables; spawn web
+    browser if text/html, media type unknown, or has no table
+    """
+    contenttype, encoding = mimetypes.guess_type(filename)        # check name
+    if contenttype == None or encoding is not None:               # can't guess
+        contenttype = '?/?'                                       # poss .txt.gz
+    maintype, subtype = contenttype.split('/', 1)                 # 'image/jpeg'
+    if maintype == 'text' and subtype == 'html':
+        trywebbrowser(filename, **options)                        # special case
+    elif maintype in mimetable:
+        playknownfile(filename, mimetable[maintype], **options)   # try table
+    else:
+        trywebbrowser(filename, **options)                        # other types
+
+###############################################################################
+# self-test code
+###############################################################################
+
+if __name__ == '__main__':
+    # media type known
+    playknownfile('sousa.au', audiotools, wait=True)
+    playknownfile('ora-pp3e.gif', imagetools, wait=True)
+    playknownfile('ora-lp4e.jpg', imagetools)
+
+    # media type guessed
+    input('Stop players and press Enter')
+    playfile('ora-lp4e.jpg')                     # image/jpeg
+    playfile('ora-pp3e.gif')                     # image/gif
+    playfile('priorcalendar.html')               # text/html
+    playfile('lp4e-preface-preview.html')        # text/html
+    playfile('lp-code-readme.txt')               # text/plain
+    playfile('spam.doc')                         # app
+    playfile('spreadsheet.xls')                  # app
+    playfile('sousa.au', wait=True)              # audio/basic
+    input('Done')                                # stay open if clicked</pre>
+</div>
+</div>
+<p>Although it’s generally possible to open most media files by
+        passing their names to a web browser these days, this module provides
+        a simple framework for launching media files with more specific tools,
+        tailored by both media type and platform. A web browser is used only
+        as a fallback option, if more specific tools are not available. The
+        net result is an extendable media file player, which is as specific
+        and portable as the customizations you provide for its tables.</p>
+<p>We’ve seen the program launch tools employed by this script in
+        prior chapters. The script’s main new concepts have to do with the
+        modules it uses: the <code class="epub__literal">webbrowser</code>
+        module to open some files in a local web browser, as well as the
+        Python <code class="epub__literal">mimetypes</code> module to
+        determine media type from file name. Since these are the heart of this
+        code’s matter, let’s explore these briefly before we run the
+        <a id="I_indexterm5_d1e24905"></a><a id="I_indexterm5_d1e24907"></a>script.</p>
+<div class="epub__sect2" title="The Python webbrowser Module"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_python_webbrowser_module"></a>The Python webbrowser Module</h2>
+</div>
+</div>
+</div>
+<p>The standard library <code class="epub__literal">webbrowser</code> module <a id="web6.10.1"></a>used by this example provides a portable interface for
+          launching web browsers from Python scripts. It attempts to locate a
+          suitable web browser on your local machine to open a given URL (file
+          or web address) for display. Its interface is
+          straightforward:</p><a id="I_programlisting5_d1e24922"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; import webbrowser
+&gt;&gt;&gt; webbrowser.open_new('file://' + <em class="epub__replaceable"><code>fullfilename</code></em>)         # use os.path.abspath()</pre>
+<p>This code will open the named file in a new web browser window
+          using whatever browser is found on the underlying computer, or raise
+          an exception if it cannot. You can tailor the browsers used on your
+          platform, and the order in which they are attempted, by using the
+          <code class="epub__literal">BROWSER</code> environment variable and
+          <code class="epub__literal">register</code> function. By default,
+          <code class="epub__literal">webbrowser</code> attempts to be
+          automatically portable across platforms.</p>
+<p>Use an argument string of the form “file://...” or
+          “http://...” to open a file on the local computer or web server,
+          respectively. In fact, you can pass in any URL that the browser
+          understands. The following pops up Python’s home page in a new
+          locally-running browser window, for example:</p><a id="I_programlisting5_d1e24940"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; webbrowser.open_new('http://www.python.org')</pre>
+<p>Among other things, this is an easy way to display HTML
+          documents as well as media files, as demonstrated by this section’s
+          example. For broader applicability, this module can be used as both
+          command-line script (Python’s <code class="epub__literal">-m</code>
+          module search path flag helps here) and as importable tool:</p><a id="I_programlisting5_d1e24947"></a>
+<pre class="epub__programlisting">C:\Users\mark\Stuff\Websites\public_html&gt; <strong class="epub__userinput"><code>python -m webbrowser about-pp.html</code></strong>
+C:\Users\mark\Stuff\Websites\public_html&gt; <strong class="epub__userinput"><code>python -m webbrowser -n about-pp.html</code></strong>
+C:\Users\mark\Stuff\Websites\public_html&gt; <strong class="epub__userinput"><code>python -m webbrowser -t about-pp.html</code></strong>
+
+C:\Users\mark\Stuff\Websites\public_html&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import webbrowser</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>webbrowser.open('about-pp.html')</code></strong>            # reuse, new window, new tab
+True
+&gt;&gt;&gt; <strong class="epub__userinput"><code>webbrowser.open_new('about-pp.html')</code></strong>        # file:// optional on Windows
+True
+&gt;&gt;&gt; <strong class="epub__userinput"><code>webbrowser.open_new_tab('about-pp.html')</code></strong>
+True</pre>
+<p>In both modes, the difference between the three usage forms is
+          that the first tries to reuse an already-open browser window if
+          possible, the second tries to open a new window, and the third tries
+          to open a new tab. In practice, though, their behavior is totally
+          dependent on what the browser selected on your platform supports,
+          and even on the platform in general. All three forms may behave the
+          same.</p>
+<p>On Windows, for example, all three simply run <code class="epub__literal">os.startfile</code> by default and thus create a
+          new tab in an existing window under Internet Explorer 8. This is
+          also why I didn’t need the “file://” full URL prefix in the
+          preceding listing. Technically, Internet Explorer is only run if
+          this is what is registered on your computer for the file type being
+          opened; if not, that file type’s handler is opened instead. Some
+          images, for example, may open in a photo viewer instead. On other
+          platforms, such as Unix and Mac OS X, browser behavior differs, and
+          non-URL file names might not be opened; use “file://” for <span>portability</span>.</p>
+<p>We’ll use this module again later in this book. For example,
+          the PyMailGUI program in Chapter 14
+          will employ it as a way to display HTML-formatted email messages and
+          attachments, as well as program help. See the Python library manual
+          for more details. In Chapters 13 and 15,
+          we’ll also meet a related call, <code class="epub__literal">urllib.request.urlopen</code>, which fetches a
+          web page’s text given a URL, but does not open it in a browser; it
+          may be parsed, saved, or otherwise <a id="I_indexterm5_d1e24995"></a>used.</p>
+</div>
+<div class="epub__sect2" title="The Python mimetypes Module"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="the_python_mimetypes_module"></a>The Python mimetypes Module</h2>
+</div>
+</div>
+</div>
+<p>To make this <a id="mime6.10.2"></a>media player module even more useful, we also use the
+          Python <code class="epub__literal">mimetypes</code> standard library module to
+          automatically determine the media type from the filename. We get
+          back a <code class="epub__literal">type/subtype</code> MIME
+          content-type string if the type can be determined or <code class="epub__literal">None</code> if the guess failed:</p><a id="I_programlisting5_d1e25018"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>import mimetypes</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>mimetypes.guess_type('spam.jpg')</code></strong>
+('image/jpeg', None)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>mimetypes.guess_type('TheBrightSideOfLife.mp3')</code></strong>
+('audio/mpeg', None)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>mimetypes.guess_type('lifeofbrian.mpg')</code></strong>
+('video/mpeg', None)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>mimetypes.guess_type('lifeofbrian.xyz')</code></strong>       # unknown type
+(None, None)</pre>
+<p>Stripping off the first part of the content-type string gives
+          the file’s general media type, which we can use to select a generic
+          player; the second part (subtype) can tell us if text is plain or
+          HTML:</p><a id="I_programlisting5_d1e25037"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>contype, encoding = mimetypes.guess_type('spam.jpg')</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>contype.split('/')[0]</code></strong>
+'image'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>mimetypes.guess_type('spam.txt')</code></strong>              # subtype is 'plain'
+('text/plain', None)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>mimetypes.guess_type('spam.html')</code></strong>
+('text/html', None)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>mimetypes.guess_type('spam.html')[0].split('/')[1]</code></strong>
+'html'</pre>
+<p>A subtle thing: the second item in the tuple returned from the
+          <code class="epub__literal">mimetypes</code> guess is an encoding
+          type we won’t use here for opening purposes. We still have to pay
+          attention to it, though—if it is not <code class="epub__literal">None</code>, it means the file is compressed
+          (<code class="epub__literal">gzip</code> or <code class="epub__literal">compress</code>), even if we receive a media
+          content type. For example, if the filename is something like
+          <span class="epub__emphasis"><em>spam.gif.gz</em></span>, it’s a compressed image that we
+          don’t want to try to open directly:</p><a id="I_programlisting5_d1e25071"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>mimetypes.guess_type('spam.gz')</code></strong>              # content unknown
+(None, 'gzip')
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>mimetypes.guess_type('spam.gif.gz')</code></strong>          # don't play me!
+('image/gif', 'gzip')
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>mimetypes.guess_type('spam.zip')</code></strong>             # archives
+('application/zip', None)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>mimetypes.guess_type('spam.doc')</code></strong>             # office app files
+('application/msword', None)</pre>
+<p>If the filename you pass in contains a directory path, the
+          path portion is ignored (only the extension is used). This module is
+          even smart enough to give us a filename extension for a type—useful
+          if we need to go the other way, and create a file name from a
+          content type:</p><a id="I_programlisting5_d1e25087"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>mimetypes.guess_type(r'C:\songs\sousa.au')</code></strong>
+('audio/basic', None)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>mimetypes.guess_extension('audio/basic')</code></strong>
+'.au'</pre>
+<p>Try more calls on your own for more details. We’ll use the
+          <code class="epub__literal">mimetypes</code> module again in FTP
+          examples in Chapter 13 to determine
+          transfer type (text or binary), and in our email examples in
+          Chapters 13, 14,
+          and 16 to send, save, and open mail
+          attachments.</p>
+<p>In Example 6-23, we use
+          <code class="epub__literal">mimetypes</code> to select a table of
+          platform-specific player commands for the media type of the file to
+          be played. That is, we pick a player table for the file’s media
+          type, and then pick a command from the player table for the
+          platform. At both steps, we give up and run a web browser if there
+          is nothing more specific to be done.</p>
+<div class="epub__sect3" title="Using mimetypes guesses for SearchVisitor"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="using_mimetypes_guesses_for_searchvisito"></a>Using mimetypes guesses for SearchVisitor</h3>
+</div>
+</div>
+</div>
+<p>To use this <a id="I_indexterm5_d1e25121"></a>module for directing our text file search scripts we
+            wrote earlier in this chapter, simply extract the first item in
+            the content-type returned for a file’s name. For instance, all in
+            the following list are considered text (except “.pyw”, which we
+            may have to special-case if we must care):</p><a id="I_programlisting5_d1e25125"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>for ext in ['.txt', '.py', '.pyw', '.html', '.c', '.h', '.xml']:</code></strong>
+...     <strong class="epub__userinput"><code>print(ext, mimetypes.guess_type('spam' + ext))</code></strong>
+...
+.txt ('text/plain', None)
+.py ('text/x-python', None)
+.pyw (None, None)
+.html ('text/html', None)
+.c ('text/plain', None)
+.h ('text/plain', None)
+.xml ('text/xml', None)</pre>
+<p>We can add this technique to our earlier <code class="epub__literal">SearchVisitor</code> class by redefining its
+            candidate selection method, in order to replace its default
+            extension lists with <code class="epub__literal">mimetypes</code>
+<span>guesses—</span>yet more evidence of
+            the power of OOP customization at work:</p><a id="I_programlisting5_d1e25144"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import mimetypes</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from visitor import SearchVisitor</code></strong>             # or PP4E.Tools.visitor if not .
+&gt;&gt;&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class SearchMimeVisitor(SearchVisitor):</code></strong>
+...     <strong class="epub__userinput"><code>def candidate(self, fname):</code></strong>
+...         <strong class="epub__userinput"><code>contype, encoding = mimetypes.guess_type(fname)</code></strong>
+...         <strong class="epub__userinput"><code>return (contype and</code></strong>
+...                 <strong class="epub__userinput"><code>contype.split('/')[0] == 'text' and</code></strong>
+...                 <strong class="epub__userinput"><code>encoding == None)</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V = SearchMimeVisitor('mimetypes', trace=0)</code></strong>             # search key
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V.run(r'C:\temp\PP3E\Examples')</code></strong>                         # root dir
+C:\temp\PP3E\Examples\PP3E\extras\LosAlamosAdvancedClass\day1-system\data.txt ha
+s mimetypes
+C:\temp\PP3E\Examples\PP3E\Internet\Email\mailtools\mailParser.py has mimetypes
+C:\temp\PP3E\Examples\PP3E\Internet\Email\mailtools\mailSender.py has mimetypes
+C:\temp\PP3E\Examples\PP3E\Internet\Ftp\mirror\downloadflat.py has mimetypes
+C:\temp\PP3E\Examples\PP3E\Internet\Ftp\mirror\downloadflat_modular.py has mimet
+ypes
+C:\temp\PP3E\Examples\PP3E\Internet\Ftp\mirror\ftptools.py has mimetypes
+C:\temp\PP3E\Examples\PP3E\Internet\Ftp\mirror\uploadflat.py has mimetypes
+C:\temp\PP3E\Examples\PP3E\System\Media\playfile.py has mimetypes
+&gt;&gt;&gt; <strong class="epub__userinput"><code>V.scount, V.fcount, V.dcount</code></strong>
+(8, 1429, 186)</pre>
+<p>Because this is not completely accurate, though (you may
+            need to add logic to include extensions like “.pyw” missed by the
+            guess), and because it’s not even appropriate for all search
+            clients (some may want to search specific kinds of text only),
+            this scheme was not used for the original class. Using and
+            tailoring it for your own searches is left as optional <a id="I_indexterm5_d1e25186"></a>exercise.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Running the Script"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="running_the_script-id2"></a>Running the Script</h2>
+</div>
+</div>
+</div>
+<p>Now, when Example 6-23
+          is run from the command line, if all goes well its canned self-test
+          code at the end opens a number of audio, image, text, and other file
+          types located in the script’s directory, using either
+          platform-specific players or a general web browser. On my Windows 7
+          laptop, GIF and HTML files open in new IE browser tabs; JPEG files
+          in Windows Photo Viewer; plain text files in Notepad; DOC and XLS
+          files in Microsoft Word and Excel; and audio files in Windows Media
+          Player.</p>
+<p>Because the programs used and their behavior may vary widely
+          from machine to machine, though, you’re best off studying this
+          script’s code and running it on your own computer and with your own
+          test files to see what happens. As usual, you can also test it
+          interactively (use the package path like this one to import from a
+          different directory, assuming your module search path includes the
+          PP4E root):</p><a id="I_programlisting5_d1e25198"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from PP4E.System.Media.playfile import playfile</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>playfile(r'C:\movies\mov10428.mpg')</code></strong>                       # video/mpeg</pre>
+<p>We’ll use the <code class="epub__literal">playfile</code>
+          module again as an imported library like this in Chapter 13 to open media files downloaded by
+          FTP. Again, you may want to tweak this script’s tables for your
+          players. This script also assumes the media file is located on the
+          local machine (even though the <code class="epub__literal">webbrowser</code> module supports remote files
+          with “http://” names), and it does not currently allow different
+          players for most different MIME subtypes (it special-cases text to
+          handle “plain” and “html” differently, but no others). In fact, this
+          script is really just something of a simple framework that was
+          designed to be extended. As always, hack on; this is Python,
+          <a id="I_indexterm5_d1e25216"></a><a id="I_indexterm5_d1e25218"></a>after all.</p>
+</div>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>12.15. Task Queues (Unscheduled Tasks)</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">12.15. Task Queues (Unscheduled Tasks)</h3>
+<p class="docText">Tasks
+ in App Engine are used for additional work which might need to be done 
+as part of your application but that is not required in generating the 
+response that is sent back to the user. This ancillary work can include 
+actions such as logging, creating or updating datastore entities, 
+sending notifications, etc.</p>
+<p class="docText">App Engine supports two different types of tasks. The first are called <span class="docEmphasis">Push Queues</span>,
+ which are jobs that your application creates to be executed as quickly 
+and concurrently as possible. They do not allow for external influence. 
+The second type are <span class="docEmphasis">Pull Queues</span>,
+ which are a bit more flexible. They’re created by your App Engine 
+application, as well; however, they can be consumed or “leased” by your 
+App Engine or an external application via a representational state 
+transfer application programmers interface (REST API). We’ll spend most 
+of the upcoming section discussing Push Queues, and then conclude with a
+ brief word on Pull Queues.</p>
+
+<h4 class="docSection2Title" id="title-ID0ERJCK">12.15.1. Creating Tasks</h4>
+<p class="docText">Tasks can be started by the 
+handler of a user-facing request, or they can be created by another 
+task. An example of the latter is when all the work managed by the first
+ task was not able to be completed in a timely fashion (think of a 
+30-second or 10-minute deadline), so the work the first task was created
+ to do has not been completed yet.</p>
+<p class="docText">Tasks are added to task queues. Queues are named and can have different execution rates, <span class="docEmphasis">replenishment</span> or <span class="docEmphasis">burstiness</span>
+ rates, and retry parameters. Users get one default queue but must 
+specify others if more are desired (more on this later). Adding a task 
+to the default queue is straightforward and requires only one simple 
+call once you’ve imported the taskqueue API:</p>
+<div class="docText"><pre><span class="docEmphStrong">from</span> google.appengine.api <span class="docEmphStrong">import</span> taskqueue
+taskqueue.add()</pre></div><br/>
+<p class="docText">All queue requests will be 
+POSTed to URL, and thus a handler. If a custom URL is not created by the
+ user, requests will go to a default URL based on the name of the queue:
+ <tt>/_ah/queue/QUEUE_NAME</tt>. So for the default queue, that would be <tt>/_ah/queue/default</tt>. This means that you should provide a handler setting for it when creating your <tt>WSGIApplication</tt>:</p>
+<div class="docText"><pre><span class="docEmphStrong">def</span> main():
+    run_wsgi_app(webapp.WSGIApplication([
+        . . .
+        ('/_ah/queue/default', DoSomething),
+        . . .
+]))</pre></div><br/>
+<p class="docText">Of course, you need the code for the actual task, too; for example, the <tt>DoSomething</tt> handler we just defined:</p>
+<div class="docText"><pre><span class="docEmphStrong">class</span> DoSomething(webapp.RequestHandler):
+    <span class="docEmphStrong">def</span> post(self):
+        # do the task here
+        . . .
+        logging.info('completed task')</pre></div><br/>
+<p class="docText">We added a quick log entry at
+ the end to confirm the task had actually executed. Obviously, you don’t
+ have to log anything if you don’t want to, but it can also be a great 
+way to confirm that the task did complete. In fact, you can even use the
+ log entry as a placeholder if you haven’t completed the code to perform
+ the actual task’s work. (Of course, if you <span class="docEmphasis">do</span> choose to log something, ensure that you have an <tt>import</tt> <tt>logging</tt> statement somewhere up above.)</p>
+
+<h5 class="docSection3Title" id="title-ID0EKMCK">Configuring <tt>app.yaml</tt></h5>
+<p class="docText">With regard to configuration, you <span class="docEmphasis">could</span> leave your <tt>app.yaml</tt> alone with a default handler for all URLs:</p>
+<div class="docText"><pre>handlers:
+- url: .*
+  script: main.py</pre></div><br/>
+<p class="docText">This setting will direct normal application URLs to <tt>main.py</tt> but the pattern also matches <tt>/_ah/queue/default</tt>,
+ meaning task queue requests will be sent there, as well, which might be
+ what you want. However, the problem with this setup is that anyone can 
+go to your <tt>/_ah/queue/default</tt> URL externally, even if they were not created as a task.</p>
+<p class="docText">The best practice is to lock down this URL to task-only requests by adding a <tt>login:</tt> <tt>admin</tt>
+ directive as we did earlier when configuring your application to 
+receive e-mail. You will have to split off this special URL from all the
+ others, like this modified <tt>app.yaml</tt>:</p>
+<div class="docText"><pre>handlers:
+- url: /_ah/queue/default
+  script: main.py
+  login: admin
+
+- url: .*
+  script: main.py</pre></div><br/>
+
+<h5 class="docSection3Title" id="title-ID0E3NCK">Additional Task Creation and Configuration Options</h5>
+<p class="docText">Earlier we showed you the simplest way of creating a task by using <tt>taskqueue.add()</tt>.
+ Of course, there are plenty more options to let you create a task 
+destined for a different (not default) queue, time delay till execution 
+desired, the ability to pass in parameters to the task, etc. The list 
+that follows shows a few of these options, of which a user can choose 
+one or more:</p>
+<div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList"><tt>taskqueue.add(url='/task')</tt></p></div></li><li><div style="font-weight:normal"><p class="docList"><tt>taskqueue.add(countdown=300)</tt></p></div></li><li><div style="font-weight:normal"><p class="docList"><tt>taskqueue.add(url='/send_email',</tt> <tt>params={'groupID':</tt> <tt>1})</tt></p></div></li><li><div style="font-weight:normal"><p class="docList"><tt>taskqueue.add(url='/send_email?groupID=1', method='GET')</tt></p></div></li><li><div style="font-weight:normal"><p class="docList"><tt>taskqueue.add(queue_name='send-newsletter')</tt></p></div></li></ol></div>
+<p class="docText">In the first call, a specific 
+URL is passed in. This is for times when you prefer to use a custom URL,
+ as opposed to the default one. In the second case, a countdown 
+parameter is given to delay execution of the task until at least a 
+certain number of seconds have passed. The third call shows an example 
+of both a custom URL as well as passing in task handler parameters. The 
+fourth example is the same as the third, except that the user has asked 
+for a <tt>GET</tt> request rather than the default <tt>POST</tt>. The final example we’re going to look at is when you’ve defined a custom task queue instead of using the default.</p>
+<p class="docText">These are just a few of the parameters that <tt>taskqueue.add()</tt> supports. You can read about the rest at http://code.google.com/appengine/docs/python/taskqueue/functions.html.</p>
+<p class="docText">So far, all of our previous 
+examples have been using the default queue. You can create other queues,
+ too; as of this writing, you can have up to ten additional queues for 
+free applications and a hundred for those with billing enabled (subject 
+to change, however). To do so, you’ll configure them in a file named <tt>queue.yaml</tt> in a format that looks like the following:</p>
+<div class="docText"><pre>queue:
+- name: default
+  rate: 1/s
+  bucket_size: 10
+
+- name: send-newsletter
+  rate: 1/d</pre></div><br/>
+<p class="docText">The default is normally created on its own, but if you want to choose different parameters for it, you can specify those in <tt>queue.yaml</tt>, as we just did, overriding the default <tt>rate</tt> of 5/s and <tt>bucket_size</tt> of 5. (The <tt>rate</tt> is how fast tasks are processed, and the <tt>bucket_size</tt>
+ controls how quickly a queue can process succeeding tasks.) The 
+send-newsletter queue is for a once-a-day, opt-in e-mail newsletter. You
+ can read more about all the configuration parameters for queues at http://code.google.com/appengine/docs/python/config/queue.html.</p>
+<p class="docText">The final word on tasks is 
+that there is another kind of queue that gives developers more 
+flexibility in terms of how and when tasks are created as well as 
+consumed and completed. The types of task queues discussed in this 
+section are Push Queues, which means that your application generates 
+tasks on demand, pushing the work to queues as necessary.</p>
+<p class="docText">We mentioned that App 
+Engine has an alternative task interface by which jobs can be created in
+ Pull Queues. These queues can be accessed directly by App Engine 
+(creating or consuming work) or accessed from external applications via a
+ REST interface. This means that work can originate from an App Engine 
+application and be executed or processed elsewhere, if desired. Because 
+of this, there is a more flexible execution timeline. More information 
+on pull queues is available in the documentation at http://code.google.com/appengine/docs/python/taskqueue/overviewpull.html.</p>
+
+<h5 class="docSection3Title" id="title-ID0EZSCK">Sending E-Mail as a Task</h5>
+<p class="docText">In an earlier example, we 
+presented an example of how to send e-mail from your application. If 
+you’re only sending a single message, perhaps to the administrator of 
+your application whenever someone makes a blog post entry, it’s not that
+ big of a deal to also send the e-mail as part of the handling of that 
+request. However, if you need to send e-mail to thousands of customers, 
+it’s probably less of a good idea.</p>
+<p class="docText">Instead, the work of sending 
+all this e-mail is a great candidate for a task. Rather than sending the
+ e-mail, the handler will create the task, pass in the parameters (such 
+as all the e-mail addresses or a group ID of the group of users to 
+receive the message), and then return the response back to the user 
+while the task sends the e-mail on its own time (not that of the users).</p>
+<p class="docText">Suppose that we have a Web 
+template that lets a user configure an e-mail message and recipient 
+group. When users submit the form to the <tt>/submit</tt> URL, it’s handled by the <tt>FormHandler</tt> class, for which part of it might look like this:</p>
+<div class="docText"><pre>class FormHandler(webapp.RequestHandler):
+    def post(self): # should run at most 1/s
+        groupID = self.request.get('group')
+        taskqueue.add(params={'groupID': groupID})
+        . . .</pre></div><br/>
+<p class="docText">The <tt>FormHandler.</tt><tt>post()</tt> method makes a call to <tt>taskqueue.add()</tt>,
+ which adds a task on the default queue, passing in the ID of the group 
+that will be receiving the e-mail newsletter. When the task is executed 
+by App Engine, it issues a <tt>POST</tt> to <tt>/_ah/queue/default</tt> for which we need to define another handler class for the task.</p>
+<p class="docText">Because we’re using the default queue here, we’ll take the <tt>app.yaml</tt> as defined in the previous subsection with the additional security lock of <tt>login:</tt> <tt>admin</tt>. Now our main handler (<tt>main.py</tt>),
+ can specify the handlers for the form (in the previous example) as well
+ as for the upcoming task handler we’re going to create:</p>
+<div class="docText"><pre><span class="docEmphStrong">def</span> main():
+    run_wsgi_app(webapp.WSGIApplication([
+        . . .
+        ('/submit', FormHandler),
+        ('/_ah/queue/default', SendNewsletter),
+        . . .
+]))</pre></div><br/>
+<p class="docText">Now let’s define the task handler, <tt>SendNewsletter</tt>,
+ which will receive an inbound request along with the group ID, as sent 
+from form handler. We’ll then forward it to a generalized function to 
+carry out the distribution of the newsletter e-mail messages. Here’s one
+ way you can create the <tt>SendNewsletter</tt> class:</p>
+<div class="docText"><pre><span class="docEmphStrong">class</span> SendNewsletter(webapp.RequestHandler):
+    <span class="docEmphStrong">def</span> post(self): # should run at most 1/s
+        groupID = self.request.get('group')
+        send_group_email(groupID)
+        . . .</pre></div><br/>
+<p class="docText">This, of course, presumes that you’ve created a nice <tt>send_group_email()</tt>
+ function to handle the task of taking a group ID, pulling in all the 
+member e-mail addresses (possibly extracting them from the datastore), 
+constructing the message body (from the datastore, auto-generated, 
+pulled from another server, etc.), and of course, making the actual call
+ to <tt>mail. send_mail()</tt>. Here’s what some of that code might look like:</p>
+<div class="docText"><pre><span class="docEmphStrong">from</span> datetime <span class="docEmphStrong">import</span> date
+<span class="docEmphStrong">from</span> google.appengine.api <span class="docEmphStrong">import</span> mail
+. . .
+
+<span class="docEmphStrong">def</span> send_group_email(groupID):
+    group_emails = . . . # get addresses for groupID members
+    msg_body = . . . # get custom msg for groupID members
+    mail.send_mail('noreply@APP_ID.appspotmail.com', group_emails,
+        '%s Newsletter' % date.today().strftime("%B %Y"), msg_body)</pre></div><br/>
+<p class="docText">Why did we create a separate <tt>send_group_email()</tt>
+ function? Couldn’t we have just rolled these lines of code into our 
+handler to avoid an additional function call? This is a valid argument; 
+however, we feel that code reuse is an even nobler goal. A separate 
+function gives you the option to use the same function elsewhere, 
+perhaps a command-line tool, a special administrator screen/function, or
+ even another application. If you roll this code into our handler here, 
+you’d have to cut and paste it out or eventually split it up into two 
+functions anyway, so we might as well do it now.</p>
+<p class="docText">It’s clear that it’s not too 
+difficult to create tasks to perform non-user-facing application work. 
+Tasks are very popular with App Engine users; we invite you to give them
+ a try. But before you do, we also recommend that you consider a 
+convenience package if your needs are simpler than those of others: the <tt>deferred</tt> library.</p>
+
+<h5 class="docSection3Title" id="title-ID0EFYCK">The <tt>deferred</tt> Package</h5>
+<p class="docText">As you read in the previous 
+subsection, App Engine’s tasks queues are a great way to delegate 
+additional work. This work is typically not user-facing, and typically, 
+developers don’t want such activities to impact the time it takes to 
+respond back to their users. However, although tasks offer the App 
+Engine developer flexibility in terms of customizing the creation and 
+execution of tasks, it still seems like a bit of work required to just 
+run some simple tasks. This is where <tt>deferred</tt> comes in.</p>
+<p class="docText">The <tt>deferred</tt> package 
+is a convenience tool that hides much of the effort in setting up and 
+executing tasks: you have to adjust your form handler to create tasks, 
+you have to extract and provide the appropriate task parameters and 
+execution guidelines, you have to create and configure separate task 
+handlers, etc. Why can’t I just <span class="docEmphasis">delegate that to a task</span>? That’s pretty much <span class="docEmphasis">exactly</span> what <tt>deferred</tt> offers.</p>
+<p class="docText">You’re only presented with a single function, <tt>deferred.defer()</tt>, that you’ll use to create a deferred task. It can be as simple as a logging call, such as the following:</p>
+<div class="docText"><pre><span class="docEmphStrong">from</span> google.appengine.ext <span class="docEmphStrong">import</span> deferred
+deferred.defer(logging.info, "Called a deferred task")</pre></div><br/>
+<p class="docText">Other than configuring your application to use the <tt>deferred</tt>
+ library, there’s nothing else for you to do. Deferred tasks run (by 
+default) on the default queue, and as you read earlier, you don’t need 
+to do anything special
+ to set that up, unless you want to change the default characteristics 
+of the default queue. You also don’t need to specify a handler in your 
+application to handle the deferred task—the <tt>deferred</tt> library implements all of this. As you can see from the preceding short example, you only need to pass <tt>deferred.defer()</tt> a Python callable and any arguments and/or keyword arguments.</p>
+<p class="docText">In addition, you can also pass
+ in task arguments, too (such as the ones described in the last 
+section), but you need to disguise them somewhat to prevent them from 
+being mixed up with the arguments to your <tt>deferred</tt>
+ callable. To do so, you need to prepend them with a single underscore, 
+which precludes mistaking them for the parameters for your executable. 
+For example, to make the same call as above, but delayed by (at least) 5
+ seconds, you would use this, instead:</p>
+<div class="docText"><pre>deferred.defer(logging.info,
+    "Called a delayed deferred task", _countdown=5)</pre></div><br/>
+<p class="docText">We can easily convert out e-mail distribution example to this equivalent code:</p>
+<div class="docText"><pre><span class="docEmphStrong">class</span> SendNewsletter(webapp.RequestHandler):
+    <span class="docEmphStrong">def</span> post(self):
+        groupID = self.request.get('group')
+        deferred.defer(send_group_email, groupID)
+        . . .</pre></div><br/>
+<p class="docText">Deferred tasks can call functions, methods, and generally any object that is callable or that have <tt>__call__</tt> defined. From the documentation in the code, these are the callables that can be used as deferred tasks:</p>
+<div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Functions defined in the top level of a module</p></div></li><li><div style="font-weight:normal"><p class="docList">Classes defined in the top level of a module</p><div style="font-weight:bold"><ol class="docList" type="a"><li><div style="font-weight:normal"><p class="docList">Instances of those classes that implement <tt>__call__</tt></p></div></li><li><div style="font-weight:normal"><p class="docList">Instance methods of objects of those classes</p></div></li><li><div style="font-weight:normal"><p class="docList">Class methods of those classes</p></div></li></ol></div></div></li><li><div style="font-weight:normal"><p class="docList">Built-in functions</p></div></li><li><div style="font-weight:normal"><p class="docList">Built-in methods</p></div></li></ol></div>
+<p class="docText">However, the following are not permitted (also documented in the code):</p>
+<ul><li><p class="docList">Nested functions or closures</p></li><li><p class="docList">Nested classes or objects of them</p></li><li><p class="docList">Lambda functions</p></li><li><p class="docList">Static methods</p></li></ul>
+<p class="docText">Furthermore,
+ all the parameters of the callable used must be “pickleable,” meaning 
+just your basic Python objects, such as constants, numbers, strings, 
+sequences, and hashing types. For a full list, you can consult the 
+official Python documentation at http://docs.python.org/release/2.5.4/lib/node317.html (Python 2.5) or http://docs.python.org/library/pickle.html#what-can-be-pickled-and-unpickled (latest Python version).</p>
+<p class="docText">The only other restriction with our example is that <tt>send_group_email()</tt>
+ needs to be in a different module and an import added to our main 
+handler. The reason for this is because at the time you “defer” your 
+task and it’s “serialized,” it records that your code belongs to the <tt>__main__</tt> module, but when the <tt>deferred</tt> package executes your callable after receiving it from the <tt>POST</tt> request that is created by the task, the <tt>deferred</tt> module is what is executing (hence it’s [also] <tt>__main__</tt>, which means it won’t be able to find your code). You’ll receive an error that looks like the following if your <tt>deferred</tt> function were called <tt>foo()</tt>:</p>
+<div class="docText"><pre>Traceback (most recent call last):
+  File "/usr/local/google_appengine/google/appengine/ext/deferred/
+deferred.py", line 258, in post
+    run(self.request.body)
+  File "/usr/local/google_appengine/google/appengine/ext/deferred/
+deferred.py", line 122, in run
+    raise PermanentTaskFailure(e)
+PermanentTaskFailure: 'module' object has no attribute 'foo'</pre></div><br/>
+<p class="docText">However, by placing it outside of <tt>main.py</tt>
+ (or whatever Python module contains your main handler), you will avoid 
+this confusion and have your code be imported and execute properly. If 
+you would like a quick refresher on <tt>__main__</tt>, read the chapter on modules in <span class="docEmphasis">Core Python</span>. To find more about <tt>deferred</tt>, check out the original article at http://code.google.com/appengine/articles/deferred.html.</p>
+</div>
+</body>
+</html>

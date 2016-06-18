@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Reloading Callback Handlers Dynamically</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Reloading Callback Handlers Dynamically"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="reloading_callback_handlers_dynamically"></a>Reloading Callback Handlers Dynamically</h1>
+</div>
+</div>
+</div>
+<p>Our next GUI programming <a id="gui10.6"></a><a id="call10.6"></a>technique is all about changing a GUI while it is
+        <span>running—</span>the ultimate in
+        customization. The Python <code class="epub__literal">imp.reload</code> function lets you dynamically
+        change and reload a program’s modules without stopping the program.
+        For instance, you can bring up a text editor window to change the
+        source code of selected parts of a system while it is running and see
+        those changes show up immediately after reloading the changed
+        module.</p>
+<p>This is a powerful feature, especially for developing programs
+        that take a long time to restart. Programs that connect to databases
+        or network servers, initialize large objects, implement long-running
+        services, or travel through a long series of steps to retrigger a
+        callback are prime candidates for <code class="epub__literal">reload</code>. It can shave substantial time from
+        the development cycle and make systems more flexible.</p>
+<p>The catch for GUIs, though, is that because callback handlers
+        are registered as<a id="I_indexterm4_d1e42786"></a> <span class="epub__emphasis"><em>object references</em></span> rather than
+        module and object names, reloads of callback handler functions are
+        ineffective after the callback has been registered. The Python
+        <code class="epub__literal">imp.reload</code> operation works by
+        changing a module object’s contents in place. Because tkinter stores a
+        pointer to the registered handler object directly, though, it is
+        oblivious to any reloads of the module that the handler came from.
+        That is, tkinter will still reference a module’s old objects even
+        after the module is reloaded and changed.</p>
+<p>This is a subtle thing, but you really only need to remember
+        that you must do something special to reload callback handler
+        functions dynamically. Not only do you need to explicitly request
+        reloading of the modules that you change, but you must also generally
+        provide an indirection layer that routes callbacks from registered
+        objects to modules so that reloads have impact.</p>
+<p>For example, the script in Example 10-14 goes the extra
+        mile to indirectly dispatch callbacks to functions in an explicitly
+        reloaded module. The callback handlers registered with tkinter are
+        method objects that do nothing but reload and dispatch again. Because
+        the true callback handler functions are fetched through a module
+        object, reloading that module makes the latest versions of the
+        functions accessible.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id119"></a>
+<p class="epub__title">Example 10-14. PP4E\Gui\Tools\rad.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># reload callback handlers dynamically
+
+from tkinter import *
+import radactions           # get initial callback handlers
+from imp import reload      # moved to a module in Python 3.X
+
+class Hello(Frame):
+    def __init__(self, master=None):
+        Frame.__init__(self, master)
+        self.pack()
+        self.make_widgets()
+
+    def make_widgets(self):
+        Button(self, text='message1', command=self.message1).pack(side=LEFT)
+        Button(self, text='message2', command=self.message2).pack(side=RIGHT)
+
+    def message1(self):
+        reload(radactions)         # need to reload actions module before calling
+        radactions.message1()      # now new version triggered by pressing button
+
+    def message2(self):
+        reload(radactions)         # changes to radactions.py picked up by reload
+        radactions.message2(self)  # call the most recent version; pass self
+
+    def method1(self):
+        print('exposed method...')       # called from radactions function
+
+Hello().mainloop()</pre>
+</div>
+</div>
+<p>When run, this script makes a two-button window that triggers
+        the <code class="epub__literal">message1</code> and <code class="epub__literal">message2</code> methods. Example 10-15 contains the
+        actual callback handler code. Its functions receive a <code class="epub__literal">self</code> argument that gives access back to the
+        <code class="epub__literal">Hello</code> class object, as though these
+        were real methods. You can change this file any number of times while
+        the <code class="epub__literal">rad</code> script’s GUI is active;
+        each time you do so, you’ll change the behavior of the GUI when a
+        button press occurs.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id120"></a>
+<p class="epub__title">Example 10-15. PP4E\Gui\Tools\radactions.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># callback handlers: reloaded each time triggered
+
+def message1():                 # change me
+    print('spamSpamSPAM')       # or could build a dialog...
+
+def message2(self):
+    print('Ni! Ni!')            # change me
+    self.method1()              # access the 'Hello' instance...</pre>
+</div>
+</div>
+<p>Try running <code class="epub__literal">rad</code> and editing
+        the messages printed by <code class="epub__literal">radactions</code>
+        in another window; you should see your new messages printed in the
+        <code class="epub__literal">stdout</code> console window each time the
+        GUI’s buttons are pressed. This example is deliberately simple to
+        illustrate the concept, but the actions reloaded like this in practice
+        might build pop-up dialogs, new top-level windows, and so on.
+        Reloading the code that creates such windows would also let us
+        dynamically change their appearances.</p>
+<p>There are other ways to change a GUI while it’s running. For
+        instance, we saw in Chapter 9
+        that appearances can be altered at any time by calling the widget
+        <code class="epub__literal">config</code> method, and widgets can be
+        added and deleted from a display dynamically with methods such as
+        <code class="epub__literal">pack_forget</code> and <code class="epub__literal">pack</code> (and their <code class="epub__literal">grid</code> manager relatives). Furthermore,
+        passing a new <code class="epub__literal">command=</code><em class="epub__replaceable"><code>action</code></em>
+        option setting to a widget’s <code class="epub__literal">config</code>
+        method might reset a callback handler to a new action object on the
+        fly; with enough support code, this may be a viable alternative to the
+        indirection scheme used earlier to make reloads more effective in
+        GUIs.</p>
+<p>Of course, not all GUIs need to be so dynamic. Imagine a game
+        which allows character modification, though—dynamic reloads in such a
+        system can greatly enhance their utility. (I’ll leave the task of
+        extending this example with a massively multiplayer online
+        role-playing game server as suggested <a id="I_indexterm4_d1e42873"></a><a id="I_indexterm4_d1e42875"></a>exercise.)</p>
+</div>
+</div>
+</body>
+</html>

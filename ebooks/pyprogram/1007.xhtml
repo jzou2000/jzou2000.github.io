@@ -1,0 +1,636 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>GUIs, Threads, and Queues</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="GUIs, Threads, and Queues"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="guis_comma_threads_comma_and_queues"></a>GUIs, Threads, and Queues</h1>
+</div>
+</div>
+</div>
+<p>In Chapter 5, we <a id="gui10.8"></a>learned about threads and the queue mechanism that
+        threads typically use to communicate with one another. We also
+        described the application of those ideas to GUIs in the abstract. In
+        Chapter 9, we specialized some of
+        these topics to the tkinter GUI toolkit we’re using in this book and
+        expanded on the threaded GUI model in general, including thread safety
+        (or lack thereof) and the roles of queues and locks.</p>
+<p>Now that we’ve become fully functional GUI programmers, we can
+        finally see what these ideas translate to in terms of code. If you
+        skipped the related material in Chapter 5 or Chapter 9, you should probably go back
+        and take a look first; we won’t be repeating the thread or queue
+        background material in its entirety here.</p>
+<p>The application to GUIs, however, is straightforward. Recall
+        that long-running operations must generally be run in parallel
+        threads, to avoid blocking the GUI from updating itself or responding
+        to new user requests. Long-running operations can include
+        time-intensive function calls, downloads from servers, blocking
+        input/output calls, and any task which might insert a noticeable
+        delay. In our packing and unpacking examples earlier in this chapter,
+        for instance, we noted that the calls to run the actual file
+        processing should generally run in threads so that the main GUI thread
+        is not blocked until they finish.</p>
+<p>In the general case, if a GUI waits for anything to finish, it
+        will be completely unresponsive during the wait—it can’t be resized,
+        it can’t be minimized, and it won’t even redraw itself if it is
+        covered and uncovered by other windows. To avoid being blocked this
+        way, the GUI must run long-running tasks in parallel, usually with
+        threads that can share program state. That way, the main GUI thread is
+        freed up to update the display and respond to new user interactions
+        while threads do other work. As we’ve also seen, the tkinter <code class="epub__literal">update</code> call can help in some contexts, but
+        it only refreshes the display when it can be called; threads fully
+        parallelize long-running operations and offer a more general
+        solution.</p>
+<p>However, because, as we learned in Chapter 9, only the main thread should
+        generally update a GUI’s display, threads you start to handle
+        long-running tasks should not update the display with results
+        themselves. Rather, they should place data on a queue (or other
+        mechanism), to be picked up and displayed by the main GUI thread. To
+        make this work, the main thread typically runs a timer-based loop that
+        periodically checks the queue for new results to be displayed. Spawned
+        threads produce and queue data but know nothing about the GUI; the
+        main GUI thread consumes and displays results but does not generate
+        them.</p>
+<p>Because of its division of labor, we usually call this a
+        <span class="epub__emphasis"><em>producer</em></span>/<span class="epub__emphasis"><em>consumer</em></span> model—task
+        threads produce data which the GUI thread consumes. The long-running
+        task threads are also sometimes called <span class="epub__emphasis"><em>workers</em></span>,
+        because they handle the work of producing results behind the scenes,
+        for the GUI to present to a user. In some sense, the GUI is also a
+        <span class="epub__emphasis"><em>client</em></span> to worker thread
+        <span class="epub__emphasis"><em>servers</em></span>, though that terminology is usually
+        reserved for more specific process-based roles; servers provide data
+        sources which are longer-lived and more loosely coupled (though a GUI
+        can also display data from independent servers). Whatever we call it,
+        this model both avoids blocking the GUI while tasks run and avoids
+        potentially parallel updates to the GUI itself.</p>
+<p>As a more concrete example, suppose your GUI needs to display
+        telemetry data sent in real time from a satellite over sockets (an IPC
+        tool introduced in Chapter 5). Your
+        program has to be responsive enough to not lose incoming data, but it
+        also cannot get stuck waiting for or processing that data. To achieve
+        both goals, spawn threads that fetch the incoming data and throw it on
+        a queue, to be picked up and displayed periodically by the main GUI
+        thread. With such a separation of labor, the GUI isn’t blocked by the
+        satellite, nor vice versa—the GUI itself will run independently of the
+        data streams, but because the data stream threads can run at full
+        speed, they’ll be able to pick up incoming data as fast as it’s sent.
+        GUI event loops are not generally responsive enough to handle
+        real-time inputs. Without the data stream threads, we might lose
+        incoming telemetry; with them, we’ll receive data as it is sent and
+        display it as soon as the GUI’s event loop gets around to picking it
+        up off the queue—plenty fast for the real human user to see. If no
+        data is sent, only the spawned threads wait, not the GUI
+        itself.</p>
+<p>In other scenarios, threads are required just so that the GUI
+        remains active during long-running tasks. While downloading a reply
+        from a web server, for example, your GUI must be able to redraw itself
+        if covered or resized. Because of that, the download call cannot be a
+        simple function call; it must run in parallel with the rest of your
+        <span>program—</span>typically, as a thread.
+        When the result is fetched, the thread must notify the GUI that data
+        is ready to be displayed; by placing the result on a queue, the
+        notification is <span>simple—</span>the main
+        GUI thread will find it the next time it checks the queue in its timer
+        callback function. For example, we’ll use threads and queues this way
+        in the PyMailGUI program in Chapter 14,
+        to allow multiple overlapping mail transfers to occur without blocking
+        the GUI <a id="I_indexterm4_d1e43010"></a>itself.</p>
+<div class="epub__sect2" title="Placing Data on Queues"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="placing_data_on_queues"></a>Placing Data on Queues</h2>
+</div>
+</div>
+</div>
+<p>Whether your GUIs interface with <a id="qu10.8.1"></a>satellites, websites, or something else, this
+          thread-based model turns out to be fairly simple in terms of code.
+          Example 10-18 is the GUI
+          equivalent of the queue-based threaded program we met earlier in
+          Chapter 5 (compare this with Example 5-14). In the context of a
+          GUI, the consumer thread becomes the GUI itself, and producer
+          threads add data to be displayed to the shared queue as it is
+          produced. The main GUI thread uses the tkinter <code class="epub__literal">after</code> method to check the queue for
+          results instead of an explicit loop.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id123"></a>
+<p class="epub__title">Example 10-18. PP4E\Gui\Tools\queuetest-gui.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># GUI that displays data produced and queued by worker threads
+
+import _thread, queue, time
+dataQueue = queue.Queue()    # infinite size
+
+def producer(id):
+    for i in range(5):
+        time.sleep(0.1)
+        print('put')
+        dataQueue.put('[producer id=%d, count=%d]' % (id, i))
+
+def consumer(root):
+    try:
+        print('get')
+        data = dataQueue.get(block=False)
+    except queue.Empty:
+        pass
+    else:
+        root.insert('end', 'consumer got =&gt; %s\n' % str(data))
+        root.see('end')
+    root.after(250, lambda: consumer(root))    # 4 times per sec
+
+def makethreads():
+    for i in range(4):
+        _thread.start_new_thread(producer, (i,))
+
+if __name__ == '__main__':
+    # main GUI thread: spawn batch of worker threads on each mouse click
+    from tkinter.scrolledtext import ScrolledText
+    root = ScrolledText()
+    root.pack()
+    root.bind('&lt;Button-1&gt;', lambda event: makethreads())
+    consumer(root)                       # start queue check loop in main thread
+    root.mainloop()                      # pop-up window, enter tk event loop</pre>
+</div>
+</div>
+<p>Observe how we fetch one queued data item per timer event
+          here. This is on purpose; although we could loop through all the
+          data items queued on each timer event, this might block the GUI
+          indefinitely in pathological cases where many items are queued
+          quickly (imagine a fast telemetry interface suddenly queueing
+          hundreds or thousands of results all at once). Processing one item
+          at a time ensures that the GUI will return to its event loop to
+          update the display and process new user inputs without becoming
+          blocked. The downside of this approach is that it may take awhile to
+          work through very many items placed on the queue. Hybrid schemes,
+          such as dispatching at most N queued items per timer event callback,
+          might be useful in some such scenarios; we’ll see an example like
+          this later in this section (Example 10-20).</p>
+<p>When this script is run, the main GUI thread displays the data
+          it grabs off the queue in the <code class="epub__literal">ScrolledText</code> window captured in Figure 10-11. A new batch of four
+          producer threads is started each time you left-click in the window,
+          and threads issue “get” and “put” messages to the standard output
+          stream (which isn’t synchronized in this example—printed messages
+          might overlap occasionally on some platforms, including Windows).
+          The producer threads issue sleep calls to simulate long-running
+          tasks such as downloading mail, fetching a query result, or waiting
+          for input to show up on a socket (more on sockets later in this
+          chapter). I left-clicked multiple times to encourage thread overlap
+          in Figure 10-11.</p><div class="epub__figure"><a id="display_updated_by_main_gui_thread"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e43054"></a><img alt="Display updated by main GUI thread" src="Images/getfile-30.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 10-11. Display updated by main GUI thread</p>
+</div>
+<div class="epub__sect3" title="Recoding with classes and bound methods"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="recoding_with_classes_and_bound_methods"></a>Recoding with classes and bound methods</h3>
+</div>
+</div>
+</div>
+<p>Example 10-19
+            takes <a id="cl10.8.1.1"></a><a id="bo10.8.1.1"></a>the model one small step further and migrates it to
+            a class to allow for future customization and reuse. Its
+            operation, window, and output are the same as the prior
+            non-object-oriented version, but the queue is checked more often,
+            and there are no standard output prints. Notice how we use
+            <span class="epub__emphasis"><em>bound methods</em></span> for button callbacks and thread
+            actions here; because bound methods retain both instance and
+            method, the threaded action has access to state information,
+            including the shared queue. This allows us to move the queue and
+            the window itself from the prior version’s global variables to
+            instance object state.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id124"></a>
+<p class="epub__title">Example 10-19. PP4E\Gui\Tools\queuetest-gui-class.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># GUI that displays data produced and queued by worker threads (class-based)
+
+import threading, queue, time
+from tkinter.scrolledtext import ScrolledText       # or PP4E.Gui.Tour.scrolledtext
+
+class ThreadGui(ScrolledText):
+    threadsPerClick = 4
+
+    def __init__(self, parent=None):
+        ScrolledText.__init__(self, parent)
+        self.pack()
+        self.dataQueue = queue.Queue()              # infinite size
+        self.bind('&lt;Button-1&gt;', self.makethreads)   # on left mouse click
+        self.consumer()                             # queue loop in main thread
+
+    def producer(self, id):
+        for i in range(5):
+            time.sleep(0.1)
+            self.dataQueue.put('[producer id=%d, count=%d]' % (id, i))
+
+    def consumer(self):
+        try:
+            data = self.dataQueue.get(block=False)
+        except queue.Empty:
+            pass
+        else:
+            self.insert('end', 'consumer got =&gt; %s\n' % str(data))
+            self.see('end')
+        self.after(100, self.consumer)    # 10 times per sec
+
+    def makethreads(self, event):
+        for i in range(self.threadsPerClick):
+            threading.Thread(target=self.producer, args=(i,)).start()
+
+if __name__ == '__main__':
+    root = ThreadGui()      # in main thread: make GUI, run timer loop
+    root.mainloop()         # pop-up window, enter tk event loop</pre>
+</div>
+</div>
+<p>Watch for this thread, timer loop, and shared queue
+            technique to resurface later in this chapter, as well as in Chapter 11’s more realistic PyEdit program
+            example. In PyEdit, we’ll use it to run external file searches in
+            threads, so they avoid blocking the GUI and may overlap in time.
+            We’ll also revisit the classic producer/consumer thread queue
+            model in a more realistic scenario later in this chapter, as a way
+            to avoid blocking a GUI that must read an input stream—the output
+            of another <a id="I_indexterm4_d1e43088"></a><a id="I_indexterm4_d1e43090"></a>program.</p>
+</div>
+<div class="epub__sect3" title="Thread exits in GUIs"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="thread_exits_in_guis"></a>Thread exits in GUIs</h3>
+</div>
+</div>
+</div>
+<p>Example 10-19
+            also uses Python’s<a id="I_indexterm4_d1e43099"></a><a id="I_indexterm4_d1e43104"></a><a id="I_indexterm4_d1e43109"></a> <code class="epub__literal">threading</code> module
+            instead of <code class="epub__literal">_thread</code>. This would
+            normally mean that, unlike the prior version, the program would
+            not exit if any producer threads are still running, unless they
+            are made daemons manually by setting their <code class="epub__literal">daemon</code> flag to <code class="epub__literal">True</code>. Remember that under <code class="epub__literal">threading</code>, programs exit when only
+            daemonic threads remain; the producer threads here inherit a
+            <code class="epub__literal">False</code> daemon value from the
+            thread that creates them, which prevents program exit while they
+            run.</p>
+<p>However, in this example the spawned threads finish too
+            quickly to noticeably defer program exit. Change this script’s
+            <code class="epub__literal">time.sleep</code> call to 2.0 seconds
+            to simulate longer-lived worker threads and witness this effect in
+            action—closing the window after a left-click erases the window,
+            but the program itself then does not exit for roughly 10 seconds
+            (e.g., its shell window is paused). If you do the same to the
+            prior <code class="epub__literal">_thread</code> version, or set
+            this version’s threads’ <code class="epub__literal">daemon</code>
+            flags to <code class="epub__literal">True</code>, the program
+            exits immediately instead.</p>
+<p>In more realistic GUIs, you’ll want to analyze exit policies
+            in the context of running threads, and code accordingly; both
+            nondaemonic <code class="epub__literal">threading</code> threads
+            and thread locks in general can be used to defer exits if needed.
+            Conversely, a perpetually running <code class="epub__literal">threading</code> thread might preclude a
+            desired shutdown if nondaemonic. See Chapter 5 for more on program exits and
+            daemonic threads (and other scary <a id="I_indexterm4_d1e43158"></a>topics!).</p>
+</div>
+</div>
+<div class="epub__sect2" title="Placing Callbacks on Queues"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="placing_callbacks_on_queues"></a>Placing Callbacks on Queues</h2>
+</div>
+</div>
+</div>
+<p>In the prior <a id="qu10.8.2"></a><a id="call10.8.2"></a>section’s examples, the data placed on the queue is
+          always a string. That’s sufficient for simple applications where
+          there is just one type of producer. If you may have many different
+          kinds of threads producing many different types of results running
+          at once, though, this can become difficult to manage. You’ll
+          probably have to insert and parse out some sort of type or action
+          information in the string so that the GUI knows how to process
+          it.</p>
+<p>Imagine an email client, for instance, where multiple sends
+          and receives may overlap in time; if all threads share the same
+          single queue, the information they place on it must somehow
+          designate the sort of event it represents—a downloaded mail to
+          display, a progress indicator update, a successful <a id="py10.8.2"></a>send completion, and so on. This isn’t entirely
+          hypothetical: we’ll confront this exact issue in Chapter 14’s PyMailGUI.</p>
+<p>Luckily, queues support much more than just strings—any type
+          of Python object can be placed on a queue. Perhaps the most general
+          of these is a callable object: by placing a function or other
+          callable object on the queue, a producer thread can tell the GUI how
+          to handle the message in a very direct way. The GUI simply calls the
+          objects it pulls off the queue. Since threads all run within the
+          same process and memory space, any type of callable object works on
+          a queue—simple functions, lambdas, and even bound methods that
+          combine a function with an implied subject object that gives access
+          to state information and methods. Any updates performed by the
+          callback object update state shared across the entire
+          process.</p>
+<p>Because Python makes it easy to handle functions and their
+          argument lists in generic fashion, this turns out to be easier than
+          it might sound. Example 10-20, for instance,
+          shows one way to throw callbacks on a queue that we’ll be using in
+          Chapter 14 for PyMailGUI. This module
+          comes with a handful of tools. Its <code class="epub__literal">ThreadCounter</code> class can be used as a
+          shared counter and Boolean flag (for example, to manage operation
+          overlap). The real meat here, though, is the queue interface
+          functions—in short, they allow clients to launch threads which queue
+          their exit actions, to be dispatched in the main thread by a timer
+          loop.</p>
+<p>In some ways this example is just a variation on those of the
+          prior section—we still run a timer loop here to pull items off the
+          queue in the main thread. For both responsiveness and efficiency,
+          this timer loop pulls at most N items on each timer event, not just
+          one (which may take too long or incur overheads for a short timer
+          delay), and not all queued (which may block indefinitely when many
+          items are produced quickly). We’ll leverage this per-event batching
+          feature to work through many progress updates in PyMailGUI without
+          having to devote CPU resources to quick timer events that are
+          normally <span>unnecessary</span>.</p>
+<p>The main difference to notice here, though, is that we
+          <span class="epub__emphasis"><em>call</em></span> the object pulled off the queue, and the
+          producer threads have been generalized to place a success or failure
+          callback on the queue in response to exits and exceptions. Moreover,
+          the actions that run in producer threads receive a progress status
+          function which, when called, simply adds a progress indicator
+          callback to the queue to be dispatched by the main thread. We can
+          use this, for example, to show progress in the GUI during network
+          downloads.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id125"></a>
+<p class="epub__title">Example 10-20. PP4E\Gui\Tools\threadtools.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+#################################################################################
+System-wide thread interface utilities for GUIs.
+
+Implements a single thread callback queue and checker timer loop shared by
+all the windows in a program; worker threads queue their exit and progress
+actions to be run in the main thread; this doesn't block the GUI - it just
+spawns operations and manages and dispatches exits and progress; worker
+threads can overlap freely with the main thread, and with other workers.
+
+Using a queue of callback functions and arguments is more useful than a
+simple data queue if there can be many kinds of threads running at the
+same time - each kind may have different implied exit actions.
+
+Because GUI API is not completely thread-safe, instead of calling GUI
+update callbacks directly after thread main action, place them on a shared
+queue, to be run from a timer loop in the main thread, not a child thread;
+this also makes GUI update points less random and unpredictable; requires
+threads to be split into main action, exit actions, and progress action.
+
+Assumes threaded action raises an exception on failure, and has a 'progress'
+callback argument if it supports progress updates;  also assumes callbacks
+are either short-lived or update as they run, and that queue will contain
+callback functions (or other callables) for use in a GUI app - requires a
+widget in order to schedule and catch 'after' event loop callbacks; to use
+this model in non-GUI contexts, could use simple thread timer instead.
+#################################################################################
+"""
+
+# run even if no threads                 # in standard lib now
+try:                                     # raise ImportError to
+    import _thread as thread             # run with GUI blocking
+except ImportError:                      # if threads not available
+    import _dummy_thread as thread       # same interface, no threads
+
+# shared cross-process queue
+# named in shared global scope, lives in shared object memory
+import queue, sys
+threadQueue = queue.Queue(maxsize=0)              # infinite size
+
+
+#################################################################################
+# IN MAIN THREAD - periodically check thread completions queue; run implied GUI
+# actions on queue in this main GUI thread; one consumer (GUI), and multiple
+# producers (load, del, send); a simple list may suffice too: list.append and
+# pop atomic?; 4E: runs at most N actions per timer event: looping through all
+# queued callbacks on each timer event may block GUI indefinitely, but running
+# only one can take a long time or consume CPU for timer events (e.g., progress);
+# assumes callback is either short-lived or updates display as it runs: after a
+# callback run, the code here reschedules and returns to event loop and updates;
+# because this perpetual loop runs in main thread, does not stop program exit;
+#################################################################################
+
+def threadChecker(widget, delayMsecs=100, perEvent=1):       # 10x/sec, 1/timer
+    for i in range(perEvent):                                # pass to set speed
+        try:
+            (callback, args) = threadQueue.get(block=False)  # run &lt;= N callbacks
+        except queue.Empty:
+            break                                            # anything ready?
+        else:
+            callback(*args)                                  # run callback here
+
+    widget.after(delayMsecs,                                 # reset timer event
+        lambda: threadChecker(widget, delayMsecs, perEvent)) # back to event loop
+
+
+#################################################################################
+# IN A NEW THREAD - run action, manage thread queue puts for exits and progress;
+# run action with args now, later run on* calls with context; calls added to
+# queue here are dispatched in main thread only, to avoid parallel GUI updates;
+# allows action to be fully ignorant of use in a thread here; avoids running
+# callbacks in thread directly: may update GUI in thread, since passed func in
+# shared memory called in thread; progress callback just adds callback to queue
+# with passed args; don't update in-progress counters here: not finished till
+# exit actions taken off queue and dispatched in main thread by threadChecker;
+#################################################################################
+
+def threaded(action, args, context, onExit, onFail, onProgress):
+    try:
+        if not onProgress:            # wait for action in this thread
+            action(*args)             # assume raises exception if fails
+        else:
+            def progress(*any):
+                threadQueue.put((onProgress, any + context))
+            action(progress=progress, *args)
+    except:
+        threadQueue.put((onFail, (sys.exc_info(), ) + context))
+    else:
+        threadQueue.put((onExit, context))
+
+def startThread(action, args, context, onExit, onFail, onProgress=None):
+    thread.start_new_thread(
+        threaded, (action, args, context, onExit, onFail, onProgress))
+
+
+#################################################################################
+# a thread-safe counter or flag: useful to avoid operation overlap if threads
+# update other shared state beyond that managed by the thread callback queue
+#################################################################################
+
+class ThreadCounter:
+    def __init__(self):
+        self.count = 0
+        self.mutex = thread.allocate_lock()     # or use Threading.semaphore
+    def incr(self):
+        self.mutex.acquire()                    # or with self.mutex:
+        self.count += 1
+        self.mutex.release()
+    def decr(self):
+        self.mutex.acquire()
+        self.count -= 1
+        self.mutex.release()
+    def __len__(self): return self.count        # True/False if used as a flag
+
+
+#################################################################################
+# self-test code: split thread action into main, exits, progress
+#################################################################################
+
+if __name__ == '__main__':                      # self-test code when run
+    import time                                 # or PP4E.Gui.Tour.scrolledtext
+    from tkinter.scrolledtext import ScrolledText
+
+    def onEvent(i):                             # code that spawns thread
+        myname = 'thread-%s' % i
+        startThread(
+            action     = threadaction,
+            args       = (i, 3),
+            context    = (myname,),
+            onExit     = threadexit,
+            onFail     = threadfail,
+            onProgress = threadprogress)
+
+    # thread's main action
+    def threadaction(id, reps, progress):       # what the thread does
+        for i in range(reps):
+            time.sleep(1)
+            if progress: progress(i)            # progress callback: queued
+        if id % 2 == 1: raise Exception         # odd numbered: fail
+
+    # thread exit/progress callbacks: dispatched off queue in main thread
+    def threadexit(myname):
+        text.insert('end', '%s\texit\n' % myname)
+        text.see('end')
+
+    def threadfail(exc_info, myname):
+        text.insert('end', '%s\tfail\t%s\n' % (myname, exc_info[0]))
+        text.see('end')
+
+    def threadprogress(count, myname):
+        text.insert('end', '%s\tprog\t%s\n' % (myname, count))
+        text.see('end')
+        text.update()   # works here: run in main thread
+
+    # make enclosing GUI and start timer loop in main thread
+    # spawn batch of worker threads on each mouse click: may overlap
+
+    text = ScrolledText()
+    text.pack()
+    threadChecker(text)                 # start thread loop in main thread
+    text.bind('&lt;Button-1&gt;',             # 3.x need list for map, range ok
+              lambda event: list(map(onEvent, range(6))) )
+    text.mainloop()                     # pop-up window, enter tk event loop</pre>
+</div>
+</div>
+<p>This module’s comments describe its implementation, and its
+          self-test code demonstrates how this interface is used. Notice how a
+          thread’s behavior is split into main action, exit actions, and
+          optional progress action—the main action runs in the new thread, but
+          the others are queued to be dispatched in the main thread. That is,
+          to use this module, you will essentially break a modal operation
+          into thread and post-thread steps, with an optional progress call.
+          Generally, only the thread step should be long running.</p>
+<p>When Example 10-20
+          is run standalone, on each button click in a <code class="epub__literal">ScrolledTest</code>, it starts up six threads,
+          all running the <code class="epub__literal">threadaction</code>
+          function. As this threaded function runs, calls to the passed-in
+          progress function place a callback on the queue, which invokes
+          <code class="epub__literal">threadprogress</code> in the main
+          thread. When the threaded function exits, the interface layer will
+          place a callback on the queue that will invoke either <code class="epub__literal">threadexit</code> or <code class="epub__literal">threadfail</code> in the main thread, depending
+          upon whether the threaded function raised an exception. Because all
+          the callbacks placed on the queue are pulled off and run in the main
+          thread’s timer loop, this guarantees that GUI updates occur in the
+          main thread only and won’t overlap in parallel.</p>
+<p>Figure 10-12 shows part
+          of the output generated after clicking the example’s window. Its
+          exit, failure, and progress messages are produced by callbacks added
+          to the queue by spawned threads and invoked from the timer loop
+          running in the main thread.</p><div class="epub__figure"><a id="messages_from_queued_callbacks"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e43242"></a><img alt="Messages from queued callbacks" src="Images/getfile_002-23.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 10-12. Messages from queued callbacks</p>
+</div>
+<p>Study this code for more details and try to trace through the
+          self-test code. This is a bit complex, and you may have to make more
+          than one pass over this code to make sense of its juggling act. Once
+          you get the hang of this paradigm, though, it provides a general
+          scheme for handling heterogeneous overlapping threads in a uniform
+          way. PyMailGUI, for example, will do very much the same as <code class="epub__literal">onEvent</code> in the self-test code here,
+          whenever it needs to start a mail transfer.</p>
+<div class="epub__sect3" title="Passing bound method callbacks on queues"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="passing_bound_method_callbacks_on_queues"></a>Passing bound method callbacks on queues</h3>
+</div>
+</div>
+</div>
+<p>Technically, to make this even more flexible, PyMailGUI in
+            Chapter 14 will queue <span class="epub__emphasis"><em>bound
+            methods</em></span> with this module—callable objects that, as
+            mentioned, pair a method function with an instance that gives
+            access to state information and other methods. In this mode, the
+            thread manager module’s client code takes a form that looks more
+            like Example 10-21: a
+            revision of the prior example’s self-test using classes and
+            methods.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id126"></a>
+<p class="epub__title">Example 10-21. PP4E\Gui\Tools\threadtools-test-classes.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># tests thread callback queue, but uses class bound methods for action and callbacks
+
+import time
+from threadtools import threadChecker, startThread
+from tkinter.scrolledtext import ScrolledText
+
+class MyGUI:
+    def __init__(self, reps=3):
+        self.reps = reps                        # uses default Tk root
+        self.text = ScrolledText()              # save widget as state
+        self.text.pack()
+        threadChecker(self.text)                # start thread check loop
+        self.text.bind('&lt;Button-1&gt;',            # 3.x need list for map, range ok
+              lambda event: list(map(self.onEvent, range(6))) )
+
+    def onEvent(self, i):                       # code that spawns thread
+        myname = 'thread-%s' % i
+        startThread(
+            action     = self.threadaction,
+            args       = (i, ),
+            context    = (myname,),
+            onExit     = self.threadexit,
+            onFail     = self.threadfail,
+            onProgress = self.threadprogress)
+
+    # thread's main action
+    def threadaction(self, id, progress):       # what the thread does
+        for i in range(self.reps):              # access to object state here
+            time.sleep(1)
+            if progress: progress(i)            # progress callback: queued
+        if id % 2 == 1: raise Exception         # odd numbered: fail
+
+    # thread callbacks: dispatched off queue in main thread
+    def threadexit(self, myname):
+        self.text.insert('end', '%s\texit\n' % myname)
+        self.text.see('end')
+
+    def threadfail(self, exc_info, myname):     # have access to self state
+        self.text.insert('end', '%s\tfail\t%s\n' % (myname, exc_info[0]))
+        self.text.see('end')
+
+    def threadprogress(self, count, myname):
+        self.text.insert('end', '%s\tprog\t%s\n' % (myname, count))
+        self.text.see('end')
+        self.text.update()   # works here: run in main thread
+
+if __name__ == '__main__': MyGUI().text.mainloop()</pre>
+</div>
+</div>
+<p>This code both queues bound methods as thread exit and
+            progress actions and runs bound methods as the thread’s main
+            action itself. As we learned in Chapter 5, because threads all run in the
+            same process and memory space, bound methods reference the
+            original in-process instance object, not a copy of it. This allows
+            them to update the GUI and other implementation state directly.
+            Furthermore, because bound methods are normal objects which pass
+            for callables interchangeably with simple functions, using them
+            both on queues and in threads this way just works. To many, this
+            broadly shared state of threads is one of their primary advantages
+            over processes.</p>
+<p>Watch for the more realistic application of this module in
+            Chapter 14’s PyMailGUI, where it will
+            serve as the core thread exit and progress dispatch engine. There,
+            we’ll also run bound methods as thread actions, too, allowing both
+            threads and their queued actions to access shared mutable object
+            state of the GUI. As we’ll see, queued action updates are
+            automatically made thread-safe by this module’s protocol, because
+            they run in the main thread only. Other state updates to shared
+            objects performed in spawned threads, though, may still have to be
+            synchronized separately if they might overlap with other threads,
+            and are made outside the scope of the callback queue. A direct
+            update to a mail cache, for instance, might lock out other
+            operations until <a id="I_indexterm4_d1e43277"></a><a id="I_indexterm4_d1e43279"></a><a id="I_indexterm4_d1e43281"></a><span>finished</span>.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

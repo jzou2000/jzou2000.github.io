@@ -1,0 +1,579 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Searching Directory Trees</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Searching Directory Trees"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="searching_directory_trees"></a>Searching Directory Trees</h1>
+</div>
+</div>
+</div>
+<p>Engineers <a id="sys6.8"></a><a id="dir6.8"></a><a id="se6.8"></a>love to change things. As I was writing this book, I
+        found it almost <span class="epub__emphasis"><em>irresistible</em></span> to move and rename
+        directories, variables, and shared modules in the book examples tree
+        whenever I thought I’d stumbled onto a more coherent structure. That
+        was fine early on, but as the tree became more intertwined, this
+        became a maintenance nightmare. Things such as program directory paths
+        and module names were hardcoded all over the place—in package import
+        statements, program startup calls, text notes, configuration files,
+        and more.</p>
+<p>One way to repair these references, of course, is to edit every
+        file in the directory by hand, searching each for information that has
+        changed. That’s so tedious as to be utterly impossible in this book’s
+        examples tree, though; the examples of the prior edition contained 186
+        directories and 1,429 files! Clearly, I needed a way to automate
+        updates after changes. There are a variety of solutions to such
+        goals—from shell commands, to find operations, to custom tree walkers,
+        to general-purpose frameworks. In this and the next section, we’ll
+        explore each option in turn, just as I did while refining solutions to
+        this real-world dilemma.</p>
+<div class="epub__sect2" title="Greps and Globs and Finds"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="greps_and_globs_and_finds"></a>Greps and Globs and Finds</h2>
+</div>
+</div>
+</div>
+<p>If you work on Unix-like systems, you probably already know
+          that there is a standard way to search files for strings on such
+          platforms—the command-line program <code class="epub__literal">grep</code> <a id="I_indexterm5_d1e23565"></a>and its relatives list all lines in one or more files
+          containing a string or string pattern.<sup>[22]</sup> Given that shells expand (i.e., “glob”) filename
+          patterns automatically, a command such as the following will search
+          a single directory’s Python files for a string named on the command
+          line (this uses the <code class="epub__literal">grep</code> command
+          installed with the Cygwin Unix-like system for Windows that I
+          described in the prior chapter):</p><a id="I_programlisting5_d1e23576"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>c:\cygwin\bin\grep.exe walk *.py</code></strong>
+bigext-tree.py:for (thisDir, subsHere, filesHere) in os.walk(dirname):
+bigpy-path.py:    for (thisDir, subsHere, filesHere) in os.walk(srcdir):
+bigpy-tree.py:for (thisDir, subsHere, filesHere) in os.walk(dirname):</pre>
+<p>As we’ve seen, we can often accomplish the same within a
+          Python script by running such a shell command with <code class="epub__literal">os.system</code> or <code class="epub__literal">os.popen</code>. And if we search its results
+          manually, we can also achieve similar results with the
+          Python<a id="I_indexterm5_d1e23589"></a> <code class="epub__literal">glob</code> module we met
+          in Chapter 4; it expands a
+          filename pattern into a list of matching filename strings much like
+          a shell:</p><a id="I_programlisting5_d1e23600"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import os</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for line in os.popen(r'c:\cygwin\bin\grep.exe walk *.py'):</code></strong>
+...     <strong class="epub__userinput"><code>print(line, end='')</code></strong>
+...
+bigext-tree.py:for (thisDir, subsHere, filesHere) in os.walk(dirname):
+bigpy-path.py:    for (thisDir, subsHere, filesHere) in os.walk(srcdir):
+bigpy-tree.py:for (thisDir, subsHere, filesHere) in os.walk(dirname):
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from glob import glob</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for filename in glob('*.py'):</code></strong>
+...     <strong class="epub__userinput"><code>if 'walk' in open(filename).read():</code></strong>
+...         <strong class="epub__userinput"><code>print(filename)</code></strong>
+...
+bigext-tree.py
+bigpy-path.py
+bigpy-tree.py</pre>
+<p>Unfortunately, these tools are generally limited to a single
+          directory. <code class="epub__literal">glob</code> can visit
+          multiple directories given the right sort of pattern string, but
+          it’s not a general directory walker of the sort I need to maintain a
+          large examples tree. On Unix-like systems, a <code class="epub__literal">find</code> shell command<a id="I_indexterm5_d1e23635"></a><a id="I_indexterm5_d1e23638"></a><a id="I_indexterm5_d1e23643"></a> can go the extra mile to traverse an entire directory
+          tree. For <span>instance</span>, the
+          following Unix command line would pinpoint lines and files at and
+          below the current directory that mention the string <code class="epub__literal">popen</code>:</p><a id="I_programlisting5_d1e23656"></a>
+<pre class="epub__programlisting">find . -name "*.py" -print -exec fgrep popen {} \;</pre>
+<p>If you happen to have a Unix-like <code class="epub__literal">find</code> command on every machine you will
+          ever use, this is one way to process directories.</p>
+</div>
+<div class="epub__sect2" title="Rolling Your Own find Module"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="rolling_your_own_find_module"></a>Rolling Your Own find Module</h2>
+</div>
+</div>
+</div>
+<p>But if you don’t happen to have a Unix <code class="epub__literal">find</code> on all your computers, not to
+          worry—it’s easy to code a portable one in Python. Python itself used
+          to have a<a id="find6.8.2"></a> <code class="epub__literal">find</code> module in its
+          standard library, which I used frequently in the past. Although that
+          module was removed between the second and third editions of this
+          book, the newer <code class="epub__literal">os.walk</code> makes
+          writing your own simple. Rather than lamenting the demise of a
+          module, I decided to spend 10 minutes coding a custom
+          equivalent.</p>
+<p>Example 6-13
+          implements a find utility in Python, which collects all matching
+          filenames in a directory tree. Unlike <code class="epub__literal">glob.glob</code>, its <code class="epub__literal">find.find</code> automatically matches through an
+          entire tree. And unlike the tree walk structure of <code class="epub__literal">os.walk</code>, we can treat <code class="epub__literal">find.find</code> results as a simple linear
+          group.</p><div class="epub__example"><a id="pp4e_reverse_solidus_tools_reverse"></a>
+<p class="epub__title">Example 6-13. PP4E\Tools\find.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">#!/usr/bin/python
+"""
+################################################################################
+Return all files matching a filename pattern at and below a root directory;
+
+custom version of the now deprecated find module in the standard library:
+import as "PP4E.Tools.find"; like original, but uses os.walk loop, has no
+support for pruning subdirs, and is runnable as a top-level script;
+
+find() is a generator that uses the os.walk() generator to yield just
+matching filenames: use findlist() to force results list generation;
+################################################################################
+"""
+
+import fnmatch, os
+
+def find(pattern, startdir=os.curdir):
+    for (thisDir, subsHere, filesHere) in os.walk(startdir):
+        for name in subsHere + filesHere:
+            if fnmatch.fnmatch(name, pattern):
+                fullpath = os.path.join(thisDir, name)
+                yield fullpath
+
+def findlist(pattern, startdir=os.curdir, dosort=False):
+    matches = list(find(pattern, startdir))
+    if dosort: matches.sort()
+    return matches
+
+if __name__ == '__main__':
+    import sys
+    namepattern, startdir = sys.argv[1], sys.argv[2]
+    for name in find(namepattern, startdir): print(name)</pre>
+</div>
+</div>
+<p>There’s not much to this file—it’s largely just a minor
+          extension to<a id="I_indexterm5_d1e23703"></a> <code class="epub__literal">os.walk</code>—but
+          calling its <code class="epub__literal">find</code> function
+          provides the same utility as both the deprecated <code class="epub__literal">find</code> standard library module and the Unix
+          utility of the same name. It’s also much more portable, and
+          noticeably easier than repeating all of this file’s code every time
+          you need to perform a find-type search. Because this file is
+          instrumented to be both a script and a library, it can also be both
+          run as a command-line tool or called from other programs.</p>
+<p>For instance, to process every Python file in the directory
+          tree rooted one level up from the current working directory, I
+          simply run the following command line from a system console window.
+          Run this yourself to watch its progress; the script’s standard
+          output is piped into the <code class="epub__literal">more</code>
+          command to page it here, but it can be piped into any processing
+          program that reads its input from the standard input stream:</p><a id="I_programlisting5_d1e23725"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>python find.py *.py .. | more</code></strong>
+..\LaunchBrowser.py
+..\Launcher.py
+..\__init__.py
+..\Preview\attachgui.py
+..\Preview\customizegui.py
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more lines omitted...</span></em></pre>
+<p>For more control, run the following sort of Python code from a
+          script or interactive prompt. In this mode, you can apply any
+          operation to the found files that the Python language
+          provides:</p><a id="I_programlisting5_d1e23734"></a>
+<pre class="epub__programlisting">C:\...\PP4E\System\Filetools&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from PP4E.Tools import find</code></strong>                  # or just import find if in cwd
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for filename in find.find('*.py', '..'):</code></strong>
+...     <strong class="epub__userinput"><code>if 'walk' in open(filename).read():</code></strong>
+...         <strong class="epub__userinput"><code>print(filename)</code></strong>
+...
+..\Launcher.py
+..\System\Filetools\bigext-tree.py
+..\System\Filetools\bigpy-path.py
+..\System\Filetools\bigpy-tree.py
+..\Tools\cleanpyc.py
+..\Tools\find.py
+..\Tools\visitor.py</pre>
+<p>Notice how this avoids having to recode the nested loop
+          structure required for <code class="epub__literal">os.walk</code>
+          every time you want a list of matching file names; for many use
+          cases, this seems conceptually simpler. Also note that because this
+          finder is a generator function, your script doesn’t have to wait
+          until all matching files have been found and collected; <code class="epub__literal">os.walk</code> yields results as it goes, and
+          <code class="epub__literal">find.find</code> yields matching files
+          among that set.</p>
+<p>Here’s a more complex example of our <code class="epub__literal">find</code> module at work: the following system
+          command line lists all Python files in directory
+          <span class="epub__emphasis"><em>C:\temp\PP3E</em></span> whose names begin with the letter
+          <span class="epub__emphasis"><em>q</em></span> or <span class="epub__emphasis"><em>t</em></span>. Note how <code class="epub__literal">find</code> returns full directory paths that
+          begin with the start directory specification:</p><a id="I_programlisting5_d1e23780"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>find.py [qx]*.py C:\temp\PP3E</code></strong>
+C:\temp\PP3E\Examples\PP3E\Database\SQLscripts\querydb.py
+C:\temp\PP3E\Examples\PP3E\Gui\Tools\queuetest-gui-class.py
+C:\temp\PP3E\Examples\PP3E\Gui\Tools\queuetest-gui.py
+C:\temp\PP3E\Examples\PP3E\Gui\Tour\quitter.py
+C:\temp\PP3E\Examples\PP3E\Internet\Other\Grail\Question.py
+C:\temp\PP3E\Examples\PP3E\Internet\Other\XML\xmlrpc.py
+C:\temp\PP3E\Examples\PP3E\System\Threads\queuetest.py</pre>
+<p>And here’s some Python code that does the same find but also
+          extracts base names and file sizes for each file found:</p><a id="I_programlisting5_d1e23787"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import os</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from find import find</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for name in find('[qx]*.py', r'C:\temp\PP3E'):</code></strong>
+...     <strong class="epub__userinput"><code>print(os.path.basename(name), os.path.getsize(name))</code></strong>
+...
+querydb.py 635
+queuetest-gui-class.py 1152
+queuetest-gui.py 963
+quitter.py 801
+Question.py 817
+xmlrpc.py 705
+queuetest.py 1273</pre>
+<div class="epub__sect3" title="The fnmatch module"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="the_fnmatch_module"></a>The fnmatch module</h3>
+</div>
+</div>
+</div>
+<p>To achieve such <a id="fn6.8.2.1"></a>code economy, the <code class="epub__literal">find</code> module calls <code class="epub__literal">os.walk</code> to walk the tree and simply
+            yields matching filenames along the way. New here, though, is the
+            <code class="epub__literal">fnmatch</code> module—yet another
+            Python standard library module that performs Unix-like pattern
+            matching against filenames. This module supports common operators
+            in name pattern strings: <code class="epub__literal">*</code> to
+            match any number of characters, <code class="epub__literal">?</code> to match any single character, and
+            <code class="epub__literal">[...]</code> and <code class="epub__literal">[!...]</code> to match any character inside the
+            bracket pairs or not; other characters match themselves. Unlike
+            the <code class="epub__literal">re</code> module, <code class="epub__literal">fnmatch</code> supports only common Unix shell
+            matching operators, not full-blown regular expression patterns;
+            we’ll see why this distinction matters in Chapter 19.</p>
+<p>Interestingly, Python’s <code class="epub__literal">glob.glob</code> function also uses the
+            <code class="epub__literal">fnmatch</code> module to match names:
+            it combines <code class="epub__literal">os.listdir</code> and
+            <code class="epub__literal">fnmatch</code> to match in directories
+            in much the same way our <code class="epub__literal">find.find</code> combines <code class="epub__literal">os.walk</code> and <code class="epub__literal">fnmatch</code> to match in trees (though
+            <code class="epub__literal">os.walk</code> ultimately uses
+            <code class="epub__literal">os.listdir</code> as well). One
+            ramification of all this is that you can pass byte strings for
+            both pattern and start-directory to <code class="epub__literal">find.find</code> if you need to suppress
+            Unicode filename decoding, just as you can for <code class="epub__literal">os.walk</code> and <code class="epub__literal">glob.glob</code>; you’ll receive byte strings
+            for filenames in the result. See Chapter 4 for more details on Unicode
+            filenames.</p>
+<p>By comparison, <code class="epub__literal">find.find</code>
+            with just “*” for its name pattern is also roughly equivalent to
+            platform-specific directory tree listing shell commands such as
+            <code class="epub__literal">dir /B /S</code> on DOS and Windows.
+            Since all files match “*”, this just exhaustively generates all
+            the file names in a tree with a single traversal. Because we can
+            usually run such shell commands in a Python script with <code class="epub__literal">os.popen</code>, the following do the same
+            work, but the first is inherently nonportable and must start up a
+            separate program along the way:</p><a id="I_programlisting5_d1e23896"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>import os</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for line in os.popen('dir /B /S'): print(line, end='')</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from PP4E.Tools.find import find</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>for name in find(pattern='*', startdir='.'): print(name)</code></strong></pre>
+<p>Watch for this utility to show up in action later in this
+            chapter and book, including an arguably strong showing in the next
+            section and a cameo appearance in the Grep dialog of Chapter 11’s PyEdit text editor GUI, where
+            it will serve a central role in a threaded external files search
+            tool. The standard library’s <code class="epub__literal">find</code> module may be gone, but it need not
+            be <a id="I_indexterm5_d1e23916"></a><a id="I_indexterm5_d1e23918"></a>forgotten.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p>In fact, you <span class="epub__emphasis"><em>must</em></span> pass a <code class="epub__literal">bytes</code> pattern string for a <code class="epub__literal">bytes</code> filename to <code class="epub__literal">fnnmatch</code> (or pass both as <code class="epub__literal">str</code>), because the <code class="epub__literal">re</code> pattern matching module it uses
+              does not allow the string types of subject and pattern to be
+              mixed. This rule is inherited by our <code class="epub__literal">find.find</code> for directory and pattern.
+              See Chapter 19 for more on <code class="epub__literal">re</code>.</p>
+<p>Curiously, the <code class="epub__literal">fnmatch</code>
+              module in Python 3.1 also converts a <code class="epub__literal">bytes</code> pattern string to and from
+              Unicode <code class="epub__literal">str</code> in order to
+              perform internal text processing, using the Latin-1 encoding.
+              This suffices for many contexts, but may not be entirely sound
+              for some encodings which do not map to Latin-1 cleanly. <code class="epub__literal">sys.getfilesystemencoding</code> might be a
+              better encoding choice in such contexts, as this reflects the
+              underlying file system’s constraints (as we learned in Chapter 4, <code class="epub__literal">sys.getdefaultencoding</code> reflects file
+              content, not names).</p>
+<p>In the absence of <code class="epub__literal">bytes</code>, <code class="epub__literal">os.walk</code> assumes filenames follow the
+              platform’s convention and does not ignore decoding errors
+              triggered by <code class="epub__literal">os.listdir</code>. In
+              the “grep” utility of Chapter 11’s
+              PyEdit, this picture is further clouded by the fact that a
+              <code class="epub__literal">str</code> pattern string from a GUI
+              would have to be encoded to <code class="epub__literal">bytes</code> using a potentially
+              inappropriate encoding for some files present. See <em class="epub__filename">fnmatch.py</em> and <em class="epub__filename">os.py</em> in Python’s library and the
+              Python library manual for more details. Unicode can be a very
+              subtle affair.</p>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="Cleaning Up Bytecode Files"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="cleaning_up_bytecode_files"></a>Cleaning Up Bytecode Files</h2>
+</div>
+</div>
+</div>
+<p>The <code class="epub__literal">find</code> module of
+          <a id="dir6.8.3"></a><a id="byte6.8.3"></a><a name="section isn"></a>the prior section isn’t quite the general string
+          searcher we’re after, but it’s an important first step—it collects
+          files that we can then search in an automated script. In fact, the
+          act of collecting matching files in a tree is enough by itself to
+          support a wide variety of day-to-day system tasks.</p>
+<p>For example, one of the other common tasks I perform on a
+          regular basis is removing all the bytecode files in a tree. Because
+          these are not always portable across major Python releases, it’s
+          usually a good idea to ship programs without them and let Python
+          create new ones on first imports. Now that we’re expert <code class="epub__literal">os.walk</code> users, we could cut out the
+          middleman and use it directly. Example 6-14 codes a portable
+          and general command-line tool, with support for arguments, exception
+          processing, tracing, and list-only mode.</p><div class="epub__example"><a id="pp4e_reverse_solidus_tools_reverse-id1"></a>
+<p class="epub__title">Example 6-14. PP4E\Tools\cleanpyc.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+delete all .pyc bytecode files in a directory tree: use the
+command line arg as root if given, else current working dir
+"""
+
+import os, sys
+findonly = False
+rootdir = os.getcwd() if len(sys.argv) == 1 else sys.argv[1]
+
+found = removed = 0
+for (thisDirLevel, subsHere, filesHere) in os.walk(rootdir):
+    for filename in filesHere:
+        if filename.endswith('.pyc'):
+            fullname = os.path.join(thisDirLevel, filename)
+            print('=&gt;', fullname)
+            if not findonly:
+                try:
+                    os.remove(fullname)
+                    removed += 1
+                except:
+                    type, inst = sys.exc_info()[:2]
+                    print('*'*4, 'Failed:', filename, type, inst)
+            found += 1
+
+print('Found', found, 'files, removed', removed)</pre>
+</div>
+</div>
+<p>When run, this script walks a directory tree (the CWD by
+          default, or else one passed in on the command line), deleting any
+          and all bytecode files along the way:</p><a id="I_programlisting5_d1e24030"></a>
+<pre class="epub__programlisting">C:\...\Examples\PP4E&gt; <strong class="epub__userinput"><code>Tools\cleanpyc.py</code></strong>
+=&gt; C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\__init__.pyc
+=&gt; C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\Preview\initdata.pyc
+=&gt; C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\Preview\make_db_file.pyc
+=&gt; C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\Preview\manager.pyc
+=&gt; C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\Preview\person.pyc
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more lines here...</span></em>
+Found 24 files, removed 24
+
+C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>cleanpyc.py .</code></strong>
+=&gt; .\find.pyc
+=&gt; .\visitor.pyc
+=&gt; .\__init__.pyc
+Found 3 files, removed 3</pre>
+<p>This script works, but it’s a bit more manual and code-y than
+          it needs to be. In fact, now that we also know about find
+          operations, writing scripts based upon them is almost trivial when
+          we just need to match filenames. Example 6-15, for instance,
+          falls back on spawning shell find commands if you have them.</p><div class="epub__example"><a id="pp4e_reverse_solidus_tools_reverse-id2"></a>
+<p class="epub__title">Example 6-15. PP4E\Tools\cleanpyc-find-shell.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+find and delete all "*.pyc" bytecode files at and below the directory
+named on the command-line; assumes a nonportable Unix-like find command
+"""
+
+import os, sys
+
+rundir = sys.argv[1]
+if sys.platform[:3] == 'win':
+    findcmd = r'c:\cygwin\bin\find %s -name "*.pyc" -print' % rundir
+else:
+    findcmd = 'find %s -name "*.pyc" -print' % rundir
+print(findcmd)
+
+count = 0
+for fileline in os.popen(findcmd):                  # for all result lines
+    count += 1                                      # have \n at the end
+    print(fileline, end='')
+    os.remove(fileline.rstrip())
+
+print('Removed %d .pyc files' % count)</pre>
+</div>
+</div>
+<p>When run, files returned by the shell command are
+          removed:</p><a id="I_programlisting5_d1e24052"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>cleanpyc-find-shell.py .</code></strong>
+c:\cygwin\bin\find . -name "*.pyc" -print
+./find.pyc
+./visitor.pyc
+./__init__.pyc
+Removed 3 .pyc files</pre>
+<p>This script uses <code class="epub__literal">os.popen</code>
+          to collect the output of a Cygwin <code class="epub__literal">find</code> program installed on one of my
+          Windows computers, or else the standard <code class="epub__literal">find</code> tool on the Linux side. It’s also
+          <span class="epub__emphasis"><em>completely nonportable</em></span> to Windows machines that
+          don’t have the Unix-like <code class="epub__literal">find</code>
+          program installed, and that includes other computers of my own (not
+          to mention those throughout most of the world at large). As we’ve
+          seen, spawning shell commands also incurs performance penalties for
+          starting a new program.</p>
+<p>We can do much better on the portability and performance
+          fronts and still retain code simplicity, by applying the find tool
+          we wrote in Python in the prior section. The new script is shown in
+          Example 6-16.</p><div class="epub__example"><a id="pp4e_reverse_solidus_tools_reverse-id3"></a>
+<p class="epub__title">Example 6-16. PP4E\Tools\cleanpyc-find-py.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+find and delete all "*.pyc" bytecode files at and below the directory
+named on the command-line; this uses a Python-coded find utility, and
+so is portable; run this to delete .pyc's from an old Python release;
+"""
+
+import os, sys, find   # here, gets Tools.find
+
+count = 0
+for filename in find.find('*.pyc', sys.argv[1]):
+    count += 1
+    print(filename)
+    os.remove(filename)
+
+print('Removed %d .pyc files' % count)</pre>
+</div>
+</div>
+<p>When run, all bytecode files in the tree rooted at the
+          passed-in directory name are removed as before; this time, though,
+          our script works just about everywhere Python does:</p><a id="I_programlisting5_d1e24086"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Tools&gt; <strong class="epub__userinput"><code>cleanpyc-find-py.py .</code></strong>
+.\find.pyc
+.\visitor.pyc
+.\__init__.pyc
+Removed 3 .pyc files</pre>
+<p>This works portably, and it avoids external program startup
+          costs. But <code class="epub__literal">find</code> is really just
+          half the story—it collects files matching a name pattern but doesn’t
+          search their content. Although extra code can add such searching to
+          a find’s result, a more manual approach can allow us to tap into the
+          search process more directly. The next section shows <a id="I_indexterm5_d1e24096"></a><a id="I_indexterm5_d1e24098"></a>how.</p>
+</div>
+<div class="epub__sect2" title="A Python Tree Searcher"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="a_python_tree_searcher"></a>A Python Tree Searcher</h2>
+</div>
+</div>
+</div>
+<p>After experimenting with greps and globs and finds, in the
+          end, to help ease the task of performing global searches on all
+          platforms I might ever use, I wound up coding a task-specific Python
+          script to do most of the work for me. Example 6-17 employs the
+          following standard Python tools that we met in the preceding
+          chapters: <code class="epub__literal">os.walk</code> to visit files
+          in a directory, <code class="epub__literal">os.path.splitext</code>
+          to skip over files with binary-type extensions, and <code class="epub__literal">os.path.join</code> to portably combine a
+          directory path and filename.</p>
+<p>Because it’s pure Python code, it can be run the same way on
+          both Linux and Windows. In fact, it should work on any computer
+          where Python has been installed. Moreover, because it uses direct
+          system calls, it will likely be faster than approaches that rely on
+          underlying shell commands.</p><div class="epub__example"><a id="pp4e_reverse_solidus_tools_reverse-id4"></a>
+<p class="epub__title">Example 6-17. PP4E\Tools\search_all.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+################################################################################
+Use: "python ...\Tools\search_all.py dir string".
+Search all files at and below a named directory for a string; uses the
+os.walk interface, rather than doing a find.find to collect names first;
+similar to calling visitfile for each find.find result for "*" pattern;
+################################################################################
+"""
+
+import os, sys
+listonly = False
+textexts = ['.py', '.pyw', '.txt', '.c', '.h']             # ignore binary files
+
+def searcher(startdir, searchkey):
+    global fcount, vcount
+    fcount = vcount = 0
+    for (thisDir, dirsHere, filesHere) in os.walk(startdir):
+        for fname in filesHere:                            # do non-dir files here
+            fpath = os.path.join(thisDir, fname)           # fnames have no dirpath
+            visitfile(fpath, searchkey)
+
+def visitfile(fpath, searchkey):                           # for each non-dir file
+    global fcount, vcount                                  # search for string
+    print(vcount+1, '=&gt;', fpath)                           # skip protected files
+    try:
+        if not listonly:
+            if os.path.splitext(fpath)[1] not in textexts:
+                print('Skipping', fpath)
+            elif searchkey in open(fpath).read():
+                input('%s has %s' % (fpath, searchkey))
+                fcount += 1
+    except:
+        print('Failed:', fpath, sys.exc_info()[0])
+    vcount += 1
+
+if __name__ == '__main__':
+    searcher(sys.argv[1], sys.argv[2])
+    print('Found in %d files, visited %d' % (fcount, vcount))</pre>
+</div>
+</div>
+<p>Operationally, this script works roughly the same as calling
+          its <code class="epub__literal">visitfile</code> function for every
+          result generated by our <code class="epub__literal">find.find</code>
+          tool with a pattern of “*”; but because this version is specific to
+          searching content it can better tailored for its goal. Really, this
+          equivalence holds only because a “*” pattern invokes an exhaustive
+          traversal in <code class="epub__literal">find.find</code>, and
+          that’s all that this new script’s<a id="I_indexterm5_d1e24135"></a> <code class="epub__literal">searcher</code> function
+          does. The finder is good at selecting specific file types, but this
+          script benefits from a more custom single traversal.</p>
+<p>When run standalone, the search key is passed on the command
+          line; when imported, clients call this module’s <code class="epub__literal">searcher</code> function directly. For example,
+          to search (that is, grep) for all appearances of a string in the
+          book examples tree, I run a command line like this in a DOS or Unix
+          shell:</p><a id="I_programlisting5_d1e24147"></a>
+<pre class="epub__programlisting">C:\\PP4E&gt; <strong class="epub__userinput"><code>Tools\search_all.py . mimetypes</code></strong>
+1 =&gt; .\LaunchBrowser.py
+2 =&gt; .\Launcher.py
+3 =&gt; .\Launch_PyDemos.pyw
+4 =&gt; .\Launch_PyGadgets_bar.pyw
+5 =&gt; .\__init__.py
+6 =&gt; .\__init__.pyc
+Skipping .\__init__.pyc
+7 =&gt; .\Preview\attachgui.py
+8 =&gt; .\Preview\bob.pkl
+Skipping .\Preview\bob.pkl
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more lines omitted: pauses for Enter key press at matches...</span></em>
+Found in 2 files, visited 184</pre>
+<p>The script lists each file it checks as it goes, tells you
+          which files it is skipping (names that end in extensions not listed
+          in the variable <code class="epub__literal">textexts</code> that
+          imply binary data), and pauses for an Enter key press each time it
+          announces a file containing the search string. The <code class="epub__literal">search_all</code> script works the same way when
+          it is <span class="epub__emphasis"><em>imported</em></span> rather than run, but there is no
+          final statistics output line (<code class="epub__literal">fcount</code> and <code class="epub__literal">vcount</code> live in the module and so would
+          have to be imported to be inspected here):</p><a id="I_programlisting5_d1e24172"></a>
+<pre class="epub__programlisting">C:\...\PP4E\dev\Examples\PP4E&gt; <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import Tools.search_all</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>search_all.searcher(r'C:\temp\PP3E\Examples', 'mimetypes')</code></strong>
+<em class="epub__lineannotation"><span class="epub__lineannotation">...more lines omitted: 8 pauses for Enter key press along the way...</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>search_all.fcount, search_all.vcount</code></strong>     # matches, files
+(8, 1429)</pre>
+<p>However launched, this script tracks down all references to a
+          string in an entire directory tree: a name of a changed book
+          examples file, object, or directory, for instance. It’s exactly what
+          I was looking for—or at least I thought so, until further
+          deliberation drove me to seek more complete and better structured
+          solutions, the topic of the next <a id="I_indexterm5_d1e24191"></a><a id="I_indexterm5_d1e24193"></a><a id="I_indexterm5_d1e24195"></a>section.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p>Be sure to also see the coverage of regular expressions in
+            Chapter 19. The <code class="epub__literal">search_all</code> script here searches for a
+            simple string in each file with the <code class="epub__literal">in</code> string membership expression, but it
+            would be trivial to extend it to search for a regular expression
+            pattern match instead (roughly, just replace <code class="epub__literal">in</code> with a call to a regular expression
+            object’s search method). Of course, such a mutation will be much
+            more trivial after we’ve learned how.</p>
+<p>Also notice the <code class="epub__literal">textexts</code>
+            list in Example 6-17,
+            which attempts to list all possible binary file types: it would be
+            more general and robust to use the <code class="epub__literal">mimetypes</code> logic we will meet near the
+            end of this chapter in order to guess file content type from its
+            name, but the skips list provides more control and sufficed for
+            the trees I used this script against.</p>
+<p>Finally note that for simplicity many of the directory
+            searches in this chapter assume that text is encoded per the
+            underlying platform’s Unicode default. They could open text in
+            binary mode to avoid decoding errors, but searches might then be
+            inaccurate because of encoding scheme differences in the raw
+            encoded bytes. To see how to do better, watch for the “grep”
+            utility in Chapter 11’s PyEdit GUI,
+            which will apply an encoding name to all the files in a searched
+            tree and ignore those text or binary files that fail to
+            decode.</p>
+</div>
+</div><div class="epub__footnotes"><br/><hr/><div class="epub__footnote">
+<p><sup>[22] </sup>In fact, the act of searching files often goes by the
+              colloquial name “grepping” among developers who have spent any
+              substantial time in the Unix ghetto.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

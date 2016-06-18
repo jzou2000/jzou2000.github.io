@@ -1,0 +1,807 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>4.7. Multithreading in Practice</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">4.7. Multithreading in Practice</h3>
+<p class="docText">So
+ far, none of the simplistic sample snippets we’ve seen so far represent
+ code that you’d write in practice. They don’t really do anything useful
+ beyond demonstrating threads and the different ways that you can create
+ them—the way we’ve started them up and wait for them to finish are all 
+identical, and they all just sleep, too.</p>
+<p class="docText">We also mentioned earlier in Section 4.3.1
+ that due to the fact that the Python Virtual Machine is single-threaded
+ (the GIL), greater concurrency in Python is only possible when 
+threading is applied to an I/O-bound application (versus CPU-bound 
+applications, which only do round-robin), so let’s look at an example of
+ this, and for a further exercise, try to port it to Python 3 to give 
+you a sense of what that process entails.</p>
+
+<h4 class="docSection2Title" id="title-ID0EXVBG">4.7.1. Book Rankings Example</h4>
+<p class="docText">The <tt>bookrank.py</tt> script shown in Example 4-9
+ is very staightforward. It goes to the one of my favorite online 
+retailers, Amazon, and asks for the current rankings of books written by
+ yours truly. In our sample code, you’ll see a function, <tt>getRanking()</tt>, that uses a regular expression to pull out and return the current ranking plus <tt>showRanking()</tt>, which displays the result to the user.</p>
+<p class="docText">Note that, according to their <span class="docEmphasis">Conditions of Use</span> guidelines, “<span class="docEmphasis">Amazon
+ grants you a limited license to access and make personal use of this 
+site and not to download (other than page caching) or modify it, or any 
+portion of it, except with express written consent of Amazon.</span>”
+ For our application, all we’re doing is looking at the current book 
+rankings for a specific book and then throwing everything away; we’re 
+not even caching the page.</p>
+<p class="docText">Example 4-9 is our first (but nearly-final) attempt at <tt>bookrank.py</tt>, which is a non-threaded version.</p>
+<p class="docText"></p><h5 class="docExampleTitle" id="title-ID0E6WBG">Example 4-9. Book Rankings “Screenscraper” (<tt>bookrank.py</tt>)</h5><p></p><div class="box">
+<p class="docText">This script makes calls to download book ranking information via separate threads.</p>
+<pre class="preFixedHeight">1    #!/usr/bin/env python
+2
+3    <span class="docEmphStrong">from</span> atexit <span class="docEmphStrong">import</span> register
+4    <span class="docEmphStrong">from</span> re <span class="docEmphStrong">import</span> compile
+5    <span class="docEmphStrong">from</span> threading <span class="docEmphStrong">import</span> Thread
+6    <span class="docEmphStrong">from</span> time <span class="docEmphStrong">import</span> ctime
+7    <span class="docEmphStrong">from</span> urllib2 <span class="docEmphStrong">import</span> urlopen <span class="docEmphStrong">as</span> uopen
+8
+9    REGEX = compile('#([\d,]+) in Books ')
+10   AMZN = 'http://amazon.com/dp/'
+11   ISBNs = {
+12       '0132269937': 'Core Python Programming',
+13       '0132356139': 'Python Web Development with Django',
+14       '0137143419': 'Python Fundamentals',
+15   }
+16
+17   <span class="docEmphStrong">def</span> getRanking(isbn):
+18       page = uopen('%s%s' % (AMZN, isbn)) # or str.format()
+19       data = page.read()
+20       page.close()
+21       <span class="docEmphStrong">return</span> REGEX.findall(data)[0]
+22
+23   <span class="docEmphStrong">def</span> _showRanking(isbn):
+24       <span class="docEmphStrong">print</span> '- %r ranked %s' % (
+25           ISBNs[isbn], getRanking(isbn))
+26
+27   <span class="docEmphStrong">def</span> _main():
+28       <span class="docEmphStrong">print</span> 'At', ctime(), 'on Amazon...'
+29       <span class="docEmphStrong">for</span> isbn <span class="docEmphStrong">in</span> ISBNs:
+30           _showRanking(isbn)
+31
+32   @register
+33   <span class="docEmphStrong">def</span> _atexit():
+34       <span class="docEmphStrong">print</span> 'all DONE at:', ctime()
+35
+36   <span class="docEmphStrong">if</span> __name__ == '__main__':
+37       main()
+
+					  </pre><br/>
+</div><p></p>
+
+<h5 class="docSection3Title" id="title-ID0EH1BG">Line-by-Line Explanation</h5>
+
+<h5 class="docSection4Title" id="title-ID0EP1BG">Lines 1–7</h5>
+<p class="docText">These are the startup and import lines. We’ll use the <tt>atexit.register()</tt> function to tell us when the script is over (you’ll see why later). We’ll also use the regular expression <tt>re.compile()</tt> function for the pattern that matches a book’s ranking on Amazon’s product pages. Then, we save the <tt>threading.Thread</tt> import for future improvement (coming up a bit later), <tt>time.ctime()</tt> for the current timestamp string, and <tt>urllib2.urlopen()</tt> for accessing each link.</p>
+
+<h5 class="docSection4Title" id="title-ID0EO3BG">Lines 9–15</h5>
+<p class="docText">We use three constants in this script: <tt>REGEX</tt>, the regular expression object (compiled from the regex pattern that matches a book’s ranking); <tt>AMZN</tt>,
+ the base Amazon product link—all we need to complete each link is a 
+book’s International Standard Book Number (ISBN), which serves as a 
+book’s ID, differentiating one written work from all others. There are 
+two standards: the ISBN-10 ten-character value and its successor, the 
+ISBN-13 thirteen-character ISBN. Currently, Amazon’s systems understand 
+both ISBN types, so we’ll just use ISBN-10 because they’re shorter. 
+These are stored in the <tt>ISBNs</tt> dictionary along with the corresponding book titles.</p>
+
+<h5 class="docSection4Title" id="title-ID0EA4BG">Lines 17–21</h5>
+<p class="docText">The purpose of <tt>getRanking()</tt> is to take an ISBN, create the final URL with which to communicate to Amazon’s servers, and then call <tt>urllib2.urlopen()</tt>
+ on it. We used the string format operator to put together the URL (on 
+line 18) but if you’re using version 2.6 and newer, you can also try the
+ <tt>str.format()</tt> method, for example, <tt>'</tt><tt>{0}{1}'.format(AMZN,isbn)</tt>.</p>
+<p class="docText">Once you have the full URL, call <tt>urllib2.urlopen()</tt>—we shortened it to <tt>uopen()</tt>—and expect the file-like object back once the Web server has been contacted. Then the <tt>read()</tt>
+ call is issued to download the entire Web page, and “file” is closed. 
+If the regex is as precise as we have planned, there should only be 
+exactly one match, so we grab it from the generated list (any additional
+ would be dropped) and return it back to the caller.</p>
+
+<h5 class="docSection4Title" id="title-ID0E54BG">Lines 23–25</h5>
+<p class="docText">The <tt>_showRanking()</tt> function is just a short snippet of code that takes an ISBN, looks up the title of the book it represents, calls <tt>getRanking()</tt>
+ to get its current ranking on Amazon’s Web site, and then outputs both 
+of these values to the user. The leading single-underscore notation 
+indicates that this is a special function only to be used by code within
+ this module and should not be imported by any other application using 
+this as a library or utility module.</p>
+
+<h5 class="docSection4Title" id="title-ID0EO5BG">Lines 27–30</h5>
+<p class="docText"><tt>_main()</tt>
+ is also a special function, only executed if this module is run 
+directly from the command-line (and not imported for use by another 
+module). It shows the start and end times (to let users know how long it
+ took to run the entire script) and calls <tt>_showRanking()</tt> for each ISBN to lookup and display each book’s current ranking on Amazon.</p>
+
+<h5 class="docSection4Title" id="title-ID0EXAAI">Lines 32–37</h5>
+<p class="docText">These lines present something completely different. What is <tt>atexit.register()</tt>? It’s a function (used in a decorator role here) that registers an <span class="docEmphasis">exit function</span>
+ with the Python interpreter, meaning it’s requesting a special function
+ be called just before the script quits. (Instead of the decorator, you 
+could have also done <tt>register</tt> <tt>(_atexit())</tt>.</p>
+<p class="docText">Why are we using it here? Well, right now, it’s definitely not needed. The print statement could very well go at the end of <tt>_main()</tt>
+ in lines 27–31, but that’s not a really great place for it. Plus this 
+is functionality that you might really want to use in a real production 
+application at some point. We assume that you know what lines 36–37 are 
+about, so onto the output:</p>
+<div class="docText"><pre>$ python bookrank.py
+At Wed Mar 30 22:11:19 2011 PDT on Amazon...
+- 'Core Python Programming' ranked 87,118
+- 'Python Fundamentals' ranked 851,816
+- 'Python Web Development with Django' ranked 184,735
+all DONE at: Wed Mar 30 22:11:25 2011</pre></div><br/>
+<p class="docText">If you’re wondering, we’ve separated the process of retrieving (<tt>getRanking()</tt>) and displaying (<tt>_showRanking()</tt> and <tt>_main()</tt>) the data in case you wish to do something <span class="docEmphasis">other</span>
+ than dumping the results out to the user via the terminal. In practice,
+ you might need to send this data back via a Web template, store it in a
+ database, text it to a mobile phone, etc. If you put all of this code 
+into a single function, it makes it harder to reuse and/or repurpose.</p>
+<p class="docText">Also, if Amazon changes the 
+layout of their product pages, you might need to modify the regular 
+expression “screenscraper” to continue to be able to extract the data 
+from the product page. By the way, using a regex (or even plain old 
+string processing) for this simple example is fine, but you might need a
+ more powerful markup parser, such as HTMLParser from the standard 
+library or third-party tools like BeautifulSoup, html5lib, or lxml. (We 
+demonstrate a few of these in Chapter 9, “Web Clients and Servers.”)</p>
+
+<h5 class="docSection3Title" id="title-ID0EMCAI">Add threading</h5>
+<p class="docText">Okay,
+ you don’t have to tell me that this is still a silly single-threaded 
+program. We’re going to change our application to use threads instead. 
+It is an I/O-bound application, so this is a good candidate to do so. To
+ simplify things, we won’t use any of the classes and object-oriented 
+programming; instead, we’ll use <tt>threading.Thread</tt> directly, so you can think of this more as a derivative of <tt>mtsleepC.py</tt> than any of the succeeding examples. We’ll just spawn the threads and start them up immediately.</p>
+<p class="docText">Take your application and modify the <tt>_showRanking(isbn)</tt> call to the following:</p>
+<div class="docText"><pre>Thread(target=_showRanking, args=(isbn,)).start().</pre></div><br/>
+<p class="docText">That’s it! Now you have your final version of <tt>bookrank.py</tt>
+ and can see that the application (typically) runs faster because of the
+ added concurrency. But, your still only as fast as the slowest 
+response.</p>
+<div class="docText"><pre>$ python bookrank.py
+At Thu Mar 31 10:11:32 2011 on Amazon...
+- 'Python Fundamentals' ranked 869,010
+- 'Core Python Programming' ranked 36,481
+- 'Python Web Development with Django' ranked 219,228
+all DONE at: Thu Mar 31 10:11:35 2011</pre></div><br/>
+<p class="docText">As you can see from the 
+output, instead of taking six seconds as our single-threaded version, 
+our threaded version only takes three. Also note that the output is in 
+“by completion” order, which is variable, versus the single-threaded 
+display. With the non-threaded version, the order is always by key, but 
+now the queries all happen in parallel with the output coming as each 
+thread completes its work.</p>
+<p class="docText">In the earlier <tt>mtsleep</tt><span class="docEmphasis"><tt>X</tt></span><tt>.py</tt> examples, we used <tt>Thread</tt><tt>.join()</tt>
+ on all the threads to block execution until each thread exits. This 
+effectively prevents the main thread from continuing until all threads 
+are done, so the print statement of “all DONE at” is called at the 
+correct time.</p>
+<p class="docText">In those examples, it’s not necessary to <tt>join()</tt>
+ all the threads because none of them are daemon threads. The main 
+thread is not going to exit the script until all the spawned threads 
+have completed anyway. Because of this reasoning, we’ve dropped all the <tt>join()</tt>s in <tt>mtsleepF.py</tt>. However, realize that if we displayed “all done” from the same spot, it would be incorrect.</p>
+<p class="docText">The main thread would have displayed “all done” before the threads have completed, so we can’t have that print call above in <tt>_main()</tt>. There are only 2 places we can put this <tt>print</tt>: after line 37 when <tt>_main()</tt> returns (the very final line executed of our script), or use <tt>atexit.register()</tt> to register an exit function. Because the latter is something we haven’t discussed before <span class="docEmphasis">and</span>
+ might be something useful to you later on, we thought this would be a 
+good place to introduce it to you. This is also one interface that 
+remains constant between Python 2 and 3, our upcoming challenge.</p>
+
+<h5 class="docSection3Title" id="title-ID0ENGAI">Porting to Python 3</h5>
+<p class="docText">
+<img alt="" border="0" height="35" id="" src="Images/getfile_004-2.jpg" width="54"/></p>
+<p class="docText">The next thing we want is a 
+working Python 3 version of this script. As projects and applications 
+continue down the migration path, this is something with which you need 
+to become familiar, anyway. Fortunately, there are few tools to help 
+you, one of them being the <tt>2to3</tt> tool. There are generally two ways of using it:</p>
+<div class="docText"><pre>$ 2to3 foo.py    # only output diff
+$ 2to3 -w foo.py # overwrites w/3.x code</pre></div><br/>
+<p class="docText">In the first command, the <tt>2to3</tt> tool just displays the differences between the version 2.x original script and its generated 3.x equivalent. The <tt>-w</tt> flag instructs <tt>2to3</tt> to overwrite the original script with the newly minted 3.x version while renaming the 2.x version to <tt>foo.py.bak</tt>.</p>
+<p class="docText">Let’s run <tt>2to3</tt> on <tt>bookrank.py</tt>, writing over the existing file. It not only spits out the differences, it also saves the new version, as we just described:</p>
+<div class="docText"><pre class="preFixedHeight">$ 2to3 -w bookrank.py
+RefactoringTool: Skipping implicit fixer: buffer
+RefactoringTool: Skipping implicit fixer: idioms
+RefactoringTool: Skipping implicit fixer: set_literal
+RefactoringTool: Skipping implicit fixer: ws_comma
+--- bookrank.py (original)
++++ bookrank.py (refactored)
+@@ -4,7 +4,7 @@
+ from re import compile
+ from threading import Thread
+ from time import ctime
+-from urllib2 import urlopen as uopen
++from urllib.request import urlopen as uopen
+
+ REGEX = compile('#([\d,]+) in Books ')
+ AMZN = 'http://amazon.com/dp/'
+@@ -21,17 +21,17 @@
+     return REGEX.findall(data)[0]
+
+ def _showRanking(isbn):
+-    print '- %r ranked %s' % (
+-        ISBNs[isbn], getRanking(isbn))
++    print('- %r ranked %s' % (
++        ISBNs[isbn], getRanking(isbn)))
+
+ def _main():
+-    print 'At', ctime(), 'on Amazon...'
++    print('At', ctime(), 'on Amazon...')
+     for isbn in ISBNs:
+         Thread(target=_showRanking,
+args=(isbn,)).start()#_showRanking(isbn)
+
+ @register
+ def _atexit():
+-    print 'all DONE at:', ctime()
++    print('all DONE at:', ctime())
+
+ if __name__ == '__main__':
+     _main()
+RefactoringTool: Files that were modified:
+RefactoringTool: bookrank.py
+
+					  </pre></div><br/>
+<p class="docText">The following step is optional for readers, but we renamed our files to <tt>bookrank.py</tt> and <tt>bookrank3.py</tt> by using these POSIX commands (Windows-based PC users should use the <tt>ren</tt> command):</p>
+<div class="docText"><pre>$ mv bookrank.py bookrank3.py
+$ mv bookrank.py.bak bookrank.py</pre></div><br/>
+<p class="docText">If you try to run our new 
+next-generation script, it’s probably wishful thinking that it’s a 
+perfect translation and that you’re done with your work. Something bad 
+happened, and you’ll get the following exception in each thread (this 
+output is for just one thread as they’re all the same):</p>
+<div class="docText"><pre>$ python3 bookrank3.py
+Exception in thread Thread-1:
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/
+      3.2/lib/python3.2/threading.py", line 736, in
+      _bootstrap_inner
+    self.run()
+  File "/Library/Frameworks/Python.framework/Versions/
+      3.2/lib/python3.2/threading.py", line 689, in run
+    self._target(*self._args, **self._kwargs)
+  File "bookrank3.py", line 25, in _showRanking
+    ISBNs[isbn], getRanking(isbn)))
+  File "bookrank3.py", line 21, in getRanking
+    return REGEX.findall(data)[0]
+TypeError: can't use a string pattern on a bytes-like object
+        :</pre></div><br/>
+<p class="docText">Darn it! Apparently the problem is that the regular expression is a (Unicode) string, whereas the data that comes back from <tt>urlopen()</tt> file-like object’s <tt>read()</tt> method is an ASCII/<tt>bytes</tt> string. The fix here is to compile a <tt>bytes</tt> object instead of a text string. Therefore, change line 9 so that <tt>re.compile()</tt> is compiling a <tt>bytes</tt> string (by adding the <tt>bytes</tt> string. To do this, add the <tt>bytes</tt> string designation <tt>b</tt> just before the opening quote, as shown here:</p>
+<div class="docText"><pre>REGEX = compile(b'#([\d,]+) in Books ')</pre></div><br/>
+<p class="docText">Now let’s try it again:</p>
+<div class="docText"><pre>$ python3 bookrank3.py
+At Sun Apr  3 00:45:46 2011 on Amazon...
+- 'Core Python Programming' ranked b'108,796'
+- 'Python Web Development with Django' ranked b'268,660'
+- 'Python Fundamentals' ranked b'969,149'
+all DONE at: Sun Apr  3 00:45:49 2011</pre></div><br/>
+<p class="docText">Aargh! What’s wrong now? Well, it’s a <span class="docEmphasis">little</span> bit better (no errors), but the output looks weird. The ranking values grabbed by the regular expressions, when passed to <tt>str()</tt> show the <tt>b</tt> and quotes. Your first instinct might be to try ugly string slicing:</p>
+<div class="docText"><pre>&gt;&gt;&gt; x = b'xxx'
+&gt;&gt;&gt; repr(x)
+"b'xxx'"
+&gt;&gt;&gt; str(x)
+"b'xxx'"
+&gt;&gt;&gt; str(x)[2:-1]
+'xxx'</pre></div><br/>
+<p class="docText">However, it’s just more appropriate to convert it to a real (Unicode string, perhaps using UTF-8:</p>
+<div class="docText"><pre>&gt;&gt;&gt; str(x, 'utf-8')
+'xxx'</pre></div><br/>
+<p class="docText">To do that in our script, make a similar change to line 53 so that it now reads as:</p>
+<div class="docText"><pre>return str(REGEX.findall(data)[0], 'utf-8')</pre></div><br/>
+<p class="docText">Now, the output of our Python 3 script matches that of our Python 2 script:</p>
+<div class="docText"><pre>$ python3 bookrank3.py
+At Sun Apr  3 00:47:31 2011 on Amazon...
+- 'Python Fundamentals' ranked 969,149
+- 'Python Web Development with Django' ranked 268,660
+- 'Core Python Programming' ranked 108,796
+all DONE at: Sun Apr  3 00:47:34 2011</pre></div><br/>
+<p class="docText">In general, you’ll find that
+ porting from version 2.x to version 3.x follows a similar pattern: you 
+ensure that all your unit and integration tests pass, knock down all the
+ basics using <tt>2to3</tt> (and other tools), 
+and then clean up the aftermath by getting the code to run and pass the 
+same tests. We’ll try this exercise again with our next example which 
+demonstrates the use of synchronization with threads.</p>
+
+<h4 class="docSection2Title" id="title-ID0ETOAI">4.7.2. Synchronization Primitives</h4>
+<p class="docText">In
+ the main part of this chapter, we looked at basic threading concepts 
+and how to utilize threading in Python applications. However, we 
+neglected to mention one very important aspect of threaded programming: 
+synchronization. Often times in threaded code, you will have certain 
+functions or blocks in which you don’t (or shouldn’t) want more than one
+ thread executing. Usually these involve modifying a database, updating a
+ file, or anything similar that might cause a race condition, which, if 
+you recall from earlier in the chapter, is when different code paths or 
+behaviors are exhibited or inconsistent data was rendered if one thread 
+ran before another one and vice versa. (You can read more about race 
+conditions on the Wikipedia page at http://en.wikipedia.org/wiki/Race_condition.)</p>
+<p class="docText">Such cases 
+require synchronization. Synchronization is used when any number of 
+threads can come up to one of these critical sections of code (http://en.wikipedia.org/wiki/Critical_section),
+ but only one is allowed through at any given time. The programmer makes
+ these determinations and chooses the appropriate synchronization 
+primitives, or thread control mechanisms to perform the synchronization.
+ There are different types of process synchronization (see http://en.wikipedia.org/wiki/Synchronization_(computer_science)) and Python supports several types, giving you enough choices to select the best one to get the job done.</p>
+<p class="docText">We introduced them all to
+ you earlier at the beginning of this section, so here we’d like to 
+demonstrate a couple of sample scripts that use two types of 
+synchronization primitives: locks/mutexes, and semaphores. A lock is the
+ simplest and lowest-level of all these mechanisms; while semaphores are
+ for situations in which multiple threads are contending for a finite 
+resource. Locks are easier to explain, so we’ll start there, and then 
+discuss semaphores.</p>
+
+<h4 class="docSection2Title" id="title-ID0EJSAI">4.7.3. Locking Example</h4>
+<p class="docText">Locks have two states: 
+locked and unlocked (surprise, surprise). They support only two 
+functions: acquire and release. These actions mean exactly what you 
+think.</p>
+<p class="docText">As multiple threads vie 
+for a lock, the first thread to acquire one is permitted to go in and 
+execute code in the critical section. All other threads coming along are
+ blocked until the first thread wraps up, exits the critical section, 
+and releases the lock. At this moment, any of the other waiting threads 
+can acquire the lock and enter the critical section. Note that there is
+ no ordering (first come, first served) for the blocked threads; the 
+selection of the “winning” thread is not deterministic and can vary 
+between different implementations of Python.</p>
+<p class="docText">Let’s see why locks are necessary. <tt>mtsleepF.py</tt>
+ is an application that spawns a random number of threads, each of which
+ outputs when it has completed. Take a look at the core chunk of (Python
+ 2) source here:</p>
+<div class="docText"><pre class="preFixedHeight"><span class="docEmphStrong">from</span> atexit <span class="docEmphStrong">import</span> register
+<span class="docEmphStrong">from</span> random <span class="docEmphStrong">import</span> randrange
+<span class="docEmphStrong">from</span> threading <span class="docEmphStrong">import</span> Thread, currentThread
+<span class="docEmphStrong">from</span> time <span class="docEmphStrong">import</span> sleep, ctime
+
+<span class="docEmphStrong">class</span> CleanOutputSet(set):
+    <span class="docEmphStrong">def</span> __str__(self):
+        <span class="docEmphStrong">return</span> ', '.join(x <span class="docEmphStrong">for</span> x <span class="docEmphStrong">in</span> self)
+
+loops = (randrange(2,5) <span class="docEmphStrong">for</span> x <span class="docEmphStrong">in</span> xrange(randrange(3,7)))
+remaining = CleanOutputSet()
+
+<span class="docEmphStrong">def</span> loop(nsec):
+    myname = currentThread().name
+    remaining.add(myname)
+    <span class="docEmphStrong">print</span> '[%s] Started %s' % (ctime(), myname)
+    sleep(nsec)
+    remaining.remove(myname)
+    <span class="docEmphStrong">print</span> '[%s] Completed %s (%d secs)' % (
+        ctime(), myname, nsec)
+    <span class="docEmphStrong">print</span> '    (remaining: %s)' % (remaining or 'NONE')
+
+<span class="docEmphStrong">def</span> _main():
+    <span class="docEmphStrong">for</span> pause <span class="docEmphStrong">in</span> loops:
+        Thread(target=loop, args=(pause,)).start()
+
+@register
+<span class="docEmphStrong">def</span> _atexit():
+    <span class="docEmphStrong">print</span> 'all DONE at:', ctime()
+
+					  </pre></div><br/>
+<p class="docText">We’ll have a longer line-by-line explanation once we’ve finalized our code with locking, but basically what <tt>mtsleepF.py</tt> does is expand on our earlier examples. Like <tt>bookrank.py</tt>, we simplify the code a bit by skipping object-oriented programming, drop the list of thread objects and thread <tt>join()</tt>s, and (re)use <tt>atexit.register()</tt> (for all the same reasons as <tt>bookrank.py</tt>).</p>
+<p class="docText">Also as a minor change to the earlier <tt>mtsleep</tt><span class="docEmphasis"><tt>X</tt></span><tt>.py</tt>
+ examples, instead of hardcoding a pair of loops/threads sleeping for 4 
+and 2 seconds, respectively, we wanted to mix it up a little by randomly
+ creating between 3 and 6 threads, each of which can sleep anywhere 
+between 2 and 4 seconds.</p>
+<p class="docText">One
+ of the new features that stands out is the use of a set to hold the 
+names of the remaining threads still running. The reason why we’re 
+subclassing the set object instead of using it directly is because we 
+just want to demonstrate another use case, altering the default 
+printable string representation of a set.</p>
+<p class="docText">When you display a set, you get output such as <tt>set([X,</tt> <tt>Y,</tt> <tt>Z,...])</tt>.
+ The issue is that the users of our application don’t (and shouldn’t) 
+need to know anything about sets or that we’re using them. We just want 
+to display something like <tt>X,</tt> <tt>Y,</tt> <tt>Z,</tt> <tt>...</tt>, instead; thus the reason why we derived from <tt>set</tt> and implemented its <tt>__str__()</tt> method.</p>
+<p class="docText">With this change, and if you’re lucky, the output will be all nice and lined up properly:</p>
+<div class="docText"><pre>$ python mtsleepF.py
+[Sat Apr  2 11:37:26 2011] Started Thread-1
+[Sat Apr  2 11:37:26 2011] Started Thread-2
+[Sat Apr  2 11:37:26 2011] Started Thread-3
+[Sat Apr  2 11:37:29 2011] Completed Thread-2 (3 secs)
+    (remaining: Thread-3, Thread-1)
+[Sat Apr  2 11:37:30 2011] Completed Thread-1 (4 secs)
+    (remaining: Thread-3)
+[Sat Apr  2 11:37:30 2011] Completed Thread-3 (4 secs)
+    (remaining: NONE)
+all DONE at: Sat Apr  2 11:37:30 2011</pre></div><br/>
+<p class="docText">However, if you’re <span class="docEmphasis">un</span>lucky, you might get strange output such as this pair of example executions:</p>
+<div class="docText"><pre class="preFixedHeight">$ python mtsleepF.py
+[Sat Apr  2 11:37:09 2011] Started Thread-1
+ [Sat Apr  2 11:37:09 2011] Started Thread-2
+[Sat Apr  2 11:37:09 2011] Started Thread-3
+[Sat Apr  2 11:37:12 2011] Completed Thread-1 (3 secs)
+ [Sat Apr  2 11:37:12 2011] Completed Thread-2 (3 secs)
+    (remaining: Thread-3)
+    (remaining: Thread-3)
+[Sat Apr  2 11:37:12 2011] Completed Thread-3 (3 secs)
+    (remaining: NONE)
+all DONE at: Sat Apr  2 11:37:12 2011
+
+$ python mtsleepF.py
+[Sat Apr  2 11:37:56 2011] Started Thread-1
+[Sat Apr  2 11:37:56 2011] Started Thread-2
+ [Sat Apr  2 11:37:56 2011] Started Thread-3
+[Sat Apr  2 11:37:56 2011] Started Thread-4
+
+[Sat Apr  2 11:37:58 2011] Completed Thread-2 (2 secs)
+ [Sat Apr  2 11:37:58 2011] Completed Thread-4 (2 secs)
+    (remaining: Thread-3, Thread-1)
+    (remaining: Thread-3, Thread-1)
+[Sat Apr  2 11:38:00 2011] Completed Thread-1 (4 secs)
+    (remaining: Thread-3)
+[Sat Apr  2 11:38:00 2011] Completed Thread-3 (4 secs)
+    (remaining: NONE)
+all DONE at: Sat Apr  2 11:38:00 2011
+
+					  </pre></div><br/>
+<p class="docText">What’s
+ wrong? Well, for one thing, the output might appear partially garbled 
+(because multiple threads might be executing I/O in parallel). You can 
+see some examples of preceding code in which the output is interleaved, 
+too. Another problem identified is when you have two threads modifying 
+the same variable (the set containing the names of the remaining 
+threads).</p>
+<p class="docText">Both the I/O and access 
+to the same data structure are part of critical sections; therefore, we 
+need locks to prevent more than one thread from entering them at the 
+same time. To add locking, you need to add a line of code to import the <tt>Lock</tt> (or <tt>RLock</tt>) object and create a lock object, so add/modify your code to contain these lines in the right places:</p>
+<div class="docText"><pre><span class="docEmphStrong">from</span> threading <span class="docEmphStrong">import</span> Thread, <span class="docEmphasis">Lock,</span> currentThread
+lock = Lock()</pre></div><br/>
+<p class="docText">Now you mut <span class="docEmphasis">use</span> your lock. The following code highlights the <tt>acquire()</tt> and <tt>release()</tt> calls that we should insert into our <tt>loop()</tt> function:</p>
+<div class="docText"><pre><span class="docEmphStrong">def</span> loop(nsec):
+    myname = currentThread().name
+    <span class="docEmphasis">lock.acquire()</span>
+    remaining.add(myname)
+    <span class="docEmphStrong">print</span> '[%s] Started %s' % (ctime(), myname)
+    <span class="docEmphasis">lock.release()</span>
+    sleep(nsec)
+    <span class="docEmphasis">lock.acquire()</span>
+    remaining.remove(myname)
+    <span class="docEmphStrong">print</span> '[%s] Completed %s (%d secs)' % (
+        ctime(), myname, nsec)
+    <span class="docEmphStrong">print</span> '    (remaining: %s)' % (remaining or 'NONE')
+    <span class="docEmphasis">lock.release()</span></pre></div><br/>
+<p class="docText">Once the changes are made, you should no longer get strange output:</p>
+<div class="docText"><pre>$ python mtsleepF.py
+[Sun Apr  3 23:16:59 2011] Started Thread-1
+[Sun Apr  3 23:16:59 2011] Started Thread-2
+[Sun Apr  3 23:16:59 2011] Started Thread-3
+[Sun Apr  3 23:16:59 2011] Started Thread-4
+[Sun Apr  3 23:17:01 2011] Completed Thread-3 (2 secs)
+    (remaining: Thread-4, Thread-2, Thread-1)
+[Sun Apr  3 23:17:01 2011] Completed Thread-4 (2 secs)
+    (remaining: Thread-2, Thread-1)
+[Sun Apr  3 23:17:02 2011] Completed Thread-1 (3 secs)
+    (remaining: Thread-2)
+[Sun Apr  3 23:17:03 2011] Completed Thread-2 (4 secs)
+    (remaining: NONE)
+all DONE at: Sun Apr  3 23:17:03 2011</pre></div><br/>
+<p class="docText">The modified (and final) version of <tt>mtsleepF.py</tt> is shown in Example 4-10.</p>
+<h5 class="docExampleTitle" id="title-ID0EO4AI">Example 4-10. Locks and More Randomness (<tt>mtsleepF.py</tt>)</h5><p></p><div class="box">
+<p class="docText">In this example, we demonstrate the use of locks and other threading tools.</p>
+<pre class="preFixedHeight">1    #!/usr/bin/env python
+2
+3    <span class="docEmphStrong">from</span> atexit <span class="docEmphStrong">import</span> register
+4    <span class="docEmphStrong">from</span> random <span class="docEmphStrong">import</span> randrange
+5    <span class="docEmphStrong">from</span> threading <span class="docEmphStrong">import</span> Thread, Lock, currentThread
+6    <span class="docEmphStrong">from</span> time <span class="docEmphStrong">import</span> sleep, ctime
+7
+8    <span class="docEmphStrong">class</span> CleanOutputSet(set):
+9        <span class="docEmphStrong">def</span> __str__(self):
+10           <span class="docEmphStrong">return</span> ', '.join(x <span class="docEmphStrong">for</span> x <span class="docEmphStrong">in</span> self)
+11
+12   lock = Lock()
+13   loops = (randrange(2,5) <span class="docEmphStrong">for</span> x <span class="docEmphStrong">in</span> xrange(randrange(3,7)))
+14   remaining = CleanOutputSet()
+15
+16   <span class="docEmphStrong">def</span> loop(nsec):
+17       myname = currentThread().name
+18       lock.acquire()
+19       remaining.add(myname)
+20       <span class="docEmphStrong">print</span> '[%s] Started %s' % (ctime(), myname)
+21       lock.release()
+22       sleep(nsec)
+23       lock.acquire()
+24       remaining.remove(myname)
+25       <span class="docEmphStrong">print</span> '[%s] Completed %s (%d secs)' % (
+26           ctime(), myname, nsec)
+27       <span class="docEmphStrong">print</span> '    (remaining: %s)' % (remaining or 'NONE')
+28       lock.release()
+29
+30   <span class="docEmphStrong">def</span> _main():
+31       <span class="docEmphStrong">for</span> pause <span class="docEmphStrong">in</span> loops:
+32           Thread(target=loop, args=(pause,)).start()
+33
+34   @register
+35   <span class="docEmphStrong">def</span> _atexit():
+36       <span class="docEmphStrong">print</span> 'all DONE at:', ctime()
+37
+38   <span class="docEmphStrong">if</span> __name__ == '__main__':
+39       main()
+
+					  </pre><br/>
+</div><p></p>
+
+<h5 class="docSection3Title" id="title-ID0EMABI">Line-by-Line Explanation</h5>
+
+<h5 class="docSection4Title" id="title-ID0EUABI">Lines 1–6</h5>
+<p class="docText">
+<img alt="" border="0" height="35" id="" src="Images/getfile-15.jpg" width="54"/></p>
+<p class="docText">These are the usual startup and import lines. Be aware that <tt>threading.currentThread()</tt> is renamed to <tt>threading.current_thread()</tt> starting in version 2.6 but with the older name remaining intact for backward compatibility.</p>
+
+<h5 class="docSection4Title" id="title-ID0EGDBI">Lines 8–10</h5>
+<p class="docText">This is the set subclass we described earlier. It contains an implementation of <tt>__str__()</tt> to change the output from the default to a comma-delimited string of its elements.</p>
+
+<h5 class="docSection4Title" id="title-ID0EUDBI">Lines 12–14</h5>
+<p class="docText">Our global variables 
+consist of the lock, an instance of our modified set from above, and a 
+random number of threads (between three and six), each of which will 
+pause or sleep for between two and four seconds.</p>
+
+<h5 class="docSection4Title" id="title-ID0E6DBI">Lines 16–28</h5>
+<p class="docText">The <tt>loop()</tt> function saves the name of the current thread executing it, then acquires a lock so that the addition of that name to the <tt>remaining</tt>
+ set and an output indicating the thread has started is atomic (where no
+ other thread can enter this critical section). After releasing the 
+lock, this thread sleeps for the predetermined random number of seconds,
+ then re-acquires the lock in order to do its final output before 
+releasing it.</p>
+
+<h5 class="docSection4Title" id="title-ID0EPEBI">Lines 30–39</h5>
+<p class="docText">The <tt>_main()</tt> function 
+is only executed if this script was not imported for use elsewhere. Its 
+job is to spawn and execute each of the threads. As mentioned before, we
+ use <tt>atexit.register()</tt> to register the <tt>_atexit()</tt> function that the interpreter can execute before exiting.</p>
+<p class="docText">As an alternative to maintaining your own set of currently running threads, you might consider using <tt>threading.enumerate()</tt>,
+ which returns a list of all threads that are still running (including 
+daemon threads, but not those which haven’t started yet). We didn’t use 
+it for our example here because it gives us two extra threads that we 
+need to remove to keep our output short: the current thread (because it 
+hasn’t completed yet) as well as the main thread (not necessary to show 
+this either).</p>
+<p class="docText">Also don’t forget that you can also use the <tt>str.format()</tt> method instead of the string format operator if you’re using Python 2.6 or newer (including version 3.x). In other words, this <span class="docEmphStrong"><tt>print</tt></span> statement</p>
+<div class="docText"><pre><span class="docEmphStrong">print</span> '[%s] Started %s' % (ctime(), myname)</pre></div><br/>
+<p class="docText">can be replaced by this one in 2.6+</p>
+<p class="docText">
+<img alt="" border="0" height="34" id="" src="Images/getfile_002-14.jpg" width="54"/></p>
+<p class="docText">
+<img alt="" border="0" height="35" id="" src="Images/getfile_004-3.jpg" width="54"/></p>
+<div class="docText"><pre><span class="docEmphStrong">print</span> '[{0}] Started {1}'.format(ctime(), myname)</pre></div><br/>
+<p class="docText">or this call to the <tt>print()</tt> function in version 3.x:</p>
+<div class="docText"><pre>print('[{0}] Started {1}'.format(ctime(), myname))</pre></div><br/>
+<p class="docText">If you just want a count of currently running threads, you can use <tt>threading.activeCount()</tt> (renamed to <tt>active_count()</tt> starting in version 2.6), instead.</p>
+
+<h5 class="docSection3Title" id="title-ID0E5LBI">Using Context Management</h5>
+<p class="docText">
+<img alt="" border="0" height="34" id="" src="Images/getfile_003.jpg" width="54"/></p>
+<p class="docText">Another option for those of you using Python 2.5 and newer is to have neither the lock <tt>acquire()</tt> nor <tt>release()</tt> calls at all, simplifying your code. When using the <tt>with</tt> statement, the context manager for each object is responsible for calling <tt>acquire()</tt> before entering the suite and <tt>release()</tt> when the block has completed execution.</p>
+<p class="docText">The <tt>threading</tt> module objects <tt>Lock</tt>, <tt>RLock</tt>, <tt>Condition</tt>, <tt>Semaphore</tt>, and <tt>BoundedSemaphore</tt>, all have context managers, meaning they can be used with the <span class="docEmphStrong"><tt>with</tt></span> statement. By using <span class="docEmphStrong"><tt>with</tt></span>, you can further simplify <tt>loop()</tt> to:</p>
+<div class="docText"><pre><span class="docEmphStrong">from</span> __future__ <span class="docEmphStrong">import</span> with_statement # 2.5 only
+<span class="docEmphStrong">def</span> loop(nsec):
+    myname = currentThread().name
+    <span class="docEmphStrong">with</span> lock:
+        remaining.add(myname)
+        <span class="docEmphStrong">print</span> '[%s] Started %s' % (ctime(), myname)
+    sleep(nsec)
+    <span class="docEmphStrong">with</span> lock:
+        remaining.remove(myname)
+        <span class="docEmphStrong">print</span> '[%s] Completed %s (%d secs)' % (
+            ctime(), myname, nsec)
+        <span class="docEmphStrong">print</span> '    (remaining: %s)' % (
+            remaining or 'NONE',)</pre></div><br/>
+
+<h5 class="docSection3Title" id="title-ID0EYOBI">Porting to Python 3</h5>
+<p class="docText">
+<img alt="" border="0" height="35" id="" src="Images/getfile_004-4.jpg" width="54"/></p>
+<p class="docText">Now let’s do a seemingly easy port to Python 3.x by running the <tt>2to3</tt> tool on the preceding script (this output is truncated because we saw a full <tt>diff</tt> dump earlier):</p>
+<div class="docText"><pre>$ 2to3 -w mtsleepF.py
+RefactoringTool: Skipping implicit fixer: buffer
+RefactoringTool: Skipping implicit fixer: idioms
+RefactoringTool: Skipping implicit fixer: set_literal
+RefactoringTool: Skipping implicit fixer: ws_comma
+     :
+RefactoringTool: Files that were modified:
+RefactoringTool: mtsleepF.py</pre></div><br/>
+<p class="docText">After renaming <tt>mtsleepF.py</tt> to <tt>mtsleepF3.py</tt> and <tt>mtsleep.py.bak</tt> to <tt>mtsleepF.py</tt>, we discover, much to our pleasant surprise, that this is one script that ported perfectly, with no issues:</p>
+<div class="docText"><pre>$ python3 mtsleepF3.py
+[Sun Apr  3 23:29:39 2011] Started Thread-1
+[Sun Apr  3 23:29:39 2011] Started Thread-2
+[Sun Apr  3 23:29:39 2011] Started Thread-3
+[Sun Apr  3 23:29:41 2011] Completed Thread-3 (2 secs)
+    (remaining: Thread-2, Thread-1)
+[Sun Apr  3 23:29:42 2011] Completed Thread-2 (3 secs)
+    (remaining: Thread-1)
+[Sun Apr  3 23:29:43 2011] Completed Thread-1 (4 secs)
+    (remaining: NONE)
+all DONE at: Sun Apr  3 23:29:43 2011</pre></div><br/>
+<p class="docText">Now let’s take our knowledge of locks, introduce semaphores, and look at an example that uses both.</p>
+
+<h4 class="docSection2Title" id="title-ID0EYRBI">4.7.4. Semaphore Example</h4>
+<p class="docText">As stated earlier, locks are
+ pretty simple to understand and implement. It’s also fairly easy to 
+decide when you should need them. However, if the situation is more 
+complex, you might need a more powerful synchronization primitive, 
+instead. For applications with finite resources, using semaphores might 
+be a better bet.</p>
+<p class="docText">Semaphores are some of the 
+oldest synchronization primitives out there. They’re basically counters 
+that decrement when a resource is being consumed (and increment again 
+when the resource is released). You can think of semaphores representing
+ their resources as either available or unavailable. The action of 
+consuming a resource and decrementing the counter is traditionally 
+called <tt>P()</tt> (from the Dutch word probeer/proberen) but is also known as <span class="docEmphasis">wait</span>, <span class="docEmphasis">try</span>, <span class="docEmphasis">acquire</span>, <span class="docEmphasis">pend</span>, or <span class="docEmphasis">procure</span>.
+ Conversely, when a thread is done with a resource, it needs to return 
+it back to the pool. To do this, the action used is named “<tt>V()</tt>” (from the Dutch word verhogen/verhoog) but also known as <span class="docEmphasis">signal</span>, <span class="docEmphasis">increment</span>, <span class="docEmphasis">release</span>, <span class="docEmphasis">post</span>, <span class="docEmphasis">vacate</span>. Python simplifies all the naming and uses the same function/method names as locks:
+ acquire and release. Semaphores are more flexible than locks because 
+you can have multiple threads, each using one of the instances of the 
+finite resource.</p>
+<p class="docText">For our example, 
+we’re going to simulate an oversimplified candy vending machine as an 
+example. This particular machine has only five slots available to hold 
+inventory (candy bars). If all slots are taken, no more candy can be 
+added to the machine, and similarly, if there are no more of one 
+particular type of candy bar, consumers wishing to purchase that product
+ are out-of-luck. We can track these finite resources (candy slots) by 
+using a semaphore.</p>
+<p class="docText">Example 4-11 shows the source code (<tt>candy.py</tt>).</p>
+<h5 class="docExampleTitle" id="title-ID0ETTBI">Example 4-11. Candy Vending Machine and Semaphores (<tt>candy.py</tt>)</h5><p></p><div class="box">
+<p class="docText">This script uses locks and semaphores to simulate a candy vending machine.</p>
+<pre class="preFixedHeight">1    #!/usr/bin/env python
+2
+3    <span class="docEmphStrong">from</span> atexit <span class="docEmphStrong">import</span> register
+4    <span class="docEmphStrong">from</span> random <span class="docEmphStrong">import</span> randrange
+5    <span class="docEmphStrong">from</span> threading <span class="docEmphStrong">import</span> BoundedSemaphore, Lock, Thread
+6    <span class="docEmphStrong">from</span> time <span class="docEmphStrong">import</span> sleep, ctime
+7
+8    lock = Lock()
+9    MAX = 5
+10   candytray = BoundedSemaphore(MAX)
+11
+12   <span class="docEmphStrong">def</span> refill():
+13       lock.acquire()
+14       <span class="docEmphStrong">print</span> 'Refilling candy...',
+15       <span class="docEmphStrong">try</span>:
+16           candytray.release()
+17       <span class="docEmphStrong">except</span> ValueError:
+18           <span class="docEmphStrong">print</span> 'full, skipping'
+19       <span class="docEmphStrong">else</span>:
+20           <span class="docEmphStrong">print</span> 'OK'
+21       lock.release()
+22
+23   <span class="docEmphStrong">def</span> buy():
+24       lock.acquire()
+25       <span class="docEmphStrong">print</span> 'Buying candy...',
+26       <span class="docEmphStrong">if</span> candytray.acquire(False):
+27           <span class="docEmphStrong">print</span> 'OK'
+28       <span class="docEmphStrong">else</span>:
+29           <span class="docEmphStrong">print</span> 'empty, skipping'
+30       lock.release()
+31
+32   <span class="docEmphStrong">def</span> producer(loops):
+33       <span class="docEmphStrong">for</span> i <span class="docEmphStrong">in</span> xrange(loops):
+34           refill()
+35           sleep(randrange(3))
+36
+37   <span class="docEmphStrong">def</span> consumer(loops):
+38       <span class="docEmphStrong">for</span> i <span class="docEmphStrong">in</span> xrange(loops):
+39           buy()
+40           sleep(randrange(3))
+41
+42   <span class="docEmphStrong">def</span> _main():
+43       <span class="docEmphStrong">print</span> 'starting at:', ctime()
+44       nloops = randrange(2, 6)
+45       <span class="docEmphStrong">print</span> 'THE CANDY MACHINE (full with %d bars)!' % MAX
+46       Thread(target=consumer, args=(randrange(
+47           nloops, nloops+MAX+2),)).start() # buyer
+48       Thread(target=producer, args=(nloops,)).start() #vndr
+49
+50   @register
+51   <span class="docEmphStrong">def</span> _atexit():
+52       <span class="docEmphStrong">print</span> 'all DONE at:', ctime()
+53
+54   <span class="docEmphStrong">if</span> __name__ == '__main__':
+55       _main()
+
+					  </pre><br/>
+</div><p></p>
+
+<h5 class="docSection3Title" id="title-ID0EJXBI">Line-by-Line Explanation</h5>
+
+<h5 class="docSection4Title" id="title-ID0ERXBI">Lines 1–6</h5>
+<p class="docText">The startup and import lines are quite similar to examples earlier in this chapter. The only thing new is the semaphore. The <tt>threading</tt> module comes with two semaphore classes, <tt>Semaphore</tt> and <tt>BoundedSemaphore</tt>. As you know, semaphores are really just counters; they start off with some fixed number of a finite resource.</p>
+<p class="docText">This counter decrements
+ when one unit of this is allocated, and when that unit is returned to 
+the pool, the counter increments. The additional feature you get with a <tt>BoundedSemaphore</tt>
+ is that the counter can never increment beyond its initial value; in 
+other words, it prevents the aberrant use case where a semaphore is 
+released more times than it’s acquired.</p>
+
+<h5 class="docSection4Title" id="title-ID0EEZBI">Lines 8–10</h5>
+<p class="docText">The global variables in this
+ script are the lock, a constant representing the maximum number of 
+items that can be inventoried, and the tray of candy.</p>
+
+<h5 class="docSection4Title" id="title-ID0EPZBI">Lines 12–21</h5>
+<p class="docText">The <tt>refill()</tt>
+ function is performed when the owner of the fictitious vending machines
+ comes to add one more item to inventory. The entire routine represents a
+ critical section; this is why acquiring the lock is the only way to 
+execute all lines. The code outputs its action to the user as well as 
+warns when someone has exceeded the maximum inventory (lines 17–18).</p>
+
+<h5 class="docSection4Title" id="title-ID0EB2BI">Lines 23–30</h5>
+<p class="docText"><tt>buy()</tt> is the converse of <tt>refill()</tt>;
+ it allows a consumer to acquire one unit of inventory. The conditional 
+(line 26) detects when all finite resources have been consumed already. 
+The counter can never go below zero, so this call would normally block 
+until the counter is incremented again. By passing the nonblocking flag 
+as <tt>False</tt>, this instructs the call to not block but to return a <tt>False</tt> if it <span class="docEmphasis">would’ve</span> blocked, indicating no more resources.</p>
+
+<h5 class="docSection4Title" id="title-ID0EW2BI">Lines 32–40</h5>
+<p class="docText">The <tt>producer()</tt> and <tt>consumer()</tt> functions merely loop and make corresponding calls to <tt>refill()</tt> and <tt>buy()</tt>, pausing momentarily between calls.</p>
+
+<h5 class="docSection4Title" id="title-ID0EK3BI">Lines 42–55</h5>
+<p class="docText">The remainder of the code contains the call to <tt>_main()</tt> if the script was executed from the command-line, the registration of the exit function, and finally, <tt>_main()</tt>, which seeds the newly created pair of threads representing the producer and consumer of the candy inventory.</p>
+<p class="docText">The additional math in the 
+creation of the consumer/buyer is to randomly suggest positive bias 
+where a customer might actually consume more candy bars than the 
+vendor/producer puts in the machine (otherwise, the code would never 
+enter the situation in which the consumer attempts to buy a candy bar 
+from an empty machine).</p>
+<p class="docText">Running the script results in output similar to the following:</p>
+<div class="docText"><pre>$ python candy.py
+starting at: Mon Apr  4 00:56:02 2011
+THE CANDY MACHINE (full with 5 bars)!
+Buying candy... OK
+Refilling candy... OK
+Refilling candy... full, skipping
+Buying candy... OK
+Buying candy... OK
+Refilling candy... OK
+Buying candy... OK
+Buying candy... OK
+Buying candy... OK
+all DONE at: Mon Apr  4 00:56:08 2011</pre></div><br/>
+<div class="docNote"><p class="docNoteTitle">Core Tip: Debugging might involve intervention</p><p></p><table border="0" cellpadding="1" cellspacing="0" width="90%"><tbody><tr><td valign="top" width="60">
+<img align="LEFT" alt="" border="0" height="37" id="" src="Images/getfile_005.jpg" width="37"/>
+</td><td valign="top"><p class="docText">At
+ some point, you might need to debug a script that uses semaphores, but 
+to do this, you might need to know exactly what value is in the 
+semaphore’s counter at any given time. In one of the exercises at the 
+end of the chapter, you will implement such a solution to <tt>candy.py</tt>, perhaps calling it <tt>candydebug.py</tt>, and give it the ability to display the counter’s value. To do this, you’ll need to look at the source code for <tt>threading.py</tt> (and probably in both the Python 2 and Python 3 versions).</p>
+<p class="docText">
+<img alt="" border="0" height="35" id="" src="Images/getfile_004-5.jpg" width="54"/></p>
+<p class="docText">You’ll discover that the <tt>threading</tt>
+ module’s synchronization primitives are not class names even though 
+they use CamelCase capitalization to look like a class. In fact, they’re
+ really just one-line functions that instantiate the objects you’re 
+expecting. There are two problems to consider: the first one is that you
+ can’t subclass them (because they’re functions); the second problem is 
+that the variable name changed between version 2.x and 3.x.</p><p class="docText">The
+ entire issue could be avoided if the object gives you clean/easy access
+ to a counter, which it doesn’t. You can directly access the counter’s 
+value because it’s just an attribute of the class, as we just mentioned,
+ the variable name changed from <tt>self.__value</tt>, meaning <tt>self._Semaphore__value</tt>, in Python 2 to <tt>self._value</tt> in Python 3.</p><p class="docText">For developers, the cleanest application programming interface (API) (at least in our opinion) is to derive from <tt>threading._BoundedSemaphore</tt> class and implement an <tt>__len__()</tt> method but use the correct counter value we just discussed if you plan to support this on both version 2.x and version 3.x.</p></td></tr></tbody></table><p></p></div><br/>
+
+<h5 class="docSection3Title" id="title-ID0ETACI">Porting to Python 3</h5>
+<p class="docText">Similar to <tt>mtsleepF.py</tt>, <tt>candy.py</tt> is another example of how the <tt>2to3</tt> tool is sufficient to generate a working Python 3 version, which we have renamed to <tt>candy3.py</tt>. We’ll leave this as an exercise for the reader to confirm.</p>
+
+<h5 class="docSection3Title" id="title-ID0EHBCI">Summary</h5>
+<p class="docText">We’ve demonstrated only a couple of the synchronization primitives that come with the <tt>threading</tt>
+ module. There are plenty more for you to explore. However, keep in mind
+ that that’s still only what they are: “primitives.” There’s nothing 
+wrong with using them to build your own classes and data structures that
+ are thread-safe. The Python Standard Library comes with one, the <tt>Queue</tt> object.</p>
+</div>
+</body>
+</html>

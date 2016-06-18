@@ -1,0 +1,1378 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Handling Multiple Clients</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Handling Multiple Clients"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="handling_multiple_clients"></a>Handling Multiple Clients</h1>
+</div>
+</div>
+</div>
+<p>The <code class="epub__literal">echo</code> client and
+        <a id="cl12.5"></a><a id="net12.5"></a><a id="in12.5"></a>server programs shown previously serve to illustrate
+        socket fundamentals. But the server model used suffers from a fairly
+        major flaw. As described earlier, if multiple clients try to connect
+        to the server, and it takes a long time to process a given client’s
+        request, the server will fail. More accurately, if the cost of
+        handling a given request prevents the server from returning to the
+        code that checks for new clients in a timely manner, it won’t be able
+        to keep up with all the requests, and some clients will eventually be
+        denied connections.</p>
+<p>In real-world client/server programs, it’s far more typical to
+        code a server so as to avoid blocking new requests while handling a
+        current client’s request. Perhaps the easiest way to do so is to
+        service each client’s request in parallel—in a new process, in a new
+        thread, or by manually switching (multiplexing) between clients in an
+        event loop. This isn’t a socket issue per se, and we already learned
+        how to start processes and threads in Chapter 5. But since these schemes are so
+        typical of socket server programming, let’s explore all three ways to
+        handle client requests in parallel here.</p>
+<div class="epub__sect2" title="Forking Servers"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="forking_servers"></a>Forking Servers</h2>
+</div>
+</div>
+</div>
+<p>The script in Example 12-4 works like <a id="se12.5.1"></a><a id="fork12.5.1"></a>the original <code class="epub__literal">echo</code>
+          server, but instead forks a new process to handle each new client
+          connection. Because the <code class="epub__literal">handleClient</code> function runs in a new
+          process, the <code class="epub__literal">dispatcher</code> function
+          can immediately resume its main loop in order to detect and service
+          a new incoming request.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id3"></a>
+<p class="epub__title">Example 12-4. PP4E\Internet\Sockets\fork-server.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Server side: open a socket on a port, listen for a message from a client,
+and send an echo reply; forks a process to handle each client connection;
+child processes share parent's socket descriptors; fork is less portable
+than threads--not yet on Windows, unless Cygwin or similar installed;
+"""
+
+import os, time, sys
+from socket import *                      # get socket constructor and constants
+myHost = ''                               # server machine, '' means local host
+myPort = 50007                            # listen on a non-reserved port number
+
+sockobj = socket(AF_INET, SOCK_STREAM)           # make a TCP socket object
+sockobj.bind((myHost, myPort))                   # bind it to server port number
+sockobj.listen(5)                                # allow 5 pending connects
+
+def now():                                       # current time on server
+    return time.ctime(time.time())
+
+activeChildren = []
+def reapChildren():                              # reap any dead child processes
+    while activeChildren:                        # else may fill up system table
+        pid, stat = os.waitpid(0, os.WNOHANG)    # don't hang if no child exited
+        if not pid: break
+        activeChildren.remove(pid)
+
+def handleClient(connection):                    # child process: reply, exit
+    time.sleep(5)                                # simulate a blocking activity
+    while True:                                  # read, write a client socket
+        data = connection.recv(1024)             # till eof when socket closed
+        if not data: break
+        reply = 'Echo=&gt;%s at %s' % (data, now())
+        connection.send(reply.encode())
+    connection.close()
+    os._exit(0)
+
+def dispatcher():                                # listen until process killed
+    while True:                                  # wait for next connection,
+        connection, address = sockobj.accept()   # pass to process for service
+        print('Server connected by', address, end=' ')
+        print('at', now())
+        reapChildren()                           # clean up exited children now
+        childPid = os.fork()                     # copy this process
+        if childPid == 0:                        # if in child process: handle
+            handleClient(connection)
+        else:                                    # else: go accept next connect
+            activeChildren.append(childPid)      # add to active child pid list
+
+dispatcher()</pre>
+</div>
+</div>
+<div class="epub__sect3" title="Running the forking server"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="running_the_forking_server"></a>Running the forking server</h3>
+</div>
+</div>
+</div>
+<p>Parts of this script are a bit tricky, and most of its
+            library calls work only on Unix-like platforms. Crucially, it runs
+            on <a id="I_indexterm1_d1e49824"></a>Cygwin Python on Windows, but not standard Windows
+            Python. Before we get into too many forking details, though, let’s
+            focus on how this server arranges to handle multiple client
+            requests.</p>
+<p>First, notice that to simulate a long-running operation
+            (e.g., database updates, other network traffic), this server adds
+            a five-second <code class="epub__literal">time.sleep</code> delay
+            in its client handler function, <code class="epub__literal">handleClient</code>. After the delay, the
+            original echo reply action is performed. That means that when we
+            run a server and clients this time, clients won’t receive the echo
+            reply until five seconds after they’ve sent their requests to the
+            server.</p>
+<p>To help keep track of requests and replies, the server
+            prints its system time each time a client connect request is
+            received, and adds its system time to the reply. Clients print the
+            reply time sent back from the server, not their own—clocks on the
+            server and client may differ radically, so to compare apples to
+            apples, all times are server times. Because of the simulated
+            delays, we also must usually start each client in its own console
+            window on Windows (clients will hang in a blocked state while
+            waiting for their reply).</p>
+<p>But the grander story here is that this script runs one main
+            parent process on the server machine, which does nothing but watch
+            for connections (in <code class="epub__literal">dispatcher</code>), plus one child process per
+            active client connection, running in parallel with both the main
+            parent process and the other client processes (in <code class="epub__literal">handleClient</code>). In principle, the server
+            can handle any number of clients without bogging down.</p>
+<p>To test, let’s first start the server remotely in a SSH or
+            Telnet window, and start three clients locally in three distinct
+            console windows. As we’ll see in a moment, this server can also be
+            run under Cygwin locally if you have Cygwin but don’t have a
+            remote server account like the one on <em class="epub__filename">learning-python.com</em> used here:</p><a id="I_programlisting1_d1e49853"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation">[server window (SSH or Telnet)]</span></em>
+[...]$ <strong class="epub__userinput"><code>uname -p -o</code></strong>
+i686 GNU/Linux
+[...]$ <strong class="epub__userinput"><code>python fork-server.py</code></strong>
+Server connected by ('72.236.109.185', 58395) at Sat Apr 24 06:46:45 2010
+Server connected by ('72.236.109.185', 58396) at Sat Apr 24 06:46:49 2010
+Server connected by ('72.236.109.185', 58397) at Sat Apr 24 06:46:51 2010
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[client window 1]</span></em>
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py learning-python.com</code></strong>
+Client received: b"Echo=&gt;b'Hello network world' at Sat Apr 24 06:46:50 2010"
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[client window 2]</span></em>
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py learning-python.com Bruce</code></strong>
+Client received: b"Echo=&gt;b'Bruce' at Sat Apr 24 06:46:54 2010"
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[client window 3]</span></em>
+C:\...\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py learning-python.com The Meaning of Life</code></strong>
+Client received: b"Echo=&gt;b'The' at Sat Apr 24 06:46:56 2010"
+Client received: b"Echo=&gt;b'Meaning' at Sat Apr 24 06:46:56 2010"
+Client received: b"Echo=&gt;b'of' at Sat Apr 24 06:46:56 2010"
+Client received: b"Echo=&gt;b'Life' at Sat Apr 24 06:46:57 2010"</pre>
+<p>Again, all times here are on the server machine. This may be
+            a little confusing because four windows are involved. In plain
+            English, the test proceeds as follows:</p><div class="epub__orderedlist"><ol class="epub__orderedlist"><li class="epub__listitem">
+<p>The server starts running remotely.</p></li><li class="epub__listitem">
+<p>All three clients are started and connect to the server
+                a few seconds apart.</p></li><li class="epub__listitem">
+<p>On the server, the client requests trigger three forked
+                child processes, which all immediately go to sleep for five
+                seconds (to simulate being busy doing something
+                useful).</p></li><li class="epub__listitem">
+<p>Each client waits until the server replies, which
+                happens five seconds after their initial requests.</p></li></ol>
+</div>
+<p>In other words, clients are serviced at the same time by
+            forked processes, while the main parent process continues
+            listening for new client requests. If clients were not handled in
+            parallel like this, no client could connect until the currently
+            connected client’s five-second delay expired.</p>
+<p>In a more realistic application, that delay could be fatal
+            if many clients were trying to connect at once—the server would be
+            stuck in the action we’re simulating with <code class="epub__literal">time.sleep</code>, and not get back to the main
+            loop to <code class="epub__literal">accept</code> new client
+            requests. With process forks per request, clients can be serviced
+            in parallel.</p>
+<p>Notice that we’re using the same client script here
+            (<span class="epub__emphasis"><em>echo-client.py</em></span>, from Example 12-2), just a different
+            server; clients simply send and receive data to a machine and port
+            and don’t care how their requests are handled on the server. The
+            result displayed shows a byte string within a byte string, because
+            the client sends one to the server and the server sends one back;
+            because the server uses string formatting and manual <span>encoding</span> instead of byte string
+            concatenation, the client’s message is shown as byte string
+            explicitly here.</p>
+</div>
+<div class="epub__sect3" title="Other run modes: Local servers with Cygwin and remote clients"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="other_run_modes_colon_local_servers_with"></a>Other run modes: Local servers with Cygwin and remote
+            clients</h3>
+</div>
+</div>
+</div>
+<p>Also note that the server is running remotely on a Linux
+            machine in the preceding section. As we learned in Chapter 5, the <code class="epub__literal">fork</code> call is not supported on Windows in
+            standard Python at the time this book was written. It does run on
+            Cygwin Python, though, which allows us to start this server
+            locally on <code class="epub__literal">localhost</code>, on the
+            same machine as its clients:</p><a id="I_programlisting1_d1e49931"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation">[Cygwin shell window]</span></em>
+[C:\...\PP4E\Internet\Socekts]$ <strong class="epub__userinput"><code>python fork-server.py</code></strong>
+Server connected by ('127.0.0.1', 58258) at Sat Apr 24 07:50:15 2010
+Server connected by ('127.0.0.1', 58259) at Sat Apr 24 07:50:17 2010
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[Windows console, same machine]</span></em>
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py localhost bright side of life</code></strong>
+Client received: b"Echo=&gt;b'bright' at Sat Apr 24 07:50:20 2010"
+Client received: b"Echo=&gt;b'side' at Sat Apr 24 07:50:20 2010"
+Client received: b"Echo=&gt;b'of' at Sat Apr 24 07:50:20 2010"
+Client received: b"Echo=&gt;b'life' at Sat Apr 24 07:50:20 2010"
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[Windows console, same machine]</span></em>
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py</code></strong>
+Client received: b"Echo=&gt;b'Hello network world' at Sat Apr 24 07:50:22 2010"</pre>
+<p>We can also run this test on the remote Linux server
+            entirely, with two SSH or Telnet windows. It works about the same
+            as when clients are started locally, in a DOS console window, but
+            here “local” actually means a remote machine you’re using locally.
+            Just for fun, let’s also contact the remote server from a locally
+            running client to show how the server is also available to the
+            Internet at large—when servers are coded with sockets and forks
+            this way, clients can connect from arbitrary machines, and can
+            overlap arbitrarily in time:</p><a id="I_programlisting1_d1e49952"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation">[one SSH (or Telnet) window]</span></em>
+[...]$ <strong class="epub__userinput"><code>python fork-server.py</code></strong>
+Server connected by ('127.0.0.1', 55743) at Sat Apr 24 07:15:14 2010
+Server connected by ('127.0.0.1', 55854) at Sat Apr 24 07:15:26 2010
+Server connected by ('127.0.0.1', 55950) at Sat Apr 24 07:15:36 2010
+Server connected by ('72.236.109.185', 58414) at Sat Apr 24 07:19:50 2010
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[another SSH window, same machine]</span></em>
+[...]$ <strong class="epub__userinput"><code>python echo-client.py</code></strong>
+Client received: b"Echo=&gt;b'Hello network world' at Sat Apr 24 07:15:19 2010"
+[...]$ <strong class="epub__userinput"><code>python echo-client.py localhost niNiNI!</code></strong>
+Client received: b"Echo=&gt;b'niNiNI!' at Sat Apr 24 07:15:31 2010"
+[...]$ <strong class="epub__userinput"><code>python echo-client.py localhost Say no more!</code></strong>
+Client received: b"Echo=&gt;b'Say' at Sat Apr 24 07:15:41 2010"
+Client received: b"Echo=&gt;b'no' at Sat Apr 24 07:15:41 2010"
+Client received: b"Echo=&gt;b'more!' at Sat Apr 24 07:15:41 2010"
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[Windows console, local machine]</span></em>
+C:\...\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py learning-python.com Blue, no yellow!</code></strong>
+Client received: b"Echo=&gt;b'Blue,' at Sat Apr 24 07:19:55 2010"
+Client received: b"Echo=&gt;b'no' at Sat Apr 24 07:19:55 2010"
+Client received: b"Echo=&gt;b'yellow!' at Sat Apr 24 07:19:55 2010"</pre>
+<p>Now that we have a handle on the basic model, let’s move on
+            to the tricky bits. This server script is fairly straightforward
+            as forking code goes, but a few words about the library tools it
+            employs are in order.</p>
+</div>
+<div class="epub__sect3" title="Forked processes and sockets"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="forked_processes_and_sockets"></a>Forked processes and sockets</h3>
+</div>
+</div>
+</div>
+<p>We met <code class="epub__literal">os.fork</code> in Chapter 5, but <a id="I_indexterm1_d1e49990"></a>recall that forked processes are essentially a copy
+            of the process that forks them, and so they inherit file and
+            socket descriptors from their parent process. As a result, the new
+            child process that runs the <code class="epub__literal">handleClient</code> function has access to the
+            connection socket created in the parent process. Really, this is
+            why the child process works at all—when conversing on the
+            connected socket, it’s using the same socket that parent’s
+            <code class="epub__literal">accept</code> call returns. Programs
+            know they are in a forked child process if the fork call returns
+            0; otherwise, the original parent process gets back the new
+            child’s ID.</p>
+</div>
+<div class="epub__sect3" title="Exiting from children"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="exiting_from_children"></a>Exiting from children</h3>
+</div>
+</div>
+</div>
+<p>In earlier fork examples, <a id="I_indexterm1_d1e50007"></a>child processes usually call one of the <code class="epub__literal">exec</code> variants to start a new program in
+            the child process. Here, instead, the child process simply calls a
+            function in the same program and exits with <code class="epub__literal">os._exit</code>. It’s imperative to call
+            <code class="epub__literal">os._exit</code> <span>here—</span>if we did not, each child would
+            live on after <code class="epub__literal">handleClient</code>
+            returns, and compete for accepting new client requests.</p>
+<p>In fact, without the exit call, we’d wind up with as many
+            perpetual server processes as requests served—remove the exit call
+            and do a <code class="epub__literal">ps</code> shell command after
+            running a few clients, and you’ll see what I mean. With the call,
+            only the single parent process listens for new requests. <code class="epub__literal">os._exit</code> is like <code class="epub__literal">sys.exit</code>, but it exits the calling
+            process immediately without cleanup actions. It’s normally used
+            only in child processes, and <code class="epub__literal">sys.exit</code> is used everywhere else.</p>
+</div>
+<div class="epub__sect3" title="Killing the zombies: Don’t fear the reaper!"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="killing_the_zombies_colon_don_apostrophy"></a>Killing the zombies: Don’t fear the reaper!</h3>
+</div>
+</div>
+</div>
+<p>Note, however, <a id="zom12.5.1.5"></a>that it’s not quite enough to make sure that child
+            processes exit and die. On systems like Linux, though not on
+            Cygwin, parents must also be sure to issue a <code class="epub__literal">wait</code> system call to remove the entries
+            for dead child processes from the system’s process table. If we
+            don’t do this, the child processes will no longer run, but they
+            will consume an entry in the system process table. For
+            long-running servers, these bogus entries may become
+            problematic.</p>
+<p>It’s common to call such dead-but-listed child processes
+            <span class="epub__emphasis"><em>zombies</em></span>: they continue to use system
+            resources even though they’ve already passed over to the great
+            operating system beyond. To clean up after child processes are
+            gone, this server keeps a list, <code class="epub__literal">active</code><code class="epub__literal">Children</code>, of the process IDs of all
+            child processes it spawns. Whenever a new incoming client request
+            is received, the server runs its <code class="epub__literal">reapChildren</code> to issue a <code class="epub__literal">wait</code> for any dead children by issuing
+            the standard Python <code class="epub__literal">os.waitpid(0,os.WNOHANG)</code> call.</p>
+<p>The <code class="epub__literal">os.waitpid</code> call
+            attempts to wait for a child process to exit and returns its
+            process ID and exit status. With a <code class="epub__literal">0</code> for its first argument, it waits for
+            any child process. With the <code class="epub__literal">WNOHANG</code> parameter for its second, it
+            does nothing if no child process has exited (i.e., it does not
+            block or pause the caller). The net effect is that this call
+            simply asks the operating system for the process ID of any child
+            that has exited. If any have, the process ID returned is removed
+            both from the system process table and from this script’s <code class="epub__literal">activeChildren</code> list.</p>
+<p>To see why all this complexity is needed, comment out the
+            <code class="epub__literal">reapChildren</code> call in this
+            script, run it on a platform where this is an issue, and then run
+            a few clients. On my Linux server, a <code class="epub__literal">ps
+            -f</code> full process listing command shows that all the dead
+            child processes stay in the system process table (show as <code class="epub__literal">&lt;defunct&gt;</code>):</p><a id="I_programlisting1_d1e50099"></a>
+<pre class="epub__programlisting">[...]$ <strong class="epub__userinput"><code>ps –f</code></strong>
+UID        PID  PPID  C STIME TTY          TIME CMD
+5693094   9990 30778  0 04:34 pts/0    00:00:00 python fork-server.py
+5693094  10844  9990  0 04:35 pts/0    00:00:00 [python] &lt;defunct&gt;
+5693094  10869  9990  0 04:35 pts/0    00:00:00 [python] &lt;defunct&gt;
+5693094  11130  9990  0 04:36 pts/0    00:00:00 [python] &lt;defunct&gt;
+5693094  11151  9990  0 04:36 pts/0    00:00:00 [python] &lt;defunct&gt;
+5693094  11482 30778  0 04:36 pts/0    00:00:00 ps -f
+5693094  30778 30772  0 04:23 pts/0    00:00:00 -bash</pre>
+<p>When the <code class="epub__literal">reapChildren</code>
+            command is reactivated, dead child zombie entries are cleaned up
+            each time the server gets a new client connection request, by
+            calling the Python <code class="epub__literal">os.waitpid</code>
+            function. A few zombies may accumulate if the server is heavily
+            loaded, but they will remain only until the next client connection
+            is received (you get only as many zombies as processes served in
+            parallel since the last <code class="epub__literal">accept</code>):</p><a id="I_programlisting1_d1e50115"></a>
+<pre class="epub__programlisting">[...]$ <strong class="epub__userinput"><code>python fork-server.py &amp;</code></strong>
+[1] 20515
+[...]$ <strong class="epub__userinput"><code>ps -f</code></strong>
+UID        PID  PPID  C STIME TTY          TIME CMD
+5693094  20515 30778  0 04:43 pts/0    00:00:00 python fork-server.py
+5693094  20777 30778  0 04:43 pts/0    00:00:00 ps -f
+5693094  30778 30772  0 04:23 pts/0    00:00:00 -bash
+[...]$
+Server connected by ('72.236.109.185', 58672) at Sun Apr 25 04:43:51 2010
+Server connected by ('72.236.109.185', 58673) at Sun Apr 25 04:43:54 2010
+[...]$ <strong class="epub__userinput"><code>ps -f</code></strong>
+UID        PID  PPID  C STIME TTY          TIME CMD
+5693094  20515 30778  0 04:43 pts/0    00:00:00 python fork-server.py
+5693094  21339 20515  0 04:43 pts/0    00:00:00 [python] &lt;defunct&gt;
+5693094  21398 20515  0 04:43 pts/0    00:00:00 [python] &lt;defunct&gt;
+5693094  21573 30778  0 04:44 pts/0    00:00:00 ps -f
+5693094  30778 30772  0 04:23 pts/0    00:00:00 -bash
+[...]$
+Server connected by ('72.236.109.185', 58674) at Sun Apr 25 04:44:07 2010
+[...]$ <strong class="epub__userinput"><code>ps -f</code></strong>
+UID        PID  PPID  C STIME TTY          TIME CMD
+5693094  20515 30778  0 04:43 pts/0    00:00:00 python fork-server.py
+5693094  21646 20515  0 04:44 pts/0    00:00:00 [python] &lt;defunct&gt;
+5693094  21813 30778  0 04:44 pts/0    00:00:00 ps -f
+5693094  30778 30772  0 04:23 pts/0    00:00:00 -bash</pre>
+<p>In fact, if you type fast enough, you can actually see a
+            child process morph from a real running program into a zombie.
+            Here, for example, a child spawned to handle a new request changes
+            to <code class="epub__literal">&lt;defunct&gt;</code> on exit. Its
+            connection cleans up lingering zombies, and its own process entry
+            will be removed completely when the next request is
+            received:</p><a id="I_programlisting1_d1e50134"></a>
+<pre class="epub__programlisting">[...]$
+Server connected by ('72.236.109.185', 58676) at Sun Apr 25 04:48:22 2010
+[...] <strong class="epub__userinput"><code>ps -f</code></strong>
+UID        PID  PPID  C STIME TTY          TIME CMD
+5693094  20515 30778  0 04:43 pts/0    00:00:00 python fork-server.py
+5693094  27120 20515  0 04:48 pts/0    00:00:00 python fork-server.py
+5693094  27174 30778  0 04:48 pts/0    00:00:00 ps -f
+5693094  30778 30772  0 04:23 pts/0    00:00:00 -bash
+[...]$ <strong class="epub__userinput"><code>ps -f</code></strong>
+UID        PID  PPID  C STIME TTY          TIME CMD
+5693094  20515 30778  0 04:43 pts/0    00:00:00 python fork-server.py
+5693094  27120 20515  0 04:48 pts/0    00:00:00 [python] &lt;defunct&gt;
+5693094  27234 30778  0 04:48 pts/0    00:00:00 ps -f
+5693094  30778 30772  0 04:23 pts/0    00:00:00 -bash</pre>
+</div>
+<div class="epub__sect3" title="Preventing zombies with signal handlers on Linux"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="preventing_zombies_with_signal_handlers"></a>Preventing zombies with signal handlers on Linux</h3>
+</div>
+</div>
+</div>
+<p>On some systems, <a id="sig12.5.1.6"></a><a id="unix12.5.1.6"></a>it’s also possible to clean up zombie child
+            processes by resetting the signal handler for the <code class="epub__literal">SIGCHLD</code> signal delivered to a parent
+            process by the operating system when a child process stops or
+            exits. If a Python script assigns the <code class="epub__literal">SIG_IGN</code> (ignore) action as the <code class="epub__literal">SIGCHLD</code> signal handler, zombies will be
+            removed automatically and immediately by the operating system as
+            child processes exit; the parent need not issue wait calls to
+            clean up after them. Because of that, this scheme is a simpler
+            alternative to manually reaping zombies on platforms where it is
+            supported.</p>
+<p>If you’ve already read Chapter 5, you know that Python’s
+            standard <code class="epub__literal">signal</code> module lets
+            scripts install handlers for signals—software-generated events. By
+            way of review, here is a brief bit of background to show how this
+            pans out for zombies. The program in Example 12-5 installs a
+            Python-coded signal handler function to respond to whatever signal
+            number you type on the command line.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id4"></a>
+<p class="epub__title">Example 12-5. PP4E\Internet\Sockets\signal-demo.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Demo Python's signal module; pass signal number as a command-line arg, and use
+a "kill -N pid" shell command to send this process a signal; on my Linux machine,
+SIGUSR1=10, SIGUSR2=12, SIGCHLD=17, and SIGCHLD handler stays in effect even if
+not restored: all other handlers are restored by Python after caught, but SIGCHLD
+behavior is left to the platform's implementation; signal works on Windows too,
+but defines only a few signal types; signals are not very portable in general;
+"""
+
+import sys, signal, time
+
+def now():
+    return time.asctime()
+
+def onSignal(signum, stackframe):                # Python signal handler
+    print('Got signal', signum, 'at', now())     # most handlers stay in effect
+    if signum == signal.SIGCHLD:                 # but sigchld handler is not
+        print('sigchld caught')
+        #signal.signal(signal.SIGCHLD, onSignal)
+
+signum = int(sys.argv[1])
+signal.signal(signum, onSignal)                  # install signal handler
+while True: signal.pause()                       # sleep waiting for signals</pre>
+</div>
+</div>
+<p>To run this script, simply put it in the background and send
+            it signals by typing the<a id="I_indexterm1_d1e50181"></a> <code class="epub__literal">kill
+            -</code><em class="epub__replaceable"><code>signal-number</code></em>
+<em class="epub__replaceable"><code>process-id</code></em> shell command line; this is
+            the shell’s equivalent of Python’s<a id="I_indexterm1_d1e50193"></a> <code class="epub__literal">os.kill</code> function
+            available on Unix-like platforms only. Process IDs are listed in
+            the PID column of <code class="epub__literal">ps</code> command
+            results. Here is this script in action catching signal numbers 10
+            (reserved for general use) and 9 (the unavoidable terminate
+            signal):</p><a id="I_programlisting1_d1e50206"></a>
+<pre class="epub__programlisting">[...]$ <strong class="epub__userinput"><code>python signal-demo.py 10 &amp;</code></strong>
+[1] 10141
+[...]$ <strong class="epub__userinput"><code>ps -f</code></strong>
+UID        PID  PPID  C STIME TTY          TIME CMD
+5693094  10141 30778  0 05:00 pts/0    00:00:00 python signal-demo.py 10
+5693094  10228 30778  0 05:00 pts/0    00:00:00 ps -f
+5693094  30778 30772  0 04:23 pts/0    00:00:00 -bash
+
+[...]$ <strong class="epub__userinput"><code>kill −10 10141</code></strong>
+Got signal 10 at Sun Apr 25 05:00:31 2010
+
+[...]$ <strong class="epub__userinput"><code>kill −10 10141</code></strong>
+Got signal 10 at Sun Apr 25 05:00:34 2010
+
+[...]$ <strong class="epub__userinput"><code>kill −9 10141</code></strong>
+[1]+  Killed                  python signal-demo.py 10</pre>
+<p>And in the following the script catches signal 17, which
+            happens to be <code class="epub__literal">SIGCHLD</code> on my
+            Linux server. Signal numbers vary from machine to machine, so you
+            should normally use their names, not their numbers. <code class="epub__literal">SIGCHLD</code> behavior may vary per platform
+            as well. On my Cygwin install, for example, signal 10 can have
+            different meaning, and signal 20 is SIGCHLD—on Cygwin, the script
+            works as shown on Linux here for signal 10, but generates an
+            exception if it tries to install on handler for signal 17 (and
+            Cygwin doesn’t require reaping in any event). See the <code class="epub__literal">signal</code> module’s library manual entry for
+            more details:</p><a id="I_programlisting1_d1e50234"></a>
+<pre class="epub__programlisting">[...]$ <strong class="epub__userinput"><code>python signal-demo.py 17 &amp;</code></strong>
+[1] 11592
+[...]$ <strong class="epub__userinput"><code>ps -f</code></strong>
+UID        PID  PPID  C STIME TTY          TIME CMD
+5693094  11592 30778  0 05:00 pts/0    00:00:00 python signal-demo.py 17
+5693094  11728 30778  0 05:01 pts/0    00:00:00 ps -f
+5693094  30778 30772  0 04:23 pts/0    00:00:00 -bash
+
+[...]$ <strong class="epub__userinput"><code>kill −17 11592</code></strong>
+Got signal 17 at Sun Apr 25 05:01:28 2010
+sigchld caught
+
+[...]$ <strong class="epub__userinput"><code>kill −17 11592</code></strong>
+Got signal 17 at Sun Apr 25 05:01:35 2010
+sigchld caught
+
+[...]$ <strong class="epub__userinput"><code>kill −9 11592</code></strong>
+[1]+  Killed                  python signal-demo.py 17</pre>
+<p>Now, to apply all of this signal knowledge to killing
+            zombies, simply set the <code class="epub__literal">SIGCHLD</code>
+            signal handler to the <code class="epub__literal">SIG_IGN</code>
+            ignore handler action; on systems where this assignment is
+            supported, child processes will be cleaned up when they exit. The
+            forking server variant shown in Example 12-6 uses this trick to
+            manage its children.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id5"></a>
+<p class="epub__title">Example 12-6. PP4E\Internet\Sockets\fork-server-signal.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Same as fork-server.py, but use the Python signal module to avoid keeping
+child zombie processes after they terminate, instead of an explicit reaper
+loop before each new connection; SIG_IGN means ignore, and may not work with
+SIG_CHLD child exit signal on all platforms; see Linux documentation for more
+about the restartability of a socket.accept call interrupted with a signal;
+"""
+
+import os, time, sys, signal, signal
+from socket import *                      # get socket constructor and constants
+myHost = ''                               # server machine, '' means local host
+myPort = 50007                            # listen on a non-reserved port number
+
+sockobj = socket(AF_INET, SOCK_STREAM)           # make a TCP socket object
+sockobj.bind((myHost, myPort))                   # bind it to server port number
+sockobj.listen(5)                                # up to 5 pending connects
+<strong class="epub__userinput"><code>signal.signal(signal.SIGCHLD, signal.SIG_IGN)</code></strong>    # avoid child zombie processes
+
+def now():                                       # time on server machine
+    return time.ctime(time.time())
+
+def handleClient(connection):                    # child process replies, exits
+    time.sleep(5)                                # simulate a blocking activity
+    while True:                                  # read, write a client socket
+        data = connection.recv(1024)
+        if not data: break
+        reply = 'Echo=&gt;%s at %s' % (data, now())
+        connection.send(reply.encode())
+    connection.close()
+    os._exit(0)
+
+def dispatcher():                                # listen until process killed
+    while True:                                  # wait for next connection,
+        connection, address = sockobj.accept()   # pass to process for service
+        print('Server connected by', address, end=' ')
+        print('at', now())
+        childPid = os.fork()                     # copy this process
+        if childPid == 0:                        # if in child process: handle
+            handleClient(connection)             # else: go accept next connect
+
+dispatcher()</pre>
+</div>
+</div>
+<p>Where applicable, this technique is:</p><div class="epub__itemizedlist"><ul class="epub__itemizedlist"><li class="epub__listitem">
+<p>Much simpler; we don’t need to manually track or reap
+                child processes.</p></li><li class="epub__listitem">
+<p>More accurate; it leaves no zombies temporarily between
+                client requests.</p></li></ul>
+</div>
+<p>In fact, only one line is dedicated to handling zombies
+            here: the <code class="epub__literal">signal.signal</code> call
+            near the top, to set the handler. Unfortunately, this version is
+            also even less portable than using <code class="epub__literal">os.fork</code> in the first place, because
+            signals may work slightly differently from platform to platform,
+            even among Unix variants. For instance, some Unix platforms may
+            not allow <code class="epub__literal">SIG_IGN</code> to be used as
+            the <code class="epub__literal">SIGCHLD</code> action at all. On
+            Linux systems, though, this simpler forking server variant works
+            like a charm:</p><a id="I_programlisting1_d1e50293"></a>
+<pre class="epub__programlisting">[...]$ <strong class="epub__userinput"><code>python fork-server-signal.py &amp;</code></strong>
+[1] 3837
+Server connected by ('72.236.109.185', 58817) at Sun Apr 25 08:11:12 2010
+
+[...] <strong class="epub__userinput"><code>ps -f</code></strong>
+UID        PID  PPID  C STIME TTY          TIME CMD
+5693094   3837 30778  0 08:10 pts/0    00:00:00 python fork-server-signal.py
+5693094   4378  3837  0 08:11 pts/0    00:00:00 python fork-server-signal.py
+5693094   4413 30778  0 08:11 pts/0    00:00:00 ps -f
+5693094  30778 30772  0 04:23 pts/0    00:00:00 -bash
+
+[...]$ <strong class="epub__userinput"><code>ps -f</code></strong>
+UID        PID  PPID  C STIME TTY          TIME CMD
+5693094   3837 30778  0 08:10 pts/0    00:00:00 python fork-server-signal.py
+5693094   4584 30778  0 08:11 pts/0    00:00:00 ps -f
+5693094  30778 30772  0 04:23 pts/0    00:00:00 –bash</pre>
+<p>Notice how in this version the child process’s entry goes
+            away as soon as it exits, even before a new client request is
+            received; no “defunct” zombie ever appears. More dramatically, if
+            we now start up the script we wrote earlier that spawns
+            <span class="epub__emphasis"><em>eight</em></span> clients in parallel
+            (<span class="epub__emphasis"><em>testecho.py</em></span>) to talk to this server
+            remotely, all appear on the server while running, but are removed
+            immediately as they exit:</p><a id="I_programlisting1_d1e50312"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation">[client window]</span></em>
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>testecho.py learning-python.com</code></strong>
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[server window]</span></em>
+[...]$
+Server connected by ('72.236.109.185', 58829) at Sun Apr 25 08:16:34 2010
+Server connected by ('72.236.109.185', 58830) at Sun Apr 25 08:16:34 2010
+Server connected by ('72.236.109.185', 58831) at Sun Apr 25 08:16:34 2010
+Server connected by ('72.236.109.185', 58832) at Sun Apr 25 08:16:34 2010
+Server connected by ('72.236.109.185', 58833) at Sun Apr 25 08:16:34 2010
+Server connected by ('72.236.109.185', 58834) at Sun Apr 25 08:16:34 2010
+Server connected by ('72.236.109.185', 58835) at Sun Apr 25 08:16:34 2010
+Server connected by ('72.236.109.185', 58836) at Sun Apr 25 08:16:34 2010
+
+[...]$ <strong class="epub__userinput"><code>ps -f</code></strong>
+UID        PID  PPID  C STIME TTY          TIME CMD
+5693094   3837 30778  0 08:10 pts/0    00:00:00 python fork-server-signal.py
+5693094   9666  3837  0 08:16 pts/0    00:00:00 python fork-server-signal.py
+5693094   9667  3837  0 08:16 pts/0    00:00:00 python fork-server-signal.py
+5693094   9668  3837  0 08:16 pts/0    00:00:00 python fork-server-signal.py
+5693094   9670  3837  0 08:16 pts/0    00:00:00 python fork-server-signal.py
+5693094   9674  3837  0 08:16 pts/0    00:00:00 python fork-server-signal.py
+5693094   9678  3837  0 08:16 pts/0    00:00:00 python fork-server-signal.py
+5693094   9681  3837  0 08:16 pts/0    00:00:00 python fork-server-signal.py
+5693094   9682  3837  0 08:16 pts/0    00:00:00 python fork-server-signal.py
+5693094   9722 30778  0 08:16 pts/0    00:00:00 ps -f
+5693094  30778 30772  0 04:23 pts/0    00:00:00 -bash
+
+[...]$ <strong class="epub__userinput"><code>ps -f</code></strong>
+UID        PID  PPID  C STIME TTY          TIME CMD
+5693094   3837 30778  0 08:10 pts/0    00:00:00 python fork-server-signal.py
+5693094  10045 30778  0 08:16 pts/0    00:00:00 ps -f
+5693094  30778 30772  0 04:23 pts/0    00:00:00 –bash</pre>
+<p>And now that I’ve shown you how to use signal handling to
+            reap children automatically on Linux, I should underscore that
+            this technique is not universally supported across all flavors of
+            Unix. If you care about portability, manually reaping children as
+            we did in Example 12-4 may
+            still be <a id="I_indexterm1_d1e50332"></a><a id="I_indexterm1_d1e50334"></a><a id="I_indexterm1_d1e50336"></a>desirable.</p>
+</div>
+<div class="epub__sect3" title="Why multiprocessing doesn’t help with socket server portability"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="why_multiprocessing_doesn_apostrophy_t_h"></a>Why multiprocessing doesn’t help with socket server
+            portability</h3>
+</div>
+</div>
+</div>
+<p>In Chapter 5, we <a id="pa12.5.1.7"></a>l<a id="multi12.5.1.7"></a>earned about Python’s new <code class="epub__literal">multiprocessing</code> module. As we saw, it
+            provides a way to start function calls in new processes that is
+            more portable than the <code class="epub__literal">os.fork</code>
+            call used in this section’s server code, and it runs processes
+            instead of threads to work around the thread GIL in some
+            scenarios. In particular, <code class="epub__literal">multiprocessing</code> works on standard
+            Windows Python too, unlike direct <code class="epub__literal">os.fork</code> calls.</p>
+<p>I experimented with a server variant based upon this module
+            to see if its portability might help for socket servers. Its full
+            source code is in the examples package in file <em class="epub__filename">multi-server.py</em>, but here are its
+            important bits that differ:</p><a id="I_programlisting1_d1e50376"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation">...rest unchanged from fork-server.py...</span></em>
+from multiprocessing import Process
+
+def handleClient(connection):
+    print('Child:', os.getpid())                 # child process: reply, exit
+    time.sleep(5)                                # simulate a blocking activity
+    while True:                                  # read, write a client socket
+        data = connection.recv(1024)             # till eof when socket closed
+        <em class="epub__lineannotation"><span class="epub__lineannotation">...rest unchanged...</span></em>
+
+def dispatcher():                                # listen until process killed
+    while True:                                  # wait for next connection,
+        connection, address = sockobj.accept()   # pass to process for service
+        print('Server connected by', address, end=' ')
+        print('at', now())
+        Process(target=handleClient, args=(connection,)).start()
+
+if __name__ == '__main__':
+    print('Parent:', os.getpid())
+    sockobj = socket(AF_INET, SOCK_STREAM)           # make a TCP socket object
+    sockobj.bind((myHost, myPort))                   # bind it to server port number
+    sockobj.listen(5)                                # allow 5 pending connects
+    dispatcher()</pre>
+<p>This server variant is noticeably simpler too. Like the
+            forking server it’s derived from, this server works fine under
+            Cygwin Python on Windows running as <code class="epub__literal">localhost</code>, and would probably work on
+            other Unix-like platforms as well, because <code class="epub__literal">multiprocessing</code> forks a process on such
+            systems, and file and socket descriptors are inherited by child
+            processes as usual. Hence, the child process uses the same
+            connected socket as the parent. Here’s the scene in a Cygwin
+            server window and two Windows client windows:</p><a id="I_programlisting1_d1e50391"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation">[server window]</span></em>
+[C:\...\PP4E\Internet\Sockets]$ <strong class="epub__userinput"><code>python multi-server.py</code></strong>
+Parent: 8388
+Server connected by ('127.0.0.1', 58271) at Sat Apr 24 08:13:27 2010
+Child: 8144
+Server connected by ('127.0.0.1', 58272) at Sat Apr 24 08:13:29 2010
+Child: 8036
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[two client windows]</span></em>
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py</code></strong>
+Client received: b"Echo=&gt;b'Hello network world' at Sat Apr 24 08:13:33 2010"
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py localhost Brave Sir Robin</code></strong>
+Client received: b"Echo=&gt;b'Brave' at Sat Apr 24 08:13:35 2010"
+Client received: b"Echo=&gt;b'Sir' at Sat Apr 24 08:13:35 2010"
+Client received: b"Echo=&gt;b'Robin' at Sat Apr 24 08:13:35 2010"</pre>
+<p>However, this server does <span class="epub__emphasis"><em>not</em></span> work on
+            standard Windows Python—the whole point of trying to use <code class="epub__literal">multiprocessing</code> in this context—because
+            open sockets are not correctly pickled when passed as arguments
+            into the new process. Here’s what occurs in the server windows on
+            Windows 7 with Python 3.1:</p><a id="I_programlisting1_d1e50415"></a>
+<pre class="epub__programlisting">C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python multi-server.py</code></strong>
+Parent: 9140
+Server connected by ('127.0.0.1', 58276) at Sat Apr 24 08:17:41 2010
+Child: 9628
+Process Process-1:
+Traceback (most recent call last):
+  File "C:\Python31\lib\multiprocessing\process.py", line 233, in _bootstrap
+    self.run()
+  File "C:\Python31\lib\multiprocessing\process.py", line 88, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\...\PP4E\Internet\Sockets\multi-server.py", line 38, in handleClient
+    data = connection.recv(1024)             # till eof when socket closed
+socket.error: [Errno 10038] An operation was attempted on something that is not
+a socket</pre>
+<p>Recall from Chapter 5 that on
+            Windows <code class="epub__literal">multiprocessing</code> passes
+            context to a new <span>Python</span>
+            interpreter process by pickling it, and that <code class="epub__literal">Process</code> arguments must all be pickleable
+            for Windows. Sockets in Python 3.1 don’t trigger errors when
+            pickled thanks to the class they are an instance of, but they are
+            not really pickled correctly:</p><a id="I_programlisting1_d1e50433"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>from pickle import *</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>from socket import *</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>s = socket()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = dumps(s)</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>s</code></strong>
+&lt;socket.socket object, fd=180, family=2, type=1, proto=0&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>loads(x)</code></strong>
+&lt;socket.socket object, fd=-1, family=0, type=0, proto=0&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x</code></strong>
+b'\x80\x03csocket\nsocket\nq\x00)\x81q\x01N}q\x02(X\x08\x00\x00\x00_io_refsq\x03
+K\x00X\x07\x00\x00\x00_closedq\x04\x89u\x86q\x05b.'</pre>
+<p>As we saw in Chapter 5,
+            <code class="epub__literal">multiprocessing</code> has other IPC
+            tools such as its own pipes and queues that might be used instead
+            of sockets to work around this issue, but clients would then have
+            to use them, too—the resulting server would not be as broadly
+            accessible as one based upon general Internet sockets.</p>
+<p>Even if <code class="epub__literal">multiprocessing</code>
+            did work on Windows, though, its need to start a new Python
+            interpreter would likely make it much slower than the more
+            traditional technique of spawning threads to talk to clients.
+            Coincidentally, that brings us to <a id="I_indexterm1_d1e50470"></a><a id="I_indexterm1_d1e50472"></a><a id="I_indexterm1_d1e50474"></a><a id="I_indexterm1_d1e50476"></a>our next topic.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Threading Servers"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="threading_servers"></a>Threading Servers</h2>
+</div>
+</div>
+</div>
+<p>The forking model <a id="se12.5.2"></a><a id="th12.5.2"></a>just described works well on Unix-like platforms in
+          general, but it suffers from some potentially significant
+          limitations:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Performance</em></span></span></dt><dd>
+<p>On some machines, starting a new process can be fairly
+                expensive in terms of time and space resources.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Portability</em></span></span></dt><dd>
+<p>Forking processes is a Unix technique; as we’ve learned,
+                the <code class="epub__literal">os.fork</code> call currently
+                doesn’t work on non-Unix platforms such as Windows under
+                standard Python. As we’ve also learned, forks can be used in
+                the Cygwin version of Python on Windows, but they may be
+                inefficient and not exactly the same as Unix forks. And as we
+                just discovered, <code class="epub__literal">multiprocessing</code> won’t help on
+                Windows, because connected sockets are not pickleable across
+                process boundaries.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Complexity</em></span></span></dt><dd>
+<p>If you think that forking servers can be complicated,
+                you’re not alone. As we just saw, forking also brings with it
+                all the shenanigans of managing and reaping zombies—cleaning
+                up after child processes that live shorter lives than their
+                parents.</p></dd></dl>
+</div>
+<p>If you read Chapter 5, you know
+          that one solution to all of these dilemmas is to use
+          <span class="epub__emphasis"><em>threads</em></span> rather than processes. Threads run in
+          parallel and share global (i.e., module and interpreter)
+          memory.</p>
+<p>Because threads all run in the same process and memory space,
+          they automatically share sockets passed between them, similar in
+          spirit to the way that child processes inherit socket descriptors.
+          Unlike processes, though, threads are usually less expensive to
+          start, and work on both Unix-like machines and Windows under
+          standard Python today. Furthermore, many (though not all) see
+          threads as simpler to program—child threads die silently on exit,
+          without leaving behind zombies to haunt the server.</p>
+<p>To illustrate, Example 12-7 is another mutation
+          of the echo server that handles client requests in parallel by
+          running them in threads rather than in processes.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id6"></a>
+<p class="epub__title">Example 12-7. PP4E\Internet\Sockets\thread-server.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Server side: open a socket on a port, listen for a message from a client,
+and send an echo reply; echoes lines until eof when client closes socket;
+spawns a thread to handle each client connection; threads share global
+memory space with main thread; this is more portable than fork: threads
+work on standard Windows systems, but process forks do not;
+"""
+
+import time, _thread as thread           # or use threading.Thread().start()
+from socket import *                     # get socket constructor and constants
+myHost = ''                              # server machine, '' means local host
+myPort = 50007                           # listen on a non-reserved port number
+
+sockobj = socket(AF_INET, SOCK_STREAM)           # make a TCP socket object
+sockobj.bind((myHost, myPort))                   # bind it to server port number
+sockobj.listen(5)                                # allow up to 5 pending connects
+
+def now():
+    return time.ctime(time.time())               # current time on the server
+
+def handleClient(connection):                    # in spawned thread: reply
+    time.sleep(5)                                # simulate a blocking activity
+    while True:                                  # read, write a client socket
+        data = connection.recv(1024)
+        if not data: break
+        reply = 'Echo=&gt;%s at %s' % (data, now())
+        connection.send(reply.encode())
+    connection.close()
+
+def dispatcher():                                # listen until process killed
+    while True:                                  # wait for next connection,
+        connection, address = sockobj.accept()   # pass to thread for service
+        print('Server connected by', address, end=' ')
+        print('at', now())
+        thread.start_new_thread(handleClient, (connection,))
+
+dispatcher()</pre>
+</div>
+</div>
+<p>This <code class="epub__literal">dispatcher</code> delegates
+          each incoming client connection request to a newly spawned thread
+          running the <code class="epub__literal">handleClient</code>
+          function. As a result, this server can process multiple clients at
+          once, and the main dispatcher loop can get quickly back to the top
+          to check for newly arrived requests. The net effect is that new
+          clients won’t be denied service due to a busy server.</p>
+<p>Functionally, this version is similar to the <code class="epub__literal">fork</code> solution (clients are handled in
+          parallel), but it will work on any machine that supports threads,
+          including Windows and Linux. Let’s test it on both. First, start the
+          server on a Linux machine and run clients on both Linux and
+          Windows:</p><a id="I_programlisting1_d1e50554"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation">[window 1: thread-based server process, server keeps accepting</span></em>
+<em class="epub__lineannotation"><span class="epub__lineannotation">client connections while threads are servicing prior requests]</span></em>
+[...]$ <strong class="epub__userinput"><code>python thread-server.py</code></strong>
+Server connected by ('127.0.0.1', 37335) at Sun Apr 25 08:59:05 2010
+Server connected by ('72.236.109.185', 58866) at Sun Apr 25 08:59:54 2010
+Server connected by ('72.236.109.185', 58867) at Sun Apr 25 08:59:56 2010
+Server connected by ('72.236.109.185', 58868) at Sun Apr 25 08:59:58 2010
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[window 2: client, but on same remote server machine]</span></em>
+[...]$ <strong class="epub__userinput"><code>python echo-client.py</code></strong>
+Client received: b"Echo=&gt;b'Hello network world' at Sun Apr 25 08:59:10 2010"
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[windows 3-5: local clients, PC]</span></em>
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py learning-python.com</code></strong>
+Client received: b"Echo=&gt;b'Hello network world' at Sun Apr 25 08:59:59 2010"
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py learning-python.com Bruce</code></strong>
+Client received: b"Echo=&gt;b'Bruce' at Sun Apr 25 09:00:01 2010"
+
+C:\...\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py learning-python.com The Meaning of life</code></strong>
+Client received: b"Echo=&gt;b'The' at Sun Apr 25 09:00:03 2010"
+Client received: b"Echo=&gt;b'Meaning' at Sun Apr 25 09:00:03 2010"
+Client received: b"Echo=&gt;b'of' at Sun Apr 25 09:00:03 2010"
+Client received: b"Echo=&gt;b'life' at Sun Apr 25 09:00:03 2010"</pre>
+<p>Because this server uses threads rather than forked processes,
+          we can run it portably on both Linux and a Windows PC. Here it is at
+          work again, running on the same local Windows PC as its clients;
+          again, the main point to notice is that new clients are accepted
+          while prior clients are being processed in parallel with other
+          clients and the main thread (in the five-second sleep delay):</p><a id="I_programlisting1_d1e50586"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation">[window 1: server, on local PC]</span></em>
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python thread-server.py</code></strong>
+Server connected by ('127.0.0.1', 58987) at Sun Apr 25 12:41:46 2010
+Server connected by ('127.0.0.1', 58988) at Sun Apr 25 12:41:47 2010
+Server connected by ('127.0.0.1', 58989) at Sun Apr 25 12:41:49 2010
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[windows 2-4: clients, on local</span></em> PC]
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py</code></strong>
+Client received: b"Echo=&gt;b'Hello network world' at Sun Apr 25 12:41:51 2010"
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py localhost Brian</code></strong>
+Client received: b"Echo=&gt;b'Brian' at Sun Apr 25 12:41:52 2010"
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py localhost Bright side of life</code></strong>
+Client received: b"Echo=&gt;b'Bright' at Sun Apr 25 12:41:54 2010"
+Client received: b"Echo=&gt;b'side' at Sun Apr 25 12:41:54 2010"
+Client received: b"Echo=&gt;b'of' at Sun Apr 25 12:41:54 2010"
+Client received: b"Echo=&gt;b'life' at Sun Apr 25 12:41:54 2010"</pre>
+<p>Remember that a thread silently exits when the function it is
+          running returns; unlike the process <code class="epub__literal">fork</code> version, we don’t call anything like
+          <code class="epub__literal">os</code>.<code class="epub__literal">_exit</code> in the client handler function (and
+          we shouldn’t—it may kill all threads in the process, including the
+          main loop watching for new connections!). Because of this, the
+          thread version is not only more portable, but also <a id="I_indexterm1_d1e50616"></a><a id="I_indexterm1_d1e50618"></a>simpler.</p>
+</div>
+<div class="epub__sect2" title="Standard Library Server Classes"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="standard_library_server_classes"></a>Standard Library Server Classes</h2>
+</div>
+</div>
+</div>
+<p>Now that I’ve <a id="I_indexterm1_d1e50626"></a>shown you how to write forking and threading servers
+          to process clients without blocking incoming requests, I should also
+          tell you that there are standard tools in the Python standard
+          library to make this process even easier. In particular, the
+          <code class="epub__literal">socketserver</code> module defines
+          classes that implement all flavors of forking and threading servers
+          that you are likely to be interested in.</p>
+<p>Like the manually-coded servers we’ve just studied, this
+          module’s primary classes implement servers which process clients in
+          parallel (a.k.a. asynchronously) to avoid denying service to new
+          requests during long-running transactions. Their net effect is to
+          automate the top-levels of common server code. To use this module,
+          simply create the desired kind of imported server object, passing in
+          a handler object with a callback method of your own, as demonstrated
+          in the threaded TCP server of Example 12-8.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id7"></a>
+<p class="epub__title">Example 12-8. PP4E\Internet\Sockets\class-server.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Server side: open a socket on a port, listen for a message from a client, and
+send an echo reply; this version uses the standard library module socketserver to
+do its work; socketserver provides TCPServer, ThreadingTCPServer, ForkingTCPServer,
+UDP variants of these, and more, and routes each client connect request to a new
+instance of a passed-in request handler object's handle method; socketserver also
+supports Unix domain sockets, but only on Unixen; see the Python library manual.
+"""
+
+import socketserver, time               # get socket server, handler objects
+myHost = ''                             # server machine, '' means local host
+myPort = 50007                          # listen on a non-reserved port number
+def now():
+    return time.ctime(time.time())
+
+class MyClientHandler(socketserver.BaseRequestHandler):
+    def handle(self):                           # on each client connect
+        print(self.client_address, now())       # show this client's address
+        time.sleep(5)                           # simulate a blocking activity
+        while True:                             # self.request is client socket
+            data = self.request.recv(1024)      # read, write a client socket
+            if not data: break
+            reply = 'Echo=&gt;%s at %s' % (data, now())
+            self.request.send(reply.encode())
+        self.request.close()
+
+# make a threaded server, listen/handle clients forever
+myaddr = (myHost, myPort)
+server = socketserver.ThreadingTCPServer(myaddr, MyClientHandler)
+server.serve_forever()</pre>
+</div>
+</div>
+<p>This server works the same as the threading server we wrote by
+          hand in the previous section, but instead focuses on service
+          implementation (the customized <code class="epub__literal">handle</code> method), not on threading details.
+          It is run the same way, too—here it is processing three clients
+          started by hand, plus eight spawned by the <code class="epub__literal">testecho</code> script shown we wrote in Example 12-3:</p><a id="I_programlisting1_d1e50652"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation">[window 1: server, serverHost='localhost' in echo-client.py]</span></em>
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python class-server.py</code></strong>
+('127.0.0.1', 59036) Sun Apr 25 13:50:23 2010
+('127.0.0.1', 59037) Sun Apr 25 13:50:25 2010
+('127.0.0.1', 59038) Sun Apr 25 13:50:26 2010
+('127.0.0.1', 59039) Sun Apr 25 13:51:05 2010
+('127.0.0.1', 59040) Sun Apr 25 13:51:05 2010
+('127.0.0.1', 59041) Sun Apr 25 13:51:06 2010
+('127.0.0.1', 59042) Sun Apr 25 13:51:06 2010
+('127.0.0.1', 59043) Sun Apr 25 13:51:06 2010
+('127.0.0.1', 59044) Sun Apr 25 13:51:06 2010
+('127.0.0.1', 59045) Sun Apr 25 13:51:06 2010
+('127.0.0.1', 59046) Sun Apr 25 13:51:06 2010
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[windows 2-4: client, same machine]</span></em>
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py</code></strong>
+Client received: b"Echo=&gt;b'Hello network world' at Sun Apr 25 13:50:28 2010"
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py localhost Arthur</code></strong>
+Client received: b"Echo=&gt;b'Arthur' at Sun Apr 25 13:50:30 2010"
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py localhost Brave Sir Robin</code></strong>
+Client received: b"Echo=&gt;b'Brave' at Sun Apr 25 13:50:31 2010"
+Client received: b"Echo=&gt;b'Sir' at Sun Apr 25 13:50:31 2010"
+Client received: b"Echo=&gt;b'Robin' at Sun Apr 25 13:50:31 2010"
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python testecho.py</code></strong></pre>
+<p>To build a forking server instead, just use the class name
+          <code class="epub__literal">ForkingTCPServer</code> when creating
+          the server object. The <code class="epub__literal">socketserver</code> module has more power than
+          shown by this example; it also supports nonparallel (a.k.a. serial
+          or synchronous) servers, UDP and Unix domain sockets, and Ctrl-C
+          server interrupts on Windows. See Python’s library manual for more
+          details.</p>
+<p>For more advanced server needs, Python also comes with
+          standard library tools that use those shown here, and allow you to
+          implement in just a few lines of Python code a simple but
+          fully-functional HTTP (web) server that knows how to run server-side
+          CGI scripts. We’ll explore those larger server tools in Chapter 15.</p>
+</div>
+<div class="epub__sect2" title="Multiplexing Servers with select"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="multiplexing_servers_with_select"></a>Multiplexing Servers with select</h2>
+</div>
+</div>
+</div>
+<p>So far we’ve seen <a id="server12.5.4"></a><a id="multi12.5.4"></a><a id="sel12.5.4"></a>how to handle multiple clients at once with both
+          forked processes and spawned threads, and we’ve looked at a library
+          class that encapsulates both schemes. Under both approaches, all
+          client handlers seem to run in parallel with one another and with
+          the main dispatch loop that continues watching for new incoming
+          requests. Because all of these tasks run in parallel (i.e., at the
+          same time), the server doesn’t get blocked when accepting new
+          requests or when processing a long-running client handler.</p>
+<p>Technically, though, threads and processes don’t really run in
+          parallel, unless you’re lucky enough to have a machine with many
+          CPUs. Instead, your operating system performs a juggling act—it
+          divides the computer’s processing power among all active tasks. It
+          runs part of one, then part of another, and so on. All the tasks
+          appear to run in parallel, but only because the operating system
+          switches focus between tasks so fast that you don’t usually notice.
+          This process of switching between tasks is sometimes called
+          <span class="epub__emphasis"><em>time-slicing</em></span> when done by an operating system;
+          it is more generally known as
+          <span class="epub__emphasis"><em>multiplexing</em></span>.</p>
+<p>When we spawn threads and processes, we rely on the operating
+          system to juggle the active tasks so that none are starved of
+          computing resources, especially the main server dispatcher loop.
+          However, there’s no reason that a Python script can’t do so as well.
+          For instance, a script might divide tasks into multiple steps—run a
+          step of one task, then one of another, and so on, until all are
+          completed. The script need only know how to divide its attention
+          among the multiple active tasks to multiplex on its own.</p>
+<p>Servers can apply this technique to yield yet another way to
+          handle multiple clients at once, a way that requires neither threads
+          nor forks. By multiplexing client connections and the main
+          dispatcher with the <code class="epub__literal">select</code> system
+          call, a single event loop can process multiple clients and accept
+          new ones in parallel (or at least close enough to avoid stalling).
+          Such servers are sometimes called <span class="epub__emphasis"><em>asynchronous</em></span>,
+          because they service clients in spurts, as each becomes ready to
+          communicate. In asynchronous servers, a single main loop run in a
+          single process and thread decides which clients should get a bit of
+          attention each time through. Client requests and the main dispatcher
+          loop are each given a small slice of the server’s attention if they
+          are ready to converse.</p>
+<p>Most of the magic behind this server structure is the
+          operating system <code class="epub__literal">select</code> call,
+          available in Python’s standard <code class="epub__literal">select</code> module on all major platforms.
+          Roughly, <code class="epub__literal">select</code> is asked to
+          monitor a list of input sources, output sources, and exceptional
+          condition sources and tells us which sources are ready for
+          processing. It can be made to simply poll all the sources to see
+          which are ready; wait for a maximum time period for sources to
+          become ready; or wait indefinitely until one or more sources are
+          ready for processing.</p>
+<p>However used, <code class="epub__literal">select</code> lets
+          us direct attention to sockets ready to communicate, so as to avoid
+          blocking on calls to ones that are not. That is, when the sources
+          passed to <code class="epub__literal">select</code> are sockets, we
+          can be sure that socket calls like <code class="epub__literal">accept</code>, <code class="epub__literal">recv</code>, and <code class="epub__literal">send</code> will not block (pause) the server
+          when applied to objects returned by <code class="epub__literal">select</code>. Because of that, a single-loop
+          server that uses <code class="epub__literal">select</code> need not
+          get stuck communicating with one client or waiting for new ones
+          while other clients are starved for the server’s attention.</p>
+<p>Because this type of server does not need to start threads or
+          processes, it can be efficient when transactions with clients are
+          relatively short-lived. However, it also requires that these
+          transactions be quick; if they are not, it still runs the risk of
+          becoming bogged down waiting for a dialog with a particular client
+          to end, unless augmented with threads or forks for long-running
+          transactions.<sup>[46]</sup></p>
+<div class="epub__sect3" title="A select-based echo server"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="a_select-based_echo_server"></a>A select-based echo server</h3>
+</div>
+</div>
+</div>
+<p>Let’s see how all of this translates into code. The script
+            in Example 12-9 implements
+            another <code class="epub__literal">echo</code> server, one that
+            can handle multiple clients without ever starting new processes or
+            threads.</p><div class="epub__example"><a id="pp4e_reverse_solidus_internet-id8"></a>
+<p class="epub__title">Example 12-9. PP4E\Internet\Sockets\select-server.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+Server: handle multiple clients in parallel with select. use the select
+module to manually multiplex among a set of sockets: main sockets which
+accept new client connections, and input sockets connected to accepted
+clients; select can take an optional 4th arg--0 to poll, n.m to wait n.m
+seconds, or omitted to wait till any socket is ready for processing.
+"""
+
+import sys, time
+from select import select
+from socket import socket, AF_INET, SOCK_STREAM
+def now(): return time.ctime(time.time())
+
+myHost = ''                             # server machine, '' means local host
+myPort = 50007                          # listen on a non-reserved port number
+if len(sys.argv) == 3:                  # allow host/port as cmdline args too
+    myHost, myPort = sys.argv[1:]
+numPortSocks = 2                        # number of ports for client connects
+
+# make main sockets for accepting new client requests
+mainsocks, readsocks, writesocks = [], [], []
+for i in range(numPortSocks):
+    portsock = socket(AF_INET, SOCK_STREAM)   # make a TCP/IP socket object
+    portsock.bind((myHost, myPort))           # bind it to server port number
+    portsock.listen(5)                        # listen, allow 5 pending connects
+    mainsocks.append(portsock)                # add to main list to identify
+    readsocks.append(portsock)                # add to select inputs list
+    myPort += 1                               # bind on consecutive ports
+
+# event loop: listen and multiplex until server process killed
+print('select-server loop starting')
+while True:
+    #print(readsocks)
+    readables, writeables, exceptions = select(readsocks, writesocks, [])
+    for sockobj in readables:
+        if sockobj in mainsocks:                     # for ready input sockets
+            # port socket: accept new client
+            newsock, address = sockobj.accept()      # accept should not block
+            print('Connect:', address, id(newsock))  # newsock is a new socket
+            readsocks.append(newsock)                # add to select list, wait
+        else:
+            # client socket: read next line
+            data = sockobj.recv(1024)                # recv should not block
+            print('\tgot', data, 'on', id(sockobj))
+            if not data:                             # if closed by the clients
+                sockobj.close()                      # close here and remv from
+                readsocks.remove(sockobj)            # del list else reselected
+            else:
+                # this may block: should really select for writes too
+                reply = 'Echo=&gt;%s at %s' % (data, now())
+                sockobj.send(reply.encode())</pre>
+</div>
+</div>
+<p>The bulk of this script is its <code class="epub__literal">while</code> event loop at the end that calls
+            <code class="epub__literal">select</code> to find out which
+            sockets are ready for processing; these include both main port
+            sockets on which clients can connect and open client connections.
+            It then loops over all such ready sockets, accepting connections
+            on main port sockets and reading and echoing input on any client
+            sockets ready for input. Both the <code class="epub__literal">accept</code> and <code class="epub__literal">recv</code> calls in this code are guaranteed
+            to not block the server process after <code class="epub__literal">select</code> returns; as a result, this server
+            can quickly get back to the top of the loop to process newly
+            arrived client requests and already connected clients’ inputs. The
+            net effect is that all new requests and clients are serviced in
+            pseudoparallel fashion.</p>
+<p>To make this process work, the server appends the connected
+            socket for each client to the <code class="epub__literal">readables</code> list passed to <code class="epub__literal">select</code>, and simply waits for the socket
+            to show up in the selected inputs list. For illustration purposes,
+            this server also listens for new clients on more than one port—on
+            ports 50007 and 50008, in our examples. Because these main port
+            sockets are also interrogated with <code class="epub__literal">select</code>, connection requests on either
+            port can be accepted without blocking either already connected
+            clients or new connection requests appearing on the other port.
+            The <code class="epub__literal">select</code> call returns
+            whatever sockets in <code class="epub__literal">readables</code> are ready for
+            processing—both main port sockets and sockets connected to clients
+            currently being processed.</p>
+</div>
+<div class="epub__sect3" title="Running the select server"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="running_the_select_server"></a>Running the select server</h3>
+</div>
+</div>
+</div>
+<p>Let’s run this script locally to see how it does its stuff
+            (the client and server can also be run on different machines, as
+            in prior socket examples). First, we’ll assume we’ve already
+            started this server script on the local machine in one window, and
+            run a few clients to talk to it. The following listing gives the
+            interaction in two such client console windows running on Windows.
+            The first client simply runs the <code class="epub__literal">echo-client</code> script twice to contact the
+            server, and the second also kicks off the <code class="epub__literal">testecho</code> script to spawn eight <code class="epub__literal">echo-client</code> programs running in
+            parallel.</p>
+<p>As before, the server simply echoes back whatever text that
+            client sends, though without a sleep pause here (more on this in a
+            moment). Notice how the second client window really runs a script
+            called <code class="epub__literal">echo-client-50008</code> so as
+            to connect to the second port socket in the server; it’s the same
+            as <code class="epub__literal">echo-client</code>, with a
+            different hardcoded port number; alas, the original script wasn’t
+            designed to input a port number:</p><a id="I_programlisting1_d1e50843"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation">[client window 1]</span></em>
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py</code></strong>
+Client received: b"Echo=&gt;b'Hello network world' at Sun Apr 25 14:51:21 2010"
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client.py</code></strong>
+Client received: b"Echo=&gt;b'Hello network world' at Sun Apr 25 14:51:27 2010"
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[client window 2]</span></em>
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python echo-client-5008.py localhost Sir Galahad</code></strong>
+Client received: b"Echo=&gt;b'Sir' at Sun Apr 25 14:51:22 2010"
+Client received: b"Echo=&gt;b'Galahad' at Sun Apr 25 14:51:22 2010"
+
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python testecho.py</code></strong></pre>
+<p>The next listing is the sort of output that show up in the
+            window where the server has been started. The first three
+            connections come from <code class="epub__literal">echo-client</code> runs; the rest is the result
+            of the eight programs spawned by <code class="epub__literal">testecho</code> in the second client window. We
+            can run this server on Windows, too, because <strong class="epub__userinput"><code>select</code></strong> is available on this platform.
+            Correlate this output with the server’s code to see how it
+            runs.</p>
+<p>Notice that for <code class="epub__literal">testecho</code>,
+            new client connections and client inputs are multiplexed together.
+            If you study the output closely, you’ll see that they overlap in
+            time, because all activity is dispatched by the single event loop
+            in the server. In fact, the trace output on the server will
+            probably look a bit different nearly every time it runs. Clients
+            and new connections are interleaved almost at random due to timing
+            differences on the host machines. This happens in the earlier
+            forking and treading servers, too, but the operating system
+            automatically switches between the execution paths of the
+            dispatcher loop and client transactions.</p>
+<p>Also note that the server gets an empty string when the
+            client has closed its socket. We take care to close and delete
+            these sockets at the server right away, or else they would be
+            needlessly reselected again and again, each time through the main
+            loop:</p><a id="I_programlisting1_d1e50879"></a>
+<pre class="epub__programlisting"><em class="epub__lineannotation"><span class="epub__lineannotation">[server window]</span></em>
+C:\...\PP4E\Internet\Sockets&gt; <strong class="epub__userinput"><code>python select-server.py</code></strong>
+C:\Users\mark\Stuff\Books\4E\PP4E\dev\Examples\PP4E\Internet\Sockets&gt;python sele
+ct-server.py
+select-server loop starting
+Connect: ('127.0.0.1', 59080) 21339352
+        got b'Hello network world' on 21339352
+        got b'' on 21339352
+Connect: ('127.0.0.1', 59081) 21338128
+        got b'Sir' on 21338128
+        got b'Galahad' on 21338128
+        got b'' on 21338128
+Connect: ('127.0.0.1', 59082) 21339352
+        got b'Hello network world' on 21339352
+        got b'' on 21339352
+
+<em class="epub__lineannotation"><span class="epub__lineannotation">[testecho results]</span></em>
+Connect: ('127.0.0.1', 59083) 21338128
+        got b'Hello network world' on 21338128
+        got b'' on 21338128
+Connect: ('127.0.0.1', 59084) 21339352
+        got b'Hello network world' on 21339352
+        got b'' on 21339352
+Connect: ('127.0.0.1', 59085) 21338128
+        got b'Hello network world' on 21338128
+        got b'' on 21338128
+Connect: ('127.0.0.1', 59086) 21339352
+        got b'Hello network world' on 21339352
+        got b'' on 21339352
+Connect: ('127.0.0.1', 59087) 21338128
+        got b'Hello network world' on 21338128
+        got b'' on 21338128
+Connect: ('127.0.0.1', 59088) 21339352
+Connect: ('127.0.0.1', 59089) 21338128
+        got b'Hello network world' on 21339352
+        got b'Hello network world' on 21338128
+Connect: ('127.0.0.1', 59090) 21338056
+        got b'' on 21339352
+        got b'' on 21338128
+        got b'Hello network world' on 21338056
+        got b'' on 21338056</pre>
+<p>Besides this more verbose output, there’s another subtle but
+            crucial difference to <span>notice—</span>a <code class="epub__literal">time.sleep</code> call to simulate a
+            long-running task doesn’t make sense in the server here. Because
+            all clients are handled by the same single loop, sleeping would
+            pause <span class="epub__emphasis"><em>everything</em></span>, and defeat the whole point
+            of a multiplexing server. Again, manual multiplexing servers like
+            this one work well when transactions are short, but also generally
+            require them to either be so, or be handled specially.</p>
+<p>Before we move on, here are a few additional notes and
+            options:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">select</code> <span class="epub__emphasis"><em>call
+                details</em></span></span></dt><dd>
+<p>Formally, <code class="epub__literal">select</code> is
+                  called with three lists of selectable objects (input
+                  sources, output sources, and exceptional condition sources),
+                  plus an optional timeout. The timeout argument may be a real
+                  wait expiration value in seconds (use floating-point numbers
+                  to express fractions of a second), a zero value to mean
+                  simply poll and return immediately, or omitted to mean wait
+                  until at least one object is ready (as done in our server
+                  script). The call returns a triple of ready objects—subsets
+                  of the first three arguments—any or all of which may be
+                  empty if the timeout expired before sources became
+                  ready.</p></dd><dt><span class="epub__term"><code class="epub__literal">select</code>
+<span class="epub__emphasis"><em>portability</em></span></span></dt><dd>
+<p>Like threading, but unlike forking, this server works
+                  in standard Windows Python, too. Technically, the <code class="epub__literal">select</code> call works only for sockets
+                  on Windows, but also works for things like files and pipes
+                  on Unix and Macintosh. For servers running over the
+                  Internet, of course, the primary devices we are interested
+                  in are sockets.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Nonblocking sockets</em></span></span></dt><dd>
+<p><code class="epub__literal">select</code> lets us be
+                  sure that socket calls like <code class="epub__literal">accept</code> and <code class="epub__literal">recv</code> won’t block (pause) the
+                  caller, but it’s also possible to make Python <a id="I_indexterm1_d1e50944"></a>sockets nonblocking in general. Call the
+                  <code class="epub__literal">setblocking</code> method of
+                  socket objects to set the socket to blocking or nonblocking
+                  mode. For example, given a call like <code class="epub__literal">sock.setblocking(flag)</code>, the socket
+                  <code class="epub__literal">sock</code> is set to
+                  nonblocking mode if the flag is zero and to blocking mode
+                  otherwise. All sockets start out in blocking mode initially,
+                  so socket calls may always make the caller wait.</p>
+<p>However, when in nonblocking mode, a <code class="epub__literal">socket.error</code> exception is raised
+                  if a <code class="epub__literal">recv</code> socket call
+                  doesn’t find any data, or if a <code class="epub__literal">send</code> call can’t immediately
+                  transfer data. A script can catch this exception to
+                  determine whether the socket is ready for processing. In
+                  blocking mode, these calls always block until they can
+                  proceed. Of course, there may be much more to processing
+                  client requests than data transfers (requests may also
+                  require long-running computations), so nonblocking sockets
+                  don’t guarantee that servers won’t stall in general. They
+                  are simply another way to code multiplexing servers. Like
+                  <code class="epub__literal">select</code>, they are better
+                  suited when client requests can be serviced quickly.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>The</em></span> <code class="epub__literal">asyncore</code> <span class="epub__emphasis"><em>module
+                framework</em></span></span></dt><dd>
+<p>If you’re interested in using <code class="epub__literal">select</code>, you will probably also be
+                  interested in checking out the<a id="I_indexterm1_d1e50990"></a> <code class="epub__literal">asyncore.py</code> module in the standard
+                  Python library. It implements a class-based callback model,
+                  where input and output callbacks are dispatched to class
+                  methods by a precoded <code class="epub__literal">select</code> event loop. As such, it
+                  allows servers to be constructed without threads or forks,
+                  and it is a <code class="epub__literal">select</code>-based
+                  alternative to the <code class="epub__literal">socketserver</code> module’s threading
+                  and forking module we met in the prior sections. As for this
+                  type of server in general, <code class="epub__literal">asyncore</code> is best when transactions
+                  are short—what it describes as “I/O bound” instead of “CPU
+                  bound” programs, the latter of which still require threads
+                  or forks. See the Python library manual for details and a
+                  usage example.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Twisted</em></span></span></dt><dd>
+<p>For other <a id="I_indexterm1_d1e51017"></a>server options, see also the open source
+                  Twisted system (http://twistedmatrix.com). Twisted is an
+                  asynchronous networking framework written in Python that
+                  supports TCP, UDP, multicast, SSL/TLS, serial communication,
+                  and more. It supports both clients and servers and includes
+                  implementations of a number of commonly used network
+                  services such as a web server, an IRC chat server, a mail
+                  server, a relational database interface, and an object
+                  broker.</p>
+<p>Although Twisted supports processes and threads for
+                  longer-running actions, it also uses an asynchronous,
+                  event-driven model to handle clients, which is similar to
+                  the event loop of GUI libraries like tkinter. It abstracts
+                  an event loop, which multiplexes among open socket
+                  connections, automates many of the details inherent in an
+                  asynchronous server, and provides an event-driven framework
+                  for scripts to use to accomplish application tasks.
+                  Twisted’s internal event engine is similar in spirit to our
+                  <code class="epub__literal">select</code>-based server and
+                  the <code class="epub__literal">asyncore</code> module, but
+                  it is regarded as much more advanced. Twisted is a
+                  third-party system, not a standard library tool; see its
+                  website and documentation for more details.</p></dd></dl>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="Summary: Choosing a Server Scheme"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="summary_colon_choosing_a_server_scheme"></a>Summary: Choosing a Server Scheme</h2>
+</div>
+</div>
+</div>
+<p>So when should you use <code class="epub__literal">select</code> to build a server, instead of
+          threads or forks? Needs vary per application, of course, but as
+          mentioned, servers based on the <code class="epub__literal">select</code> call generally perform very well
+          when client transactions are relatively short and are not CPU-bound.
+          If they are not short, threads or forks may be a better way to split
+          processing among multiple clients. Threads and forks are especially
+          useful if clients require long-running processing above and beyond
+          the socket calls used to pass data. However, combinations are
+          possible too—nothing is stopping a select-based polling loop from
+          using threads, too.</p>
+<p>It’s important to remember that schemes based on <code class="epub__literal">select</code> (and nonblocking sockets) are not
+          completely immune to blocking. In Example 12-9, for instance, the
+          <code class="epub__literal">send</code> call that echoes text back
+          to a client might block, too, and hence stall the entire server. We
+          could work around that blocking potential by using <code class="epub__literal">select</code> to make sure that the output
+          operation is ready before we attempt it (e.g., use the <code class="epub__literal">writesocks</code> list and add another loop to
+          send replies to ready output sockets), albeit at a noticeable cost
+          in program clarity.</p>
+<p>In general, though, if we cannot split up the processing of a
+          client’s request in such a way that it can be multiplexed with other
+          requests and not block the server’s main loop, <code class="epub__literal">select</code> may not be the best way to
+          construct a server by itself. While some network servers can satisfy
+          this constraint, many cannot.</p>
+<p>Moreover, <code class="epub__literal">select</code> also seems
+          more complex than spawning either processes or threads, because we
+          need to manually transfer control among all tasks (for instance,
+          compare the threaded and <code class="epub__literal">select</code>
+          versions of our echo server, even without write selects). As usual,
+          though, the degree of that complexity varies per application. The
+          <span class="epub__emphasis"><em>asyncore</em></span> standard library module mentioned
+          earlier simplifies some of the tasks of implementing a <code class="epub__literal">select</code>-based event-loop socket server, and
+          Twisted offers additional hybrid <a id="I_indexterm1_d1e51079"></a><a id="I_indexterm1_d1e51081"></a><a id="I_indexterm1_d1e51084"></a><a id="I_indexterm1_d1e51086"></a><a id="I_indexterm1_d1e51088"></a><a id="I_indexterm1_d1e51090"></a><span>solutions</span>.</p>
+</div><div class="epub__footnotes"><br/><hr/><div class="epub__footnote">
+<p><sup>[46] </sup>Confusingly, <code class="epub__literal">select</code>-based servers are often called
+              <span class="epub__emphasis"><em>asynchronous</em></span>, to describe their
+              multiplexing of short-lived transactions. Really, though, the
+              classic forking and threading servers we met earlier are
+              asynchronous, too, as they do not wait for completion of a given
+              client’s request. There is a clearer distinction between serial
+              and parallel servers—the former process one transaction at a
+              time and the latter do not—and “synchronous” and “asynchronous”
+              are essentially synonyms for “serial” and “parallel.” By this
+              definition, forking, threading, and <code class="epub__literal">select</code> loops are three alternative
+              ways to implement parallel, asynchronous servers.</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

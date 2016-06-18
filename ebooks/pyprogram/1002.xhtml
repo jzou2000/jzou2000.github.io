@@ -1,0 +1,497 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>GuiMaker: Automating Menus and Toolbars</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="GuiMaker: Automating Menus and Toolbars"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="guimaker_colon_automating_menus_and_tool"></a>GuiMaker: Automating Menus and Toolbars</h1>
+</div>
+</div>
+</div>
+<p>The last section’s <a id="gui10.3"></a><a id="menu10.3"></a><a id="tool10.3"></a>mixin class makes common tasks simpler, but it still
+        doesn’t address the complexity of linking up widgets such as menus and
+        toolbars. Of course, if we had access to a GUI layout tool that
+        generates Python code, this would not be an issue, at least for some
+        of the more static interfaces we may require. We’d design our widgets
+        interactively, press a button, and fill in the callback handler
+        blanks.</p>
+<p>Especially for a relatively simple toolkit like tkinter, though,
+        a programming-based approach can often work just as well. We’d like to
+        be able to inherit something that does all the grunt work of
+        construction for us, given a template for the menus and toolbars in a
+        window. Here’s one way it can be done—using trees of simple objects.
+        The class in Example 10-3
+        interprets data structure representations of menus and toolbars and
+        builds all the widgets automatically.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id108"></a>
+<p class="epub__title">Example 10-3. PP4E\Gui\Tools\guimaker.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+###############################################################################
+An extended Frame that makes window menus and toolbars automatically.
+Use GuiMakerFrameMenu for embedded components (makes frame-based menus).
+Use GuiMakerWindowMenu for top-level windows (makes Tk8.0 window menus).
+See the self-test code (and PyEdit) for an example layout tree format.
+###############################################################################
+"""
+
+import sys
+from tkinter import *                     # widget classes
+from tkinter.messagebox import showinfo
+
+class GuiMaker(Frame):
+    menuBar    = []                       # class defaults
+    toolBar    = []                       # change per instance in subclasses
+    helpButton = True                     # set these in start() if need self
+
+    def __init__(self, parent=None):
+        Frame.__init__(self, parent)
+        self.pack(expand=YES, fill=BOTH)        # make frame stretchable
+        self.start()                            # for subclass: set menu/toolBar
+        self.makeMenuBar()                      # done here: build menu bar
+        self.makeToolBar()                      # done here: build toolbar
+        self.makeWidgets()                      # for subclass: add middle part
+
+    def makeMenuBar(self):
+        """
+        make menu bar at the top (Tk8.0 menus below)
+        expand=no, fill=x so same width on resize
+        """
+        menubar = Frame(self, relief=RAISED, bd=2)
+        menubar.pack(side=TOP, fill=X)
+
+        for (name, key, items) in self.menuBar:
+            mbutton  = Menubutton(menubar, text=name, underline=key)
+            mbutton.pack(side=LEFT)
+            pulldown = Menu(mbutton)
+            self.addMenuItems(pulldown, items)
+            mbutton.config(menu=pulldown)
+
+        if self.helpButton:
+            Button(menubar, text    = 'Help',
+                            cursor  = 'gumby',
+                            relief  = FLAT,
+                            command = self.help).pack(side=RIGHT)
+
+    def addMenuItems(self, menu, items):
+        for item in items:                     # scan nested items list
+            if item == 'separator':            # string: add separator
+                menu.add_separator({})
+            elif type(item) == list:           # list: disabled item list
+                for num in item:
+                    menu.entryconfig(num, state=DISABLED)
+            elif type(item[2]) != list:
+                menu.add_command(label     = item[0],         # command:
+                                 underline = item[1],         # add command
+                                 command   = item[2])         # cmd=callable
+            else:
+                pullover = Menu(menu)
+                self.addMenuItems(pullover, item[2])          # sublist:
+                menu.add_cascade(label     = item[0],         # make submenu
+                                 underline = item[1],         # add cascade
+                                 menu      = pullover)
+
+    def makeToolBar(self):
+        """
+        make button bar at bottom, if any
+        expand=no, fill=x so same width on resize
+        this could support images too: see Chapter 9,
+        would need prebuilt gifs or PIL for thumbnails
+        """
+        if self.toolBar:
+            toolbar = Frame(self, cursor='hand2', relief=SUNKEN, bd=2)
+            toolbar.pack(side=BOTTOM, fill=X)
+            for (name, action, where) in self.toolBar:
+                Button(toolbar, text=name, command=action).pack(where)
+
+    def makeWidgets(self):
+        """
+        make 'middle' part last, so menu/toolbar
+        is always on top/bottom and clipped last;
+        override this default, pack middle any side;
+        for grid: grid middle part in a packed frame
+        """
+        name = Label(self,
+                     width=40, height=10,
+                     relief=SUNKEN, bg='white',
+                     text   = self.__class__.__name__,
+                     cursor = 'crosshair')
+        name.pack(expand=YES, fill=BOTH, side=TOP)
+
+    def help(self):
+        "override me in subclass"
+        showinfo('Help', 'Sorry, no help for ' + self.__class__.__name__)
+
+    def start(self):
+        "override me in subclass: set menu/toolbar with self"
+        pass
+
+
+###############################################################################
+# Customize for Tk 8.0 main window menu bar, instead of a frame
+###############################################################################
+
+GuiMakerFrameMenu = GuiMaker           # use this for embedded component menus
+
+class GuiMakerWindowMenu(GuiMaker):    # use this for top-level window menus
+    def makeMenuBar(self):
+        menubar = Menu(self.master)
+        self.master.config(menu=menubar)
+
+        for (name, key, items) in self.menuBar:
+            pulldown = Menu(menubar)
+            self.addMenuItems(pulldown, items)
+            menubar.add_cascade(label=name, underline=key, menu=pulldown)
+
+        if self.helpButton:
+            if sys.platform[:3] == 'win':
+                menubar.add_command(label='Help', command=self.help)
+            else:
+                pulldown = Menu(menubar)  # Linux needs real pull down
+                pulldown.add_command(label='About', command=self.help)
+                menubar.add_cascade(label='Help', menu=pulldown)
+
+
+###############################################################################
+# Self-test when file run standalone: 'python guimaker.py'
+###############################################################################
+
+if __name__ == '__main__':
+    from guimixin import GuiMixin            # mix in a help method
+
+    menuBar = [
+        ('File', 0,
+            [('Open',  0, lambda:0),         # lambda:0 is a no-op
+             ('Quit',  0, sys.exit)]),       # use sys, no self here
+        ('Edit', 0,
+            [('Cut',   0, lambda:0),
+             ('Paste', 0, lambda:0)]) ]
+    toolBar = [('Quit', sys.exit, {'side': LEFT})]
+
+    class TestAppFrameMenu(GuiMixin, GuiMakerFrameMenu):
+        def start(self):
+            self.menuBar = menuBar
+            self.toolBar = toolBar
+
+    class TestAppWindowMenu(GuiMixin, GuiMakerWindowMenu):
+        def start(self):
+            self.menuBar = menuBar
+            self.toolBar = toolBar
+
+    class TestAppWindowMenuBasic(GuiMakerWindowMenu):
+        def start(self):
+            self.menuBar = menuBar
+            self.toolBar = toolBar    # guimaker help, not guimixin
+
+    root = Tk()
+    TestAppFrameMenu(Toplevel())
+    TestAppWindowMenu(Toplevel())
+    TestAppWindowMenuBasic(root)
+    root.mainloop()</pre>
+</div>
+</div>
+<p>To make sense of this module, you have to be familiar with the
+        menu fundamentals introduced in Chapter 9. If you are, though, it’s
+        straightforward—the <code class="epub__literal">GuiMaker</code> class
+        simply traverses the menu and toolbar structures and builds menu and
+        toolbar widgets along the way. This module’s self-test code includes a
+        simple example of the data structures used to lay out menus and
+        toolbars:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Menu bar templates</em></span></span></dt><dd>
+<p>Lists and nested sublists of <code class="epub__literal">(</code><em class="epub__replaceable"><code>label</code></em><code class="epub__literal">,</code>
+<em class="epub__replaceable"><code>underline</code></em><code class="epub__literal">,</code>
+<em class="epub__replaceable"><code>handler</code></em><code class="epub__literal">)</code> triples. If a <code class="epub__literal">handler</code> is a sublist rather than a
+              function or method, it is assumed to be a cascading
+              submenu.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Toolbar templates</em></span></span></dt><dd>
+<p>List of <code class="epub__literal">(</code><em class="epub__replaceable"><code>label</code></em><code class="epub__literal">,</code>
+<em class="epub__replaceable"><code>handler</code></em><code class="epub__literal">,</code>
+<em class="epub__replaceable"><code>pack-options</code></em><code class="epub__literal">)</code> triples. <code class="epub__literal">pack-options</code> is coded as a dictionary
+              of options passed on to the widget <code class="epub__literal">pack</code> method; we can code these as
+              <code class="epub__literal">{'k':v}</code> literals, or with the
+              <code class="epub__literal">dict(k=v)</code> call’s keyword
+              syntax. <code class="epub__literal">pack</code> accepts a
+              dictionary argument, but we could also transform the dictionary
+              into individual keyword <span>arguments</span> by using Python’s
+              <code class="epub__literal">func(**kargs)</code> call syntax. As
+              is, labels are assumed to be text, but images could be supported
+              too (see the note under BigGui: A Client Demo Program).</p></dd></dl>
+</div>
+<p>For variety, the mouse cursor changes based upon its location: a
+        hand in the toolbar, crosshairs in the default middle part, and
+        something else over Help buttons of frame-based menus (customize
+        <a id="I_indexterm4_d1e41757"></a>as desired).</p>
+<div class="epub__sect2" title="Subclass Protocols"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="subclass_protocols"></a>Subclass Protocols</h2>
+</div>
+</div>
+</div>
+<p>In addition to menu <a id="I_indexterm4_d1e41765"></a><a id="I_indexterm4_d1e41770"></a>and toolbar layouts, clients of this class can also
+          tap into and customize the method and geometry protocols the class
+          implements:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><span class="epub__emphasis"><em>Template attributes</em></span></span></dt><dd>
+<p>Clients of this class are expected to set <code class="epub__literal">menuBar</code> and <code class="epub__literal">toolBar</code> attributes somewhere in the
+                inheritance chain by the time the <code class="epub__literal">start</code> method has finished.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Initialization</em></span></span></dt><dd>
+<p>The <code class="epub__literal">start</code> method can
+                be overridden to construct menu and toolbar templates
+                dynamically, since <code class="epub__literal">self</code> is
+                available when it is called; <code class="epub__literal">start</code> is also where general
+                initializations should be performed—<code class="epub__literal">GuiMixin</code>’s <code class="epub__literal">__init__</code> constructor must be run,
+                not overridden.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Adding widgets</em></span></span></dt><dd>
+<p>The <code class="epub__literal">makeWidgets</code>
+                method can be redefined to construct the middle part of the
+                window—the application portion between the menu bar and the
+                toolbar. By default, <code class="epub__literal">makeWidgets</code> adds a label in the
+                middle with the name of the most specific class, but this
+                method is expected to be specialized.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Packing protocol</em></span></span></dt><dd>
+<p>In a specialized <code class="epub__literal">makeWidgets</code> method, clients may
+                attach their middle portion’s widgets to any side of <code class="epub__literal">self</code> (a <code class="epub__literal">Frame</code>) since the menu and toolbars
+                have already claimed the container’s top and bottom by the
+                time <code class="epub__literal">makeWidgets</code> is run.
+                The middle part does not need to be a nested frame if its
+                parts are packed. The menu and toolbars are also automatically
+                packed first so that they are clipped last if the window
+                shrinks.</p></dd><dt><span class="epub__term"><span class="epub__emphasis"><em>Gridding protocol</em></span></span></dt><dd>
+<p>The middle part can contain a grid layout, as long as it
+                is gridded in a nested <code class="epub__literal">Frame</code> that is itself packed within
+                the <code class="epub__literal">self</code> parent. (Remember
+                that each container level may use <code class="epub__literal">grid</code> or <code class="epub__literal">pack</code>, not both, and that <code class="epub__literal">self</code> is a <code class="epub__literal">Frame</code> with already packed bars by
+                the time <code class="epub__literal">makeWidgets</code> is
+                called.) Because the <code class="epub__literal">GuiMaker
+                Frame</code> packs itself within its parent, it is not
+                directly embeddable in a container with widgets arranged in a
+                grid, for similar reasons; add an intermediate gridded
+                <code class="epub__literal">Frame</code> to use it in this
+                context.</p></dd></dl>
+</div>
+</div>
+<div class="epub__sect2" title="GuiMaker Classes"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="guimaker_classes"></a>GuiMaker Classes</h2>
+</div>
+</div>
+</div>
+<p>In return for conforming to<a id="I_indexterm4_d1e41887"></a> <code class="epub__literal">GuiMaker</code> protocols
+          and templates, client subclasses get a <code class="epub__literal">Frame</code> that knows how to automatically
+          build up its own menus and toolbars from template data structures.
+          If you read the preceding chapter’s menu examples, you probably know
+          that this is a big win in terms of reduced coding requirements.
+          <code class="epub__literal">GuiMaker</code> is also clever enough to
+          export interfaces for both menu styles that we met in Chapter 9:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">GuiMakerWindowMenu</code></span></dt><dd>
+<p>Implements Tk 8.0-style top-level window menus, useful
+                for menus associated with standalone programs and pop
+                ups.</p></dd><dt><span class="epub__term"><code class="epub__literal">GuiMakerFrameMenu</code></span></dt><dd>
+<p>Implements alternative <code class="epub__literal">Frame/Menubutton</code>-based menus, useful
+                for menus on objects embedded as components of a larger
+                GUI.</p></dd></dl>
+</div>
+<p>Both classes build toolbars, export the same protocols, and
+          expect to find the same template structures; they differ only in the
+          way they process menu templates. In fact, one is simply a subclass
+          of the other with a specialized menu maker method—only top-level
+          menu processing differs between the two styles (a <code class="epub__literal">Menu</code> with <code class="epub__literal">Menu</code> cascades rather than a <code class="epub__literal">Frame</code> with <code class="epub__literal">Menubuttons</code>).</p>
+</div>
+<div class="epub__sect2" title="GuiMaker Self-Test"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="guimaker_self-test"></a>GuiMaker Self-Test</h2>
+</div>
+</div>
+</div>
+<p>Like <code class="epub__literal">GuiMixin</code>, when
+          <a id="I_indexterm4_d1e41944"></a>we run Example 10-3 as a top-level
+          program, we trigger the self-test logic at the bottom of its file;
+          Figure 10-2 shows the windows we
+          get. Three windows come up, representing each of the self-test
+          code’s <code class="epub__literal">TestApp</code> classes. All three
+          have a menu and toolbar with the options specified in the template
+          data structures created in the self-test code: File and Edit menu
+          pull downs, plus a Quit toolbar button and a standard Help menu
+          button. In the screenshot, one window’s File menu has been torn off
+          and the Edit menu of another is being pulled down; the lower window
+          was resized for effect.</p><div class="epub__figure"><a id="guimaker_self-test_at_work"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e41960"></a><img alt="GuiMaker self-test at work" src="Images/getfile_003-17.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 10-2. GuiMaker self-test at work</p>
+</div>
+<p><code class="epub__literal">GuiMaker</code> can be mixed in
+          with other superclasses, but it’s primarily intended to serve the
+          same extending and embedding roles as a tkinter <code class="epub__literal">Frame</code> widget class (which makes sense,
+          given that it’s really just a customized <code class="epub__literal">Frame</code> with extra construction protocols).
+          In fact, its self-test combines a <code class="epub__literal">GuiMaker</code> frame with the prior section’s
+          <code class="epub__literal">GuiMixin</code> tools package
+          class.</p>
+<p>Because of the superclass relationships coded, two of the
+          three windows get their <code class="epub__literal">help</code>
+          callback handler from <code class="epub__literal">GuiMixin</code>;
+          <code class="epub__literal">TestAppWindowMenuBasic</code> gets
+          <code class="epub__literal">GuiMaker</code>’s instead. Notice that
+          the order in which these two classes are mixed can be important:
+          because both <code class="epub__literal">GuiMixin</code> and
+          <code class="epub__literal">Frame</code> define a <code class="epub__literal">quit</code> method, we need to list the class
+          from which we want to get it first in the mixed class’s header line
+          due to the left-to-right search rule of multiple inheritance. To
+          select <code class="epub__literal">GuiMixin</code>’s methods, it
+          should usually be listed before a superclass derived from real
+          widgets.</p>
+<p>We’ll put <code class="epub__literal">GuiMaker</code> to more
+          practical use in instances such as the PyEdit example in Chapter 11. The next section shows another
+          way to use <code class="epub__literal">GuiMaker</code>’s templates
+          to build up a sophisticated interface, and serves as another test of
+          its functionality.</p>
+</div>
+<div class="epub__sect2" title="BigGui: A Client Demo Program"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="biggui_colon_a_client_demo_program"></a>BigGui: A Client Demo Program</h2>
+</div>
+</div>
+</div>
+<p>Let’s look at a program that <a id="gui10.3.4"></a><a id="big10.3.4"></a>makes better use of the two automation classes we just
+          wrote. In the module in Example 10-4, the <code class="epub__literal">Hello</code> class inherits from both <code class="epub__literal">GuiMixin</code> and <code class="epub__literal">GuiMaker</code>. <code class="epub__literal">GuiMaker</code> provides the link to the <code class="epub__literal">Frame</code> widget, plus the menu/toolbar
+          construction logic. <code class="epub__literal">GuiMixin</code>
+          provides extra common-behavior methods. Really, <code class="epub__literal">Hello</code> is another kind of extended <code class="epub__literal">Frame</code> widget because it is derived from
+          <code class="epub__literal">GuiMaker</code>. To get a menu and
+          toolbar for free, it simply follows the protocols defined by
+          <code class="epub__literal">GuiMaker</code>—it sets the <code class="epub__literal">menuBar</code> and <code class="epub__literal">toolBar</code> attributes in its <code class="epub__literal">start</code> method, and overrides <code class="epub__literal">makeWidgets</code> to put a custom label in the
+          middle.</p><div class="epub__example"><a id="pp4e_reverse_solidus_gui_reverse-id109"></a>
+<p class="epub__title">Example 10-4. PP4E\Gui\Tools\big_gui.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+GUI demo implementation - combines maker, mixin, and this
+"""
+
+import sys, os
+from tkinter import *                        # widget classes
+from PP4E.Gui.Tools.guimixin import *        # mix-in methods: quit, spawn, etc.
+from PP4E.Gui.Tools.guimaker import *        # frame, plus menu/toolbar builder
+
+class Hello(GuiMixin, GuiMakerWindowMenu):   # or GuiMakerFrameMenu
+    def start(self):
+        self.hellos = 0
+        self.master.title("GuiMaker Demo")
+        self.master.iconname("GuiMaker")
+        def spawnme(): self.spawn('big_gui.py')        # defer call vs lambda
+
+        self.menuBar = [                               # a tree: 3 pull downs
+          ('File', 0,                                  # (pull-down)
+              [('New...',  0, spawnme),
+               ('Open...', 0, self.fileOpen),          # [menu items list]
+               ('Quit',    0, self.quit)]              # label,underline,action
+          ),
+
+          ('Edit', 0,
+              [('Cut',    −1, self.notdone),           # no underline|action
+               ('Paste',  −1, self.notdone),           # lambda:0 works too
+               'separator',                            # add a separator
+               ('Stuff',  −1,
+                   [('Clone', −1, self.clone),         # cascaded submenu
+                    ('More',  −1, self.more)]
+               ),
+               ('Delete', −1, lambda:0),
+               [5]]                                    # disable 'delete'
+          ),
+
+          ('Play', 0,
+              [('Hello',     0, self.greeting),
+               ('Popup...',  0, self.dialog),
+               ('Demos',     0,
+                  [('Toplevels', 0,
+                       lambda: self.spawn(r'..\Tour\toplevel2.py')),
+                   ('Frames',    0,
+                       lambda: self.spawn(r'..\Tour\demoAll-frm-ridge.py')),
+                   ('Images',    0,
+                       lambda: self.spawn(r'..\Tour\buttonpics.py')),
+                   ('Alarm',     0,
+                       lambda: self.spawn(r'..\Tour\alarm.py', wait=False)),
+                   ('Other...', −1, self.pickDemo)]
+               )]
+          )]
+
+        self.toolBar = [                                     # add 3 buttons
+          ('Quit',  self.quit,     dict(side=RIGHT)),        # or {'side': RIGHT}
+          ('Hello', self.greeting, dict(side=LEFT)),
+          ('Popup', self.dialog,   dict(side=LEFT, expand=YES)) ]
+
+    def makeWidgets(self):                                   # override default
+        middle = Label(self, text='Hello maker world!',      # middle of window
+                       width=40, height=10,
+                       relief=SUNKEN, cursor='pencil', bg='white')
+        middle.pack(expand=YES, fill=BOTH)
+
+    def greeting(self):
+        self.hellos += 1
+        if self.hellos % 3:
+            print("hi")
+        else:
+            self.infobox("Three", 'HELLO!')    # on every third press
+
+    def dialog(self):
+        button = self.question('OOPS!',
+                               'You typed "rm*" ... continue?',  # old style
+                               'questhead', ('yes', 'no'))       # args ignored
+        [lambda: None, self.quit][button]()
+
+    def fileOpen(self):
+        pick = self.selectOpenFile(file='big_gui.py')
+        if pick:
+            self.browser(pick)     # browse my source file, or other
+
+    def more(self):
+        new = Toplevel()
+        Label(new,  text='A new non-modal window').pack()
+        Button(new, text='Quit', command=self.quit).pack(side=LEFT)
+        Button(new, text='More', command=self.more).pack(side=RIGHT)
+
+    def pickDemo(self):
+        pick = self.selectOpenFile(dir='..')
+        if pick:
+            self.spawn(pick)    # spawn any Python program
+
+if __name__ == '__main__':  Hello().mainloop()   # make one, run one</pre>
+</div>
+</div>
+<p>This script lays out a fairly large menu and toolbar
+          structure, and also adds callback methods of its own that print
+          <code class="epub__literal">stdout</code> messages, pop up text file
+          browsers and new windows, and run other programs. Many of the
+          callbacks don’t do much more than run the <code class="epub__literal">notDone</code> method inherited from <code class="epub__literal">GuiMixin</code>, though; this code is intended
+          mostly as a <code class="epub__literal">GuiMaker</code> and <code class="epub__literal">GuiMixin</code> demo.</p>
+<p>When <code class="epub__literal">big_gui</code> is run as a
+          top-level program, it creates a window with four menu pull downs on
+          top and a three-button toolbar on the bottom, shown in Figure 10-3 along with some
+          of the pop-up windows its callbacks create. The menus have
+          separators, disabled entries, and cascading submenus, all as defined
+          by the <code class="epub__literal">menuBar</code> template used by
+          <code class="epub__literal">GuiMaker</code>, and Quit invokes the
+          verifying dialog inherited from <code class="epub__literal">GuiMixin</code>—some of the many tools we’re
+          getting for free here.</p><div class="epub__figure"><a id="big_underscore_gui_with_various_pop_ups"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e42119"></a><img alt="big_gui with various pop ups" src="Images/getfile-26.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 10-3. big_gui with various pop ups</p>
+</div>
+<p>Figure 10-4 shows
+          this script’s window again, after its Play pull down has been used
+          to launch three independently running demos that we wrote in
+          Chapters 8 and 9. These demos are ultimately
+          started by using the portable launcher tools we wrote in Chapter 5, and acquired from the <code class="epub__literal">GuiMixin</code> class. If you want to run other
+          demos on your computer, select the Play menu’s Other option to pop
+          up a standard file selection dialog instead and navigate to the
+          desired program’s file. One note: I copied the icon bitmap used by
+          the top-levels demo in the Play menu to this script’s directory;
+          later, we’ll write tools that attempt to locate one
+          automatically.</p><div class="epub__figure"><a id="big_underscore_gui_with_spawned_demos"></a><div class="epub__figure-contents"><div class="epub__mediaobject"><a id="I_mediaobject4_d1e42139"></a><img alt="big_gui with spawned demos" src="Images/getfile_002-20.png"/>
+</div>
+</div>
+<p class="epub__title">Figure 10-4. big_gui with spawned demos</p>
+</div>
+<p>Finally, I should note that <code class="epub__literal">GuiMaker</code> could be redesigned to use trees
+          of embedded class instances that know how to apply themselves to the
+          tkinter widget tree being constructed, instead of branching on the
+          types of items in template data structures. In the interest of
+          space, though, we’ll banish that extension to the land of suggested
+          exercises in this <a id="I_indexterm4_d1e42149"></a><a id="I_indexterm4_d1e42151"></a><a id="I_indexterm4_d1e42153"></a><a id="I_indexterm4_d1e42155"></a>edition.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p>Speaking of suggested enhancements, in Chapter 9, I showed you a first-cut
+            way to use images instead of text for buttons in toolbars at the
+            bottom of windows. Adding this option to the GUI maker class as a
+            subclass which redefines its toolbar construction method would be
+            both a great way to experiment with the code and a useful utility.
+            If I added every cool feature imaginable, though, this book could
+            easily become big enough to be gravitationally significant…</p>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

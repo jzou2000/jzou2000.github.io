@@ -1,0 +1,617 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Basic Embedding Techniques</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div class="epub__sect1" title="Basic Embedding Techniques"><div class="epub__titlepage"><div><div><h1 class="epub__title"><a id="basic_embedding_techniques"></a>Basic Embedding Techniques</h1>
+</div>
+</div>
+</div>
+<p>As you can <a id="em20.9"></a>probably tell from the preceding overview, there is much
+        flexibility in the embedding domain. To illustrate common embedding
+        techniques in action, this section presents a handful of short C
+        programs that run Python code in one form or another. Most of these
+        examples will make use of the simple Python module file shown in Example 20-22.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id21"></a>
+<p class="epub__title">Example 20-22. PP4E\Integrate\Embed\Basics\usermod.py</p><div class="epub__example-contents">
+<pre class="epub__programlisting">"""
+#############################################################
+C code runs Python code in this module in embedded mode.
+Such a file can be changed without changing the C layer.
+This is just standard Python code (C handles conversions).
+Must be on the Python module search path if imported by C.
+C can also run code in standard library modules like string.
+#############################################################
+"""
+
+message = 'The meaning of life...'
+
+def transform(input):
+    input = input.replace('life', 'Python')
+    return input.upper()</pre>
+</div>
+</div>
+<p>If you know any Python at all, you probably know that this file
+        defines a string and a function; the function returns whatever it is
+        passed with string substitution and uppercase conversions applied.
+        It’s easy to use from Python:</p><a id="I_programlisting4_d1e87674"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Embed/Basics$ <strong class="epub__userinput"><code>python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>import usermod</code></strong>                                      # import a module
+&gt;&gt;&gt; <strong class="epub__userinput"><code>usermod.message</code></strong>                                     # fetch a string
+'The meaning of life...'
+&gt;&gt;&gt; <strong class="epub__userinput"><code>usermod.transform(usermod.message)</code></strong>                  # call a function
+'THE MEANING OF PYTHON...'</pre>
+<p>With a little Python API wizardry, it’s not much more difficult
+        to use this module the same way in C.</p>
+<div class="epub__sect2" title="Running Simple Code Strings"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="running_simple_code_strings"></a>Running Simple Code Strings</h2>
+</div>
+</div>
+</div>
+<p>Perhaps the simplest <a id="code20.9.1"></a>way to run Python code from C is by calling the
+          <code class="epub__literal">PyRun_SimpleString</code> API function.
+          With it, C programs can execute Python programs represented as C
+          character string arrays. This call is also very limited: all code
+          runs in the same namespace (the module <code class="epub__literal">__main__</code>), the code strings must be Python
+          statements (not expressions), and there is no direct way to
+          communicate inputs or outputs with the Python code run.</p>
+<p>Still, it’s a simple place to start. Moreover, when augmented
+          with an imported C extension module that the embedded Python code
+          can use to communicate with the enclosing C layer, this technique
+          can satisfy many embedding goals. To demonstrate the basics, the C
+          program in Example 20-23
+          runs Python code to accomplish the same results as the Python
+          interactive session listed in the prior section.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id22"></a>
+<p class="epub__title">Example 20-23. PP4E\Integrate\Embed\Basics\embed-simple.c</p><div class="epub__example-contents">
+<pre class="epub__programlisting">/*******************************************************
+ * simple code strings: C acts like the interactive
+ * prompt, code runs in __main__, no output sent to C;
+ *******************************************************/
+
+#include &lt;Python.h&gt;    /* standard API def */
+
+main() {
+    printf("embed-simple\n");
+    Py_Initialize();
+    PyRun_SimpleString("import usermod");                /* load .py file */
+    PyRun_SimpleString("print(usermod.message)");        /* on Python path */
+    PyRun_SimpleString("x = usermod.message");           /* compile and run */
+    PyRun_SimpleString("print(usermod.transform(x))");
+    Py_Finalize();
+}</pre>
+</div>
+</div>
+<p>The first thing you should notice here is that when Python is
+          embedded, C programs always call <code class="epub__literal">Py_Initialize</code> to initialize linked-in
+          Python libraries before using any other API functions and normally
+          call <code class="epub__literal">Py_Finalize</code> to shut the
+          interpreter down.</p>
+<p>The rest of this code is straightforward—C submits hardcoded
+          strings to Python that are roughly what we typed interactively. In
+          fact, we could concatenate all the Python code strings here with
+          <code class="epub__literal">\n</code> characters between, and submit
+          it once as a single string. Internally, <code class="epub__literal">PyRun_SimpleString</code> invokes <a id="I_indexterm4_d1e87732"></a>the Python compiler and interpreter to run the strings
+          sent from C; as usual, the Python compiler is always available in
+          systems that contain Python.</p>
+<div class="epub__sect3" title="Compiling and running"><div class="epub__titlepage"><div><div><h3 class="epub__title"><a id="compiling_and_running"></a>Compiling and running</h3>
+</div>
+</div>
+</div>
+<p>To build a standalone executable from this C source file,
+            you need to link its compiled form with the Python library file.
+            In this chapter, “library” usually means the binary library file
+            that is generated when Python is compiled, not the Python source
+            code standard library.</p>
+<p>Today, everything in Python that you need in C is compiled
+            into a single Python library file when the interpreter is built
+            (e.g., <span class="epub__emphasis"><em>libpython3.1.dll</em></span> on Cygwin). The
+            program’s <code class="epub__literal">main</code> function comes
+            from your C code, and depending on your platform and the
+            extensions installed in your Python, you may also need to link any
+            external libraries referenced by the Python library.</p>
+<p>Assuming no extra extension libraries are needed, Example 20-24 is a minimal
+            makefile for building the C program in Example 20-23 under <a id="I_indexterm4_d1e87755"></a>Cygwin on Windows. Again, makefile details vary per
+            platform, but see Python manuals for hints. This makefile uses the
+            Python include-files path to find <span class="epub__emphasis"><em>Python.h</em></span> in
+            the compile step and adds the Python library file to the final
+            link step to make API calls available to the C program.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id23"></a>
+<p class="epub__title">Example 20-24. PP4E\Integrate\Embed\Basics\makefile.1</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># a Cygwin makefile that builds a C executable that embeds
+# Python, assuming no external module libs must be linked in;
+# uses Python header files, links in the Python lib file;
+# both may be in other dirs (e.g., /usr) in your install;
+
+PYLIB = /usr/local/bin
+PYINC = /usr/local/include/python3.1
+
+embed-simple: embed-simple.o
+        gcc embed-simple.o -L$(PYLIB) -lpython3.1 -g -o embed-simple
+
+embed-simple.o: embed-simple.c
+        gcc embed-simple.c -c -g -I$(PYINC)</pre>
+</div>
+</div>
+<p>To build a program with this file, launch <code class="epub__literal">make</code> on it as usual (as before, make
+            sure indentation in rules is tabs in your copy of this
+            makefile):</p><a id="I_programlisting4_d1e87774"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Embed/Basics$ <strong class="epub__userinput"><code>make -f makefile.1</code></strong>
+gcc embed-simple.c -c -g -I/usr/local/include/python3.1
+gcc embed-simple.o -L/usr/local/bin -lpython3.1 -g -o embed-simple</pre>
+<p>Things may not be quite this simple in practice, though, at
+            least not without some coaxing. The makefile in Example 20-25 is the one I
+            actually used to build all of this section’s C programs on
+            Cygwin.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id24"></a>
+<p class="epub__title">Example 20-25. PP4E\Integrate\Embed\Basics\makefile.basics</p><div class="epub__example-contents">
+<pre class="epub__programlisting"># cygwin makefile to build all 5 basic embedding examples at once
+
+PYLIB = /usr/local/bin
+PYINC = /usr/local/include/python3.1
+
+BASICS = embed-simple.exe   \
+         embed-string.exe   \
+         embed-object.exe   \
+         embed-dict.exe     \
+         embed-bytecode.exe
+
+all:    $(BASICS)
+
+embed%.exe: embed%.o
+        gcc embed$*.o -L$(PYLIB) -lpython3.1 -g -o $@
+
+embed%.o: embed%.c
+        gcc embed$*.c -c -g -I$(PYINC)
+
+clean:
+        rm -f *.o *.pyc $(BASICS) core</pre>
+</div>
+</div>
+<p>On some platforms, you may need to also link in other
+            libraries because the Python library file used may have been built
+            with external dependencies enabled and required. In fact, you may
+            have to link in arbitrarily many more externals for your Python
+            library, and frankly, chasing down all the linker dependencies can
+            be tedious. Required libraries may vary per platform and Python
+            install, so there isn’t a lot of advice I can offer to make this
+            process simple (this is C, after all). The standard C development
+            techniques will apply.</p>
+<p>One hint here: if you’re going to do much embedding work and
+            you run into external dependency issues, on some platforms you
+            might want to build Python on your machine from its source with
+            all unnecessary extensions <span class="epub__emphasis"><em>disabled</em></span> in its
+            build configuration files (see the Python source package for
+            details). This produces a Python library with minimal external
+            requirements, which may links more easily.</p>
+<p>Once you’ve gotten the makefile to work, run it to build all
+            of this section’s C programs at once with Python libraries linked
+            in:</p><a id="I_programlisting4_d1e87798"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Embed/Basics$ <strong class="epub__userinput"><code>make -f makefile.basics clean</code></strong>
+rm -f *.o *.pyc embed-simple.exe embed-string.exe embed-object.exe
+embed-dict.exe embed-bytecode.exe core
+
+.../PP4E/Integrate/Embed/Basics$ <strong class="epub__userinput"><code>make -f makefile.basics</code></strong>
+gcc embed-simple.c -c -g -I/usr/local/include/python3.1
+gcc embed-simple.o -L/usr/local/bin -lpython3.1 -g -o embed-simple.exe
+gcc embed-string.c -c -g -I/usr/local/include/python3.1
+gcc embed-string.o -L/usr/local/bin -lpython3.1 -g -o embed-string.exe
+gcc embed-object.c -c -g -I/usr/local/include/python3.1
+gcc embed-object.o -L/usr/local/bin -lpython3.1 -g -o embed-object.exe
+gcc embed-dict.c -c -g -I/usr/local/include/python3.1
+gcc embed-dict.o -L/usr/local/bin -lpython3.1 -g -o embed-dict.exe
+gcc embed-bytecode.c -c -g -I/usr/local/include/python3.1
+gcc embed-bytecode.o -L/usr/local/bin -lpython3.1 -g -o embed-bytecode.exe
+rm embed-dict.o embed-object.o embed-simple.o embed-bytecode.o embed-string.o</pre>
+<p>After building with either makefile, you can run the
+            resulting C program as usual:</p><a id="I_programlisting4_d1e87808"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Embed/Basics$ <strong class="epub__userinput"><code>./embed-simple</code></strong>
+embed-simple
+The meaning of life...
+THE MEANING OF PYTHON...</pre>
+<p>Most of this output is produced by Python <code class="epub__literal">print</code> statements sent from C to the
+            linked-in Python library. It’s as if C has become an interactive
+            Python programmer.</p>
+<p>Naturally, strings of Python code run by C probably would
+            not be hardcoded in a C program file like this. They might instead
+            be loaded from a text file or GUI, extracted from HTML or XML
+            files, fetched from a persistent database or socket, and so on.
+            With such external sources, the Python code strings that are run
+            from C could be changed arbitrarily without having to recompile
+            the C program that runs them. They may even be changed on site,
+            and by end users of a system. To make the most of code strings,
+            though, we need to move on to more flexible API <a id="I_indexterm4_d1e87820"></a><a id="I_indexterm4_d1e87825"></a>tools.</p><div class="epub__note" title="Note"><h3 class="epub__title">Note</h3>
+<p><span class="epub__emphasis"><em>Pragmatic details</em></span>: Under Python 3.1
+              and Cygwin on Windows, I had to first set my <code class="epub__literal">PYTHONPATH</code> to include the current
+              directory in order to run the embedding examples, with the shell
+              command <code class="epub__literal">export PYTHONPATH=.</code>.
+              I also had to use the shell command <code class="epub__literal">./embed-simple</code> to execute the program
+              because <code class="epub__literal">.</code> was also not on my
+              system <code class="epub__literal">path</code> setting and isn’t
+              initially when you install Cygwin.</p>
+<p>Your mileage may vary; but if you have trouble, try
+              running the embedded Python commands <code class="epub__literal">import sys</code> and <code class="epub__literal">print sys.path</code> from C to see what
+              Python’s path looks like, and take a look at the
+              <span class="epub__emphasis"><em>Python/C API</em></span> manual for more on path
+              configuration for embedded applications.</p>
+</div>
+</div>
+</div>
+<div class="epub__sect2" title="Running Code Strings with Results and Namespaces"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="running_code_strings_with_results_and_na"></a>Running Code Strings with Results and Namespaces</h2>
+</div>
+</div>
+</div>
+<p>Example 20-26 uses
+          the <a id="name20.9.2"></a><a id="code20.9.2"></a>following API calls to run code strings that return
+          expression results back to C:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">Py_Initialize</code></span></dt><dd>
+<p>Initializes <a id="I_indexterm4_d1e87884"></a>linked-in Python libraries as before</p></dd><dt><span class="epub__term"><code class="epub__literal">PyImport_ImportModule</code></span></dt><dd>
+<p>Imports a Python <a id="I_indexterm4_d1e87895"></a>module and returns a pointer to it</p></dd><dt><span class="epub__term"><code class="epub__literal">PyModule_GetDict</code></span></dt><dd>
+<p>Fetches a <a id="I_indexterm4_d1e87906"></a>module’s attribute dictionary object</p></dd><dt><span class="epub__term"><code class="epub__literal">PyRun_String</code></span></dt><dd>
+<p>Runs a <a id="I_indexterm4_d1e87917"></a>string of code in explicit namespaces</p></dd><dt><span class="epub__term"><code class="epub__literal">PyObject_SetAttrString</code></span></dt><dd>
+<p>Assigns <a id="I_indexterm4_d1e87928"></a>an object attribute by <code class="epub__literal">namestring</code></p></dd><dt><span class="epub__term"><code class="epub__literal">PyArg_Parse</code></span></dt><dd>
+<p>Converts a <a id="I_indexterm4_d1e87941"></a>Python return value object to C form</p></dd></dl>
+</div>
+<p>The import calls are used to fetch the namespace of the
+          <code class="epub__literal">usermod</code> module listed in Example 20-22 so that code
+          strings can be run there directly and will have access to names
+          defined in that module without qualifications. <code class="epub__literal">Py_Import_ImportModule</code> is like a Python
+          <code class="epub__literal">import</code> statement, but the
+          imported module object is returned to C; it is not assigned to a
+          Python variable name. As a result, it’s probably more similar to the
+          Python <code class="epub__literal">__import__</code> built-in
+          function.</p>
+<p>The <code class="epub__literal">PyRun_String</code> call is
+          the one that actually runs code here, though. It takes a code
+          string, a parser mode flag, and dictionary object pointers to serve
+          as the global and local namespaces for running the code string. The
+          mode flag can be <code class="epub__literal">Py_eval_input</code> to
+          run an expression or <code class="epub__literal">Py_file_input</code> to run a statement; when
+          running an expression, the result of evaluating the expression is
+          returned from this call (it comes back as a <code class="epub__literal">PyObject*</code> object pointer). The two
+          namespace dictionary pointer arguments allow you to distinguish
+          global and local scopes, but they are typically passed the same
+          dictionary such that code runs in a single namespace.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id25"></a>
+<p class="epub__title">Example 20-26. PP4E\Integrate\Embed\Basics\embed-string.c</p><div class="epub__example-contents">
+<pre class="epub__programlisting">/* code-strings with results and namespaces */
+
+#include &lt;Python.h&gt;
+
+main() {
+    char *cstr;
+    PyObject *pstr, *pmod, *pdict;
+    printf("embed-string\n");
+    Py_Initialize();
+
+    /* get usermod.message */
+    pmod  = PyImport_ImportModule("usermod");
+    pdict = PyModule_GetDict(pmod);
+    pstr  = PyRun_String("message", Py_eval_input, pdict, pdict);
+
+    /* convert to C */
+    PyArg_Parse(pstr, "s", &amp;cstr);
+    printf("%s\n", cstr);
+
+    /* assign usermod.X */
+    PyObject_SetAttrString(pmod, "X", pstr);
+
+    /* print usermod.transform(X) */
+    (void) PyRun_String("print(transform(X))", Py_file_input, pdict, pdict);
+    Py_DECREF(pmod);
+    Py_DECREF(pstr);
+    Py_Finalize();
+}</pre>
+</div>
+</div>
+<p>When compiled and run, this file produces the same result as
+          its predecessor:</p><a id="I_programlisting4_d1e87982"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Embed/Basics$ <strong class="epub__userinput"><code>./embed-string</code></strong>
+embed-string
+The meaning of life...
+THE MEANING OF PYTHON...</pre>
+<p>However, very different work goes into producing this output.
+          This time, C fetches, converts, and prints the value of the Python
+          module’s <code class="epub__literal">message</code> attribute
+          directly by running a string expression and assigning a global
+          variable (<code class="epub__literal">X</code>) within the module’s
+          namespace to serve as input for a Python <code class="epub__literal">print</code> statement string.</p>
+<p>Because the string execution call in this version lets you
+          specify namespaces, you can better partition the embedded code your
+          system runs—each grouping can have a distinct namespace to avoid
+          overwriting other groups’ variables. And because this call returns a
+          result, you can better communicate with the embedded code;
+          expression results are outputs, and assignments to globals in the
+          namespace in which code runs can serve as inputs.</p>
+<p>Before we move on, I need to explain three coding issues here.
+          First, this program also decrements the reference count on objects
+          passed to it from Python, using the <code class="epub__literal">Py_DECREF</code> call described in Python’s C API
+          manuals. These calls are not strictly needed here (the objects’
+          space is reclaimed when the programs exits anyhow), but they
+          demonstrate how embedding interfaces must manage reference counts
+          when Python passes object ownership to C. If this was a function
+          called from a larger system, for instance, you would generally want
+          to decrement the count to allow Python to reclaim the <span>objects</span>.</p>
+<p>Second, in a realistic program, you should generally test the
+          return values of <span class="epub__emphasis"><em>all</em></span> the API calls in this
+          program immediately to detect errors (e.g., import failure). Error
+          tests are omitted in this section’s example to keep the code simple,
+          but they should be included in your programs to make them more
+          robust.</p>
+<p>And third, there is a related function that lets you run
+          entire <span class="epub__emphasis"><em>files</em></span> of code, but it is not
+          demonstrated in this chapter: <code class="epub__literal">PyRun_File</code>. Because you can always load a
+          file’s text and run it as a single code string with <code class="epub__literal">PyRun_String</code>, the <code class="epub__literal">PyRun_File</code> call’s main advantage is to
+          avoid allocating memory for file content. In such multiline code
+          strings, the <code class="epub__literal">\n</code> character
+          terminates lines and indentation group blocks as <a id="I_indexterm4_d1e88032"></a><a id="I_indexterm4_d1e88034"></a>usual.</p>
+</div>
+<div class="epub__sect2" title="Calling Python Objects"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="calling_python_objects"></a>Calling Python Objects</h2>
+</div>
+</div>
+</div>
+<p>The last two <a id="call20.9.3"></a><a id="obj20.9.3"></a>sections dealt with running strings of code, but it’s
+          easy for C programs to deal in terms of Python objects, too. Example 20-27 accomplishes the
+          same task as Examples 20-23 and 20-26, but it uses other API tools to
+          interact with objects in the Python module directly:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">PyImport_ImportModule</code></span></dt><dd>
+<p>Imports <a id="I_indexterm4_d1e88067"></a>the module from C as before</p></dd><dt><span class="epub__term"><code class="epub__literal">PyObject_GetAttrString</code></span></dt><dd>
+<p>Fetches <a id="I_indexterm4_d1e88078"></a>an object’s attribute value by name</p></dd><dt><span class="epub__term"><code class="epub__literal">PyEval_CallObject</code></span></dt><dd>
+<p>Calls a <a id="I_indexterm4_d1e88089"></a>Python function (or class or method)</p></dd><dt><span class="epub__term"><code class="epub__literal">PyArg_Parse</code></span></dt><dd>
+<p>Converts <a id="I_indexterm4_d1e88101"></a>Python objects to C values</p></dd><dt><span class="epub__term"><code class="epub__literal">Py_BuildValue</code></span></dt><dd>
+<p>Converts <a id="I_indexterm4_d1e88112"></a>C values to Python objects</p></dd></dl>
+</div>
+<p>We used both of the data conversion functions earlier in this
+          chapter in extension modules. The <code class="epub__literal">PyEval_CallObject</code> call in this version of
+          the example is the key point here: it runs the imported function
+          with a tuple of arguments, much like the Python <code class="epub__literal">func(*args)</code> call syntax. The Python
+          function’s return value comes back to C as a <code class="epub__literal">PyObject*</code>, a generic Python object
+          pointer.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id26"></a>
+<p class="epub__title">Example 20-27. PP4E\Integrate\Embed\Basics\embed-object.c</p><div class="epub__example-contents">
+<pre class="epub__programlisting">/* fetch and call objects in modules */
+
+#include &lt;Python.h&gt;
+
+main() {
+    char *cstr;
+    PyObject *pstr, *pmod, *pfunc, *pargs;
+    printf("embed-object\n");
+    Py_Initialize();
+
+    /* get usermod.message */
+    pmod = PyImport_ImportModule("usermod");
+    pstr = PyObject_GetAttrString(pmod, "message");
+
+    /* convert string to C */
+    PyArg_Parse(pstr, "s", &amp;cstr);
+    printf("%s\n", cstr);
+    Py_DECREF(pstr);
+
+    /* call usermod.transform(usermod.message) */
+    pfunc = PyObject_GetAttrString(pmod, "transform");
+    pargs = Py_BuildValue("(s)", cstr);
+    pstr  = PyEval_CallObject(pfunc, pargs);
+    PyArg_Parse(pstr, "s", &amp;cstr);
+    printf("%s\n", cstr);
+
+    /* free owned objects */
+    Py_DECREF(pmod);
+    Py_DECREF(pstr);
+    Py_DECREF(pfunc);        /* not really needed in main() */
+    Py_DECREF(pargs);        /* since all memory goes away  */
+    Py_Finalize();
+}</pre>
+</div>
+</div>
+<p>When compiled and run, the result is the same again:</p><a id="I_programlisting4_d1e88134"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Embed/Basics$ <strong class="epub__userinput"><code>./embed-object</code></strong>
+embed-object
+The meaning of life...
+THE MEANING OF PYTHON...</pre>
+<p>However, this output is generated by C this time—first, by
+          fetching the Python module’s <code class="epub__literal">message</code> attribute value, and then by
+          fetching and calling the module’s <code class="epub__literal">transform</code> function object directly and
+          printing its return value that is sent back to C. Input to the
+          <code class="epub__literal">transform</code> function is a function
+          argument here, not a preset global variable. Notice that <code class="epub__literal">message</code> is fetched as a module attribute
+          this time, instead of by running its name as a code string; as this
+          shows, there is often more than one way to accomplish the same goals
+          with different API calls.</p>
+<p>Running functions in modules like this is a simple way to
+          structure embedding; code in the module file can be changed
+          arbitrarily without having to recompile the C program that runs it.
+          It also provides a direct communication model: inputs and outputs to
+          Python code can take the form of function arguments and return
+          <a id="I_indexterm4_d1e88155"></a><a id="I_indexterm4_d1e88157"></a>values.</p>
+</div>
+<div class="epub__sect2" title="Running Strings in Dictionaries"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="running_strings_in_dictionaries"></a>Running Strings in Dictionaries</h2>
+</div>
+</div>
+</div>
+<p>When we <a id="I_indexterm4_d1e88165"></a><a id="I_indexterm4_d1e88170"></a>used <code class="epub__literal">PyRun_String</code>
+          earlier to run expressions with results, code was executed in the
+          namespace of an existing Python module. Sometimes, though, it’s more
+          convenient to <a id="I_indexterm4_d1e88179"></a>create a brand-new namespace for running code strings
+          that is independent of any existing module files. The C file in
+          Example 20-28 shows how;
+          the new namespace is created as a new Python dictionary object, and
+          a handful of new API calls are employed in the process:</p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">PyDict_New</code></span></dt><dd>
+<p>Makes a <a id="I_indexterm4_d1e88195"></a>new empty dictionary object</p></dd><dt><span class="epub__term"><code class="epub__literal">PyDict_SetItemString</code></span></dt><dd>
+<p>Assigns <a id="I_indexterm4_d1e88206"></a>to a dictionary’s key</p></dd><dt><span class="epub__term"><code class="epub__literal">PyDict_GetItemString</code></span></dt><dd>
+<p>Fetches <a id="I_indexterm4_d1e88217"></a>(indexes) a dictionary value by key</p></dd><dt><span class="epub__term"><code class="epub__literal">PyRun_String</code></span></dt><dd>
+<p>Runs a <a id="I_indexterm4_d1e88228"></a>code string in namespaces, as before</p></dd><dt><span class="epub__term"><code class="epub__literal">PyEval_GetBuiltins</code></span></dt><dd>
+<p>Gets the <a id="I_indexterm4_d1e88239"></a>built-in scope’s module</p></dd></dl>
+</div>
+<p>The main trick here is the new dictionary. Inputs and outputs
+          for the embedded code strings are mapped to this dictionary by
+          passing it as the code’s namespace dictionaries in the <code class="epub__literal">PyRun_String</code> call. The net effect is that
+          the C program in Example 20-28 works just like
+          this Python code:</p><a id="I_programlisting4_d1e88250"></a>
+<pre class="epub__programlisting"> &gt;&gt;&gt; <strong class="epub__userinput"><code>d = {}</code></strong>
+ &gt;&gt;&gt; <strong class="epub__userinput"><code>d['Y'] = 2</code></strong>
+ &gt;&gt;&gt; <strong class="epub__userinput"><code>exec('X = 99', d, d)</code></strong>
+ &gt;&gt;&gt; <strong class="epub__userinput"><code>exec('X = X + Y', d, d)</code></strong>
+ &gt;&gt;&gt; <strong class="epub__userinput"><code>print(d['X'])</code></strong>
+ 101</pre>
+<p>But here, each Python operation is replaced by a C API
+          call.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id27"></a>
+<p class="epub__title">Example 20-28. PP4E\Integrate\Embed\Basics\embed-dict.c</p><div class="epub__example-contents">
+<pre class="epub__programlisting">/* make a new dictionary for code string namespace */
+
+#include &lt;Python.h&gt;
+
+main() {
+    int cval;
+    PyObject *pdict, *pval;
+    printf("embed-dict\n");
+    Py_Initialize();
+
+    /* make a new namespace */
+    pdict = PyDict_New();
+    PyDict_SetItemString(pdict, "__builtins__", PyEval_GetBuiltins());
+
+    PyDict_SetItemString(pdict, "Y", PyLong_FromLong(2));  /* dict['Y'] = 2   */
+    PyRun_String("X = 99",  Py_file_input, pdict, pdict);  /* run statements  */
+    PyRun_String("X = X+Y", Py_file_input, pdict, pdict);  /* same X and Y    */
+    pval = PyDict_GetItemString(pdict, "X");               /* fetch dict['X'] */
+
+    PyArg_Parse(pval, "i", &amp;cval);                         /* convert to C */
+    printf("%d\n", cval);                                  /* result=101 */
+    Py_DECREF(pdict);
+    Py_Finalize();
+}</pre>
+</div>
+</div>
+<p>When compiled and run, this C program creates this sort of
+          output, tailored for this use case:</p><a id="I_programlisting4_d1e88276"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Embed/Basics$ <strong class="epub__userinput"><code>./embed-dict</code></strong>
+embed-dict
+101</pre>
+<p>The output is different this time: it reflects the value of
+          the Python variable <code class="epub__literal">X</code> assigned by
+          the embedded Python code strings and fetched by C. In general, C can
+          fetch module attributes either by calling<a id="I_indexterm4_d1e88286"></a> <code class="epub__literal">PyObject_GetAttrString</code> with the module or
+          by using <code class="epub__literal">PyDict_GetItemString</code> to
+          index the module’s attribute dictionary (expression strings work,
+          too, but they are less direct). Here, there is no module at all, so
+          dictionary indexing is used to access the code’s namespace in
+          C.</p>
+<p>Besides allowing you to partition code string namespaces
+          independent of any Python module files on the underlying system,
+          this scheme provides a natural communication mechanism. Values that
+          are stored in the new dictionary before code is run serve as inputs,
+          and names assigned by the embedded code can later be fetched out of
+          the dictionary to serve as code outputs. For instance, the variable
+          <code class="epub__literal">Y</code> in the second string run refers
+          to a name set to 2 by C; <code class="epub__literal">X</code> is
+          assigned by the Python code and fetched later by C code as the
+          printed result.</p>
+<p>There is one subtlety in this
+          embedding mode: dictionaries that serve as namespaces for running
+          code are generally required to have a <code class="epub__literal">__builtins__</code> link to the built-in scope
+          searched last for name lookups, set with code of this form:</p><a id="I_programlisting4_d1e88311"></a>
+<pre class="epub__programlisting">PyDict_SetItemString(pdict, "__builtins__", PyEval_GetBuiltins());</pre>
+<p>This is esoteric, and it is normally handled by Python
+          internally for modules and built-ins like the <code class="epub__literal">exec</code> function. For raw dictionaries used
+          as namespaces, though, we are responsible for setting the link
+          manually if we expect to reference built-in names. This still holds
+          true in Python 3.X.</p>
+</div>
+<div class="epub__sect2" title="Precompiling Strings to Bytecode"><div class="epub__titlepage"><div><div><h2 class="epub__title"><a id="precompiling_strings_to_bytecode"></a>Precompiling Strings to Bytecode</h2>
+</div>
+</div>
+</div>
+<p>Finally, when you <a id="code20.9.5"></a>call Python function objects from C, you are actually
+          running the already compiled bytecode <a id="byte20.9.5"></a>associated with the object (e.g., a function body),
+          normally created when the enclosing module is imported. When running
+          strings, Python must compile the string before running it. Because
+          compilation is a slow process, this can be a substantial overhead if
+          you run a code string more than once. Instead, precompile the string
+          to a bytecode object to be run later, using the API calls
+          illustrated in <span>Example 20-29:</span></p><div class="epub__variablelist"><dl><dt><span class="epub__term"><code class="epub__literal">Py_CompileString</code></span></dt><dd>
+<p>Compiles <a id="I_indexterm4_d1e88346"></a>a string of code and returns a bytecode
+                object</p></dd><dt><span class="epub__term"><code class="epub__literal">PyEval_EvalCode</code></span></dt><dd>
+<p>Runs a <a id="I_indexterm4_d1e88357"></a>compiled bytecode object</p></dd></dl>
+</div>
+<p>The first of these takes the mode flag that is normally passed
+          to <code class="epub__literal">PyRun_String</code>, as well as a
+          second string argument that is used only in error messages. The
+          second takes two namespace dictionaries. These two API calls are
+          used in Example 20-29 to
+          compile and execute three strings of Python code in turn.</p><div class="epub__example"><a id="pp4e_reverse_solidus_integrate-id28"></a>
+<p class="epub__title">Example 20-29. PP4E\Integrate\Embed\Basics\embed-bytecode.c</p><div class="epub__example-contents">
+<pre class="epub__programlisting">/* precompile code strings to bytecode objects */
+
+#include &lt;Python.h&gt;
+#include &lt;compile.h&gt;
+#include &lt;eval.h&gt;
+
+main() {
+    int i;
+    char *cval;
+    PyObject *pcode1, *pcode2, *pcode3, *presult, *pdict;
+    char *codestr1, *codestr2, *codestr3;
+    printf("embed-bytecode\n");
+
+    Py_Initialize();
+    codestr1 = "import usermod\nprint(usermod.message)";    /* statements */
+    codestr2 = "usermod.transform(usermod.message)";        /* expression */
+    codestr3 = "print('%d:%d' % (X, X ** 2), end=' ')";     /* use input X */
+
+    /* make new namespace dictionary */
+    pdict = PyDict_New();
+    if (pdict == NULL) return −1;
+    PyDict_SetItemString(pdict, "__builtins__", PyEval_GetBuiltins());
+
+    /* precompile strings of code to bytecode objects */
+    pcode1 = Py_CompileString(codestr1, "&lt;embed&gt;", Py_file_input);
+    pcode2 = Py_CompileString(codestr2, "&lt;embed&gt;", Py_eval_input);
+    pcode3 = Py_CompileString(codestr3, "&lt;embed&gt;", Py_file_input);
+
+    /* run compiled bytecode in namespace dict */
+    if (pcode1 &amp;&amp; pcode2 &amp;&amp; pcode3) {
+        (void)    PyEval_EvalCode((PyCodeObject *)pcode1, pdict, pdict);
+        presult = PyEval_EvalCode((PyCodeObject *)pcode2, pdict, pdict);
+        PyArg_Parse(presult, "s", &amp;cval);
+        printf("%s\n", cval);
+        Py_DECREF(presult);
+
+        /* rerun code object repeatedly */
+        for (i = 0; i &lt;= 10; i++) {
+            PyDict_SetItemString(pdict, "X", PyLong_FromLong(i));
+            (void) PyEval_EvalCode((PyCodeObject *)pcode3, pdict, pdict);
+        }
+        printf("\n");
+    }
+    /* free referenced objects */
+    Py_XDECREF(pdict);
+    Py_XDECREF(pcode1);
+    Py_XDECREF(pcode2);
+    Py_XDECREF(pcode3);
+    Py_Finalize();
+}</pre>
+</div>
+</div>
+<p>This program combines a variety of techniques that we’ve
+          already seen. The namespace in which the compiled code strings run,
+          for instance, is a newly created dictionary (not an existing module
+          object), and inputs for code strings are passed as preset variables
+          in the namespace. When built and executed, the first part of the
+          output is similar to previous examples in this section, but the last
+          line represents running the same precompiled code string 11
+          times:</p><a id="I_programlisting4_d1e88375"></a>
+<pre class="epub__programlisting">.../PP4E/Integrate/Embed/Basics$ <strong class="epub__userinput"><code>embed-bytecode</code></strong>
+embed-bytecode
+The meaning of life...
+THE MEANING OF PYTHON...
+
+0:0 1:1 2:4 3:9 4:16 5:25 6:36 7:49 8:64 9:81 10:100</pre>
+<p>If your system executes Python code strings multiple times, it
+          is a major speedup to precompile to bytecode in this fashion. This
+          step is not required in other contexts that invoke callable Python
+          objects—including the common embedding use case presented in the
+          <a id="I_indexterm4_d1e88382"></a><a id="I_indexterm4_d1e88384"></a><a id="I_indexterm4_d1e88386"></a><a id="I_indexterm4_d1e88388"></a>next section.</p>
+</div>
+</div>
+</div>
+</body>
+</html>

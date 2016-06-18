@@ -1,0 +1,546 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>New-Style Class Changes</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><div><h1 class="epub__title"><a id="new-style_class_changes"></a>New-Style Class Changes</h1>
+<p>New-style <a id="ch31newstyleclasseschanges"></a>classes <a id="ch31classesnewstyleclasseschanges"></a>differ from classic classes in a number of ways, some of
+        which are subtle but can impact existing 2.X code and coding styles.
+        Here are some of the most prominent ways they differ:</p><div class="epub__variablelist"><dl><dt><span class="epub__term">Classes and types merged</span></dt><dd>
+<p>Classes are now types, and types are now classes. In fact,
+              the two are essentially synonyms. The <code class="epub__literal">type(</code><em class="epub__replaceable"><code>I</code></em><code class="epub__literal">)</code> built-in returns the class an
+              instance is made from, instead of a generic instance type, and
+              is normally the same as <em class="epub__replaceable"><code>I</code></em><code class="epub__literal">.__class__</code>. Moreover, classes are
+              instances of the <code class="epub__literal">type</code> class,
+              <code class="epub__literal">type</code> may be subclassed to
+              customize class creation, and all classes (and hence types)
+              inherit from <code class="epub__literal">object</code>, which
+              comes with a small set of default operator overloading
+              methods.</p></dd><dt><span class="epub__term">Inheritance search order</span></dt><dd>
+<p>Diamond patterns of multiple inheritance have a slightly
+              different search order—roughly, they are searched across before
+              up, and more breadth-first than depth-first.</p></dd><dt><span class="epub__term">Attribute fetch for built-ins</span></dt><dd>
+<p>The <code class="epub__literal">__getattr__</code> and
+              <code class="epub__literal">__getattribute__</code> methods are
+              no longer run for attributes implicitly fetched by built-in
+              operations. This means that they are not called for <code class="epub__literal">__</code><em class="epub__replaceable"><code>X</code></em><code class="epub__literal">__</code> operator overloading method
+              names—the search for such names begins at classes, not
+              instances.</p></dd><dt><span class="epub__term">New advanced tools</span></dt><dd>
+<p>New-style classes have a set of new class tools, including
+              slots, properties, descriptors, and the <code class="epub__literal">__getattribute__</code> method. Most of these
+              have very specific tool-building purposes.</p></dd></dl>
+</div>
+<p>We discussed the third of these changes briefly in a sidebar in
+        Chapter 27, and we’ll revisit it in
+        depth in the contexts of attribute management in Chapter 37 and privacy decorators in Chapter 38. Because the first and second of the changes
+        just listed can break existing 2.X code, though, let’s explore these
+        in more detail before moving on to new-style additions.</p>
+<div class="epub__sect2" title="Type Model Changes"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="type_model_changes"></a>Type Model Changes</h2>
+</div>
+</div>
+</div>
+<p>In <a id="ch31newstyleclsstypmodchngs"></a>new-style classes, the distinction between type and
+          class has vanished entirely. Classes themselves are types: the
+          <code class="epub__literal">type</code> object generates classes as
+          its instances, and classes generate instances of their type. If
+          fact, there is no real difference between built-in types like lists
+          and strings and user-defined types coded as classes. This is why we
+          can subclass built-in types, as shown earlier in this
+          chapter—because subclassing a built-in type such as <code class="epub__literal">list</code> qualifies a class as new-style, it
+          becomes a user-defined type.</p>
+<p>Besides allowing us to subclass built-in types, one of the
+          contexts where this becomes most obvious is when we do explicit type
+          testing. With Python 2.6’s classic classes, the type of a class
+          instance is a generic “instance,” but the types of built-in objects
+          are more specific:</p><a id="I_programlisting7_d1e77213"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python26\python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class C: pass</code></strong>                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Classic classes in 2.6</span></em>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>I = C()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(I)</code></strong>                             <em class="epub__lineannotation"><span class="epub__lineannotation"># Instances are made from classes</span></em>
+&lt;type 'instance'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>I.__class__</code></strong>
+&lt;class __main__.C at 0x025085A0&gt;
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(C)</code></strong>                             <em class="epub__lineannotation"><span class="epub__lineannotation"># But classes are not the same as types</span></em>
+&lt;type 'classobj'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>C.__class__</code></strong>
+AttributeError: class C has no attribute '__class__'
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type([1, 2, 3])</code></strong>
+&lt;type 'list'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(list)</code></strong>
+&lt;type 'type'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>list.__class__</code></strong>
+&lt;type 'type'&gt;</pre>
+<p>But with new-style classes in 2.6, the type of a class
+          instance is the class it’s created from, since classes are simply
+          user-defined types—the type of an instance is its class, and the
+          type of a user-defined class is the same as the type of a built-in
+          object type. Classes have a <code class="epub__literal">__class__</code> attribute now, too, because they
+          are instances of <code class="epub__literal">type</code>:</p><a id="I_programlisting7_d1e77264"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python26\python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class C(object): pass</code></strong>               <em class="epub__lineannotation"><span class="epub__lineannotation"># New-style classes in 2.6</span></em>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>I = C()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(I)</code></strong>                             <em class="epub__lineannotation"><span class="epub__lineannotation"># Type of instance is class it's made from</span></em>
+&lt;class '__main__.C'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>I.__class__</code></strong>
+&lt;class '__main__.C'&gt;
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(C)</code></strong>                             <em class="epub__lineannotation"><span class="epub__lineannotation"># Classes are user-defined types</span></em>
+&lt;type 'type'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>C.__class__</code></strong>
+&lt;type 'type'&gt;
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type([1, 2, 3])</code></strong>                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Built-in types work the same way</span></em>
+&lt;type 'list'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(list)</code></strong>
+&lt;type 'type'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>list.__class__</code></strong>
+&lt;type 'type'&gt;</pre>
+<p>The same is true for all classes in Python 3.0, since all
+          classes are automatically new-style, even if they have no explicit
+          superclasses. In fact, the distinction between built-in types and
+          user-defined class types melts away altogether in 3.0:</p><a id="I_programlisting7_d1e77312"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class C: pass</code></strong>                       <em class="epub__lineannotation"><span class="epub__lineannotation"># All classes are new-style in 3.0</span></em>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>I = C()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(I)</code></strong>                             <em class="epub__lineannotation"><span class="epub__lineannotation"># Type of instance is class it's made from</span></em>
+&lt;class '__main__.C'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>I.__class__</code></strong>
+&lt;class '__main__.C'&gt;
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(C)</code></strong>                             <em class="epub__lineannotation"><span class="epub__lineannotation"># Class is a type, and type is a class</span></em>
+&lt;class 'type'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>C.__class__</code></strong>
+&lt;class 'type'&gt;
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type([1, 2, 3])</code></strong>                     <em class="epub__lineannotation"><span class="epub__lineannotation"># Classes and built-in types work the same</span></em>
+&lt;class 'list'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(list)</code></strong>
+&lt;class 'type'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>list.__class__</code></strong>
+&lt;class 'type'&gt;</pre>
+<p>As you can see, in 3.0 classes are types, but types are also
+          classes. Technically, each class is generated by a
+          <span class="epub__emphasis"><em><a id="I_indexterm7_d1e77361"></a>metaclass</em></span>—<a id="I_indexterm7_d1e77366"></a>a class that is normally either <code class="epub__literal">type</code> itself, or a subclass of it
+          customized to augment or manage generated classes. Besides impacting
+          code that does type testing, this turns out to be an important hook
+          for tool developers. We’ll talk more about metaclasses later in this
+          chapter, and again in more detail in Chapter 39.</p>
+<div class="epub__sect3" title="Implications for type testing"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="implications_for_type_testing"></a>Implications for type testing</h3>
+</div>
+</div>
+</div>
+<p>Besides <a id="I_indexterm7_d1e77382"></a>providing for built-in type customization and
+            metaclass hooks, the merging of classes and types in the new-style
+            class model can impact code that does type testing. In Python 3.0,
+            for example, the types of class instances compare directly and
+            meaningfully, and in the same way as built-in type objects. This
+            follows from the fact that classes are now types, and an
+            instance’s type is the instance’s class:</p><a id="I_programlisting7_d1e77390"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python30\python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class C: pass</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class D: pass</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>c = C()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>d = D()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(c) == type(d)</code></strong>                 <em class="epub__lineannotation"><span class="epub__lineannotation"># 3.0: compares the instances' classes</span></em>
+False
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(c), type(d)</code></strong>
+(&lt;class '__main__.C'&gt;, &lt;class '__main__.D'&gt;)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>c.__class__, d.__class__</code></strong>
+(&lt;class '__main__.C'&gt;, &lt;class '__main__.D'&gt;)
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>c1, c2 = C(), C()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(c1) == type(c2)</code></strong>
+True</pre>
+<p>With classic classes in 2.6 and earlier, though, comparing
+            instance types is almost useless, because all instances have the
+            same “instance” type. To truly compare types, the instance
+            <code class="epub__literal">__class__</code> attributes must be
+            compared (if you care about portability, this works in 3.0, too,
+            but it’s not required there):</p><a id="I_programlisting7_d1e77431"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python26\python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class C: pass</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class D: pass</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>c = C()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>d = D()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(c) == type(d)</code></strong>                 <em class="epub__lineannotation"><span class="epub__lineannotation"># 2.6: all instances are same type</span></em>
+True
+&gt;&gt;&gt; <strong class="epub__userinput"><code>c.__class__ == d.__class__</code></strong>         <em class="epub__lineannotation"><span class="epub__lineannotation"># Must compare classes explicitly</span></em>
+False
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(c), type(d)</code></strong>
+(&lt;type 'instance'&gt;, &lt;type 'instance'&gt;)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>c.__class__, d.__class__</code></strong>
+(&lt;class __main__.C at 0x024585A0&gt;, &lt;class __main__.D at 0x024588D0&gt;)</pre>
+<p>And as you should expect by now, new-style classes in 2.6
+            work the same as all classes in 3.0 in this regard—comparing
+            instance types compares the instances’ classes automatically:</p><a id="I_programlisting7_d1e77472"></a>
+<pre class="epub__programlisting">C:\misc&gt; <strong class="epub__userinput"><code>c:\python26\python</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class C(object): pass</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class D(object): pass</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>c = C()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>d = D()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(c) == type(d)</code></strong>                 <em class="epub__lineannotation"><span class="epub__lineannotation"># 2.6 new-style: same as all in 3.0</span></em>
+False
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(c), type(d)</code></strong>
+(&lt;class '__main__.C'&gt;, &lt;class '__main__.D'&gt;)
+&gt;&gt;&gt; <strong class="epub__userinput"><code>c.__class__, d.__class__</code></strong>
+(&lt;class '__main__.C'&gt;, &lt;class '__main__.D'&gt;)</pre>
+<p>Of course, as I’ve pointed out numerous times in this book,
+            type checking is usually the wrong thing to do in Python programs
+            (we code to object interfaces, not object types), and the more
+            general <code class="epub__literal">isinstance</code> built-in is
+            more likely what you’ll want to use in the rare cases where
+            instance class types must be queried. However, knowledge of
+            Python’s type model can help demystify the class model in
+            general.</p>
+</div>
+<div class="epub__sect3" title="All objects derive from “object”"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="all_objects_derive_from_quotation_mark"></a>All objects derive from “object”</h3>
+</div>
+</div>
+</div>
+<p>One <a id="I_indexterm7_d1e77512"></a>other ramification of the type change in the
+            new-style class model is that because all classes derive (inherit)
+            from the class <code class="epub__literal">object</code> either
+            implicitly or explicitly, and because all types are now classes,
+            every object derives from the <code class="epub__literal">object</code> built-in class, whether directly
+            or through a superclass. Consider the following interaction in
+            Python 3.0 (code an explicit <code class="epub__literal">object</code> superclass in 2.6 to make this
+            work equivalently):</p><a id="I_programlisting7_d1e77529"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>class C: pass</code></strong>
+...
+&gt;&gt;&gt; <strong class="epub__userinput"><code>X = C()</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(X)</code></strong>                           <em class="epub__lineannotation"><span class="epub__lineannotation"># Type is now class instance was created from</span></em>
+&lt;class '__main__.C'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(C)</code></strong>
+&lt;class 'type'&gt;</pre>
+<p>As before, the type of a class instance is the class it was
+            made from, and the type of a class is the <code class="epub__literal">type</code> class because classes and types
+            have merged. It is also true, though, that the instance and class
+            are both derived from the built-in <code class="epub__literal">object</code> class, since this is an implicit
+            or explicit superclass of every class:</p><a id="I_programlisting7_d1e77555"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>isinstance(X, object)</code></strong>
+True
+&gt;&gt;&gt; <strong class="epub__userinput"><code>isinstance(C, object)</code></strong>             <em class="epub__lineannotation"><span class="epub__lineannotation"># Classes always inherit from object</span></em>
+True</pre>
+<p>The same holds true for built-in types like lists and
+            strings, because types are classes in the new-style model—built-in
+            types are now classes, and their instances derive from <code class="epub__literal">object</code>, too:</p><a id="I_programlisting7_d1e77571"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>type('spam')</code></strong>
+&lt;class 'str'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(str)</code></strong>
+&lt;class 'type'&gt;
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>isinstance('spam', object)</code></strong>        <em class="epub__lineannotation"><span class="epub__lineannotation"># Same for  built-in types (classes)</span></em>
+True
+&gt;&gt;&gt; <strong class="epub__userinput"><code>isinstance(str, object)</code></strong>
+True</pre>
+<p>In fact, <code class="epub__literal">type</code> itself
+            derives from <code class="epub__literal">object</code>, and
+            <code class="epub__literal">object</code> derives from <code class="epub__literal">type</code>, even though the two are different
+            objects—a circular relationship that caps the object model and
+            stems from the fact that types are classes that generate
+            classes:</p><a id="I_programlisting7_d1e77602"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>type(type)</code></strong>                        <em class="epub__lineannotation"><span class="epub__lineannotation"># All classes are types, and vice versa</span></em>
+&lt;class 'type'&gt;
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type(object)</code></strong>
+&lt;class 'type'&gt;
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>isinstance(type, object)</code></strong>          <em class="epub__lineannotation"><span class="epub__lineannotation"># All classes derive from object, even type</span></em>
+True
+&gt;&gt;&gt; <strong class="epub__userinput"><code>isinstance(object, type)</code></strong>          <em class="epub__lineannotation"><span class="epub__lineannotation"># Types make classes, and type is a class</span></em>
+True
+&gt;&gt;&gt; <strong class="epub__userinput"><code>type is object</code></strong>
+False</pre>
+<p>In practical terms, this model makes for fewer special cases
+            than the prior type/class distinction of classic classes, and it
+            allows us to write code that assumes and uses an <code class="epub__literal">object</code> superclass. We’ll see examples of
+            the latter later in the book; for now, let’s move on to explore
+            other new-style <a id="I_indexterm7_d1e77634"></a>changes.</p>
+</div>
+</div>
+<div class="epub__sect2" title="Diamond Inheritance Change"><div class="epub__titlepage"><div>
+<div>
+<h2 class="epub__title"><a id="diamond_inheritance_change"></a>Diamond Inheritance Change</h2>
+</div>
+</div>
+</div>
+<p>One <a id="ch31newstyleclssdiainheritchng"></a>of the most visible changes in new-style classes is
+          their slightly different inheritance search procedures for the
+          so-called <span class="epub__emphasis"><em><a id="I_indexterm7_d1e77649"></a>diamond</em></span> pattern<a id="I_indexterm7_d1e77654"></a> of multiple inheritance trees, where more than one
+          superclass leads to the same higher superclass further above. The
+          diamond pattern is an advanced design concept, is coded only rarely
+          in Python practice, and has not been discussed in this book, so we
+          won’t dwell on this topic in depth.</p>
+<p>In short, though, with <span class="epub__emphasis"><em>classic</em></span> classes,
+          the inheritance search procedure is strictly depth first, and then
+          left to right—Python climbs all the way to the top, hugging the left
+          side of the tree, before it backs up and begins to look further to
+          the right. In <span class="epub__emphasis"><em>new-style</em></span> classes, the search is
+          more breadth-first in such cases—Python first looks in any
+          superclasses to the right of the first one searched before ascending
+          all the way to the common superclass at the top. In other words,
+          the search proceeds across by levels before moving up. The search
+          algorithm is a bit more complex than this, but this is as much as
+          most programmers need to know.</p>
+<p>Because of this change, lower superclasses can overload
+          attributes of higher superclasses, regardless of the sort of
+          multiple inheritance trees they are mixed into. Moreover, the
+          new-style search rule avoids visiting the same superclass more than
+          once when it is accessible from multiple subclasses.</p>
+<div class="epub__sect3" title="Diamond inheritance example"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="diamond_inheritance_example"></a>Diamond inheritance example</h3>
+</div>
+</div>
+</div>
+<p>To illustrate, <a id="I_indexterm7_d1e77678"></a>consider this simplistic incarnation of the diamond
+            multiple inheritance pattern for classic classes. Here, <code class="epub__literal">D</code>’s superclasses <code class="epub__literal">B</code> and <code class="epub__literal">C</code> both lead to the same common ancestor,
+            <code class="epub__literal">A</code>:</p><a id="I_programlisting7_d1e77698"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>class A:</code></strong>
+        <strong class="epub__userinput"><code>attr = 1</code></strong>         <em class="epub__lineannotation"><span class="epub__lineannotation"># Classic (Python 2.6)</span></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class B(A):</code></strong>          <em class="epub__lineannotation"><span class="epub__lineannotation"># B and C both lead to A</span></em>
+        <strong class="epub__userinput"><code>pass</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class C(A):</code></strong>
+        <strong class="epub__userinput"><code>attr = 2</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class D(B, C):</code></strong>
+        <strong class="epub__userinput"><code>pass</code></strong>             <em class="epub__lineannotation"><span class="epub__lineannotation"># Tries A before C</span></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = D()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.attr</code></strong>               <em class="epub__lineannotation"><span class="epub__lineannotation"># Searches x, D, B, A</span></em>
+1</pre>
+<p>The attribute here is found in superclass <code class="epub__literal">A</code>, because with classic classes, the
+            inheritance search climbs as high as it can before backing up and
+            moving right—Python will search <code class="epub__literal">D</code>, <code class="epub__literal">B</code>,
+            <code class="epub__literal">A</code>, and then <code class="epub__literal">C</code>, but will stop when <code class="epub__literal">attr</code> is found in <code class="epub__literal">A</code>, above <code class="epub__literal">B</code>.</p>
+<p>However, with new-style classes derived from a built-in like
+            <code class="epub__literal">object</code>, and all classes in 3.0,
+            the search order is different: Python looks in <code class="epub__literal">C</code> (to the right of <code class="epub__literal">B</code>) before <code class="epub__literal">A</code> (above <code class="epub__literal">B</code>). That is, it searches <code class="epub__literal">D</code>, <code class="epub__literal">B</code>,
+            <code class="epub__literal">C</code>, and then <code class="epub__literal">A</code>, and in this case, stops in <code class="epub__literal">C</code>:</p><a id="I_programlisting7_d1e77804"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>class A(object):</code></strong>
+        <strong class="epub__userinput"><code>attr = 1</code></strong>         <em class="epub__lineannotation"><span class="epub__lineannotation"># New-style ("object" not required in 3.0)</span></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class B(A):</code></strong>
+        <strong class="epub__userinput"><code>pass</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class C(A):</code></strong>
+        <strong class="epub__userinput"><code>attr = 2</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class D(B, C):</code></strong>
+        <strong class="epub__userinput"><code>pass</code></strong>             <em class="epub__lineannotation"><span class="epub__lineannotation"># Tries C before A</span></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = D()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.attr</code></strong>               <em class="epub__lineannotation"><span class="epub__lineannotation"># Searches x, D, B, C</span></em>
+2</pre>
+<p>This change in the inheritance search procedure is based
+            upon the assumption that if you mix in <code class="epub__literal">C</code> lower in the tree, you probably intend
+            to grab its attributes in preference to <code class="epub__literal">A</code>’s. It also assumes that <code class="epub__literal">C</code> is always intended to override
+            <code class="epub__literal">A</code>’s attributes in all contexts,
+            which is probably true when it’s used standalone but may not be
+            when it’s mixed into a diamond with classic classes—you might not
+            even know that <code class="epub__literal">C</code> may be mixed
+            in like this when you code it.</p>
+<p>Since it is most likely that the programmer meant that
+            <code class="epub__literal">C</code> should override <code class="epub__literal">A</code> in this case, though, new-style
+            classes visit <code class="epub__literal">C</code> first.
+            Otherwise, <code class="epub__literal">C</code> could be
+            essentially pointless in a diamond context: it could not customize
+            <code class="epub__literal">A</code> and would be used only for
+            names unique to <code class="epub__literal">C</code>.</p>
+</div>
+<div class="epub__sect3" title="Explicit conflict resolution"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="explicit_conflict_resolution"></a>Explicit conflict resolution</h3>
+</div>
+</div>
+</div>
+<p>Of course, <a id="I_indexterm7_d1e77890"></a>the problem with assumptions is that they assume
+            things. If this search order deviation seems too subtle to
+            remember, or if you want more control over the search process, you
+            can always force the selection of an attribute from anywhere in
+            the tree by assigning or otherwise naming the one you want at the
+            place where the classes are mixed together:</p><a id="I_programlisting7_d1e77898"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>class A:</code></strong>
+        <strong class="epub__userinput"><code>attr = 1</code></strong>         <em class="epub__lineannotation"><span class="epub__lineannotation"># Classic</span></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class B(A):</code></strong>
+        <strong class="epub__userinput"><code>pass</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class C(A):</code></strong>
+        <strong class="epub__userinput"><code>attr = 2</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class D(B, C):</code></strong>
+        <strong class="epub__userinput"><code>attr = C.attr</code></strong>    <em class="epub__lineannotation"><span class="epub__lineannotation"># Choose C, to the right</span></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = D()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.attr</code></strong>               <em class="epub__lineannotation"><span class="epub__lineannotation"># Works like new-style (all 3.0)</span></em>
+2</pre>
+<p>Here, a tree of classic classes is emulating the search
+            order of new-style classes: the assignment to the attribute in
+            <code class="epub__literal">D</code> picks the version in <code class="epub__literal">C</code>, thereby subverting the normal
+            inheritance search path (<code class="epub__literal">D.attr</code>
+            will be lowest in the tree). New-style classes can similarly
+            emulate classic classes by choosing the attribute above at the
+            place where the classes are mixed together:</p><a id="I_programlisting7_d1e77952"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>class A(object):</code></strong>
+        <strong class="epub__userinput"><code>attr = 1</code></strong>         <em class="epub__lineannotation"><span class="epub__lineannotation"># New-style</span></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class B(A):</code></strong>
+        <strong class="epub__userinput"><code>pass</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class C(A):</code></strong>
+        <strong class="epub__userinput"><code>attr = 2</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class D(B, C):</code></strong>
+        <strong class="epub__userinput"><code>attr = B.attr</code></strong>    <em class="epub__lineannotation"><span class="epub__lineannotation"># Choose A.attr, above</span></em>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = D()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.attr</code></strong>               <em class="epub__lineannotation"><span class="epub__lineannotation"># Works like classic (default 2.6)</span></em>
+1</pre>
+<p>If you are willing to always resolve conflicts like this,
+            you can largely ignore the search order difference and not rely on
+            assumptions about what you meant when you coded your
+            classes.</p>
+<p>Naturally, attributes picked this way can also be method
+            functions—methods are normal, assignable objects:</p><a id="I_programlisting7_d1e77999"></a>
+<pre class="epub__programlisting">&gt;&gt;&gt; <strong class="epub__userinput"><code>class A:</code></strong>
+        <strong class="epub__userinput"><code>def meth(s): print('A.meth')</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class C(A):</code></strong>
+        <strong class="epub__userinput"><code>def meth(s): print('C.meth')</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class B(A):</code></strong>
+        <strong class="epub__userinput"><code>pass</code></strong>
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class D(B, C): pass</code></strong>            <em class="epub__lineannotation"><span class="epub__lineannotation"># Use default search order</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = D()</code></strong>                        <em class="epub__lineannotation"><span class="epub__lineannotation"># Will vary per class type</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.meth()</code></strong>                       <em class="epub__lineannotation"><span class="epub__lineannotation"># Defaults to classic order in 2.6</span></em>
+A.meth
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class D(B, C): meth = C.meth</code></strong>   <em class="epub__lineannotation"><span class="epub__lineannotation"># Pick C's method: new-style (and 3.0)</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = D()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.meth()</code></strong>
+C.meth
+
+&gt;&gt;&gt; <strong class="epub__userinput"><code>class D(B, C): meth = B.meth</code></strong>   <em class="epub__lineannotation"><span class="epub__lineannotation"># Pick B's method: classic</span></em>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x = D()</code></strong>
+&gt;&gt;&gt; <strong class="epub__userinput"><code>x.meth()</code></strong>
+A.meth</pre>
+<p>Here, we select methods by explicitly assigning to names
+            lower in the tree. We might also simply call the desired class
+            explicitly; in practice, this pattern might be more common,
+            especially for things like constructors:</p><a id="I_programlisting7_d1e78066"></a>
+<pre class="epub__programlisting">class D(B, C):
+    def meth(self):                <em class="epub__lineannotation"><span class="epub__lineannotation"># Redefine lower</span></em>
+        ...
+        C.meth(self)               <em class="epub__lineannotation"><span class="epub__lineannotation"># Pick C's method by calling</span></em></pre>
+<p>Such selections by assignment or call at mix-in points can
+            effectively insulate your code from this difference in class
+            flavors. Explicitly resolving the conflicts this way ensures that
+            your code won’t vary per Python version in the future (apart from
+            perhaps needing to derive classes from <code class="epub__literal">object</code> or a built-in type for the
+            new-style tools in 2.6). To trace how new-stye inheritance works
+            by default, see also the <code class="epub__literal">class.mro()</code> method mentioned in the
+            preceding chapter's class lister examples.</p><div class="epub__note" title="Note">
+<h3 class="epub__title">Note</h3>
+<p>Even without the classic/new-style class divergence, the
+              explicit method resolution technique shown here may come in
+              handy in multiple inheritance scenarios in general. For
+              instance, if you want part of a superclass on the left and part
+              of a superclass on the right, you might need to tell Python
+              which same-named attributes to choose by using explicit
+              assignments in subclasses. We’ll revisit this notion in a
+              “gotcha” at the end of this chapter.</p>
+<p>Also note that diamond inheritance patterns might be more
+              problematic in some cases than I’ve implied here (e.g., what if
+              <code class="epub__literal">B</code> and <code class="epub__literal">C</code> both have required constructors that
+              call to the constructor in <code class="epub__literal">A</code>?). Since such contexts are rare in
+              real-world Python, we’ll leave this topic outside this book’s
+              scope (but see the <code class="epub__literal">super</code>
+              built-in function for hints—besides providing generic access to
+              superclasses in single inheritance trees, <code class="epub__literal">super</code> supports a cooperative mode for
+              resolving some conflicts in multiple inheritance trees).</p>
+</div>
+</div>
+<div class="epub__sect3" title="Scope of search order change"><div class="epub__titlepage"><div>
+<div>
+<h3 class="epub__title"><a id="scope_of_search_order_change"></a>Scope of search order change</h3>
+</div>
+</div>
+</div>
+<p>In sum, <a id="I_indexterm7_d1e78104"></a>by default, the diamond pattern is searched
+            differently for classic and new-style classes, and this is a
+            nonbackward-compatible change. Keep in mind, though, that this
+            change primarily affects diamond pattern cases of multiple
+            inheritance; new-style class inheritance works unchanged for most
+            other inheritance tree structures. Further, it’s not impossible
+            that this entire issue may be of more theoretical than practical
+            importance—because the
+            new-style search wasn’t significant enough to address until Python
+            2.2 and didn’t become standard until 3.0, it seems unlikely to
+            impact much Python code.</p>
+<p>Having said that, I should also note that even though you
+            might not code diamond patterns in classes you write yourself,
+            because the implied <code class="epub__literal">object</code>
+            superclass is above every class in 3.0, <span class="epub__emphasis"><em>every</em></span>
+            case of multiple inheritance exhibits the diamond pattern today.
+            That is, in new-style classes, <code class="epub__literal">object</code> automatically plays the role that
+            the class <code class="epub__literal">A</code> does in the example
+            we just considered. Hence the new-style search rule not only
+            modifies logical semantics, but also optimizes performance by
+            avoiding visiting the same class more than once.</p>
+<p>Just as important, the implied <code class="epub__literal">object</code> superclass in the new-style model
+            provides default methods for a variety of built-in operations,
+            including the <code class="epub__literal">__str__</code> and
+            <code class="epub__literal">__repr__</code> display format
+            methods. Run a <code class="epub__literal">dir(object)</code> to
+            see which methods are provided. Without the new-style search
+            order, in multiple inheritance cases the defaults in <code class="epub__literal">object</code> would always override
+            redefinitions in user-coded classes, unless they were always made
+            in the leftmost superclass. In other words, the new-style class
+            model itself makes using the new-style search order more
+            critical!</p>
+<p>For a more visual example of the implied <code class="epub__literal">object</code> superclass in 3.0, and other
+            examples of diamond patterns created by it, see the <code class="epub__literal">ListTree</code> class’s output in the <em class="epub__filename">lister.py</em> example in the preceding
+            chapter, as well as the <em class="epub__filename">classtree.py</em> tree walker <a id="I_indexterm7_d1e78160"></a><a id="I_indexterm7_d1e78162"></a><a id="I_indexterm7_d1e78165"></a>example in Chapter 28.</p>
+</div>
+</div>
+<div class="epub__sect1" title="New-Style Class Extensions"><div class="epub__titlepage"><div>
+<div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Real-World Build System Scenarios</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+<h3>Real-World Build System Scenarios</h3>
+
+<p class="docText">As with the other build tools 
+described in this book, this section considers how CMake can address a 
+number of real-world build system scenarios. CMake’s language features 
+are similar to those in other build tools, so this section describes the
+ detail of these solutions when it’s not already obvious.</p>
+
+
+<h4>Scenario 1: Source Code in a Single Directory</h4>
+
+<p class="docText">The first scenario is extremely simple to implement, making CMake a great tool to use for small projects.</p>
+
+<div class="docText">
+  <pre>1  project (scenario-1)
+2  add_executable (calculator add sub mult calc)</pre>
+</div>
+<br/>
+<p class="docText">Keep
+ in mind that when CMake generates a native build system, it adds a 
+number of standard features, such as automatic dependency analysis.</p>
+
+
+
+<h4>Scenario 2: Source Code in Multiple Directories</h4>
+
+<p class="docText">The second scenario 
+shows how to use CMake for larger projects in which the build 
+description is divided across multiple directories. You haven’t yet seen
+ the <tt>add_subdirectory</tt> command, but there should be no surprises in the way it works.</p>
+
+<p class="docText">The first build description file, <tt>src/CMakeLists.txt</tt>, appears at the top level of the build tree and recursively includes content from the subdirectories.</p>
+
+<div class="docText">
+  <pre>1  project (scenario-2)
+2
+3  cmake_minimum_required(VERSION 2.6)
+4
+5  add_subdirectory(libmath)
+6  add_subdirectory(libprint)
+7  add_subdirectory(calc)</pre>
+</div>
+<br/>
+<p class="docText">The second build description file, <tt>src/libmath/CMakeLists.txt</tt>, builds the <tt>Math</tt> library using the <tt>add_library</tt> command.</p>
+
+<div class="docText">
+  <pre>1  add_library(Math clock letter number)</pre>
+</div>
+<br/>
+<p class="docText">Next, <tt>src/libprint/CMakeLists.txt</tt> builds the <tt>Print</tt> library in the same way.</p>
+
+<div class="docText">
+  <pre>1  add_library(Print banner.c center.c normal.c)</pre>
+</div>
+<br/>
+<p class="docText">Finally, <tt>src/calc/CMakeLists.t</tt>xt pulls everything together by creating an executable file and linking it with the <tt>Math</tt> and <tt>Print</tt> libraries.</p>
+
+<div class="docText">
+  <pre>1  add_executable (calculator calc.c)
+2  target_link_libraries (calculator Math Print)</pre>
+</div>
+<br/>
+<p class="docText">To make use of this build description, you again execute the <tt>cmake</tt>
+ tool. This step is the same as in previous examples, so the output 
+isn’t interesting to show. Finally, you use the native build tool (in 
+this case, GNU Make) to compile the finished product.</p>
+
+<div class="docText">
+  <pre class="preFixedHeight">$ gmake
+Scanning dependencies of target Math
+[ 14%] Building C object libmath/CMakeFiles/Math.dir/
+clock.c.o
+[ 28%] Building C object libmath/CMakeFiles/Math.dir/
+       letter.c.o
+[ 42%] Building C object libmath/CMakeFiles/Math.dir/
+       number.c.o
+Linking C static library libMath.a
+[ 42%] Built target Math
+Scanning dependencies of target Print
+[ 57%] Building C object libprint/CMakeFiles/Print.dir/
+       banner.c.o
+[ 71%] Building C object libprint/CMakeFiles/Print.dir/
+       center.c.o
+[ 85%] Building C object libprint/CMakeFiles/Print.dir/
+       normal.c.o
+Linking C static library libPrint.a
+[ 85%] Built target Print
+Scanning dependencies of target calculator
+[100%] Building C object calc/CMakeFiles/calculator.dir/
+       calc.c.o
+Linking C executable calculator
+[100%] Built target calculator
+
+					  </pre>
+</div>
+<br/>
+<p class="docText">One
+ of the many advantages of using a CMake-generated build system is that 
+the subbuild problem is solved and dependencies into other 
+subdirectories are dealt with correctly. For example, if you build in 
+the <tt>libmath</tt> directory, only that library is rebuilt:</p>
+
+<div class="docText">
+  <pre>$ cd obj/libmath
+$ gmake
+[100%] Built target Math</pre>
+</div>
+<br/>
+<p class="docText">However, if you build in the <tt>calc</tt> directory, both the <tt>Print</tt> and <tt>Math</tt> libraries are also considered for recompilation:</p>
+
+<div class="docText">
+  <pre>$ cd obj/calc
+$ gmake
+[ 42%] Built target Print
+[ 85%] Built target Math
+[100%] Built target calculator</pre>
+</div>
+<br/>
+<p class="docText">As you can see, CMake generates
+ a fully featured Make-based build system without requiring the 
+developer to understand anything about the underlying framework.</p>
+
+
+
+<h4>Scenario 3: Defining New Compilation Tools</h4>
+
+<p class="docText">Adding the <tt>mathcomp</tt> compiler into a CMake-based build system requires using the <tt>add_custom_command</tt> directive. In addition, you use the <tt>execute_process</tt> command to gather the dependencies. Finally, you wrap the whole solution inside a macro to make it more convenient to use.</p>
+
+<div class="docText">
+  <pre class="preFixedHeight"> 1  project (scenario-3)
+ 2
+ 3  cmake_minimum_required(VERSION 2.6)
+ 4
+ 5  macro (mathcomp FUNC_NAME INPUT_FILE OUTPUT_FILE)
+ 6     execute_process(
+ 7         COMMAND /tools/bin/mathcomp -d ${INPUT_FILE}
+ 8         OUTPUT_VARIABLE DEPS
+ 9    )
+10    separate_arguments(DEPS)
+11
+12    add_custom_command(
+13        OUTPUT ${OUTPUT_FILE}
+14        COMMAND /tools/bin/mathcomp -c -o ${OUTPUT_FILE}
+15                -f ${FUNC_NAME} ${INPUT_FILE}
+16        DEPENDS ${DEPS}
+17    )
+18  endmacro (mathcomp)
+19
+20  mathcomp(equations ${PROJECT_SOURCE_DIR}/equations.math
+    equations.c)
+21  add_executable (calculator calculator.c equations.c)
+
+					  </pre>
+</div>
+<br/>
+<p class="docText">Lines 5–18 define a macro that encapsulates the complexity of this solution. Line 20 invokes this macro to generate the <tt>equations.c</tt> output file from the <tt>equations.math</tt> input file. The build system executes from within the object directory, so you use the <tt>PROJECT_SOURCE_DIR</tt> variable to access the source file.</p>
+
+<p class="docText">Looking now at the macro definition, lines 6–9 invoke the <tt>mathcomp</tt> compiler with the <tt>-d</tt> option, to determine the dependencies present in the <tt>.math</tt> file. The output from this command is placed in the <tt>DEPS</tt> variable. On line 10, this space-separated output is translated into a list of separate filenames.</p>
+
+<p class="docText">The <tt>add_custom_command</tt>
+ directive on lines 12–17 is now fairly straightforward. You already 
+know the name of the output file, and you’ve just computed the list of 
+dependencies. The <tt>/tools/bin/mathcomp</tt> compiler is ready to be invoked in the same way you did for GNU Make, Ant, and SCons.</p>
+
+<p class="docText">One final observation is that <tt>add_custom_command</tt> makes the new tool available for use by the native build system. That is, when the native build system needs to create the <tt>equations.c</tt> file, it directly invokes the <tt>mathcomp</tt> compiler. However, notice that the <tt>execute_process</tt> command determines the source file dependencies. This command is used only when the <tt>cmake</tt> tool is initially invoked, which is before the native build tool is ever called into action.</p>
+
+<p class="docText">The limitation here is 
+that when source files are modified, the native build system won’t 
+notice if any dependencies have changed. Before long, the build system 
+starts using outdated information. CMake solves this problem for C and C++ files by requiring the <tt>IMPLICIT_DEPENDS</tt> keyword for the <tt>add_custom_command</tt> directive. To support this same feature for the <tt>mathcomp</tt> tool, the standard CMake system must be modified.</p>
+
+
+
+<h4>Scenario 4: Building with Multiple Variants</h4>
+
+<p class="docText">The multivariant 
+scenario takes advantage of the configuration cache, where the user can 
+indicate which CPU type to compile for (<tt>i386</tt>, <tt>powerpc</tt>, or <tt>alpha</tt>).
+ The build system then validates the selection and chooses a suitable 
+compiler for that CPU type. Unlike the GNU Make and SCons solutions, 
+there’s no requirement to create a per-CPU build directory. Instead, 
+CMake already requires users to create their own directory for object 
+files.</p>
+
+<div class="docText">
+  <pre>$ mkdir obj-alpha
+$ cd obj-alpha
+$ cmake -DPLATFORM=alpha ../src</pre>
+</div>
+<br/>
+<p class="docText">Alternatively, the <tt>ccmake</tt> command (refer to Figure 9.2) can provide a more interactive user experience. The CMake build description is as follows:</p>
+
+<div class="docText">
+  <pre> 1  project (scenario-4)
+ 2
+ 3  set (PLATFORM i386 CACHE STRING "CPU Type: i386, powerpc
+    or alpha")
+ 4
+ 5  if (NOT ${PLATFORM} MATCHES "^(i386|powerpc|alpha)$")
+ 6    message(SEND_ERROR
+ 7         "Invalid PLATFORM. Must be one of i386, powerpc or
+           alpha")
+ 8  endif ()
+ 9
+10  message("Compiling code for platform ${PLATFORM}")
+11
+12  set (CMAKE_C_COMPILER /tools/bin/gcc-${PLATFORM})
+13
+14  add_executable (calculator add sub mult calc)</pre>
+</div>
+<br/>
+<p class="docText">Line 3 demonstrates the creation of a new cache variable named <tt>PLATFORM</tt>. This command is similar to a standard <tt>set</tt> command, except that you use the <tt>CACHE</tt>
+ keyword to indicate that the user can configure the value when 
+generating a new native build system. As usual, the default CPU type is <tt>i386</tt>; in this case, a text string (“<tt>CPU Type: i386, powerpc or alpha</tt>”) is provided as a prompt to the user.</p>
+
+<p class="docText">The rest of the build 
+description is easy to understand. Lines 5–10 validate the user’s input 
+and provide a suitable message. Line 12 selects the compiler to be used (<tt>CMAKE_C_COMPILER</tt> is another standard cache variable). Finally, line 14 generates the executable program.</p>
+
+
+
+
+<h4>Scenario 5: Cleaning a Build Tree</h4>
+
+<p class="docText">As
+ you might expect, the native build system created by CMake already 
+supports a “clean” target for any object files it knows about. If <tt>add_executable</tt> or <tt>add_library</tt>
+ is used to compile source files, CMake already knows the name of the 
+executable or library file, as well as any intermediate object files. 
+For generated files that aren’t automatically detected, the name can be 
+listed in the <tt>ADDITIONAL_MAKE_CLEAN_FILES</tt> property. This is a per-directory property that contains the list of files to be removed from that directory.</p>
+
+
+
+<h4>Scenario 6: Debugging Incorrect Builds</h4>
+
+<p class="docText">CMake’s two-phase approach to 
+building software makes debugging a little more challenging. In some 
+cases, the problem lies in the original <tt>CMakeLists.txt</tt>
+ file, but in less common cases, a problem might arise in the native 
+(auto-generated) build system. Even if the bug was caused by an error in
+ the high-level description, you might locate the problem only when 
+running the native build tool.</p>
+
+<p class="docText">Start by focusing on the debug 
+facilities that the CMake tool provides. These are used to analyze 
+CMake’s flow of control as it generates the native build system:</p>
+
+<ul>
+  <li>
+    <p class="docText"><span class="docEmphStrong">The <span class="docEmphRoman"><tt>--system-information</tt></span> flag:</span> Provides an extensive dump of information about the build machine as it executes the <tt>cmake</tt>
+ command. This includes the location of compilation tools, the choice of
+ command-line options to pass to each tool, and various other 
+system-dependent parameters. If you suspect that an invalid tool or 
+command-line option is used, start by validating this output.</p>
+  </li>
+  <li>
+    <p class="docText"><span class="docEmphStrong">The <span class="docEmphRoman"><tt>--trace</tt></span> flag:</span>
+ Provides a line-by-line trace of CMake’s execution. Every variable 
+assignment, condition, loop, macro, and command is displayed in the 
+order in which it’s executed. By following along with the trace output, 
+you can validate your expectations on how the program should execute.</p>
+  </li>
+</ul>
+<p class="docText">If observing the CMake 
+generator in action didn’t solve your problem, try using the native 
+build tool’s debugging features. Each build tool, such as GNU Make, has 
+its own range of options for tracing the build system’s execution. If 
+you manage to locate the source of the problem, you need to work 
+backward and identify which lines in the <tt>CMakeLists.txt</tt> are causing the issue.</p>
+
+<p class="docText">The tricky part is when
+ the native build system contains a complex framework that you had no 
+involvement in writing. You might be able to scour the framework to locate the problem, but executing the build and watching the output is usually much easier. Invoking <tt>gmake</tt> with the <tt>VERBOSE=1</tt> flag provides a nicely formatted output to show each of the compilation commands.</p>
+
+<p class="docText">In the worst case, the native build system might contain a bug, even though the <tt>CMakeLists.txt</tt>
+ file is correct. In this case, you have no choice but to fix the CMake 
+tool itself. Some people might find it tempting to fix the bug directly 
+in the native build system, but the CMake generator would soon overwrite
+ any changes.</p>
+
+
+
+
+</body>
+</html>
