@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 6.9. Storing Containers in Containers</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 6.9. Storing Containers in Containers</h3>
+
+<h4 class="docSection2Title" id="title-ID0EF2AI">Problem</h4>
+<p class="docText">You have a number of instances
+
+ of a standard container
+(<tt>list</tt>s, <tt>set</tt>s, etc.), and you
+want to keep track of them by storing them in yet another container.</p>
+
+<h4 class="docSection2Title" id="title-ID0EF3AI">Solution</h4>
+<p class="docText">Store pointers to your containers in a single, master container. For
+example, you can use a <tt>map</tt> to store a
+<tt>string</tt> key and a pointer to a
+<tt>set</tt> as its value. Example 6-12
+presents a simple transaction log class that stores its data as a
+<tt>map</tt> of
+<tt>string</tt>-<tt>set</tt> pointer pairs.</p>
+<h5 class="docExampleTitle" id="title-ID0E53AI">Example 6-12. Storing set pointers in a map</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;iostream&gt;
+#include &lt;set&gt;
+#include &lt;map&gt;
+#include &lt;string&gt;
+
+using namespace std;
+
+typedef set&lt;string&gt; SetStr;
+typedef map&lt;string, SetStr*&gt; MapStrSetStr;
+
+// Dummy database class
+class DBConn {
+public:
+   void beginTxn( ) {}
+   void endTxn( ) {}
+   void execSql(string&amp; sql) {}
+};
+
+class SimpleTxnLog {
+
+public:
+   SimpleTxnLog( ) {}
+  ~SimpleTxnLog( ) {purge( );}
+
+   // Add an SQL statement to the list
+   void addTxn(const string&amp; id,
+               const string&amp; sql) {
+      SetStr* pSet = log_[id];      // This creates the entry for
+      if (pSet == NULL) {           // this id if it isn't there
+         pSet = new SetStr( );
+         log_[id] = pSet;
+      }
+      pSet-&gt;insert(sql);
+   }
+
+   // Apply the SQL statements to the database, one transaction
+   // at a time
+   void apply( ) {
+      for (MapStrSetStr::iterator p = log_.begin( );
+           p != log_.end( ); ++p) {
+         conn_-&gt;beginTxn( );
+
+         // Remember that a map iterator actually refers to an object
+         // of pair&lt;Key,Val&gt;.  The set pointer is stored in p-&gt;second.
+         for (SetStr::iterator pSql = p-&gt;second-&gt;begin( );
+              pSql != p-&gt;second-&gt;end( ); ++pSql) {
+            string s = *pSql;
+            conn_-&gt;execSql(s);
+            cout &lt;&lt; "Executing SQL: " &lt;&lt; s &lt;&lt; endl;
+         }
+
+         conn_-&gt;endTxn( );
+         delete p-&gt;second;
+      }
+      log_.clear( );
+   }
+
+   void purge( ) {
+      for (MapStrSetStr::iterator p = log_.begin( );
+           p != log_.end( ); ++p)
+        delete p-&gt;second;
+
+      log_.clear( );
+   }
+  // ...
+
+private:
+   MapStrSetStr log_;
+   DBConn* conn_;
+};
+
+					  </pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0EH4AI">Discussion</h4>
+<p class="docText">Example 6-12 offers one situation where you might
+need to store containers within a container. Imagine that you need to
+store a series of SQL statements in batches, to be executed against a
+relational database all at once sometime in the future.
+That's what <tt>SimpleTxnLog</tt> does. It
+could stand to have a few more member functions to make it useful,
+and some exception handling to make it safe, but the purpose of the
+example is to show how to store one kind of container in another.</p>
+<p class="docText">To begin with, I created some <tt>typedef</tt>s to make the
+code easier to read:</p>
+<pre>typedef std::set&lt;std::string&gt; SetStr;
+typedef std::map&lt;std::string, SetStr*&gt; MapStrSetStr;</pre><br/>
+<p class="docText">When you are using templates of templates (of templates . . . ad
+nauseam), the declarations will get very long, which makes them hard
+to read, so make your life easier by employing
+<tt>typedef</tt>. Furthermore, using
+<tt>typedef</tt> makes it easier to change something about
+the template declaration without having to search and replace through
+multiple source files.</p>
+<p class="docText">The <tt>DBConn</tt> class is a dummy class that is supposed
+to represent a connection to a relational database. The interesting
+part comes when we get into the definition of
+<tt>SimpleTxnLog</tt>, in the <tt>addTxn</tt>
+member function. At the beginning of the function, I do this to see
+if there is already a set object for the <tt>id</tt> that
+was passed in:</p>
+<pre>SetStr* pSet = log_[id];</pre><br/>
+<p class="docText"><tt>log_</tt> is a <tt>map</tt> (see Recipe 6.6), so <tt>operator[]</tt> does a
+lookup of <tt>id</tt> to see if there is a data object
+associated with it. If there is, the data object is returned and
+<tt>pSet</tt> is non-<tt>NULL</tt>; if there
+isn't, it creates it and returns the associated
+pointer, which will be <tt>NULL</tt>. Then, I can check to
+see if <tt>pSet</tt> points to anything to determine if I
+need to create another set:</p>
+<pre>if (pSet == NULL) {
+   pSet = new SetStr( );  // SetStr = std::set&lt;std::string&gt;
+   log_[id] = pSet;
+}</pre><br/>
+<p class="docText">Once I create the <tt>set</tt>, I have to assign it back to
+the associated key in the <tt>map</tt>, since
+<tt>pSet</tt> is a copy of the data object stored in the
+<tt>map</tt> (a set pointer), not the value itself. Once I
+do that, all that's left is to add an element to the
+set and return:</p>
+<pre>pSet-&gt;insert(sql);</pre><br/>
+<p class="docText">With the above steps, I added a pointer to an address of one
+container (a <tt>set</tt>) to another (a
+<tt>map</tt>). What I didn't do was add a
+<tt>set</tt>
+<span class="docEmphasis">object</span> to a
+<tt>map</tt>. The difference is important. Since containers
+have copy-in, copy-out semantics, doing the following would copy the
+entire set <tt>s</tt> into the <tt>map</tt>:</p>
+<pre>set&lt;string&gt; s;
+// Load up s with data...
+log_[id] = s; // Copy s and add the copy to log_</pre><br/>
+<p class="docText">This will cause a lot of extra copying that you probably
+don't want. Therefore, the general rule to follow
+when using 
+
+containers of containers is to use
+containers of <span class="docEmphasis">pointers</span> to containers.</p>
+</div>
+</body>
+</html>

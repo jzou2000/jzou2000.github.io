@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>26.3. The SIGCHLD Signal</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">26.3. The <tt>SIGCHLD</tt> Signal</h3><p class="docText">The
+ termination of a child process is an event that occurs asynchronously. A
+ parent can’t predict when one of its child will terminate. (Even if the
+ parent sends a <tt>SIGKILL</tt> signal to the 
+child, the exact time of termination is still dependent on when the 
+child is next scheduled for use of a CPU.) We have already seen that the
+ parent should use <span class="docEmphasis">wait()</span> (or similar) in order to prevent the accumulation of zombie children, and have looked at two ways in which this can be done:</p><ul><li><p class="docList">The parent can call <span class="docEmphasis">wait()</span>, or <span class="docEmphasis">waitpid()</span> without specifying the <tt>WNOHANG</tt> flag, in which case the call will block if a child has not already terminated.</p></li><li><p class="docList">The parent can periodically perform a nonblocking check (a poll) for dead children via a call to <span class="docEmphasis">waitpid()</span> specifying the <tt>WNOHANG</tt> flag.</p></li></ul><p class="docText">Both
+ of these approaches can be inconvenient. On the one hand, we may not 
+want the parent to be blocked waiting for a child to terminate. On the 
+other hand, making repeated nonblocking <span class="docEmphasis">waitpid()</span>
+ calls wastes CPU time and adds complexity to an application design. To 
+get around these problems, we can employ a handler for the <tt>SIGCHLD</tt> signal.</p><h4 class="docSection2Title" id="title-ID0EI1CK">26.3.1. Establishing a Handler for <tt>SIGCHLD</tt></h4><p class="docText">The <tt>SIGCHLD</tt>
+ signal is sent to a parent process whenever one of its children 
+terminates. By default, this signal is ignored, but we can catch it by 
+installing a signal handler. Within the signal handler, we can use <span class="docEmphasis">wait()</span> (or similar) to reap the zombie child. However, there is a subtlety to consider in this approach.</p><p class="docText">In Section 20.10 and Section 20.12, we observed that when a signal handler is called, the signal that caused its invocation is temporarily blocked (unless the <span class="docEmphasis">sigaction()</span> <tt>SA_NODEFER</tt> flag was specified), and also that standard signals, of which <tt>SIGCHLD</tt> is one, are not queued. Consequently, if a second and third child terminate in quick succession while a <tt>SIGCHLD</tt> handler is executing for an already terminated child, then, although <tt>SIGCHLD</tt> is generated twice, it is queued only once to the parent. As a result, if the parent’s <tt>SIGCHLD</tt> handler called <span class="docEmphasis">wait()</span> only once each time it was invoked, the handler might fail to reap some zombie children.</p><p class="docText">The solution is to loop inside the <tt>SIGCHLD</tt> handler, repeatedly calling <span class="docEmphasis">waitpid()</span> with the <tt>WNOHANG</tt> flag until there are no more dead children to be reaped. Often, the body of a <tt>SIGCHLD</tt> handler simply consists of the following code, which reaps any dead children without checking their status:</p><pre>while (waitpid(-1, NULL, WNOHANG) &gt; 0)
+    continue;</pre><br/>
+<p class="docText">The above loop continues until <span class="docEmphasis">waitpid()</span> returns either 0, indicating no more zombie children, or -1, indicating an error (probably <tt>ECHILD</tt>, meaning that there are no more children).</p><h5 class="docSection3Title" id="title-ID0EM3CK">26.3.1.1. Design issues for <tt>SIGCHLD</tt> handlers</h5><p class="docText">Suppose that, at the time we establish a handler for <tt>SIGCHLD</tt>, there is already a terminated child for this process. Does the kernel then immediately generate a <tt>SIGCHLD</tt> signal for the parent? SUSv3 leaves this point unspecified. Some System V-derived implementations do generate a <tt>SIGCHLD</tt>
+ in these circumstances; other implementations, including Linux, do not.
+ A portable application can make this difference invisible by 
+establishing the <tt>SIGCHLD</tt> handler before creating any children. (This is usually the natural way of doing things, of course.)</p><p class="docText">A further point to consider is the issue of reentrancy. In Section 21.1.2, we noted that using a system call (e.g., <span class="docEmphasis">waitpid()</span>) from within a signal handler may change the value of the global variable <span class="docEmphasis">errno</span>. Such a change could interfere with attempts by the main program to explicitly set <span class="docEmphasis">errno</span> (see, for example, the discussion of <span class="docEmphasis">getpriority()</span> in Section 35.1) or check its value after a failed system call. For this reason, it is sometimes necessary to code a <tt>SIGCHLD</tt> handler to save <span class="docEmphasis">errno</span> in a local variable on entry to the handler, and then restore the <span class="docEmphasis">errno</span> value just prior to returning. An example of this is shown in Example 26-5.</p><h5 class="docSection3Title" id="title-ID0E65CK">26.3.1.2. Example program</h5><p class="docText">Example 26-5 provides an example of a more complex <tt>SIGCHLD</tt> handler. This handler displays the process ID and wait status of each reaped child <img alt="" border="0" id="" src="Images/getfile_003-15.png"/>. In order to see that multiple <tt>SIGCHLD</tt> signals are not queued while the handler is already invoked, execution of the handler is artificially lengthened by a call to <span class="docEmphasis">sleep()</span> <img alt="" border="0" id="" src="Images/getfile_002-16.png"/>. The main program creates one child process for each (integer) command-line argument <img alt="" border="0" id="" src="Images/getfile_004.png"/>. Each of these children sleeps for the number of seconds specified in the corresponding command-line argument and then exits <img alt="" border="0" id="" src="Images/getfile_005-11.png"/>. In the following example of the execution of this program, we see that even though three children terminate, <tt>SIGCHLD</tt> is only queued twice to the parent:</p><pre class="preFixedWidth">$ <b>./multi_SIGCHLD 1 2 4 </b>
+16:45:18 Child 1 (PID=17767) exiting
+16:45:18 handler: Caught SIGCHLD            <i> First invocation of handler</i>
+16:45:18 handler: Reaped child 17767 - child exited, status=0
+16:45:19 Child 2 (PID=17768) exiting        <i> These children terminate during...</i>
+16:45:21 Child 3 (PID=17769) exiting        <i> first invocation of handler</i>
+16:45:23 handler: returning                 <i> End of first invocation of handler</i>
+16:45:23 handler: Caught SIGCHLD            <i> Second invocation of handler</i>
+16:45:23 handler: Reaped child 17768 - child exited, status=0
+16:45:23 handler: Reaped child 17769 - child exited, status=0
+16:45:28 handler: returning
+16:45:28 All 3 children have terminated; SIGCHLD was caught 2 times
+
+					  </pre><br/>
+<p class="docText">Note the use of <span class="docEmphasis">sigprocmask()</span> to block the SIGCHLD signal before any children are created in Example 26-5 <img alt="" border="0" id="" src="Images/getfile-45.png"/>. This is done to ensure correct operation of the <span class="docEmphasis">sigsuspend()</span> loop in the parent. If we failed to block <tt>SIGCHLD</tt> in this way, and a child terminated between the test of the value of <span class="docEmphasis">numLiveChildren</span> and the execution of the <span class="docEmphasis">sigsuspend()</span> call (or alternatively a <span class="docEmphasis">pause()</span> call), then the <span class="docEmphasis">sigsuspend()</span> call would block forever waiting for a signal that has already been caught <img alt="" border="0" id="" src="Images/getfile_006.png"/>. The requirement for dealing with this type of race condition was detailed in Section 22.9.</p><h5 class="docExampleTitle" id="title-ID0E2CDK">Example 26-5. Reaping dead children via a handler for <tt>SIGCHLD</tt></h5><p></p><div class="box"><pre class="preFixedHeight"><b>procexec/multi_SIGCHLD.c</b>
+    #include &lt;signal.h&gt;
+    #include &lt;sys/wait.h&gt;
+    #include "print_wait_status.h"
+    #include "curr_time.h"
+    #include "tlpi_hdr.h"
+
+    static volatile int numLiveChildren = 0;
+                    /* Number of children started but not yet waited on */
+
+    static void
+    sigchldHandler(int sig)
+    {
+
+        int status, savedErrno;
+        pid_t childPid;
+
+        /* UNSAFE: This handler uses non-async-signal-safe functions
+           (printf(), printWaitStatus(), currTime(); see Section 21.1.2) */
+
+        savedErrno = errno;     /* In case we modify 'errno' */
+
+        printf("%s handler: Caught SIGCHLD\n", currTime("%T"));
+
+        while ((childPid = waitpid(-1, &amp;status, WNOHANG)) &gt; 0) {
+<img alt="" border="0" id="" src="Images/getfile_003-16.png"/>
+            printf("%s handler: Reaped child %ld - ", currTime("%T"),
+                    (long) childPid);
+            printWaitStatus(NULL, status);
+            numLiveChildren—;
+        }
+
+        if (childPid == -1 &amp;&amp; errno != ECHILD)
+            errMsg("waitpid");
+    <img alt="" border="0" id="" src="Images/getfile_002-17.png"/>    sleep(5);               /* Artificially lengthen execution of handler */
+        printf("%s handler: returning\n", currTime("%T"));
+
+        errno = savedErrno;
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        int j, sigCnt;
+        sigset_t blockMask, emptyMask;
+        struct sigaction sa;
+
+        if (argc &lt; 2 || strcmp(argv[1], "—help") == 0)
+            usageErr("%s child-sleep-time...\n", argv[0]);
+
+        setbuf(stdout, NULL);       /* Disable buffering of stdout */
+
+        sigCnt = 0;
+        numLiveChildren = argc - 1;
+
+        sigemptyset(&amp;sa.sa_mask);
+        sa.sa_flags = 0;
+        sa.sa_handler = sigchldHandler;
+        if (sigaction(SIGCHLD, &amp;sa, NULL) == -1)
+            errExit("sigaction");
+
+        /* Block SIGCHLD to prevent its delivery if a child terminates
+           before the parent commences the sigsuspend() loop below */
+
+        sigemptyset(&amp;blockMask);
+        sigaddset(&amp;blockMask, SIGCHLD);
+<img alt="" border="0" id="" src="Images/getfile-46.png"/>    if (sigprocmask(SIG_SETMASK, &amp;blockMask, NULL) == -1)
+            errExit("sigprocmask");
+
+<img alt="" border="0" id="" src="Images/getfile_004.png"/>    for (j = 1; j &lt; argc; j++) {
+            switch (fork()) {
+            case -1:
+                errExit("fork");
+
+            case 0:         /* Child - sleeps and then exits */
+<img alt="" border="0" id="" src="Images/getfile_005-12.png"/>            sleep(getInt(argv[j], GN_NONNEG, "child-sleep-time"));
+                printf("%s Child %d (PID=%ld) exiting\n", currTime("%T"),
+                        j, (long) getpid());
+                _exit(EXIT_SUCCESS);
+
+            default:        /* Parent - loops to create next child */
+                break;
+            }
+        }
+
+            /* Parent comes here: wait for SIGCHLD until all children are dead */
+
+        sigemptyset(&amp;emptyMask);
+        while (numLiveChildren &gt; 0) {
+<img alt="" border="0" id="" src="Images/getfile_006.png"/>        if (sigsuspend(&amp;emptyMask) == -1 &amp;&amp; errno != EINTR)
+                errExit("sigsuspend");
+            sigCnt++;
+        }
+
+        printf("%s All %d children have terminated; SIGCHLD was caught "
+                "%d times\n", currTime("%T"), argc - 1, sigCnt);
+
+        exit(EXIT_SUCCESS);
+    }
+          <b>procexec/multi_SIGCHLD.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0ETEDK">26.3.2. Delivery of <tt>SIGCHLD</tt> for Stopped Children</h4><p class="docText">Just as <span class="docEmphasis">waitpid()</span> can be used to monitor stopped children, so is it possible for a parent process to receive the <tt>SIGCHLD</tt> signal when one of its children is stopped by a signal. This behavior is controlled by the <tt>SA_NOCLDSTOP</tt> flag when using <span class="docEmphasis">sigaction()</span> to establish a handler for the <tt>SIGCHLD</tt> signal. If this flag is omitted, a <tt>SIGCHLD</tt> signal is delivered to the parent when one of its children stops; if the flag is present, <tt>SIGCHLD</tt> is not delivered for stopped children. (The implementation of <span class="docEmphasis">signal()</span> given in Section 22.7 doesn’t specify <tt>SA_NOCLDSTOP</tt>.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Since <tt>SIGCHLD</tt> is ignored by default, the <tt>SA_NOCLDSTOP</tt> flag has a meaning only if we are establishing a handler for <tt>SIGCHLD</tt>. Furthermore, <tt>SIGCHLD</tt> is the only signal for which the <tt>SA_NOCLDSTOP</tt> flag has an effect.</p><hr noshade="noshade" size="1"/><p class="docText">SUSv3 also allows for a parent to be sent a <tt>SIGCHLD</tt> signal if one of its stopped children is resumed by being sent a <tt>SIGCONT</tt> signal. (This corresponds to the <tt>WCONTINUED</tt> flag for <span class="docEmphasis">waitpid()</span>.) This feature is implemented in Linux since kernel 2.6.9.</p><h4 class="docSection2Title" id="title-ID0E5HDK">26.3.3. Ignoring Dead Child Processes</h4><p class="docText">There is a further possibility for dealing with dead child processes. Explicitly setting the disposition of <tt>SIGCHLD</tt> to <tt>SIG_IGN</tt>
+ causes any child process that subsequently terminates to be immediately
+ removed from the system instead of being converted into a zombie. In 
+this case, since the status of the child process is simply discarded, a 
+subsequent call to <span class="docEmphasis">wait()</span> (or similar) can’t return any information for the terminated child.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Note that even though the default disposition for <tt>SIGCHLD</tt> is to be ignored, explicitly setting the disposition to <tt>SIG_IGN</tt> causes the different behavior described here. In this respect, <tt>SIGCHLD</tt> is treated uniquely among signals.</p><hr noshade="noshade" size="1"/><p class="docText">On Linux, as on many UNIX implementations, setting the disposition of <tt>SIGCHLD</tt> to <tt>SIG_IGN</tt>
+ doesn’t affect the status of any existing zombie children, which must 
+still be waited upon in the usual way. On some other UNIX 
+implementations (e.g., Solaris 8), setting the disposition of <tt>SIGCHLD</tt> to <tt>SIG_IGN</tt> <span class="docEmphasis">does</span> remove existing zombie children.</p><p class="docText">The <tt>SIG_IGN</tt> semantics for <tt>SIGCHLD</tt>
+ have a long history, deriving from System V. SUSv3 specifies the 
+behavior described here, but these semantics were left unspecified in 
+the original POSIX.1 standard. Thus, on some older UNIX implementations,
+ ignoring <tt>SIGCHLD</tt> has no effect on the creation of zombies. The only completely portable way of preventing the creation of zombies is to call <span class="docEmphasis">wait()</span> or <span class="docEmphasis">waitpid()</span>, possibly from within a handler established for <tt>SIGCHLD</tt>.</p><h5 class="docSection3Title" id="title-ID0E3JDK">26.3.3.1. Deviations from SUSv3 in older Linux kernels</h5><p class="docText">SUSv3 specifies that if the disposition of <tt>SIGCHLD</tt> is set to <tt>SIG_IGN</tt>,
+ the resource usage information for the child should be discarded and 
+not included in the totals returned when the parent makes a call to <span class="docEmphasis">getrusage()</span> specifying the <tt>RUSAGE_CHILDREN</tt> flag (Section 36.1). However, on Linux versions before kernel 2.6.9, the CPU times and resources used by the child <span class="docEmphasis">are</span> recorded and are visible in calls to <span class="docEmphasis">getrusage()</span>. This nonconformance is fixed in Linux 2.6.9 and later.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Setting the disposition of <tt>SIGCHLD</tt> to <tt>SIG_IGN</tt> should also prevent the child CPU times from being included in the structure returned by <span class="docEmphasis">times()</span> (Section 10.7). However, on Linux kernels before 2.6.9, a similar nonconformance applies for the information returned by <span class="docEmphasis">times()</span>.</p><hr noshade="noshade" size="1"/><p class="docText">SUSv3 specifies that if the disposition of <tt>SIGCHLD</tt> is set to <tt>SIG_IGN</tt>,
+ and the parent has no terminated children that have been transformed 
+into zombies and have not yet been waited for, then a call to <span class="docEmphasis">wait()</span> (or <span class="docEmphasis">waitpid()</span>) should block until <span class="docEmphasis">all</span> of the parent’s children have terminated, at which point the call should terminate with the error <tt>ECHILD</tt>. Linux 2.6 conforms to this requirement. However, in Linux 2.4 and earlier, <span class="docEmphasis">wait()</span> blocks only until the <span class="docEmphasis">next</span>
+ child terminates, and then returns the process ID and status of that 
+child (i.e., the behavior is the same as if the disposition of <tt>SIGCHLD</tt> had not been set to <tt>SIG_IGN</tt>).</p><h5 class="docSection3Title" id="title-ID0E4MDK">26.3.3.2. The <span class="docEmphasis">sigaction()</span><tt>SA_NOCLDWAIT</tt> flag</h5><p class="docText">SUSv3 specifies the <tt>SA_NOCLDWAIT</tt> flag, which can be used when setting the disposition of the <tt>SIGCHLD</tt> signal using <span class="docEmphasis">sigaction()</span>. This flag produces behavior similar to that when the disposition of <tt>SIGCHLD</tt> is set to <tt>SIG_IGN</tt>. This flag was not implemented in Linux 2.4 and earlier, but is implemented in Linux 2.6.</p><p class="docText">The principal difference between setting the disposition of <tt>SIGCHLD</tt> to <tt>SIG_IGN</tt> and employing <tt>SA_NOCLDWAIT</tt> is that, when establishing a handler with <tt>SA_NOCLDWAIT</tt>, SUSv3 leaves it unspecified whether or not a <tt>SIGCHLD</tt> signal is sent to the parent when a child terminates. In other words, an implementation is permitted to deliver <tt>SIGCHLD</tt> when <tt>SA_NOCLDWAIT</tt> is specified, and an application could catch this signal (although the <tt>SIGCHLD</tt> handler would not be able to reap the child status using <span class="docEmphasis">wait()</span>, since the kernel has already discarded the zombie). On some UNIX implementations, including Linux, the kernel does generate a <tt>SIGCHLD</tt> signal for the parent process. On other UNIX implementations, <tt>SIGCHLD</tt> is not generated.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">When setting the <tt>SA_NOCLDWAIT</tt> flag for the <tt>SIGCHLD</tt>
+ signal, older Linux kernels demonstrate the same details of 
+nonconformance to SUSv3 as were described above for setting the 
+disposition of <tt>SIGCHLD</tt> to <tt>SIG_IGN</tt>.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EJPDK">26.3.3.3. The System V <tt>SIGCLD</tt> signal</h5><p class="docText">On Linux, the name SIGCLD is provided as a synonym for the <tt>SIGCHLD</tt> signal. The reason for the existence of both names is historical. The <tt>SIGCHLD</tt>
+ signal originated on BSD, and this name was adopted by POSIX, which 
+largely standardized on the BSD signal model. System V provided the 
+corresponding <tt>SIGCLD</tt> signal, with slightly different semantics.</p><p class="docText">The key difference between BSD <tt>SIGCHLD</tt> and System V <tt>SIGCLD</tt> lies in what happens when the disposition of the signal was set to <tt>SIG_IGN</tt>:</p><ul><li><p class="docList">On
+ historical (and some contemporary) BSD implementations, the system 
+continues to generate zombies for unwaited-for children, even when <tt>SIGCHLD</tt> is ignored.</p></li><li><p class="docList">On System V, using <span class="docEmphasis">signal()</span> (but not <span class="docEmphasis">sigaction()</span>) to ignore <tt>SIGCLD</tt> has the result that zombies are not generated when children died.</p></li></ul><p class="docText">As already noted, the original POSIX.1 standard left the result of ignoring <tt>SIGCHLD</tt>
+ unspecified, thus permitting the System V behavior. Nowadays, this 
+System V behavior is specified as part of SUSv3 (which nevertheless 
+holds to the name <tt>SIGCHLD</tt>). Modern System V derivatives use the standard name <tt>SIGCHLD</tt> for this signal, but continue to provide the synonym <tt>SIGCLD</tt>. Further details on <tt>SIGCLD</tt> can be found in [Stevens &amp; Rago, 2005].</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Knowing Your Objects: The this Pointer</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Knowing Your Objects: The <tt>this</tt> Pointer</h3>
+<p class="docText">You can do still more with the <tt>Stock</tt>
+ class. So far each class member function has dealt with but a single 
+object: the object that invokes it. Sometimes, however, a method might 
+need to deal with two objects, and doing so may involve a curious C++ 
+pointer called <tt>this</tt>. Let’s look at how the need for <tt>this</tt> can unfold.</p>
+<p class="docText">Although the <tt>Stock</tt> class declaration displays data, it’s deficient in analytic power. For example, by looking at the <tt>show()</tt> output, you can tell which of your holdings has the greatest value, but the program can’t tell because it can’t access <tt>total_val</tt>
+ directly. The most direct way of letting a program know about stored 
+data is to provide methods to return values. Typically, you use inline 
+code for this, as in the following example:</p>
+<div class="docText"><pre>class Stock
+{
+private:
+    ...
+    double total_val;
+    ...
+public:
+    double total() const { return total_val; }
+    ...
+};</pre></div><br/>
+<p class="docText">This definition, in effect, makes <tt>total_val</tt> read-only memory as far as a direct program access is concerned. That is, you can use the <tt>total_val()</tt> method to obtain the value, but the class doesn’t provide a method for specifically resetting the value of <tt>total_val</tt>. (Other methods, such as <tt>buy()</tt>, <tt>sell()</tt>, and <tt>update()</tt>, do modify <tt>total_val</tt> as a by-product of resetting the <tt>shares</tt> and <tt>share_val</tt> members.)</p>
+<p class="docText">By adding this function to the 
+class declaration, you can let a program investigate a series of stocks 
+to find the one with the greatest value. However, you can take a 
+different approach, one that helps you learn about the <tt>this</tt> pointer. The approach is to define a member function that looks at two <tt>Stock</tt>
+ objects and returns a reference to the larger of the two. Attempting to
+ implement this approach raises some interesting questions, which we’ll 
+look into now.</p>
+<p class="docText">First, how do you provide 
+the member function with two objects to compare? Suppose, for example, 
+that you decide to name the method <tt>topval()</tt>. Then the function call <tt>stock1.topval()</tt> accesses the data of the <tt>stock1</tt> object, whereas the message <tt>stock2.topval()</tt> accesses the data of the <tt>stock2</tt>
+ object. If you want the method to compare two objects, you have to pass
+ the second object as an argument. For efficiency, you can pass the 
+argument by reference. That is, you can have the <tt>topval()</tt> method use a type <tt>const Stock &amp;</tt> argument.</p>
+<p class="docText">Second, how do you communicate 
+the method’s answer back to the calling program? The most direct way is 
+to have the method return a reference to the object that has the larger 
+total value. Thus, the comparison method should have the following 
+prototype:</p>
+<div class="docText"><pre>const Stock &amp; topval(const Stock &amp; s) const;</pre></div><br/>
+<p class="docText">This function 
+accesses one object implicitly and one object explicitly, and it returns
+ a reference to one of those two objects. The <tt>const</tt> in parentheses states that the function won’t modify the explicitly accessed object, and the <tt>const</tt>
+ that follows the parentheses states that the function won’t modify the 
+implicitly accessed object. Because the function returns a reference to 
+one of the two <tt>const</tt> objects, the return type also has to be a <tt>const</tt> reference.</p>
+<p class="docText">Suppose, then, that you want to compare the <tt>Stock</tt> objects <tt>stock1</tt> and <tt>stock2</tt> and assign the one with the greater total value to the object <tt>top</tt>. You can use either of the following statements to do so:</p>
+<div class="docText"><pre>top = stock1.topval(stock2);
+top = stock2.topval(stock1);</pre></div><br/>
+<p class="docText">The first form accesses <tt>stock1</tt> implicitly and <tt>stock2</tt><a name="second accesses"></a> explicitly, whereas the second accesses <tt>stock1</tt> explicitly and <tt>stock2</tt> implicitly (see Figure 10.3). Either way, the method compares the two objects and returns a reference to the one with the higher total value.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 10.3. Accessing two objects by using a member function.</h5>
+<p class="docText">
+<img alt="" border="0" height="296" id="" src="Images/getfile-33.jpg" width="349"/></p>
+</center><p></p><br/>
+<p class="docText">Actually, this notation is a bit confusing. It would be clearer if you could somehow use the relational operator <tt>&gt;</tt> to compare the two objects. You can do so with operator overloading, which Chapter 11 discusses.</p>
+<p class="docText">Meanwhile, there’s still the implementation of <tt>topval()</tt> to attend to. It raises a slight problem. Here’s a partial implementation that highlights the problem:</p>
+<div class="docText"><pre>const Stock &amp; Stock::topval(const Stock &amp; s) const
+{
+    if (s.total_val &gt; total_val)
+        return s;               // argument object
+     else
+        return ?????;           // invoking object
+}</pre></div><br/>
+<p class="docText">Here <tt>s.total_val</tt> is the total value for the object passed as an argument, and <tt>total_val</tt> is the total value for the object to which the message is sent. If <tt>s.total_val</tt> is greater than <tt>total_val</tt>, the function returns a reference to <tt>s</tt>. Otherwise, it returns a reference to the object used to evoke the method. (In OOP talk, that is the object to which the <tt>topval</tt> message is sent.) Here’s the problem: What do you call that object? If you make the call <tt>stock1.topval(stock2)</tt>, then <tt>s</tt> is a reference for <tt>stock2</tt> (that is, an alias for <tt>stock2</tt>), but there is no alias for <tt>stock1</tt>.</p>
+<p class="docText">The C++ solution to this problem is to use a special pointer called <tt>this</tt>. The <tt>this</tt> pointer points to the object used to invoke a member function. (Basically, <tt>this</tt> is passed as a hidden argument to the method.) Thus, the function call <tt>stock1.topval(stock2)</tt> sets <tt>this</tt> to the address of the <tt>stock1</tt> object and makes that pointer available to the <tt>topval()</tt> method. Similarly, the function call <tt>stock2.topval(stock1)</tt> sets <tt>this</tt> to the address of the <tt>stock2</tt> object. In general, all class methods have a <tt>this</tt> pointer set to the address of the object that invokes the method. Indeed, <tt>total_val</tt> in <tt>topval()</tt> is just shorthand notation for <tt>this-&gt;total_val</tt>. (Recall from Chapter 4, “Compound Types,” that you use the <tt>-&gt;</tt> operator to access structure members via a pointer. The same is true for class members.) (See Figure 10.4.)</p>
+<p class="docText"></p><p></p><center>
+<h5 class="docFigureTitle">Figure 10.4. <tt>this</tt> points to the invoking object.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="388" id="" src="Images/getfile_002-19.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<div class="docNote"><p class="docNoteTitle">Note</p>
+<p class="docText">Each member function, including constructors and destructors, has a <tt>this</tt> pointer. The special property of the <tt>this</tt>
+ pointer is that it points to the invoking object. If a method needs to 
+refer to the invoking object as a whole, it can use the expression <tt>*this</tt>. Using the <tt>const</tt> qualifier after the function argument parentheses qualifies <tt>this</tt> as being a pointer to <tt>const</tt>; in that case, you can’t use <tt>this</tt> to change the object’s value.</p>
+</div><br/>
+<p class="docText">What you want to return, however, is not <tt>this</tt> because <tt>this</tt> is the address of the object. You want to return the object itself, and that is symbolized by <tt>*this</tt>. (Recall that applying the dereferencing operator <tt>*</tt> to a pointer yields the value to which the pointer points.) Now you can complete the method definition by using <tt>*this</tt> as an alias for the invoking object:</p>
+<div class="docText"><pre>const Stock &amp; Stock::topval(const Stock &amp; s) const
+{
+    if (s.total_val &gt; total_val)
+       return s;           // argument object
+    else
+       return *this;       // invoking object
+}</pre></div><br/>
+<p class="docText">The
+ fact that the return type is a reference means that the returned object
+ is the invoking object itself rather than a copy passed by the return 
+mechanism. Listing 10.7 shows the new header file.</p>
+<h5 class="docExampleTitle" id="title-ID0E3UAK">Listing 10.7. <tt>stock20.h</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// stock20.h -- augmented version
+#ifndef STOCK20_H_
+#define STOCK20_H_
+#include &lt;string&gt;
+
+class Stock
+{
+private:
+    std::string company;
+    int shares;
+    double share_val;
+    double total_val;
+    void set_tot() { total_val = shares * share_val; }
+public:
+    Stock();        // default constructor
+    Stock(const std::string &amp; co, long n = 0, double pr = 0.0);
+    ~Stock();       // do-nothing destructor
+    void buy(long num, double price);
+    void sell(long num, double price);
+    void update(double price);
+    void show()const;
+    const Stock &amp; topval(const Stock &amp; s) const;
+};
+
+#endif
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Listing 10.8 presents the revised class methods file. It includes the new <tt>topval()</tt> method. Also now that you’ve seen how the constructors and destructor work, Listing 10.8 replaces them with silent versions.</p>
+<h5 class="docExampleTitle" id="title-ID0E2VAK">Listing 10.8. <tt>stock20.cpp</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// stock20.cpp -- augmented version
+#include &lt;iostream&gt;
+#include "stock20.h"
+
+// constructors
+Stock::Stock()        // default constructor
+{
+    company = "no name";
+    shares = 0;
+    share_val = 0.0;
+    total_val = 0.0;
+}
+
+Stock::Stock(const std::string &amp; co, long n, double pr)
+{
+    company = co;
+
+    if (n &lt; 0)
+    {
+        std::cout &lt;&lt; "Number of shares can't be negative; "
+                   &lt;&lt; company &lt;&lt; " shares set to 0.\n";
+        shares = 0;
+    }
+    else
+        shares = n;
+    share_val = pr;
+    set_tot();
+}
+
+// class destructor
+Stock::~Stock()        // quiet class destructor
+{
+}
+
+// other methods
+void Stock::buy(long num, double price)
+{
+     if (num &lt; 0)
+    {
+        std::cout &lt;&lt; "Number of shares purchased can't be negative. "
+             &lt;&lt; "Transaction is aborted.\n";
+    }
+    else
+    {
+        shares += num;
+        share_val = price;
+        set_tot();
+    }
+}
+
+void Stock::sell(long num, double price)
+{
+    using std::cout;
+    if (num &lt; 0)
+    {
+        cout &lt;&lt; "Number of shares sold can't be negative. "
+             &lt;&lt; "Transaction is aborted.\n";
+    }
+    else if (num &gt; shares)
+    {
+        cout &lt;&lt; "You can't sell more than you have! "
+             &lt;&lt; "Transaction is aborted.\n";
+    }
+    else
+    {
+        shares -= num;
+        share_val = price;
+        set_tot();
+    }
+}
+
+void Stock::update(double price)
+{
+    share_val = price;
+    set_tot();
+}
+
+void Stock::show() const
+{
+    using std::cout;
+    using std::ios_base;
+    // set format to #.###
+    ios_base::fmtflags orig =
+        cout.setf(ios_base::fixed, ios_base::floatfield);
+    std::streamsize prec = cout.precision(3);
+
+    cout &lt;&lt; "Company: " &lt;&lt; company
+        &lt;&lt; "  Shares: " &lt;&lt; shares &lt;&lt; '\n';
+    cout &lt;&lt; "  Share Price: $" &lt;&lt; share_val;
+    // set format to #.##
+    cout.precision(2);
+    cout &lt;&lt; "  Total Worth: $" &lt;&lt; total_val &lt;&lt; '\n';
+
+    // restore original format
+    cout.setf(orig, ios_base::floatfield);
+    cout.precision(prec);
+}
+
+const Stock &amp; Stock::topval(const Stock &amp; s) const
+{
+    if (s.total_val &gt; total_val)
+        return s;
+    else
+        return *this;
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Of course, you want to see if the <tt>this</tt>
+ pointer works, and a natural place to use the new method is in a 
+program with an array of objects, which leads us to the next topic.</p>
+</div>
+</body>
+</html>

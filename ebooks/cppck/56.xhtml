@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 56. Policies</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 56. Policies</h2>
+		
+<p class="docText">In <span class="docEmphasis">Specializing for Type Information</span> [52,
+ 183], we designed a stack template that deleted any remaining elements 
+left in the stack at the end of the stack’s lifetime if the stack’s 
+element type was a pointer.</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt; class Stack;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This is not an unreasonable 
+policy, but it is inflexible. There may be cases where the user of our 
+stack does not want to delete what the stack’s pointers refer to. For 
+instance, the pointers may refer to objects that are not on the heap or 
+that are shared with other containers. Additionally, it’s possible that a
+ pointer refers to an array of objects, rather than a single object. If 
+we have a stack of character pointers, this is almost certainly the 
+case, since character pointers usually refer to an NTCTS (standardese 
+for a null terminated array of characters):</p>
+		
+<div class="docText">
+  <pre>				<span class="docEmphMark">Stack&lt;const char *&gt; names; // oops! undefined behavior        </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">Our deletion policy assumes that a <tt>Stack</tt>’s pointers refer to a single object, and therefore employs the nonarray form of <tt>delete</tt>, whereas for an array we must use array delete (see <span class="docEmphasis">Array Allocation</span> [37, 127]).</p>
+		
+<p class="docText">Our goal is to be able to write the <tt>Stack</tt> template’s destructor in something like the following way:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+class Stack {
+  public:
+    ~Stack() {
+        for( I i( s_.begin() ); i != s_.end(); ++i )
+            <span class="docEmphasis">doDeletionPolicy</span>( *i );
+    }
+    //...
+  private:
+    typedef std::deque&lt;T&gt; C;
+    typedef typename C::iterator I;
+    C s_;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The destructor iterates over any remaining elements and executes the appropriate deletion policy on each element. The <tt>doDeletionPolicy</tt> could be implemented in a variety of ways. Typically, a policy is made explicit when the <tt>Stack</tt> template is instantiated and is implemented with a template template parameter (see <span class="docEmphasis">Template Template Parameters</span> [55, 199]).</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T, template &lt;typename&gt; class DeletionPolicy&gt;
+class Stack {
+  public:
+    ~Stack() {
+        for( I i( s_.begin() ); i != s_.end(); ++i )
+            DeletionPolicy&lt;T&gt;::doDelete( *i ); // exec policy
+    }
+    //...
+  private:
+    typedef std::deque&lt;T&gt; C;
+    typedef typename C::iterator I;
+    C s_;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">By examining how the deletion policy is used in the <tt>Stack</tt> destructor, we can determine that a <tt>Stack's</tt> deletion policy is a class template that is instantiated with the element type of the <tt>Stack</tt>. It has a static member function called <tt>doDelete</tt> that performs the appropriate deletion action on the <tt>Stack</tt> element. Now we can go about defining some appropriate policies. One policy is to delete:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+struct PtrDeletePolicy {
+    static void doDelete( T ptr )
+        { delete ptr; }
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Of course, we 
+could have designed a policy implementation with a different interface. 
+For example, rather than use a static member function, we could have 
+overloaded the function call operator</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+struct PtrDeletePolicy {
+
+    void operator ()( T ptr )
+        { delete ptr; }
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">and modified the deletion operation in Stack’s destructor to read</p>
+		
+<div class="docText">
+  <pre>DeletionPolicy&lt;T&gt;()(*i);
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The important 
+thing is to establish a convention, because every implementation of a 
+particular policy will be accessed with the same syntax.</p>
+		
+<p class="docText">Other useful policies perform an array deletion or do nothing at all:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+struct ArrayDeletePolicy {
+    static void doDelete( T ptr )
+        { delete [] ptr; }
+};
+template &lt;typename T&gt;
+struct NoDeletePolicy {
+    static void doDelete( const T &amp; )
+        {}
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Now we can specify the appropriate deletion policy when we instantiate <tt>Stack</tt>:</p>
+		
+<div class="docText">
+  <pre>Stack&lt;int, NoDeletePolicy&gt; s1; // don't delete ints
+Stack&lt;std::string *, PtrDeletePolicy&gt; s2; // delete string *'s
+Stack&lt;const char *, ArrayDeletePolicy&gt; s3; // delete [] these
+Stack&lt;const char *, NoDeletePolicy&gt; s4; // don't delete!
+<span class="docEmphMark">Stack&lt;int, PtrDeletePolicy&gt; s5; // error! can't delete int!  </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">If one policy is more commonly used than others, it’s often a good idea to make it the default:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T,
+    template &lt;typename&gt; class DeletionPolicy = NoDeletePolicy&gt;
+class Stack;
+//...
+Stack&lt;int&gt; s6; // don't delete
+Stack&lt;const char *&gt; s7; // don't delete
+Stack&lt;const char *, ArrayDeletePolicy&gt; s8; // delete []
+</pre>
+</div>
+<br/>
+		
+<p class="docText">A template design often offers several opportunities for parameterization by policies. For example, in <span class="docEmphasis">Template Template Parameters</span> [55, 199] we gave the user the ability to specify how a <tt>Stack</tt> was implemented. That’s an implementation policy:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T,
+    template &lt;typename&gt; class DeletionPolicy = NoDeletePolicy
+    template &lt;typename&gt; class Cont = Deque&gt;
+class Stack;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This gives the user of <tt>Stack</tt> additional flexibility:</p>
+		
+<div class="docText">
+  <pre>Stack&lt;double *, ArrayDeletePolicy, Vector&gt; dailyReadings;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">while allowing good general behavior in the default case.</p>
+		
+<div class="docText">
+  <pre>Stack&lt;double&gt; moreReadings; // no deletion, use a Deque
+</pre>
+</div>
+<br/>
+		
+<p class="docText">In generic design,
+ we frequently make policy decisions about implementation and behavior. 
+Often, those decisions can be abstracted and represented as policies.</p>
+		
+
+
+</body>
+</html>

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>22.7. Implementation and Portability of signal()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">22.7. Implementation and Portability of <span class="docEmphasis">signal()</span></h3><p class="docText">In this section, we show how to implement <span class="docEmphasis">signal()</span> using <span class="docEmphasis">sigaction()</span>.
+ The implementation is straightforward, but needs to account for the 
+fact that, historically and across different UNIX implementations, <span class="docEmphasis">signal()</span> has had different semantics. In particular, early implementations of signals were unreliable, meaning that:</p><ul><li><p class="docList">On entry to a signal handler, the disposition of the signal was reset to its default. (This corresponds to the <tt>SA_RESETHAND</tt> flag described in Section 20.13.)
+ In order to have the signal handler invoked again for a subsequent 
+delivery of the same signal, the programmer needed to make a call to <span class="docEmphasis">signal()</span>
+ from within the handler to explicitly reestablish the handler. The 
+problem in this scenario is that there is a small window of time between
+ entering the signal handler and reestablishment of the handler, during 
+which, if the signal arrives a second time, it would be processed 
+according to its default disposition.</p></li><li><p class="docList">Delivery of further occurrences of a signal was not blocked during execution of a signal handler. (This corresponds to the <tt>SA_NODEFER</tt> flag described in Section 20.13.)
+ This meant that if the signal was delivered again while the handler was
+ still executing, then the handler would be recursively invoked. Given a
+ sufficiently rapid stream of signals, the resulting recursive 
+invocations of the handler could overflow the stack.</p></li></ul><p class="docText">As
+ well as being unreliable, early UNIX implementations did not provide 
+automatic restarting of system calls (i.e., the behavior described for 
+the <tt>SA_RESTART</tt> flag in Section 21.5).</p><p class="docText">The
+ 4.2BSD reliable signals implementation rectified these limitations, and
+ several other UNIX implementations followed suit. However, the older 
+semantics live on today in the System V implementation of <span class="docEmphasis">signal()</span>, and even contemporary standards such as SUSv3 and C99 leave these aspects of <span class="docEmphasis">signal()</span> deliberately unspecified.</p><p class="docText">Tying the above information together, we implement <span class="docEmphasis">signal()</span> as shown in Example 22-1. By default, this implementation provides the modern signal semantics. If compiled with <span class="docEmphasis">-DOLD_SIGNAL</span>, then it provides the earlier unreliable signal semantics and doesn’t enable automatic restarting of system calls.</p><h5 class="docExampleTitle" id="title-ID0E2GBK">Example 22-1. An implementation of <span class="docEmphasis">signal()</span></h5><p></p><div class="box"><pre><b>signals/signal.c</b>
+#include &lt;signal.h&gt;
+
+typedef void (*sighandler_t)(int);
+
+sighandler_t
+signal(int sig, sighandler_t handler)
+{
+    struct sigaction newDisp, prevDisp;
+
+    newDisp.sa_handler = handler;
+    sigemptyset(&amp;newDisp.sa_mask);
+#ifdef OLD_SIGNAL
+    newDisp.sa_flags = SA_RESETHAND | SA_NODEFER;
+#else
+    newDisp.sa_flags = SA_RESTART;
+#endif
+
+    if (sigaction(sig, &amp;newDisp, &amp;prevDisp) == -1)
+        return SIG_ERR;
+    else
+        return prevDisp.sa_handler;
+}
+      <b>signals/signal.c</b></pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0EIHBK">22.7.1. </h4><h5 class="docSection3Title" id="title-ID0EMHBK">22.7.1.1. Some <span class="docEmphasis">glibc</span> details</h5><p class="docText">The <span class="docEmphasis">glibc</span> implementation of the <span class="docEmphasis">signal()</span> library function has changed over time. In newer versions of the library (<span class="docEmphasis">glibc 2</span>
+ and later), the modern semantics are provided by default. In older 
+versions of the library, the earlier unreliable (System V-compatible) 
+semantics are provided.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The Linux kernel contains an implementation of <span class="docEmphasis">signal()</span> as a system call. This implementation provides the older, unreliable semantics. However, <span class="docEmphasis">glibc</span> bypasses this system call by providing a <span class="docEmphasis">signal()</span> library function that calls <span class="docEmphasis">sigaction()</span>.</p><hr noshade="noshade" size="1"/><p class="docText">If we want to obtain unreliable signal semantics with modern versions of <span class="docEmphasis">glibc</span>, we can explicitly replace our calls to <span class="docEmphasis">signal()</span> with calls to the (nonstandard) <span class="docEmphasis">sysv_signal()</span> function.</p><pre>#define _GNU_SOURCE
+#include &lt;signal.h&gt;
+
+void ( *<b>sysv_signal </b>(int <i> sig</i>, void (*<i> handler</i>)(int)) ) (int);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns previous signal disposition on success, or <tt>SIG_ERR</tt> on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">sysv_signal()</span> function takes the same arguments as <span class="docEmphasis">signal()</span>.</p><p class="docText">If the <tt>_BSD_SOURCE</tt> feature test macro is not defined when compiling a program, <span class="docEmphasis">glibc</span> implicitly redefines all calls to <span class="docEmphasis">signal()</span> to be calls to <span class="docEmphasis">sysv_signal()</span>, meaning that <span class="docEmphasis">signal()</span> has unreliable semantics. By default, <tt>_BSD_SOURCE</tt> <span class="docEmphasis">is</span> defined, but it is disabled (unless also explicitly defined) if other feature test macros such as <tt>_SVID_SOURCE</tt> or <tt>_XOPEN_SOURCE</tt> are defined when compiling a program.</p><h5 class="docSection3Title" id="title-ID0EFMBK">22.7.1.2. <span class="docEmphasis">sigaction()</span> is the preferred API for establishing a signal handler</h5><p class="docText">Because of the System V versus BSD (and old versus recent <span class="docEmphasis">glibc</span>) portability issues described above, it is good practice always to use <span class="docEmphasis">sigaction()</span>, rather than <span class="docEmphasis">signal()</span>,
+ to establish signal handlers. We follow this practice throughout the 
+remainder of this book. (An alternative is to write our own version of <span class="docEmphasis">signal()</span>, probably similar to Example 22-1,
+ specifying exactly the flags that we require, and employ that version 
+with our applications.) Note, however, that it is portable (and shorter)
+ to use <span class="docEmphasis">signal()</span> to set the disposition of a signal to <tt>SIG_IGN</tt> or <tt>SIG_DFL</tt>, and we’ll often use <span class="docEmphasis">signal()</span> for that purpose.</p>
+</div>
+</body>
+</html>

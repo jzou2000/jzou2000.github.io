@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>28.1. Process Accounting</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">28.1. Process Accounting</h3><p class="docText">When
+ process accounting is enabled, the kernel writes an accounting record 
+to the system-wide process accounting file as each process terminates. 
+This accounting record contains various information maintained by the 
+kernel about the process, including its termination status and how much 
+CPU time it consumed. The accounting file can be analyzed by standard 
+tools (<span class="docEmphasis">sa(8)</span> summarizes information from the accounting file, and <span class="docEmphasis">lastcomm(1)</span> lists information about previously executed commands) or by tailored applications.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In
+ kernels before 2.6.10, a separate process accounting record was written
+ for each thread created using the NPTL threading implementation. Since 
+kernel 2.6.10, a single accounting record is written for the entire 
+process when the last thread terminates. Under the older LinuxThreads 
+threading implementation, a single process accounting record is always 
+written for each thread.</p><hr noshade="noshade" size="1"/><p class="docText">Historically,
+ the primary use of process accounting was to charge users for 
+consumption of system resources on multiuser UNIX systems. However, 
+process accounting can also be useful for obtaining information about a 
+process that was not otherwise monitored and reported on by its parent.</p><p class="docText">Although
+ available on most UNIX implementations, process accounting is not 
+specified in SUSv3. The format of the accounting records, as well as the
+ location of the accounting file, vary somewhat across implementations. 
+We describe the details for Linux in this section, noting some 
+variations from other UNIX implementations along the way.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On Linux, process accounting is an optional kernel component that is configured via the option <tt>CONFIG_BSD_PROCESS_ACCT</tt>.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0EIMDK">28.1.1. </h4><h5 class="docSection3Title" id="title-ID0EMMDK">28.1.1.1. Enabling and disabling process accounting</h5><p class="docText">The <span class="docEmphasis">acct()</span> system call is used by a privileged (<tt>CAP_SYS_PACCT</tt>)
+ process to enable and disable process accounting. This system call is 
+rarely used in application programs. Normally, process accounting is 
+enabled at each system restart by placing appropriate commands in the 
+system boot scripts.</p><pre>#define _BSD_SOURCE
+#include &lt;unistd.h&gt;
+
+int <b>acct</b>(const char *<span class="docEmphasis">acctfile</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">To enable process accounting, we supply the pathname of an <span class="docEmphasis">existing</span> regular file in <span class="docEmphasis">acctfile</span>. A typical pathname for the accounting file is <tt>/var/log/pacct</tt> or <tt>/usr/account/pacct</tt>. To disable process accounting, we specify <span class="docEmphasis">acctfile</span> as <tt>NULL</tt>.</p><p class="docText">The program in Example 28-1 uses <span class="docEmphasis">acct()</span> to switch process accounting on and off. The functionality of this program is similar to the shell <span class="docEmphasis">accton(8)</span> command.</p><h5 class="docExampleTitle" id="title-ID0EXPDK">Example 28-1. Turning process accounting on and off</h5><p></p><div class="box"><pre><b>procexec/acct_on.c</b>
+#define _BSD_SOURCE
+#include &lt;unistd.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    if (argc &gt; 2 || (argc &gt; 1 &amp;&amp; strcmp(argv[1], "--help") == 0))
+        usageErr("%s [file]\n");
+
+    if (acct(argv[1]) == -1)
+        errExit("acct");
+
+    printf("Process accounting %s\n",
+            (argv[1] == NULL) ? "disabled" : "enabled");
+    exit(EXIT_SUCCESS);
+}
+     <b>procexec/acct_on.c</b></pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0ECQDK">28.1.1.2. Process accounting records</h5><p class="docText">Once process accounting is enabled, an <span class="docEmphasis">acct</span> record is written to the accounting file as each process terminates. The <span class="docEmphasis">acct</span> structure is defined in <tt>&lt;sys/acct.h&gt;</tt> as follows:</p><pre class="preFixedHeight">typedef u_int16_t comp_t;  /* See text */
+
+struct acct {
+    char      ac_flag;     /* Accounting flags (see text) */
+    u_int16_t ac_uid;      /* User ID of process */
+    u_int16_t ac_gid;      /* Group ID of process */
+    u_int16_t ac_tty;      /* Controlling terminal for process (may be
+                              0 if none, e.g., for a daemon) */
+    u_int32_t ac_btime;    /* Start time (time_t; seconds since the Epoch) */
+    comp_t    ac_utime;    /* User CPU time (clock ticks) */
+    comp_t    ac_stime;    /* System CPU time (clock ticks) */
+    comp_t    ac_etime;    /* Elapsed (real) time (clock ticks) */
+    comp_t    ac_mem;      /* Average memory usage (kilobytes) */
+    comp_t    ac_io;       /* Bytes transferred by read(2) and write(2)
+                              (unused) */
+    comp_t    ac_rw;       /* Blocks read/written (unused) */
+    comp_t    ac_minflt;   /* Minor page faults (Linux-specific) */
+    comp_t    ac_majflt;   /* Major page faults (Linux-specific) */
+    comp_t    ac_swaps;    /* Number of swaps (unused; Linux-specific) */
+    u_int32_t ac_exitcode; /* Process termination status */
+#define ACCT_COMM 16
+    char      ac_comm[ACCT_COMM+1];
+                           /* (Null-terminated) command name
+                              (basename of last execed file) */
+    char      ac_pad[10];  /* Padding (reserved for future use) */
+};
+
+					  </pre><br/>
+<p class="docText">Note the following points regarding the <span class="docEmphasis">acct</span> structure:</p><ul><li><p class="docList">The <span class="docEmphasis">u_int16_t</span> and <span class="docEmphasis">u_int32_t</span> data types are 16-bit and 32-bit unsigned integers.</p></li><li><p class="docList">The <span class="docEmphasis">ac_flag</span> field is a bit mask recording various events for the process. The bits that can appear in this field are shown in Table 28-1.
+ As indicated in the table, some of these bits are not present on all 
+UNIX implementations. A few other implementations provide additional 
+bits in this field.</p></li><li><p class="docList">The <span class="docEmphasis">ac_comm</span> field records the name of the last command (program file) executed by this process. The kernel records this value on each <span class="docEmphasis">execve()</span>. On some other UNIX implementations, this field is limited to 8 characters.</p></li><li><p class="docList">The <span class="docEmphasis">comp_t</span> type is a kind of floating-point number. Values of this type are sometimes called <span class="docEmphasis">compressed clock ticks</span>.
+ The floating-point value consists of a 3-bit, base-8 exponent, followed
+ by a 13-bit mantissa; the exponent can represent a factor in the range 8<sup>0</sup>=1 to 8<sup>7</sup> (2,097,152). For example, a mantissa of 125 and an exponent of 1 represent the value 1000. Example 28-2 defines a function (<span class="docEmphasis">comptToLL()</span>) to convert this type to <span class="docEmphasis">long long</span>. We need to use the type <span class="docEmphasis">long long</span> because the 32 bits used to represent an <span class="docEmphasis">unsigned long</span> on x86-32 are insufficient to hold the largest value that can be represented in <span class="docEmphasis">comp_t</span>, which is (2<sup>13</sup> - 1) * 87.</p></li><li><p class="docList">The three time fields defined with the type <span class="docEmphasis">comp_t</span> represent time in system clock ticks. Therefore, we must divide these times by the value returned by <span class="docEmphasis">sysconf(_SC_CLK_TCK)</span> in order to convert them to seconds.</p></li><li><p class="docList">The <span class="docEmphasis">ac_exitcode</span> field holds the termination status of the process (described in Section 26.1.3). Most other UNIX implementations instead provide a single-byte field named <span class="docEmphasis">ac_stat</span>,
+ which records only the signal that killed the process (if it was killed
+ by a signal) and a bit indicating whether that signal caused the 
+process to dump core. BSD-derived implementations don’t provide either 
+field.</p></li></ul><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 28-1. Bit values for the <span class="docEmphasis">ac_flag</span> field of process accounting records</h5></caption><colgroup span="2"><col></col><col></col></colgroup><thead><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Bit</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Description</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top"><tt>AFORK</tt></td><td align="left" class="docTableCell" valign="top">Process was created by <span class="docEmphasis">fork()</span>, but did not <span class="docEmphasis">exec()</span> before terminating</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>ASU</tt></td><td align="left" class="docTableCell" valign="top">Process made use of superuser privileges</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>AXSIG</tt></td><td align="left" class="docTableCell" valign="top">Process was terminated by a signal (not present on some implementations)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>ACORE</tt></td><td align="left" class="docTableCell" valign="top">Process produced a core dump (not present on some implementations)</td></tr></tbody></table><p></p><br/><p class="docText">Because
+ accounting records are written only as processes terminate, they are 
+ordered by termination time (a value not recorded in the record), rather
+ than by process start time (<span class="docEmphasis">ac_btime</span>).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">If the system crashes, no accounting record is written for any processes that are still executing.</p><hr noshade="noshade" size="1"/><p class="docText">Since writing records to the accounting file can rapidly consume disk space, Linux provides the <tt>/proc/sys/kernel/acct</tt>
+ virtual file for controlling the operation of process accounting. This 
+file contains three numbers, defining (in order) the parameters <span class="docEmphasis">high-water</span>, <span class="docEmphasis">low-water</span>, and <span class="docEmphasis">frequency</span>.
+ Typical defaults for these three parameters are 4, 2, and 30. If 
+process accounting is enabled and the amount of free disk space falls 
+below <span class="docEmphasis">low-water</span> percent, accounting is suspended. If the amount of free disk space later rises above <span class="docEmphasis">high-water</span> percent, then accounting is resumed. The <span class="docEmphasis">frequency</span> value specifies how often, in seconds, checks should be made on the percentage of free disk space.</p><h5 class="docSection3Title" id="title-ID0ESXDK">28.1.1.3. Example program</h5><p class="docText">The program in Example 28-2
+ displays selected fields from the records in a process accounting file.
+ The following shell session demonstrates the use of this program. We 
+begin by creating a new, empty process accounting file and enabling 
+process accounting:</p><pre class="preFixedWidth">$ <b>su </b>                            <i> Need privilege to enable process accounting</i>
+Password:
+# <b>touch pacct </b>
+# <b>./acct_on pacct </b>
+               <i> This process will be first entry in accounting file</i>
+Process accounting enabled
+# <b>exit </b>                          <i> Cease being superuser</i>
+
+					  </pre><br/>
+<p class="docText">At this point, three processes have already terminated since we enabled process accounting. These processes executed the <span class="docEmphasis">acct_on</span>, <span class="docEmphasis">su</span>, and <span class="docEmphasis">bash</span> programs. The <span class="docEmphasis">bash</span> process was started by <span class="docEmphasis">su</span> to run the privileged shell session.</p><p class="docText">Now we run a series of commands to add further records to the accounting file:</p><pre class="preFixedWidth">$ <b>sleep 15 &amp; </b>
+[1] 18063
+$ <b>ulimit -c unlimited </b>           <i> Allow core dumps (shell built-in)</i>
+$ <b>cat </b>                           <i> Create a process</i>
+<i> Type Control-\ (generates</i> SIGQUIT <i> , signal 3) to kill cat process</i>
+Quit (core dumped)
+$
+<i> Press Enter to see shell notification</i>
+ <i> of completion of sleep before next shell prompt</i>
+[1]+  Done          sleep 15
+$ <b>grep xxx badfile </b>              <i> grep fails with status of 2</i>
+grep: badfile: No such file or directory
+$ <b>echo $? </b>                       <i> The shell obtained status of grep (shell built-in)</i>
+2
+
+					  </pre><br/>
+<p class="docText">The next two commands run programs that we presented in previous chapters (Example 27-1, in Section 27.2, and Example 24-1, in Section 24.2.1). The first command runs a program that execs the file <tt>/bin/echo</tt>; this results in an accounting record with the command name <span class="docEmphasis">echo</span>. The second command creates a child process that doesn’t perform an <span class="docEmphasis">exec()</span>.</p><pre>$ <b>./t_execve /bin/echo</b>
+hello world goodbye
+$ <b>./t_fork</b>
+PID=18350 (child) idata=333 istack=666
+PID=18349 (parent) idata=111 istack=222</pre><br/>
+<p class="docText">Finally, we use the program in Example 28-2 to view the contents of the accounting file:</p><pre>$ <b>./acct_view pacct</b>
+command  flags   term.  user     start time            CPU   elapsed
+                status                                 time    time
+acct_on   -S--      0   root     2010-07-23 17:19:05   0.00    0.00
+bash      ----      0   root     2010-07-23 17:18:55   0.02   21.10
+su        -S--      0   root     2010-07-23 17:18:51   0.01   24.94
+cat       --XC   0x83   mtk      2010-07-23 17:19:55   0.00    1.72
+sleep     ----      0   mtk      2010-07-23 17:19:42   0.00   15.01
+grep      ----  0x200   mtk      2010-07-23 17:20:12   0.00    0.00
+echo      ----      0   mtk      2010-07-23 17:21:15   0.01    0.01
+t_fork    F---      0   mtk      2010-07-23 17:21:36   0.00    0.00
+t_fork    ----      0   mtk      2010-07-23 17:21:36   0.00    3.01</pre><br/>
+<p class="docText">In the output, we see one line for each process that was created in the shell session. The <span class="docEmphasis">ulimit</span> and <span class="docEmphasis">echo</span> commands are shell built-in commands, so they don’t result in the creation of new processes. Note that the entry for <span class="docEmphasis">sleep</span> appeared in the accounting file after the <span class="docEmphasis">cat</span> entry because the <span class="docEmphasis">sleep</span> command terminated after the <span class="docEmphasis">cat</span> command.</p><p class="docText">Most of the output is self-explanatory. The <span class="docEmphasis">flags</span> column shows single letters indicating which of the <span class="docEmphasis">ac_flag</span> bits is set in each record (see Table 28-1). Section 26.1.3 describes how to interpret the termination status values shown in the <span class="docEmphasis">term. status</span> column.</p><h5 class="docExampleTitle" id="title-ID0EL5DK">Example 28-2. Displaying data from a process accounting file</h5><p></p><div class="box"><pre class="preFixedHeight"><b>procexec/acct_view.c</b>
+#include &lt;fcntl.h&gt;
+#include &lt;time.h&gt;
+#include &lt;sys/stat.h&gt;
+#include &lt;sys/acct.h&gt;
+#include &lt;limits.h&gt;
+#include "ugid_functions.h"             /* Declaration of userNameFromId() */
+#include "tlpi_hdr.h"
+
+#define TIME_BUF_SIZE 100
+
+static long long                /* Convert comp_t value into long long */
+comptToLL(comp_t ct)
+{
+    const int EXP_SIZE = 3;             /* 3-bit, base-8 exponent */
+    const int MANTISSA_SIZE = 13;       /* Followed by 13-bit mantissa */
+    const int MANTISSA_MASK = (1 &lt;&lt; MANTISSA_SIZE) - 1;
+    long long mantissa, exp;
+
+    mantissa = ct &amp; MANTISSA_MASK;
+    exp = (ct &gt;&gt; MANTISSA_SIZE) &amp; ((1 &lt;&lt; EXP_SIZE) - 1);
+    return mantissa &lt;&lt; (exp * 3);       /* Power of 8 = left shift 3 bits */
+}
+
+int
+main(int argc, char *argv[])
+{
+    int acctFile;
+    struct acct ac;
+    ssize_t numRead;
+    char *s;
+    char timeBuf[TIME_BUF_SIZE];
+    struct tm *loc;
+    time_t t;
+
+    if (argc != 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s file\n", argv[0]);
+
+    acctFile = open(argv[1], O_RDONLY);
+    if (acctFile == -1)
+        errExit("open");
+
+    printf("command  flags   term.  user     "
+            "start time            CPU   elapsed\n");
+    printf("                status           "
+            "                      time    time\n");
+
+    while ((numRead = read(acctFile, &amp;ac, sizeof(struct acct))) &gt; 0) {
+        if (numRead != sizeof(struct acct))
+            fatal("partial read");
+
+        printf("%-8.8s  ", ac.ac_comm);
+
+        printf("%c", (ac.ac_flag &amp; AFORK) ? 'F' : '-') ;
+        printf("%c", (ac.ac_flag &amp; ASU)   ? 'S' : '-') ;
+        printf("%c", (ac.ac_flag &amp; AXSIG) ? 'X' : '-') ;
+        printf("%c", (ac.ac_flag &amp; ACORE) ? 'C' : '-') ;
+
+#ifdef __linux__
+        printf(" %#6lx   ", (unsigned long) ac.ac_exitcode);
+#else   /* Many other implementations provide ac_stat instead */
+        printf(" %#6lx   ", (unsigned long) ac.ac_stat);
+#endif
+
+        s = userNameFromId(ac.ac_uid);
+        printf("%-8.8s ", (s == NULL) ? "???" : s);
+
+        t = ac.ac_btime;
+        loc = localtime(&amp;t);
+        if (loc == NULL) {
+            printf("???Unknown time???  ");
+        } else {
+            strftime(timeBuf, TIME_BUF_SIZE, "%Y-%m-%d %T ", loc);
+            printf("%s ", timeBuf);
+        }
+
+        printf("%5.2f %7.2f ", (double) (comptToLL(ac.ac_utime) +
+                    comptToLL(ac.ac_stime)) / sysconf(_SC_CLK_TCK),
+                (double) comptToLL(ac.ac_etime) / sysconf(_SC_CLK_TCK));
+        printf("\n");
+    }
+
+    if (numRead == -1)
+        errExit("read");
+
+    exit(EXIT_SUCCESS);
+}
+     <b>procexec/acct_view.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0EW5DK">28.1.1.4. Process accounting Version 3 file format</h5><p class="docText">Starting
+ with kernel 2.6.8, Linux introduced an optional alternative version of 
+the process accounting file that addresses some limitations of the 
+traditional accounting file. To use this alternative version, known as <span class="docEmphasis">Version 3</span>, the <tt>CONFIG_BSD_PROCESS_ACCT_V3</tt> kernel configuration option must be enabled before building the kernel.</p><p class="docText">When
+ using the Version 3 option, the only difference in the operation of 
+process accounting is in the format of records written to the accounting
+ file. The new format is defined as follows:</p><pre class="preFixedHeight">struct acct_v3 {
+    char      ac_flag;        /* Accounting flags */
+    char      ac_version;     /* Accounting version (3) */
+    u_int16_t ac_tty;         /* Controlling terminal for process */
+    u_int32_t ac_exitcode;    /* Process termination status */
+    u_int32_t ac_uid;         /* 32-bit user ID of process */
+    u_int32_t ac_gid;         /* 32-bit group ID of process */
+    u_int32_t ac_pid;         /* Process ID */
+    u_int32_t ac_ppid;        /* Parent process ID */
+    u_int32_t ac_btime;       /* Start time (time_t) */
+    float     ac_etime;       /* Elapsed (real) time (clock ticks) */
+    comp_t    ac_utime;       /* User CPU time (clock ticks) */
+    comp_t    ac_stime;       /* System CPU time (clock ticks) */
+    comp_t    ac_mem;         /* Average memory usage (kilobytes) */
+    comp_t    ac_io;          /* Bytes read/written (unused) */
+    comp_t    ac_rw;          /* Blocks read/written (unused) */
+    comp_t    ac_minflt;      /* Minor page faults */
+    comp_t    ac_majflt;      /* Major page faults */
+    comp_t    ac_swaps;       /* Number of swaps (unused; Linux-specific) */
+#define ACCT_COMM 16
+    char      ac_comm[ACCT_COMM];   /* Command name */
+};
+
+					  </pre><br/>
+<p class="docText">The following are the main differences between the <span class="docEmphasis">acct_v3</span> structure and the traditional Linux <span class="docEmphasis">acct</span> structure:</p><ul><li><p class="docList">The <span class="docEmphasis">ac_version</span> field is added. This field contains the version number of this type of accounting record. This field is always 3 for an <span class="docEmphasis">acct_v3</span> record.</p></li><li><p class="docList">The fields <span class="docEmphasis">ac_pid</span> and <span class="docEmphasis">ac_ppid</span>, containing the process ID and parent process ID of the terminated process, are added.</p></li><li><p class="docList">The <span class="docEmphasis">ac_uid</span> and <span class="docEmphasis">ac_gid</span>
+ fields are widened from 16 to 32 bits, to accommodate the 32-bit user 
+and group IDs that were introduced in Linux 2.4. (Large user and group 
+IDs can’t be correctly represented in the traditional <span class="docEmphasis">acct</span> file.)</p></li><li><p class="docList">The type of the <span class="docEmphasis">ac_etime</span> field is changed from <span class="docEmphasis">comp_t</span> to <span class="docEmphasis">float</span>, to allow longer elapsed times to be recorded.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">We provide a Version 3 analog of the program in Example 28-2 in the file <tt>procexec/acct_v3_view.c</tt> in the source code distribution for this book.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

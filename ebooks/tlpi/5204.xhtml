@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>52.4. Message Queue Attributes</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">52.4. Message Queue Attributes</h3><p class="docText">The <span class="docEmphasis">mq_open()</span>, <span class="docEmphasis">mq_getattr()</span>, and <span class="docEmphasis">mq_setattr()</span> functions all permit an argument that is a pointer to an <span class="docEmphasis">mq_attr</span> structure. This structure is defined in <tt>&lt;mqueue.h&gt;</tt> as follows:</p><pre>struct mq_attr {
+    long mq_flags;        /* Message queue description flags: 0 or
+                             O_NONBLOCK [mq_getattr(), mq_setattr()] */
+    long mq_maxmsg;       /* Maximum number of messages on queue
+                             [mq_open(), mq_getattr()] */
+    long mq_msgsize;      /* Maximum message size (in bytes)
+                             [mq_open(), mq_getattr()] */
+    long mq_curmsgs;      /* Number of messages currently in queue
+                             [mq_getattr()] */
+};</pre><br/>
+<p class="docText">Before we look at the <span class="docEmphasis">mq_attr</span> structure in detail, it is worth noting the following points:</p><ul><li><p class="docList">Only
+ some of the fields are used by each of the three functions. The fields 
+used by each function are indicated in the comments accompanying the 
+structure definition above.</p></li><li><p class="docList">The structure contains information about the open message queue description (<span class="docEmphasis">mq_flags</span>) associated with a message descriptor and information about the queue referred to by that descriptor (<span class="docEmphasis">mq_maxmsg</span>, <span class="docEmphasis">mq_msgsize</span>, <span class="docEmphasis">mq_curmsgs</span>).</p></li><li><p class="docList">Some of the fields contain information that is fixed at the time the queue is created with <span class="docEmphasis">mq_open()</span> (<span class="docEmphasis">mq_maxmsg</span> and <span class="docEmphasis">mq_msgsize</span>); the others return information about the current state of the message queue description (<span class="docEmphasis">mq_flags</span>) or message queue (<span class="docEmphasis">mq_curmsgs</span>).</p></li></ul><h4 class="docSection2Title" id="title-ID0EPYDM">52.4.1. </h4><h5 class="docSection3Title" id="title-ID0ETYDM">52.4.1.1. Setting message queue attributes during queue creation</h5><p class="docText">When we create a message queue with <span class="docEmphasis">mq_open()</span>, the following <span class="docEmphasis">mq_attr</span> fields determine the attributes of the queue:</p><ul><li><p class="docList">The <span class="docEmphasis">mq_maxmsg</span> field defines the limit on the number of messages that can be placed on the queue using <span class="docEmphasis">mq_send()</span>. This value must be greater than 0.</p></li><li><p class="docList">The <span class="docEmphasis">mq_msgsize</span> field defines the upper limit on the size of each message that may be placed on the queue. This value must be greater than 0.</p></li></ul><p class="docText">Together, these two values allow the kernel to determine the maximum amount of memory that this message queue may require.</p><p class="docText">The <span class="docEmphasis">mq_maxmsg</span> and <span class="docEmphasis">mq_msgsize</span> attributes are fixed when a message queue is created; they can’t subsequently be changed. In Section 52.8, we describe two <tt>/proc</tt> files that place system-wide limits on the values that can be specified for the <span class="docEmphasis">mq_maxmsg</span> and <span class="docEmphasis">mq_msgsize</span> attributes.</p><p class="docText">The program in Example 52-2 provides a command-line interface to the <span class="docEmphasis">mq_open()</span> function and shows how the <span class="docEmphasis">mq_attr</span> structure is used with <span class="docEmphasis">mq_open()</span>.</p><p class="docText">Two command-line options allow message queue attributes to be specified: <span class="docEmphasis">-m</span> for <span class="docEmphasis">mq_maxmsg</span> and <span class="docEmphasis">-s</span> for <span class="docEmphasis">mq_msgsize</span>. If either of these options is supplied, a non-<tt>NULL</tt> <span class="docEmphasis">attrp</span> argument is passed to <span class="docEmphasis">mq_open()</span>. Some default values are assigned to the fields of the <span class="docEmphasis">mq_attr</span> structure to which <span class="docEmphasis">attrp</span> points, in case only one of the <span class="docEmphasis">-m</span> and <span class="docEmphasis">-s</span> options is specified on the command line. If neither of these options is supplied, <span class="docEmphasis">attrp</span> is specified as <tt>NULL</tt> when calling <span class="docEmphasis">mq_open()</span>, which causes the queue to be created with the implementation-defined defaults for the queue attributes.</p><h5 class="docExampleTitle" id="title-ID0E32DM">Example 52-2. Creating a POSIX message queue</h5><p></p><div class="box"><pre class="preFixedHeight"><b>pmsg/pmsg_create.c</b>
+#include &lt;mqueue.h&gt;
+#include &lt;sys/stat.h&gt;
+#include &lt;fcntl.h&gt;
+#include "tlpi_hdr.h"
+
+static void
+usageError(const char *progName)
+{
+    fprintf(stderr, "Usage: %s [-cx] [-m maxmsg] [-s msgsize] mq-name "
+            "[octal-perms]\n", progName);
+    fprintf(stderr, "    -c          Create queue (O_CREAT)\n");
+    fprintf(stderr, "    -m maxmsg   Set maximum # of messages\n");
+    fprintf(stderr, "    -s msgsize  Set maximum message size\n");
+    fprintf(stderr, "    -x          Create exclusively (O_EXCL)\n");
+    exit(EXIT_FAILURE);
+}
+
+int
+main(int argc, char *argv[])
+{
+    int flags, opt;
+    mode_t perms;
+    mqd_t mqd;
+    struct mq_attr attr, *attrp;
+
+    attrp = NULL;
+    attr.mq_maxmsg = 50;
+    attr.mq_msgsize = 2048;
+    flags = O_RDWR;
+
+    /* Parse command-line options */
+
+    while ((opt = getopt(argc, argv, "cm:s:x")) != -1) {
+        switch (opt) {
+        case 'c':
+            flags |= O_CREAT;
+            break;
+
+        case 'm':
+            attr.mq_maxmsg = atoi(optarg);
+            attrp = &attr;
+            break;
+
+        case 's':
+            attr.mq_msgsize = atoi(optarg);
+            attrp = &attr;
+            break;
+
+        case 'x':
+            flags |= O_EXCL;
+            break;
+
+        default:
+            usageError(argv[0]);
+        }
+    }
+
+    if (optind &gt;= argc)
+        usageError(argv[0]);
+
+    perms = (argc &lt;= optind + 1) ? (S_IRUSR | S_IWUSR) :
+                getInt(argv[optind + 1], GN_BASE_8, "octal-perms");
+
+    mqd = mq_open(argv[optind], flags, perms, attrp);
+    if (mqd == (mqd_t) -1)
+        errExit("mq_open");
+
+    exit(EXIT_SUCCESS);
+}
+    <b>pmsg/pmsg_create.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0EH3DM">52.4.1.2. Retrieving message queue attributes</h5><p class="docText">The <span class="docEmphasis">mq_getattr()</span> function returns an <span class="docEmphasis">mq_attr</span> structure containing information about the message queue description and the message queue associated with the descriptor <span class="docEmphasis">mqdes</span>.</p><pre>#include &lt;mqueue.h&gt;
+
+int <b>mq_getattr</b>(mqd_t <span class="docEmphasis">mqdes</span>, struct mq_attr *<span class="docEmphasis">attr</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">In addition to the <span class="docEmphasis">mq_maxmsg</span> and <span class="docEmphasis">mq_msgsize</span> fields, which we have already described, the following fields are returned in the structure pointed to by <span class="docEmphasis">attr</span>:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docEmphasis">mq_flags</span></span></p></dt><dd><p class="docList">These are flags for the open message queue description associated with the descriptor <span class="docEmphasis">mqdes</span>. Only one such flag is specified: <tt>O_NONBLOCK</tt>. This flag is initialized from the <span class="docEmphasis">oflag</span> argument of <span class="docEmphasis">mq_open()</span>, and can be changed using <span class="docEmphasis">mq_setattr()</span>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docEmphasis">mq_curmsgs</span></span></p></dt><dd><p class="docList">This is the number of messages that are currently in the queue. This information may already have changed by the time <span class="docEmphasis">mq_getattr()</span> returns, if other processes are reading messages from the queue or writing messages to it.</p></dd></dl><p class="docText">The program in Example 52-3 employs <span class="docEmphasis">mq_getattr()</span>
+ to retrieve the attributes for the message queue specified in its 
+command-line argument, and then displays those attributes on standard 
+output.</p><h5 class="docExampleTitle" id="title-ID0ENAEM">Example 52-3. Retrieving POSIX message queue attributes</h5><p></p><div class="box"><pre><b>pmsg/pmsg_getattr.c</b>
+#include &lt;mqueue.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    mqd_t mqd;
+    struct mq_attr attr;
+
+    if (argc != 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s mq-name\n", argv[0]);
+
+    mqd = mq_open(argv[1], O_RDONLY);
+    if (mqd == (mqd_t) -1)
+        errExit("mq_open");
+
+    if (mq_getattr(mqd, &amp;attr) == -1)
+        errExit("mq_getattr");
+
+    printf("Maximum # of messages on queue:   %ld\n", attr.mq_maxmsg);
+    printf("Maximum message size:             %ld\n", attr.mq_msgsize);
+    printf("# of messages currently on queue: %ld\n", attr.mq_curmsgs);
+    exit(EXIT_SUCCESS);
+}
+    <b>pmsg/pmsg_getattr.c</b></pre><br/>
+</div><p></p><p class="docText">In the following shell session, we use the program in Example 52-2 to create a message queue with implementation-defined default attributes (i.e., the final argument to <span class="docEmphasis">mq_open()</span> is <tt>NULL</tt>), and then use the program in Example 52-3 to display the queue attributes so that we can see the default settings on Linux.</p><pre>$ <b>./pmsg_create -cx /mq </b>
+$ <b>./pmsg_getattr /mq </b>
+Maximum # of messages on queue:   10
+Maximum message size:             8192
+# of messages currently on queue: 0
+$ <b>./pmsg_unlink /mq </b>                             <i> Remove message queue</i></pre><br/>
+<p class="docText">From the above output, we see that the Linux default values for <span class="docEmphasis">mq_maxmsg</span> and <span class="docEmphasis">mq_msgsize</span> are 10 and 8192, respectively.</p><p class="docText">There is a wide variation in the implementation-defined defaults for <span class="docEmphasis">mq_maxmsg</span> and <span class="docEmphasis">mq_msgsize</span>. Portable applications generally need to choose explicit values for these attributes, rather than relying on the defaults.</p><h5 class="docSection3Title" id="title-ID0EBCEM">52.4.1.3. Modifying message queue attributes</h5><p class="docText">The <span class="docEmphasis">mq_setattr()</span> function sets attributes of the message queue description associated with the message queue descriptor <span class="docEmphasis">mqdes</span>, and optionally returns information about the message queue.</p><pre>#include &lt;mqueue.h&gt;
+
+int <b>mq_setattr</b>(mqd_t <span class="docEmphasis">mqdes</span>, const struct mq_attr *<span class="docEmphasis">newattr</span>,
+               struct mq_attr *<span class="docEmphasis">oldattr</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">mq_setattr()</span> function performs the following tasks:</p><ul><li><p class="docList">It uses the <span class="docEmphasis">mq_flags</span> field in the <span class="docEmphasis">mq_attr</span> structure pointed to by <span class="docEmphasis">newattr</span> to change the flags of the message queue description associated with the descriptor <span class="docEmphasis">mqdes</span>.</p></li><li><p class="docList">If <span class="docEmphasis">oldattr</span> is non-<tt>NULL</tt>, it returns an <span class="docEmphasis">mq_attr</span>
+ structure containing the previous message queue description flags and 
+message queue attributes (i.e., the same task as is performed by <span class="docEmphasis">mq_getattr()</span>).</p></li></ul><p class="docText">The only attribute that SUSv3 specifies that can be changed using <span class="docEmphasis">mq_setattr()</span> is the state of the <tt>O_NONBLOCK</tt> flag.</p><p class="docText">Allowing
+ for the possibility that a particular implementation may define other 
+modifiable flags, or that SUSv3 may add new flags in the future, a 
+portable application should change the state of the <tt>O_NONBLOCK</tt> flag by using <span class="docEmphasis">mq_getattr()</span> to retrieve the <span class="docEmphasis">mq_flags</span> value, modifying the <tt>O_NONBLOCK</tt> bit, and calling <span class="docEmphasis">mq_setattr()</span> to change the <span class="docEmphasis">mq_flags</span> settings. For example, to enable <tt>O_NONBLOCK</tt>, we would do the following:</p><pre>if (mq_getattr(mqd, &amp;attr) == -1)
+    errExit("mq_getattr");
+attr.mq_flags |= O_NONBLOCK;
+if (mq_setattr(mqd, &amp;attr, NULL) == -1)
+    errExit("mq_getattr");</pre><br/>
+</div>
+</body>
+</html>

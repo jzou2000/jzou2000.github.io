@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 8.3. Using Constructors and Destructors to Manage Resources (or RAII)</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 8.3. Using Constructors and Destructors to Manage Resources (or RAII)</h3>
+
+<h4 class="docSection2Title" id="title-ID0ERTBI">Problem</h4>
+<p class="docText">For a class that represents some resource, you want to use its
+constructor to acquire it and the destructor to release it. This
+technique is often referred to as <span class="docEmphasis">resource acquisition is
+initialization</span>
+
+
+
+
+
+ (RAII).</p>
+
+<h4 class="docSection2Title" id="title-ID0ECVBI">Solution</h4>
+<p class="docText">Allocate or acquire the resource in the constructor, and free or
+release the resource in the destructor. This reduces the amount of
+code a user of the class must write to deal with exceptions. See
+Example 8-3 for a simple illustration of this
+technique.</p>
+<h5 class="docExampleTitle" id="title-ID0EPVBI">Example 8-3. Using constructors and destructors</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;iostream&gt;
+#include &lt;string&gt;
+
+using namespace std;
+
+class Socket {
+public:
+   Socket(const string&amp; hostname) {}
+};
+
+class HttpRequest {
+public:
+   HttpRequest (const string&amp; hostname) :
+      sock_(new Socket(hostname)) {}
+   void send(string soapMsg) {sock_ &lt;&lt; soapMsg;}
+  ~HttpRequest ( ) {delete sock_;}
+private:
+   Socket* sock_;
+};
+
+void sendMyData(string soapMsg, string host) {
+   HttpRequest req(host);
+   req.send(soapMsg);
+   // Nothing to do here, because when req goes out of scope
+   // everything is cleaned up.
+}
+
+int main( ) {
+   string s = "xml";
+   sendMyData(s, "www.oreilly.com");
+}
+
+					  </pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0EYVBI">Discussion</h4>
+<p class="docText">The guarantees made by constructors and destructors offer a nice way
+to let the compiler clean up after you. Typically, you initialize an
+object and allocate any resources it uses in the constructor, and
+clean them up in the destructor. This is normal. But programmers have
+a tendency to use the create-open-use-close sequence of events, where
+the user of the class is required to do explicit
+"opening" and
+"closing" of resources. A file
+class is a good example.</p>
+<p class="docText">The usual argument for RAII goes something like this. I could easily
+have designed my <tt>HttpRequest</tt> class in Example 8-3 to make the user do a little more work. For
+example:</p>
+<pre>class HttpRequest {
+public:
+   HttpRequest ( );
+   void open(const std::string&amp; hostname);
+   void send(std::string soapMsg);
+   void close( );
+  ~HttpRequest ( );
+private:
+   Socket* sock_;
+};</pre><br/>
+<p class="docText">With this approach, a responsible version of
+<tt>sendMyData</tt> might look like this:</p>
+<pre>void sendMyData(std::string soapMsg, std::string host) {
+   HttpRequest req;
+
+   try {
+      req.open( );
+      req.send(soapMsg);
+      req.close( );
+   }
+   catch (std::exception&amp; e) {
+      req.close( );
+      // Do something useful...
+   }
+}</pre><br/>
+<p class="docText">This is more work without any benefit. This sort of design forces the
+user to write more code and to deal with exceptions by cleaning up
+your class (assuming you don't call
+<tt>close</tt> in your destructor).</p>
+<p class="docText">The RAII approach has wide applicability, especially when you want a
+guarantee that something will be undone if an exception is thrown
+without having to put <tt>try</tt>/<tt>catch</tt>
+code all over the place. Consider a desktop application that wants to
+display a message on the status bar or title bar while some work is
+being done:</p>
+<pre>void MyWindow::thisTakesALongTime( ) {
+   StatusBarMessage("Copying files...");
+   // ...
+}</pre><br/>
+<p class="docText">All the
+<tt>StatusBarMessage</tt>
+
+class has to do is update the appropriate window with status
+information when it is constructed, and reset it back to the empty
+string (or whatever message was there previously) when it is
+destroyed. Here's the key point: if the function
+returns or an exception is thrown <tt>StatusBarMessage</tt>
+still gets its work done. The compiler
+<span class="docEmphasis">guarantees</span> that the destructor will be called
+for a stack variable whose scope has exited. Without this approach,
+the author of <tt>thisTakesALongTime</tt> needs to
+carefully account for every control path so the wrong message
+doesn't remain on the window if the operation fails,
+the user cancels it, etc. Once again, this results in less code and
+fewer errors for the author of the calling function.</p>
+<p class="docText">RAII is no panacea, but if you have not used it before, chances are
+you can find a number of places where it is useful. Another good
+example is locking. If you are using RAII to manage locks on
+resources such as threads, pooled objects, network connections, etc.,
+you will find that this approach allows for stronger exception-safety
+and less code. In fact, this is how the Boost multithreading library
+implements locks to make for clean programming on the part of the
+user. See Chapter 12 for a discussion of the
+Boost Threads 
+
+
+
+
+
+library.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,765 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 30. Techniques for Writing C Functions</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 30. Techniques for Writing C Functions"><div class="titlepage"><div><h1><span class="partLabel">30</span> Techniques for Writing C Functions</h1></div></div><p id="N16733" style="text-indent: 0">
+Both the official API and the auxiliary library provide several
+mechanisms to help writing C functions.
+In this chapter, we cover the mechanisms for array manipulation,
+string manipulation,
+and storing Lua values in C.
+</p><div class="sect1" title="Array Manipulation"><div class="titlepage"><div><div><h2 class="title"><a id="L283"/>Array Manipulation</h2></div></div></div><p id="N16739" style="text-indent: 0">
+<a class="indexterm" id="N1673B"></a>
+An <span class="quote">“<span class="quote">array</span>”</span>, in Lua,
+is just a table used in a specific way.
+We can manipulate arrays using the same generic functions
+we use to manipulate tables,
+namely <a class="indexterm" id="N16744"></a><code class="function">lua_settable</code> and <a class="indexterm" id="N1674C"></a><code class="function">lua_gettable</code>.
+However, the API provides special functions
+to access and update tables with integer keys:
+</p><pre class="programlisting" id="N16754">      void lua_geti (lua_State *L, int index, int key);
+      void lua_seti (lua_State *L, int index, int key);
+</pre><p style="text-indent: 0">
+Lua versions prior to 5.3 offered only
+raw versions of these functions,
+<a class="indexterm" id="N16757"></a><code class="function">lua_rawgeti</code> and <a class="indexterm" id="N1675F"></a><code class="function">lua_rawseti</code>.
+They are similar to <a class="indexterm" id="N16767"></a><code class="function">lua_geti</code> and <a class="indexterm" id="N1676F"></a><code class="function">lua_seti</code>,
+but do raw accesses (that is, without invoking metamethods).
+When the difference in unimportant
+(e.g., the table has no metamethods),
+the raw versions can be slightly faster.
+</p><p id="N16777" style="text-indent: 0">
+The description of <a class="indexterm" id="N16779"></a><code class="function">lua_geti</code> and <a class="indexterm" id="N16782"></a><code class="function">lua_seti</code>
+is a little confusing,
+as it involves two indices:
+<code class="literal">index</code> refers to where the table is on the stack;
+<code class="literal">key</code> refers to where the element is in the table.
+The call <code class="literal">lua_geti(L, t, key)</code> is equivalent to the following
+sequence when <code class="literal">t</code> is positive
+(otherwise, we must compensate for the new item on the stack):
+</p><pre class="programlisting" id="N16797">      lua_pushnumber(L, key);
+      lua_gettable(L, t);
+</pre><p style="text-indent: 0">
+The call <code class="literal">lua_seti(L, t, key)</code> (again for <code class="literal">t</code> positive)
+is equivalent to this sequence:
+</p><pre class="programlisting" id="N167A0">      lua_pushnumber(L, key);
+      lua_insert(L, -2);  /* put 'key' below previous value */
+      lua_settable(L, t);
+</pre><p style="text-indent: 0">
+</p><p id="N167A3" style="text-indent: 0">
+As a concrete example of the use of these functions,
+<a class="xref" href="ch30.html#l_map" title="Figure 30.1. The function map in C">Figure 30.1, “The function <code class="literal">map</code> in C”</a> implements the function <a class="indexterm" id="N167A8"></a>map:
+it applies a given function to all elements of an array,
+replacing each element by the result of the call.
+</p><div class="figure-float"><div class="figure"><a id="l_map"/><p class="title" style="text-indent: 0"><strong>Figure 30.1. The function <code class="literal">map</code> in C</strong></p><div class="figure-contents"><pre class="programlisting" id="N167B4">      int l_map (lua_State *L) {
+        int i, n;
+      
+        /* 1st argument must be a table (t) */
+        luaL_checktype(L, 1, LUA_TTABLE);
+      
+        /* 2nd argument must be a function (f) */
+        luaL_checktype(L, 2, LUA_TFUNCTION);
+      
+        n = luaL_len(L, 1);  /* get size of table */
+      
+        for (i = 1; i &lt;= n; i++) {
+          lua_pushvalue(L, 2);   /* push f */
+          lua_geti(L, 1, i);  /* push t[i] */
+          lua_call(L, 1, 1);     /* call f(t[i]) */
+          lua_seti(L, 1, i);  /* t[i] = result */
+        }
+      
+        return 0;  /* no results */
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+This example also introduces three new functions:
+<a class="indexterm" id="N167B7"></a><code class="function">luaL_checktype</code>, <a class="indexterm" id="N167BF"></a><code class="function">luaL_len</code>, and <a class="indexterm" id="N167C7"></a><code class="function">lua_call</code>.
+</p><p id="N167CF" style="text-indent: 0">
+The function <a class="indexterm" id="N167D1"/><code class="function">luaL_checktype</code> (from <a class="indexterm" id="N167DA"/><code class="filename">lauxlib.h</code>)
+ensures that a given argument has a given type;
+otherwise, it raises an error.
+</p><p id="N167E0" style="text-indent: 0">
+The primitive <a class="indexterm" id="N167E2"/><code class="function">lua_len</code>
+(not used in the example)
+is equivalent to the <a class="indexterm" id="N167EB"/>length operator.
+Because of metamethods,
+this operator may result in any kind of object,
+not only numbers;
+therefore, <a class="indexterm" id="N167EF"/><code class="function">lua_len</code> returns its result on the stack.
+The function <a class="indexterm" id="N167F7"/><code class="function">luaL_len</code>
+(the one used in the example, from the auxiliary library)
+returns the length as an integer,
+raising an error if the coercion is not possible.
+</p><p id="N16800" style="text-indent: 0">
+The function <a class="indexterm" id="N16802"/><code class="function">lua_call</code> does an unprotected call.
+It is similar to <a class="indexterm" id="N1680B"/><code class="function">lua_pcall</code>,
+but it propagates errors,
+instead of returning an error code.
+When we are writing the main code in an application,
+we should not use <a class="indexterm" id="N16813"/><code class="function">lua_call</code>,
+because we want to catch any errors.
+When we are writing functions, however,
+it is usually a good idea to use <a class="indexterm" id="N1681B"/><code class="function">lua_call</code>;
+if there is an error,
+just leave it to someone who cares about it.
+</p></div><div class="sect1" title="String Manipulation"><div class="titlepage"><div><div><h2 class="title"><a id="sc_stringmanip"/>String Manipulation</h2></div></div></div><p id="N16827" style="text-indent: 0">
+<a class="indexterm" id="N16829"/>
+When a C function receives a string argument from Lua,
+there are only two rules that it must observe:
+not to pop the string from the stack while using it
+and never to modify the string.
+</p><p id="N1682F" style="text-indent: 0">
+Things get more demanding when a C function
+needs to create a string to return to Lua.
+Now, it is up to the C code to take care of
+buffer allocation/deallocation, buffer overflows,
+and other tasks that are difficult in C.
+So, the Lua API provides some functions
+to help with these tasks.
+</p><p id="N16831" style="text-indent: 0">
+The standard API provides support for two
+of the most basic string operations:
+substring extraction and string concatenation.
+To extract a substring,
+remember that the basic operation <a class="indexterm" id="N16833"></a><code class="function">lua_pushlstring</code>
+gets the string length as an extra argument.
+Therefore,
+if we want to pass to Lua a substring
+of a string <code class="literal">s</code>
+ranging from position <code class="literal">i</code> to <code class="literal">j</code> (inclusive),
+all we have to do is this:
+</p><pre class="programlisting" id="N16844">      lua_pushlstring(L, s + i, j - i + 1);
+</pre><p style="text-indent: 0">
+As an example, suppose we want a function
+that splits a string according
+<a class="indexterm" id="N16847"></a>
+to a given separator (a single character)
+and returns a table with the substrings.
+For instance, the call <code class="literal">split("hi:ho:there", ":")</code>
+should return the table <code class="literal">{"hi", "ho", "there"}</code>.
+<a class="xref" href="ch30.html#l_split" title="Figure 30.2. Splitting a string">Figure 30.2, “Splitting a string”</a> presents a simple implementation
+for this function.
+</p><div class="figure-float"><div class="figure"><a id="l_split"/><p class="title" style="text-indent: 0"><strong>Figure 30.2. Splitting a string</strong></p><div class="figure-contents"><pre class="programlisting" id="N1685B">      static int l_split (lua_State *L) {
+        const char *s = luaL_checkstring(L, 1);      /* subject */
+        const char *sep = luaL_checkstring(L, 2);  /* separator */
+        const char *e;
+        int i = 1;
+      
+        lua_newtable(L);  /* result table */
+      
+        /* repeat for each separator */
+        while ((e = strchr(s, *sep)) != NULL) {
+          lua_pushlstring(L, s, e - s);  /* push substring */
+          lua_rawseti(L, -2, i++);   /* insert it in table */
+          s = e + 1;  /* skip separator */
+        }
+      
+        /* insert last substring */
+        lua_pushstring(L, s);
+        lua_rawseti(L, -2, i);
+      
+        return 1;  /* return the table */
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+It uses no buffers
+and can handle arbitrarily long strings:
+Lua takes care of all the memory allocation.
+(As we created the table,
+we know it has no metatable;
+so, we can manipulate it with the raw operations.)
+</p><p id="N1685E" style="text-indent: 0">
+To concatenate strings,
+Lua provides a specific function,
+called <a class="indexterm" id="N16860"/><code class="function">lua_concat</code>.
+It is equivalent to the concatenation operator (<code class="literal">..</code>) in Lua:
+it converts numbers to strings and triggers metamethods
+when necessary.
+Moreover, it can concatenate more than two strings at once.
+The call <code class="literal">lua_concat(L, n)</code> will concatenate (and pop) the
+top-most <code class="literal">n</code> values on the stack and push the result.
+</p><p id="N16872" style="text-indent: 0">
+Another helpful function is <a class="indexterm" id="N16874"></a><code class="function">lua_pushfstring</code>:
+</p><pre class="programlisting" id="N1687D">      const char *lua_pushfstring (lua_State *L, const char *fmt, ...);
+</pre><p style="text-indent: 0">
+It is somewhat similar to the C function <a class="indexterm" id="N16880"></a><code class="literal">sprintf</code>,
+in that it creates a string according to a format string
+and some extra arguments.
+Unlike <code class="literal">sprintf</code>, however, we do not need to provide a buffer.
+Lua dynamically creates the string for us,
+as large as it needs to be.
+The function pushes the resulting string on the stack
+and returns a pointer to it.
+This function accepts the following directives:
+</p><div class="informaltable"><table border="1"><colgroup><col/><col/></colgroup><tbody><tr><td><p id="N16891" style="text-indent: 0"><code class="literal">%s</code></p></td><td><p id="N16895" style="text-indent: 0">inserts a zero-terminated string</p></td></tr><tr><td><p id="N16899" style="text-indent: 0"><code class="literal">%d</code></p></td><td><p id="N1689D" style="text-indent: 0">inserts an <code class="literal">int</code></p></td></tr><tr><td><p id="N168A3" style="text-indent: 0"><code class="literal">%f</code></p></td><td><p id="N168A7" style="text-indent: 0">inserts a Lua float</p></td></tr><tr><td><p id="N168AB" style="text-indent: 0"><code class="literal">%p</code></p></td><td><p id="N168AF" style="text-indent: 0">inserts a pointer</p></td></tr><tr><td><p id="N168B3" style="text-indent: 0"><code class="literal">%I</code></p></td><td><p id="N168B7" style="text-indent: 0">inserts a Lua integer</p></td></tr><tr><td><p id="N168BB" style="text-indent: 0"><code class="literal">%c</code></p></td><td><p id="N168BF" style="text-indent: 0">inserts an <code class="literal">int</code> as a one-byte character</p></td></tr><tr><td><p id="N168C6" style="text-indent: 0"><code class="literal">%U</code></p></td><td><p id="N168CA" style="text-indent: 0">inserts an <code class="literal">int</code> as a UTF-8 byte sequence</p></td></tr><tr><td><p id="N168D1" style="text-indent: 0"><code class="literal">%%</code></p></td><td><p id="N168D5" style="text-indent: 0">inserts a <a class="indexterm" id="N168D7"/>percent sign</p></td></tr></tbody></table></div><p style="text-indent: 0">
+It accepts no modifiers, such as width or precision.<sup>[<a href="#ftn.N168DC" id="N168DC" class="footnote">30</a>]</sup>
+</p><p id="N168E9" style="text-indent: 0">
+Both <a class="indexterm" id="N168EB"/><code class="function">lua_concat</code> and <a class="indexterm" id="N168F3"/><code class="function">lua_pushfstring</code>
+are useful when we want to concatenate only a few strings.
+However,
+if we need to concatenate many strings (or characters) together,
+a one-by-one approach can be quite inefficient,
+as we saw in <a class="xref" href="ch14.html#StringBuffer" title="String Buffers">the section called “String Buffers”</a>.
+Instead,
+we can use the <a class="indexterm" id="N168FE"/><em class="firstterm">buffer facility</em> provided by the auxiliary library.
+</p><p id="N16905" style="text-indent: 0">
+In its simpler usage,
+the buffer facility works with two functions:
+one gives us a buffer of any size where we can
+compose our string;
+the other converts the contents of the buffer into a Lua string.<sup>[<a href="#ftn.N16907" id="N16907" class="footnote">31</a>]</sup>
+<a class="xref" href="ch30.html#cd_upper" title="Figure 30.3. The function string.upper">Figure 30.3, “The function <code class="literal">string.upper</code>”</a> illustrates those functions
+with the implementation of <a class="indexterm" id="N1690E"></a><code class="function">string.upper</code>,
+right from the source file <a class="indexterm" id="N16916"></a><code class="filename">lstrlib.c</code>.
+</p><div class="figure-float"><div class="figure"><a id="cd_upper"/><p class="title" style="text-indent: 0"><strong>Figure 30.3. The function <code class="literal">string.upper</code></strong></p><div class="figure-contents"><pre class="programlisting" id="N16923">      static int str_upper (lua_State *L) {
+        size_t l;
+        size_t i;
+        luaL_Buffer b;
+        const char *s = luaL_checklstring(L, 1, &amp;l);
+        char *p = luaL_buffinitsize(L, &amp;b, l);
+        for (i = 0; i &lt; l; i++)
+          p[i] = toupper(uchar(s[i]));
+        luaL_pushresultsize(&amp;b, l);
+        return 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+The first step for using a buffer from the auxiliary library
+is to declare a variable with type <a class="indexterm" id="N16926"></a><code class="function">luaL_Buffer</code>.
+The next step is to call <a class="indexterm" id="N1692F"></a><code class="function">luaL_buffinitsize</code>
+to get a pointer for a buffer with the given size;
+we can then use this buffer freely to create our string.
+The last step is to call <a class="indexterm" id="N16938"></a><code class="function">luaL_pushresultsize</code>
+to convert the buffer contents into
+a new Lua string and push that sting onto the stack.
+The size in this second call is the final size of the string.
+Often, as in our example,
+this size is equal to the size of the buffer,
+but it can be smaller.
+If we do not know the exact size of the resulting string,
+but have an upper bound,
+we can conservatively allocate a larger size.
+</p><p id="N16941" style="text-indent: 0">
+Note that <a class="indexterm" id="N16943"/><code class="function">luaL_pushresultsize</code>
+does not get a <a class="indexterm" id="N1694B"/>Lua state as its first argument.
+After the initialization,
+a buffer keeps a reference to the state,
+so we do not need to pass it
+when calling other functions that manipulate buffers.
+</p><p id="N1694F" style="text-indent: 0">
+We can also use the auxlib buffers
+by adding content to them piecemeal,
+without
+knowing an upper bound on the size of the result.
+The auxiliary library offers several functions
+to add things to a buffer:
+<a class="indexterm" id="N16951"></a><code class="function">luaL_addvalue</code>
+adds a Lua string that is on the top of the stack;
+<a class="indexterm" id="N1695A"></a><code class="function">luaL_addlstring</code>
+adds strings with an explicit length;
+<a class="indexterm" id="N16963"></a><code class="function">luaL_addstring</code>
+adds zero-terminated strings;
+and <a class="indexterm" id="N1696C"></a><code class="function">luaL_addchar</code> adds single characters.
+These functions have the following prototypes:
+</p><pre class="programlisting" id="N16975">      void luaL_buffinit   (lua_State *L, luaL_Buffer *B);
+      void luaL_addvalue   (luaL_Buffer *B);
+      void luaL_addlstring (luaL_Buffer *B, const char *s, size_t l);
+      void luaL_addstring  (luaL_Buffer *B, const char *s);
+      void luaL_addchar    (luaL_Buffer *B, char c);
+      void luaL_pushresult (luaL_Buffer *B);
+</pre><p style="text-indent: 0">
+<a class="xref" href="ch30.html#cd_concat" title="Figure 30.4. A simplified implementation for table.concat">Figure 30.4, “A simplified implementation for <code class="literal">table.concat</code>”</a> illustrates the use of these functions
+with a simplified implementation
+of the function <a class="indexterm" id="N1697B"></a><code class="function">table.concat</code>.
+</p><div class="figure-float"><div class="figure"><a id="cd_concat"/><p class="title" style="text-indent: 0"><strong>Figure 30.4. A simplified implementation for <code class="literal">table.concat</code></strong></p><div class="figure-contents"><pre class="programlisting" id="N1698A">      static int tconcat (lua_State *L) {
+        luaL_Buffer b;
+        int i, n;
+        luaL_checktype(L, 1, LUA_TTABLE);
+        n = luaL_len(L, 1);
+        luaL_buffinit(L, &amp;b);
+        for (i = 1; i &lt;= n; i++) {
+          lua_geti(L, 1, i);  /* get string from table */
+          luaL_addvalue(b);   /* add it to the buffer */
+        }
+        luaL_pushresult(&amp;b);
+        return 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+In that function,
+we first call <a class="indexterm" id="N1698D"></a><code class="function">luaL_buffinit</code> to
+initialize the buffer.
+We then add elements to the buffer one by one,
+in this example using <a class="indexterm" id="N16996"></a><code class="function">luaL_addvalue</code>.
+Finally, <a class="indexterm" id="N1699E"></a><code class="function">luaL_pushresult</code> flushes the buffer and leaves the
+final string on the top of the stack.
+</p><p id="N169A7" style="text-indent: 0">
+When we use the auxlib buffer,
+we have to worry about one detail.
+After we initialize a buffer,
+it may keep some internal data in the Lua stack.
+Therefore, we cannot assume that the stack top will remain
+where it was before we started using the buffer.
+Moreover, although we can use the stack for other tasks while
+using a buffer,
+the push/pop count for these uses must be balanced
+every time we access the buffer.
+The only exception to this rule is <a class="indexterm" id="N169A9"/><code class="function">luaL_addvalue</code>,
+which assumes that the string to be added to the buffer
+is on the top of the stack.
+</p></div><div class="sect1" title="Storing State in C Functions"><div class="titlepage"><div><div><h2 class="title"><a id="L284"/>Storing State in C Functions</h2></div></div></div><p id="N169B5" style="text-indent: 0">
+Frequently, C functions need to keep some non-local data,
+that is, data that outlive their invocation.
+In C, we typically use global (<code class="literal">extern</code>)
+or static variables for this need.
+When we are programming library functions for Lua, however,
+neither works well.
+First, we cannot store a generic Lua value in a C variable.
+Second, a library that uses such variables will not work
+with multiple <a class="indexterm" id="N169BA"/>Lua states.
+</p><p id="N169BE" style="text-indent: 0">
+A better approach is to get some help from Lua.
+A Lua function has two places to store non-local data:
+global variables and non-local variables.
+The C API offers
+two similar places to store non-local data:
+the registry and <a class="indexterm" id="N169C0"/>upvalues.
+</p><div class="sect2" title="The registry"><div class="titlepage"><div><div><h3 class="title"><a id="sec_registry"/>The registry</h3></div></div></div><p id="N169C8" style="text-indent: 0">
+The <a class="indexterm" id="N169CA"/><em class="firstterm">registry</em> is a global table that
+can be accessed only by C code.<sup>[<a href="#ftn.N169D1" id="N169D1" class="footnote">32</a>]</sup>
+Typically, we use it to store data to be shared
+among several modules.
+</p><p id="N169DE" style="text-indent: 0">
+The <a class="indexterm" id="N169E0"></a>registry is always located at the <a class="indexterm" id="N169E4"></a><em class="firstterm">pseudo-index</em>
+<a class="indexterm" id="N169EB"></a><code class="function">LUA_REGISTRYINDEX</code>.
+A pseudo-index is like an index into the stack,
+except that its associated value is not on the stack.
+Most functions in the Lua API that accept indices as arguments
+also accept pseudo-indices
+—the exceptions
+being those functions that manipulate the stack itself,
+such as <a class="indexterm" id="N169F4"></a><code class="function">lua_remove</code> and <a class="indexterm" id="N169FC"></a><code class="function">lua_insert</code>.
+For instance,
+to get a value stored with key <code class="literal">"Key"</code> in the <a class="indexterm" id="N16A07"></a>registry,
+we can use the following call:
+</p><pre class="programlisting" id="N16A0B">      lua_getfield(L, LUA_REGISTRYINDEX, "Key");
+</pre><p style="text-indent: 0">
+</p><p id="N16A0E" style="text-indent: 0">
+The <a class="indexterm" id="N16A10"/>registry is a regular Lua table.
+As such, we can index it with any non-nil Lua value.
+However, because all C modules share the same <a class="indexterm" id="N16A14"/>registry,
+we must choose with care what values we use as keys,
+to avoid collisions.
+String keys are particularly useful when we want to allow
+other independent libraries to access our data,
+because all they need to know is the key name.
+For those keys, there is no bulletproof method of choosing names,
+but there are some good practices,
+such as avoiding common names
+and prefixing our names with the library name or something like it.
+(Prefixes like <code class="literal">lua</code> or <code class="literal">lualib</code> are not good choices.)
+</p><p id="N16A1E" style="text-indent: 0">
+We should never use our own numbers as keys in the <a class="indexterm" id="N16A20"></a>registry,
+because Lua reserves numeric keys for its <em>reference system</em>.
+This system comprises a pair of functions in the auxiliary
+library that allow us to store values in a table without
+worrying about how to create unique keys.
+The function <a class="indexterm" id="N16A27"></a><code class="function">luaL_ref</code> creates new references:
+</p><pre class="programlisting" id="N16A30">      int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+</pre><p style="text-indent: 0">
+The previous call pops a value from the stack,
+stores it into the <a class="indexterm" id="N16A33"></a>registry with a fresh integer key,
+and returns this key.
+We call this key a <a class="indexterm" id="N16A37"></a><em class="firstterm">reference</em>.
+</p><p id="N16A3E" style="text-indent: 0">
+As the name implies,
+we use references mainly when we need to store a reference
+to a Lua value inside a C structure.
+As we have seen, we should never store pointers to Lua strings
+outside the C function that retrieved them.
+Moreover, Lua does not even offer pointers to other objects,
+such as tables or functions.
+So, we cannot refer to Lua objects through pointers.
+Instead, when we need such pointers,
+we create a reference and store it in C.
+</p><p id="N16A40" style="text-indent: 0">
+To push the value associated with
+a reference <code class="literal">ref</code> onto the stack,
+we simply write this:
+</p><pre class="programlisting" id="N16A45">      lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
+</pre><p style="text-indent: 0">
+Finally, to release both the value and the reference,
+we call <a class="indexterm" id="N16A48"></a><code class="function">luaL_unref</code>:
+</p><pre class="programlisting" id="N16A51">      luaL_unref(L, LUA_REGISTRYINDEX, ref);
+</pre><p style="text-indent: 0">
+After this call, a new call to <a class="indexterm" id="N16A54"></a><code class="function">luaL_ref</code> may return
+this reference again.
+</p><p id="N16A5C" style="text-indent: 0">
+The reference system treats nil as a special case.
+Whenever we call <a class="indexterm" id="N16A5E"></a><code class="function">luaL_ref</code> for a nil value,
+it does not create a new reference,
+but instead returns the constant reference <a class="indexterm" id="N16A66"></a><code class="function">LUA_REFNIL</code>.
+The following call has no effect:
+</p><pre class="programlisting" id="N16A6F">      luaL_unref(L, LUA_REGISTRYINDEX, LUA_REFNIL);
+</pre><p style="text-indent: 0">
+The next one pushes a nil, as expected:
+</p><pre class="programlisting" id="N16A72">      lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_REFNIL);
+</pre><p style="text-indent: 0">
+</p><p id="N16A75" style="text-indent: 0">
+The reference system also defines the constant <a class="indexterm" id="N16A77"/><code class="function">LUA_NOREF</code>,
+which is an integer different from any valid reference.
+It is useful to signal that a value treated as a reference is invalid.
+</p><p id="N16A80" style="text-indent: 0">
+When we create a Lua state,
+the registry comes with two predefined references:
+</p><div class="variablelist"><dl><dt><span class="term"><a class="indexterm" id="N16A85"/><code class="function">LUA_RIDX_MAINTHREAD</code></span></dt><dd><p id="N16A8D" style="text-indent: 0">
+keeps the Lua state itself,
+which is also its main thread.
+</p></dd><dt><span class="term"><a class="indexterm" id="N16A91"/><code class="function">LUA_RIDX_GLOBALS</code></span></dt><dd><p id="N16A99" style="text-indent: 0">
+keeps the <a class="indexterm" id="N16A9B"/>global environment.
+</p></dd></dl></div><p style="text-indent: 0">
+</p><p id="N16AA0" style="text-indent: 0">
+Another safe way to create unique keys in the
+<a class="indexterm" id="N16AA2"></a>registry is to use as key the address of a static
+variable in our code:
+The C link editor ensures that this key
+is unique across all loaded libraries.
+To use this option,
+we need the function <a class="indexterm" id="N16AA6"></a><code class="function">lua_pushlightuserdata</code>,
+which pushes on the stack a value representing a C pointer.
+The following code shows how to store and retrieve a string from
+the <a class="indexterm" id="N16AAE"></a>registry using this method:
+</p><pre class="programlisting" id="N16AB2">      /* variable with a unique address */
+      static char Key = 'k';
+      
+      /* store a string */
+      lua_pushlightuserdata(L, (void *)&amp;Key);  /* push address */
+      lua_pushstring(L, myStr);  /* push value */
+      lua_settable(L, LUA_REGISTRYINDEX);  /* registry[&amp;Key] = myStr */
+      
+      /* retrieve a string */
+      lua_pushlightuserdata(L, (void *)&amp;Key);  /* push address */
+      lua_gettable(L, LUA_REGISTRYINDEX);  /* retrieve value */
+      myStr = lua_tostring(L, -1);  /* convert to string */
+</pre><p style="text-indent: 0">
+We will discuss <a class="indexterm" id="N16AB5"></a>light userdata in more
+detail in <a class="xref" href="ch31.html#lightudata" title="Light Userdata">the section called “Light Userdata”</a>.
+</p><p id="N16ABC" style="text-indent: 0">
+To simplify the use of variable addresses as unique keys,
+Lua 5.2 introduced two new functions:
+<a class="indexterm" id="N16ABE"></a><code class="function">lua_rawgetp</code> and <a class="indexterm" id="N16AC7"></a><code class="function">lua_rawsetp</code>.
+They are similar to <a class="indexterm" id="N16AD0"></a><code class="function">lua_rawgeti</code> and <a class="indexterm" id="N16AD8"></a><code class="function">lua_rawseti</code>,
+but they use C pointers (translated to light userdata) as keys.
+With them,
+we can write the previous code like this:
+</p><pre class="programlisting" id="N16AE0">      static char Key = 'k';
+      
+      /* store a string */
+      lua_pushstring(L, myStr);
+      lua_rawsetp(L, LUA_REGISTRYINDEX, (void *)&amp;Key);
+      
+      /* retrieve a string */
+      lua_rawgetp(L, LUA_REGISTRYINDEX, (void *)&amp;Key);
+      myStr = lua_tostring(L, -1);
+</pre><p style="text-indent: 0">
+Both functions use raw accesses.
+As the registry does not have a metatable,
+a raw access has the same behavior as a regular access,
+and it is slightly more efficient.
+</p></div><div class="sect2" title="Upvalues"><div class="titlepage"><div><div><h3 class="title"><a id="L285"/>Upvalues</h3></div></div></div><p id="N16AE7" style="text-indent: 0">
+While the <a class="indexterm" id="N16AE9"/>registry offers global variables,
+the <a class="indexterm" id="N16AED"/><em class="firstterm">upvalue</em> mechanism implements an equivalent
+of C static variables
+that are visible only inside a particular function.
+Every time we create a new C function in Lua,
+we can associate with it any number of upvalues,
+each one holding a single Lua value.
+Later, when we call the function,
+it has free access to any of its upvalues,
+using pseudo-indices.
+</p><p id="N16AF4" style="text-indent: 0">
+We call this association of a C function
+with its upvalues a <em>closure</em>.
+A <a class="indexterm" id="N16AF9"/>C closure is a C approximation to a Lua closure.
+In particular,
+we can create different closures
+using the same function code,
+but with different upvalues.
+</p><p id="N16AFF" style="text-indent: 0">
+To see a simple example,
+let us create a function <code class="literal">newCounter</code> in C.
+(We defined a similar function in Lua
+in <a class="xref" href="ch09.html" title="Chapter 9. Closures">Chapter 9, <em>Closures</em></a>.)
+This function is a <a class="indexterm" id="N16B07"></a>factory:
+it returns a new counter function each time it is called,
+as in this example:
+</p><pre class="programlisting" id="N16B0B">      c1 = newCounter()
+      print(c1(), c1(), c1())   --&gt; 1    2    3
+      c2 = newCounter()
+      print(c2(), c2(), c1())   --&gt; 1    2    4
+</pre><p style="text-indent: 0">
+Although all counters share the same C code,
+each one keeps its own independent counter.
+The factory function is like this:
+</p><pre class="programlisting" id="N16B0E">      static int counter (lua_State *L);  /* forward declaration */
+      
+      int newCounter (lua_State *L) {
+        lua_pushinteger(L, 0);
+        lua_pushcclosure(L, &amp;counter, 1);
+        return 1;
+      }
+</pre><p style="text-indent: 0">
+The key function here is <a class="indexterm" id="N16B11"></a><code class="function">lua_pushcclosure</code>,
+which creates a new closure.
+Its second argument is the base function
+(<code class="literal">counter</code>, in the example)
+and the third is the number of upvalues (1, in the example).
+Before creating a new closure,
+we must push on the stack the initial values for its upvalues.
+In our example,
+we push zero as the initial value for the
+single upvalue.
+As expected,
+<a class="indexterm" id="N16B1D"></a><code class="function">lua_pushcclosure</code> leaves the new closure on the stack,
+so the closure is ready to be returned
+as the result of <code class="literal">newCounter</code>.
+</p><p id="N16B28" style="text-indent: 0">
+Now, let us see the definition of <code class="literal">counter</code>:
+</p><pre class="programlisting" id="N16B2D">      static int counter (lua_State *L) {
+        int val = lua_tointeger(L, lua_upvalueindex(1));
+        lua_pushinteger(L, ++val);  /* new value */
+        lua_copy(L, -1, lua_upvalueindex(1));  /* update upvalue */
+        return 1;  /* return new value */
+      }
+</pre><p style="text-indent: 0">
+Here, the key element is the macro <a class="indexterm" id="N16B30"></a><code class="function">lua_upvalueindex</code>,
+which produces the pseudo-index of an upvalue.
+In particular,
+the expression <code class="literal">lua_upvalueindex(1)</code>
+gives the pseudo-index of
+the first upvalue of the running function.
+Again, this pseudo-index is like any stack index,
+except that it does not live on the stack.
+So, the call to <a class="indexterm" id="N16B3C"></a><code class="function">lua_tointeger</code>
+retrieves the current value of the first (and only)
+upvalue as an integer.
+Then, the function <code class="literal">counter</code> pushes the new value <code class="literal">++val</code>,
+copies it as the new upvalue’s value,
+and returns it.
+</p><p id="N16B4A" style="text-indent: 0">
+As a more advanced example,
+we will implement tuples using upvalues.
+A <a class="indexterm" id="N16B4C"></a><em class="firstterm">tuple</em> is a kind of constant structure with anonymous fields;
+we can retrieve a specific field with a numerical index,
+or we can retrieve all fields at once.
+In our implementation,
+we represent tuples as functions that store their values
+in their upvalues.
+When called with a numerical argument,
+the function returns that specific field.
+When called without arguments,
+it returns all its fields.
+The following code illustrates the use of tuples:
+</p><pre class="programlisting" id="N16B53">      x = tuple.new(10, "hi", {}, 3)
+      print(x(1))     --&gt; 10
+      print(x(2))     --&gt; hi
+      print(x())      --&gt; 10  hi  table: 0x8087878  3
+</pre><p style="text-indent: 0">
+</p><p id="N16B56" style="text-indent: 0">
+In C, we will represent all tuples by the same function <code class="literal">t_tuple</code>,
+presented in <a class="xref" href="ch30.html#t_tuple" title="Figure 30.5. An implementation of tuples">Figure 30.5, “An implementation of tuples”</a>.
+</p><div class="figure-float"><div class="figure"><a id="t_tuple"/><p class="title" style="text-indent: 0"><strong>Figure 30.5. An implementation of tuples</strong></p><div class="figure-contents"><pre class="programlisting" id="N16B63">      #include "lauxlib.h"
+      
+      int t_tuple (lua_State *L) {
+        lua_Integer op = luaL_optinteger(L, 1, 0);
+        if (op == 0) {  /* no arguments? */
+          int i;
+          /* push each valid upvalue onto the stack */
+          for (i = 1; !lua_isnone(L, lua_upvalueindex(i)); i++)
+             lua_pushvalue(L, lua_upvalueindex(i));
+          return i - 1;  /* number of values */
+        }
+        else {  /* get field 'op' */
+          luaL_argcheck(L, 0 &lt; op &amp;&amp; op &lt;= 256, 1,
+                           "index out of range");
+          if (lua_isnone(L, lua_upvalueindex(op)))
+            return 0;  /* no such field */
+          lua_pushvalue(L, lua_upvalueindex(op));
+          return 1;
+        }
+      }
+      
+      int t_new (lua_State *L) {
+        int top = lua_gettop(L);
+        luaL_argcheck(L, top &lt; 256, top, "too many fields");
+        lua_pushcclosure(L, t_tuple, top);
+        return 1;
+      }
+      
+      static const struct luaL_Reg tuplelib [] = {
+        {"new", t_new},
+        {NULL, NULL}
+      };
+      
+      int luaopen_tuple (lua_State *L) {
+        luaL_newlib(L, tuplelib);
+        return 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+Because we can call a tuple with or without a numeric argument,
+<code class="literal">t_tuple</code> uses <a class="indexterm" id="N16B69"></a><code class="function">luaL_optinteger</code>
+to get its optional argument.
+This function is similar to <a class="indexterm" id="N16B71"></a><code class="function">luaL_checkinteger</code>,
+but it does not complain if the argument is absent;
+instead, it returns a given default value
+(0, in the example).
+</p><p id="N16B79" style="text-indent: 0">
+The maximum number of upvalues to a C function is 255,
+and the maximum index we can use with <a class="indexterm" id="N16B7B"/><code class="function">lua_upvalueindex</code> is 256.
+So, we use <a class="indexterm" id="N16B83"/><code class="function">luaL_argcheck</code> to ensure these limits.
+</p><p id="N16B8B" style="text-indent: 0">
+When we index a non-existent upvalue,
+the result is a pseudo-value whose type is <a class="indexterm" id="N16B8D"></a><code class="function">LUA_TNONE</code>.
+(When we access a stack index above the current top,
+we also get a pseudo-value with this type <a class="indexterm" id="N16B96"></a><code class="function">LUA_TNONE</code>.)
+Our function <code class="literal">t_tuple</code> uses <a class="indexterm" id="N16BA1"></a><code class="function">lua_isnone</code>
+to test whether it has a given upvalue.
+However, we should never use <a class="indexterm" id="N16BA9"></a><code class="function">lua_upvalueindex</code> with
+a negative index or with an index greater than 256
+(which is one plus the maximum number of upvalues for a C function),
+so we must check for this condition
+when the user provides the index.
+The function <a class="indexterm" id="N16BB1"></a><code class="function">luaL_argcheck</code> checks a given condition,
+raising an error with a nice message if the condition fails:
+</p><pre class="programlisting" id="N16BBA">      &gt; t = tuple.new(2, 4, 5)
+      &gt; t(300)
+        --&gt; stdin:1: bad argument #1 to 't' (index out of range)
+</pre><p style="text-indent: 0">
+The third argument to <a class="indexterm" id="N16BBD"></a><code class="function">luaL_argcheck</code>
+provides the argument number for the error message
+(1, in the example),
+and the fourth argument provides a complement to the message
+(<code class="literal">"index out of range"</code>).
+</p><p id="N16BC8" style="text-indent: 0">
+The function to create tuples, <code class="literal">t_new</code>
+(also in <a class="xref" href="ch30.html#t_tuple" title="Figure 30.5. An implementation of tuples">Figure 30.5, “An implementation of tuples”</a>), is trivial:
+because its arguments are already on the stack,
+it first checks that the number of fields respects
+the limit for upvalues in a closure
+and then call <a class="indexterm" id="N16BD0"/><code class="function">lua_pushcclosure</code>
+to create a closure of <code class="literal">t_tuple</code> with all its arguments
+as upvalues.
+Finally, the array <code class="literal">tuplelib</code> and the function <code class="literal">luaopen_tuple</code>
+(also in <a class="xref" href="ch30.html#t_tuple" title="Figure 30.5. An implementation of tuples">Figure 30.5, “An implementation of tuples”</a>) are the standard code
+to create a library <code class="literal">tuple</code> with that single function <code class="literal">new</code>.
+</p></div><div class="sect2" title="Shared upvalues"><div class="titlepage"><div><div><h3 class="title"><a id="L286"/>Shared upvalues</h3></div></div></div><p id="N16BEE" style="text-indent: 0">
+Often,
+we need to share some values or variables
+among all functions in a library.
+Although we can use the registry for that task,
+we can also use upvalues.
+</p><p id="N16BF0" style="text-indent: 0">
+Unlike Lua closures,
+C closures cannot share upvalues.
+Each closure has its own independent upvalues.
+However,
+we can set the upvalues of different functions
+to refer to a common table,
+so that this table becomes a common environment
+where the functions can share data.
+</p><p id="N16BF2" style="text-indent: 0">
+Lua offers a function that eases the task of
+sharing an upvalue among all functions of a library.
+We have been opening C libraries
+with <a class="indexterm" id="N16BF4"></a><code class="function">luaL_newlib</code>.
+Lua implements this function as the following macro:
+</p><pre class="programlisting" id="N16BFC">      #define luaL_newlib(L,lib)  \
+           (luaL_newlibtable(L,lib), luaL_setfuncs(L,lib,0))
+</pre><p style="text-indent: 0">
+The macro <a class="indexterm" id="N16BFF"></a><code class="function">luaL_newlibtable</code> just creates a new table
+for the library.
+(This table has a preallocated size equal to
+the number of functions in the given library.)
+The function <a class="indexterm" id="N16C08"></a><code class="function">luaL_setfuncs</code> then adds the functions in the
+list <code class="literal">lib</code> to that new table,
+which is on the top of the stack.
+</p><p id="N16C14" style="text-indent: 0">
+The third parameter to <a class="indexterm" id="N16C16"></a><code class="function">luaL_setfuncs</code>
+is what we are interested in here.
+It gives the number of shared upvalues the new functions
+in the library will have.
+The initial values for these upvalues should be on the stack,
+as happens with <a class="indexterm" id="N16C1E"></a><code class="function">lua_pushcclosure</code>.
+Therefore,
+to create a library where all functions share a common table
+as their single upvalue,
+we can use the following code:
+</p><pre class="programlisting" id="N16C26">        /* create library table ('lib' is its list of functions) */
+        luaL_newlibtable(L, lib);
+        /* create shared upvalue */
+        lua_newtable(L);
+        /* add functions in list 'lib' to the new library, sharing
+           previous table as upvalue */
+        luaL_setfuncs(L, lib, 1);
+</pre><p style="text-indent: 0">
+The last call also removes the shared table from the stack,
+leaving there only the new library.
+</p></div></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L287"/>Exercises</h2></div></div></div><p id="N16C2D" style="text-indent: 0">
+Exercise 30.1:<a id="L288"></a> 
+Implement a <a class="indexterm" id="N16C32"></a>filter function in C.
+It should receive a list and a predicate
+and return a new list with all elements from the given
+list that satisfy the predicate:
+</p><pre class="programlisting" id="N16C36">      t = filter({1, 3, 20, -4, 5}, function (x) return x &lt; 5 end)
+      -- t = {1, 3, -4}
+</pre><p style="text-indent: 0">
+(A predicate is just a function that tests some condition,
+returning a Boolean.)
+
+
+</p><p id="N16C39" style="text-indent: 0">
+Exercise 30.2:<a id="L289"/> 
+Modify the function <code class="literal">l_split</code> (from <a class="xref" href="ch30.html#l_split" title="Figure 30.2. Splitting a string">Figure 30.2, “Splitting a string”</a>)
+so that it can work with strings containing zeros.
+(Among other changes,
+it should use <code class="literal">memchr</code> instead of <code class="literal">strchr</code>.)
+
+
+</p><p id="N16C4A" style="text-indent: 0">
+Exercise 30.3:<a id="L290"/> 
+Reimplement the function <code class="literal">transliterate</code>
+(<a class="link" href="ch10.html#ex_transliterate">Exercise 10.3</a>) in C.
+
+
+</p><p id="N16C56" style="text-indent: 0">
+Exercise 30.4:<a id="L291"></a> 
+Implement a library with a
+modification of <code class="literal">transliterate</code>
+so that the transliteration table is not given as an argument,
+but instead is kept by the library.
+Your library should offer the following functions:
+</p><pre class="programlisting" id="N16C5E">      lib.settrans (table)   -- set the transliteration table
+      lib.gettrans ()        -- get the transliteration table
+      lib.transliterate(s)    -- transliterate 's' according to the
+                                current table
+</pre><p style="text-indent: 0">
+Use the registry to keep the transliteration table.
+
+
+</p><p id="N16C61" style="text-indent: 0">
+Exercise 30.5:<a id="L292"/> 
+Repeat the previous exercise using an upvalue to keep
+the transliteration table.
+
+
+</p><p id="N16C66" style="text-indent: 0">
+Exercise 30.6:<a id="L293"/> 
+Do you think it is a good design to keep
+the transliteration table as part of the state
+of the library,
+instead of being a parameter to <code class="literal">transliterate</code>?
+
+
+</p></div><div class="footnotes"><br/><hr/><div class="footnote"><p id="N168DD" style="text-indent: 0"><sup>[<a href="#N168DC" id="ftn.N168DC" class="para">30</a>] </sup>The directive <code class="literal">p</code> was introduced in Lua 5.2.
+The directives <code class="literal">I</code> and <code class="literal">U</code> were introduced in Lua 5.3.</p></div><div class="footnote"><p id="N16908" style="text-indent: 0"><sup>[<a href="#N16907" id="ftn.N16907" class="para">31</a>] </sup>These two functions were introduced in Lua 5.2.</p></div><div class="footnote"><p id="N169D2" style="text-indent: 0"><sup>[<a href="#N169D1" id="ftn.N169D1" class="para">32</a>] </sup>Actually, we can access it from Lua using the debug
+function <a class="indexterm" id="N169D4"/><code class="function">debug.getregistry</code>,
+but we really should not use this function except for debugging.</p></div></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

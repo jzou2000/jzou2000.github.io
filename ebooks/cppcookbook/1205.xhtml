@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 12.4. Initializing Shared Resources Once</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 12.4. Initializing Shared Resources Once</h3>
+
+<h4 class="docSection2Title" id="title-ID0E5OAK">Problem</h4>
+<p class="docText">You have a number of threads
+that are using a resource that
+must only be initialized once.</p>
+
+<h4 class="docSection2Title" id="title-ID0ETPAK">Solution</h4>
+<p class="docText">Either initialize the resource before the threads are started, or if
+you can't, use the <tt>call_once</tt>
+function defined in <tt>&lt;boost/thread/once.hpp&gt;</tt>
+and the type <tt>once_flag</tt>. Example 12-5 shows how to use <tt>call_once</tt>.</p>
+<h5 class="docExampleTitle" id="title-ID0EIQAK">Example 12-5. Initializing something once</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;iostream&gt;
+#include &lt;boost/thread/thread.hpp&gt;
+#include &lt;boost/thread/once.hpp&gt;
+
+// Some sort of connection class that should only be initialized once
+struct Conn {
+   static void init( ) {++i_;}
+   static boost::once_flag init_;
+   static int i_;
+   // ...
+};
+
+int Conn::i_ = 0;
+boost::once_flag Conn::init_ = BOOST_ONCE_INIT;
+
+void worker( ) {
+   boost::call_once(Conn::init, Conn::init_);
+   // Do the real work...
+}
+
+Conn c;  // You probably don't want to use a global, so see the
+         // next Recipe
+
+int main( ) {
+
+   boost::thread_group grp;
+
+   for (int i = 0; i &lt; 100; ++i)
+      grp.create_thread(worker);
+
+   grp.join_all( );
+
+   std::cout &lt;&lt; c.i_ &lt;&lt; '\n'; // c.i_ = 1
+}
+
+					  </pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0ERQAK">Discussion</h4>
+<p class="docText">A shared resource has to be initialized somewhere, and you may want
+the first thread to use it to do the initializing. A variable of type
+<tt>once_flag</tt> (whose exact type is platform-dependent)
+and the <tt>call_once</tt> function can keep multiple
+threads from re-initializing the same object. You have to do two
+things.</p>
+<p class="docText">First, initialize your
+<tt>once_flag</tt>
+
+ variable to the macro
+<tt>BOOST_ONCE_INIT</tt>
+.
+This is a platform-dependent value. In Example 12-5,
+the class <tt>Conn</tt> represents some sort of connection
+(database, socket, hardware, etc.) that I only want initialized once
+even though multiple threads may try to initialize it. This sort of
+thing comes up often when you want to load a library dynamically,
+perhaps one specified in an application config file. The
+<tt>once_flag</tt> is a static class variable because I
+only want one initialization, no matter how many instances of the
+class there may be. So, I give the flag a starting value of
+<tt>BOOST_ONCE_INIT</tt> like this:</p>
+<pre>boost::once_flag Conn::initFlag_ = BOOST_ONCE_INIT;</pre><br/>
+<p class="docText">Then, in my worker function, I invoke <tt>call_once</tt>,
+which synchronizes access to my init flag and, therefore, forbids
+concurrent initialization. I pass two arguments to
+<tt>call_once</tt>:</p>
+<pre>boost::call_once(Conn::init, Conn::initFlag_);</pre><br/>
+<p class="docText">The first argument is the address of the function that will be doing
+the initialization. The second is the flag. This way, multiple
+threads can try to initialize the
+<tt>Conn</tt> class, but only the first will succeed.</p>
+</div>
+</body>
+</html>

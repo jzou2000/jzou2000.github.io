@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>52.5. Exchanging Messages</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">52.5. Exchanging Messages</h3><p class="docText">In this section, we look at the functions that are used to send messages to and receive messages from a queue.</p><h4 class="docSection2Title" id="title-ID0EUYDM">52.5.1. Sending Messages</h4><p class="docText">The <span class="docEmphasis">mq_send()</span> function adds the message in the buffer pointed to by <span class="docEmphasis">msg_ptr</span> to the message queue referred to by the descriptor <span class="docEmphasis">mqdes</span>.</p><pre>#include &lt;mqueue.h&gt;
+
+int <b>mq_send</b>(mqd_t <span class="docEmphasis">mqdes</span>, const char *<span class="docEmphasis">msg_ptr</span>, size_t <span class="docEmphasis">msg_len</span>,
+            unsigned int <span class="docEmphasis">msg_prio</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">msg_len</span> argument specifies the length of the message pointed to by <span class="docEmphasis">msg_ptr</span>. This value must be less than or equal to the <span class="docEmphasis">mq_msgsize</span> attribute of the queue; otherwise, <span class="docEmphasis">mq_send()</span> fails with the error <tt>EMSGSIZE</tt>. Zero-length messages are permitted.</p><p class="docText">Each message has a nonnegative integer priority, specified by the <span class="docEmphasis">msg_prio</span>
+ argument. Messages are ordered within the queue in descending order of 
+priority (i.e., 0 is the lowest priority). When a new message is added 
+to the queue, it is placed after any other messages of the same 
+priority. If an application doesn’t need to use message priorities, it 
+is sufficient to always specify <span class="docEmphasis">msg_prio</span> as 0.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">As
+ noted at the beginning of this chapter, the type attribute of System V 
+messages provides different functionality. System V messages are always 
+queued in FIFO order, but <span class="docEmphasis">msgrcv()</span>
+ allows us to select messages in various ways: in FIFO order, by exact 
+type, or by highest type less than or equal to some value.</p><hr noshade="noshade" size="1"/><p class="docText">SUSv3 allows an implementation to advertise its upper limit for message priorities, either by defining the constant <tt>MQ_PRIO_MAX</tt> or via the return from <span class="docEmphasis">sysconf(_SC_MQ_PRIO_MAX)</span>. SUSv3 requires this limit to be at least 32 <tt>(_POSIX_MQ_PRIO_MAX)</tt>;
+ that is, priorities at least in the range 0 to 31 are available. 
+However, the actual range on implementations is highly variable. For 
+example, on Linux, this constant has the value 32,768; on Solaris, it is
+ 32; and on Tru64, it is 256.</p><p class="docText">If the message queue is already full (i.e., the <span class="docEmphasis">mq_maxmsg</span> limit for the queue has been reached), then a further <span class="docEmphasis">mq_send()</span> either blocks until space becomes available in the queue, or, if the <tt>O_NONBLOCK</tt> flag is in effect, fails immediately with the error <tt>EAGAIN</tt>.</p><p class="docText">The program in Example 52-4 provides a command-line interface to the <span class="docEmphasis">mq_send()</span> function. We demonstrate the use of this program in the next section.</p><h5 class="docExampleTitle" id="title-ID0EX4DM">Example 52-4. Writing a message to a POSIX message queue</h5><p></p><div class="box"><pre class="preFixedHeight"><b>pmsg/pmsg_send.c</b>
+#include &lt;mqueue.h&gt;
+#include &lt;fcntl.h&gt;              /* For definition of O_NONBLOCK */
+#include "tlpi_hdr.h"
+
+static void
+usageError(const char *progName)
+{
+    fprintf(stderr, "Usage: %s [-n] name msg [prio]\n", progName);
+    fprintf(stderr, "    -n           Use O_NONBLOCK flag\n");
+    exit(EXIT_FAILURE);
+}
+
+int
+main(int argc, char *argv[])
+{
+    int flags, opt;
+    mqd_t mqd;
+    unsigned int prio;
+
+    flags = O_WRONLY;
+    while ((opt = getopt(argc, argv, "n")) != -1) {
+        switch (opt) {
+        case 'n':   flags |= O_NONBLOCK;        break;
+        default:    usageError(argv[0]);
+        }
+    }
+
+    if (optind + 1 &gt;= argc)
+        usageError(argv[0]);
+
+    mqd = mq_open(argv[optind], flags);
+    if (mqd == (mqd_t) -1)
+        errExit("mq_open");
+
+    prio = (argc &gt; optind + 2) ? atoi(argv[optind + 2]) : 0;
+
+    if (mq_send(mqd, argv[optind + 1], strlen(argv[optind + 1]), prio) == -1)
+        errExit("mq_send");
+    exit(EXIT_SUCCESS);
+}
+    <b>pmsg/pmsg_send.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0EC5DM">52.5.2. Receiving Messages</h4><p class="docText">The <span class="docEmphasis">mq_receive()</span> function removes the oldest message with the highest priority from the message queue referred to by <span class="docEmphasis">mqdes</span> and returns that message in the buffer pointed to by <span class="docEmphasis">msg_ptr</span>.</p><pre>#include &lt;mqueue.h&gt;
+
+ssize_t <b>mq_receive</b>(mqd_t <span class="docEmphasis">mqdes</span>, char *<span class="docEmphasis">msg_ptr</span>, size_t <span class="docEmphasis">msg_len</span>,
+                   unsigned int *<span class="docEmphasis">msg_prio</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of bytes in received message on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">msg_len</span> argument is used by the caller to specify the number of bytes of space available in the buffer pointed to by <span class="docEmphasis">msg_ptr</span>.</p><p class="docText">Regardless of the actual size of the message, <span class="docEmphasis">msg_len</span> (and thus the size of the buffer pointed to by <span class="docEmphasis">msg_ptr</span>) must be greater than or equal to the <span class="docEmphasis">mq_msgsize</span> attribute of the queue; otherwise, <span class="docEmphasis">mq_receive()</span> fails with the error <tt>EMSGSIZE</tt>. If we don’t know the value of the <span class="docEmphasis">mq_msgsize</span> attribute of a queue, we can obtain it using <span class="docEmphasis">mq_getattr()</span>. (In an application consisting of cooperating processes, the use of <span class="docEmphasis">mq_getattr()</span> can usually be dispensed with, because the application can typically decide on a queue’s <span class="docEmphasis">mq_msgsize</span> setting in advance.)</p><p class="docText">If <span class="docEmphasis">msg_prio</span> is not <tt>NULL</tt>, then the priority of the received message is copied into the location pointed to by <span class="docEmphasis">msg_prio</span>.</p><p class="docText">If the message queue is currently empty, then <span class="docEmphasis">mq_receive()</span> either blocks until a message becomes available, or, if the <tt>O_NONBLOCK</tt> flag is in effect, fails immediately with the error <tt>EAGAIN</tt>. (There is no equivalent of the pipe behavior where a reader sees end-of-file if there are no writers.)</p><p class="docText">The program in Example 52-5 provides a command-line interface to the <span class="docEmphasis">mq_receive()</span> function. The command format for this program is shown in the <span class="docEmphasis">usageError()</span> function.</p><p class="docText">The following shell session demonstrates the use of the programs in Example 52-4 and Example 52-5. We begin by creating a message queue and sending a few messages with different priorities:</p><pre>$ <b>./pmsg_create -cx /mq</b>
+$ <b>./pmsg_send /mq msg-a 5</b>
+$ <b>./pmsg_send /mq msg-b 0</b>
+$ <b>./pmsg_send /mq msg-c 10</b></pre><br/>
+<p class="docText">We then execute a series of commands to retrieve messages from the queue:</p><pre>$ <b>./pmsg_receive /mq</b>
+Read 5 bytes; priority = 10
+msg-c
+$ <b>./pmsg_receive /mq</b>
+Read 5 bytes; priority = 5
+msg-a
+$ <b>./pmsg_receive /mq</b>
+Read 5 bytes; priority = 0
+msg-b</pre><br/>
+<p class="docText">As we can see from the above output, the messages were retrieved in order of priority.</p><p class="docText">At this point, the queue is now empty. When we perform another blocking receive, the operation blocks:</p><pre>$ <b>./pmsg_receive /mq </b>
+<i> Blocks; we type Control-C to terminate the program</i></pre><br/>
+<p class="docText">On the other hand, if we perform a nonblocking receive, the call returns immediately with a failure status:</p><pre>$ <b>./pmsg_receive -n /mq</b>
+ERROR [EAGAIN/EWOULDBLOCK Resource temporarily unavailable] mq_receive</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0E4EEM">Example 52-5. Reading a message from a POSIX message queue</h5><p></p><div class="box"><pre class="preFixedHeight"><b>pmsg/pmsg_receive.c</b>
+#include &lt;mqueue.h&gt;
+#include &lt;fcntl.h&gt;              /* For definition of O_NONBLOCK */
+#include "tlpi_hdr.h"
+
+static void
+usageError(const char *progName)
+{
+    fprintf(stderr, "Usage: %s [-n] name\n", progName);
+    fprintf(stderr, "    -n           Use O_NONBLOCK flag\n");
+    exit(EXIT_FAILURE);
+}
+
+int
+main(int argc, char *argv[])
+{
+    int flags, opt;
+    mqd_t mqd;
+    unsigned int prio;
+    void *buffer;
+    struct mq_attr attr;
+    ssize_t numRead;
+
+    flags = O_RDONLY;
+    while ((opt = getopt(argc, argv, "n")) != -1) {
+        switch (opt) {
+        case 'n':   flags |= O_NONBLOCK;        break;
+        default:    usageError(argv[0]);
+        }
+    }
+
+    if (optind &gt;= argc)
+        usageError(argv[0]);
+
+    mqd = mq_open(argv[optind], flags);
+    if (mqd == (mqd_t) -1)
+        errExit("mq_open");
+
+    if (mq_getattr(mqd, &amp;attr) == -1)
+        errExit("mq_getattr");
+
+    buffer = malloc(attr.mq_msgsize);
+    if (buffer == NULL)
+        errExit("malloc");
+
+    numRead = mq_receive(mqd, buffer, attr.mq_msgsize, &amp;prio);
+    if (numRead == -1)
+        errExit("mq_receive");
+
+    printf("Read %ld bytes; priority = %u\n", (long) numRead, prio);
+    if (write(STDOUT_FILENO, buffer, numRead) == -1)
+        errExit("write");
+    write(STDOUT_FILENO, "\n", 1);
+
+    exit(EXIT_SUCCESS);
+}
+    <b>pmsg/pmsg_receive.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0EIFEM">52.5.3. Sending and Receiving Messages with a Timeout</h4><p class="docText">The <span class="docEmphasis">mq_timedsend()</span> and <span class="docEmphasis">mq_timedreceive()</span> functions are exactly like <span class="docEmphasis">mq_send()</span> and <span class="docEmphasis">mq_receive()</span>, except that if the operation can’t be performed immediately, and the <tt>O_NONBLOCK</tt> flag is not in effect for the message queue description, then the <span class="docEmphasis">abs_timeout</span> argument specifies a limit on the time for which the call will block.</p><pre class="preFixedWidth">#include &lt;mqueue.h&gt;
+#include &lt;time.h&gt;
+
+int <b>mq_timedsend</b>(mqd_t <span class="docEmphasis">mqdes</span>, const char *<span class="docEmphasis">msg_ptr</span>, size_t <span class="docEmphasis">msg_len</span>,
+                 unsigned int <span class="docEmphasis">msg_prio</span>, const struct timespec *<span class="docEmphasis">abs_timeout</span>);
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><pre class="preFixedWidth">ssize_t <b>mq_timedreceive</b>(mqd_t <span class="docEmphasis">mqdes</span>, char *<span class="docEmphasis">msg_ptr</span>, size_t <span class="docEmphasis">msg_len</span>,
+                 unsigned int *<span class="docEmphasis">msg_prio</span>, const struct timespec *<span class="docEmphasis">abs_timeout</span>);
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of bytes in received message on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">abs_timeout</span> argument is a <span class="docEmphasis">timespec</span> structure (Section 23.4.2)
+ that specifies the timeout as an absolute value in seconds and 
+nanoseconds since the Epoch. To perform a relative timeout, we can fetch
+ the current value of the <tt>CLOCK_REALTIME</tt> clock using <span class="docEmphasis">clock_gettime()</span> and add the required amount to that value to produce a suitably initialized <span class="docEmphasis">timespec</span> structure.</p><p class="docText">If a call to <span class="docEmphasis">mq_timedsend()</span> or <span class="docEmphasis">mq_timedreceive()</span> times out without being able to complete its operation, then the call fails with the error <tt>ETIMEDOUT</tt>.</p><p class="docText">On Linux, specifying <span class="docEmphasis">abs_timeout</span> as <tt>NULL</tt> means an infinite timeout. However, this behavior is not specified in SUSv3, and portable applications can’t rely on it.</p><p class="docText">The <span class="docEmphasis">mq_timedsend()</span> and <span class="docEmphasis">mq_timedreceive()</span> functions originally derive from POSIX.1d (1999) and are not available on all UNIX implementations.</p>
+</div>
+</body>
+</html>

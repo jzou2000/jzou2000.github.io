@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>60.4. Other Concurrent Server Designs</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">60.4. Other Concurrent Server Designs</h3><p class="docText">The
+ traditional concurrent server model described in the previous section 
+is adequate for many applications that need to simultaneously handle 
+multiple clients via TCP connections. However, for very high-load 
+servers (for example, web servers handling thousands of requests per 
+minute), the cost of creating a new child (or even thread) for each 
+client imposes a significant burden on the server (refer to Section 28.3), and alternative designs need to be employed. We briefly consider some of these alternatives.</p><h4 class="docSection2Title" id="title-ID0EJYGM">60.4.1. </h4><h5 class="docSection3Title" id="title-ID0ENYGM">60.4.1.1. Preforked and prethreaded servers</h5><p class="docText">Preforked and prethreaded servers are described in some detail in Chapter 30 of [Stevens et al., 2004]. The key ideas are the following:</p><ul><li><p class="docList">Instead
+ of creating a new child process (or thread) for each client, the server
+ precreates a fixed number of child processes (or threads) immediately 
+on startup (i.e., before any client requests are even received). These 
+children constitute a so-called <span class="docEmphasis">server pool</span>.</p></li><li><p class="docList">Each
+ child in the server pool handles one client at a time, but instead of 
+terminating after handling the client, the child fetches the next client
+ to be serviced and services it, and so on.</p></li></ul><p class="docText">Employing
+ the above technique requires some careful management within the server 
+application. The server pool should be large enough to ensure adequate 
+response to client requests. This means that the server parent must 
+monitor the number of unoccupied children, and, in times of peak load, 
+increase the size of the pool so that there are always enough child 
+processes available to immediately serve new clients. If the load 
+decreases, then the size of the server pool should be reduced, since 
+having excess processes on the system can degrade overall system 
+performance.</p><p class="docText">In addition, 
+the children in the server pool must follow some protocol to allow them 
+to exclusively select individual client connections. On most UNIX 
+implementations (including Linux), it is sufficient to have each child 
+in the pool block in an <span class="docEmphasis">accept()</span>
+ call on the listening descriptor. In other words, the server parent 
+creates the listening socket before creating any children, and each of 
+the children inherits a file descriptor for the socket during the <span class="docEmphasis">fork()</span>. When a new client connection arrives, only one of the children will complete the <span class="docEmphasis">accept()</span> call. However, because <span class="docEmphasis">accept()</span>
+ is not an atomic system call on some older implementations, the call 
+may need to be bracketed by some mutual-exclusion technique (e.g., a 
+file lock) to ensure that only one child at a time performs the call 
+([Stevens et al., 2004]).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">There are alternatives to having all of the children in the server pool perform <span class="docEmphasis">accept()</span> calls. If the server pool consists of separate processes, the server parent can perform the <span class="docEmphasis">accept()</span>
+ call, and then pass the file descriptor containing the new connection 
+to one of the free processes in the pool, using a technique that we 
+briefly describe in Section 61.13.3. If the server pool consists of threads, the main thread can perform the <span class="docEmphasis">accept()</span> call, and then inform one of the free server threads that a new client is available on the connected descriptor.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EA1GM">60.4.1.2. Handling multiple clients from a single process</h5><p class="docText">In
+ some cases, we can design a single server process to handle multiple 
+clients. To do this, we must employ one of the I/O models (I/O 
+multiplexing, signal-driven I/O, or <span class="docEmphasis">epoll</span>) that allow a single process to simultaneously monitor multiple file descriptors for I/O events. These models are described in Chapter 63.</p><p class="docText">In
+ a single-server design, the server process must take on some of the 
+scheduling tasks that are normally handled by the kernel. In a solution 
+that involves one server process per client, we can rely on the kernel 
+to ensure that each server process (and thus client) gets a fair share 
+of access to the resources of the server host. But when we use a single 
+server process to handle multiple clients, the server must do some work 
+to ensure that one or a few clients don’t monopolize access to the 
+server while other clients are starved. We say a little more about this 
+point in Section 63.4.6.</p><h5 class="docSection3Title" id="title-ID0EA2GM">60.4.1.3. Using server farms</h5><p class="docText">Other approaches to handling high client loads involve the use of multiple server systems—a <span class="docEmphasis">server farm</span>.</p><p class="docText">One of the simplest approaches to building a server farm (employed by some web servers) is <span class="docEmphasis">DNS round-robin load sharing</span> (or <span class="docEmphasis">load distribution</span>),
+ where the authoritative name server for a zone maps the same domain 
+name to several IP addresses (i.e., several servers share the same 
+domain name). Successive requests to the DNS server to resolve the 
+domain name return these IP addresses in round-robin order. Further 
+information about DNS round-robin load sharing can be found in [Albitz 
+&amp; Liu, 2006].</p><p class="docText">Round-robin
+ DNS has the advantage of being inexpensive and easy to set up. However,
+ it does have some shortcomings. A DNS server performing iterative 
+resolution may cache its results (see Section 59.8),
+ with the result that future queries on the domain name return the same 
+IP address, instead of the round-robin sequence generated by the 
+authoritative DNS server. Also, round-robin DNS doesn’t have any 
+built-in mechanisms for ensuring good load balancing (different clients 
+may place different loads on a server) or ensuring high availability 
+(what if one of the servers dies or the server application that it is 
+running crashes?). Another issue that we may need to consider—one that 
+is faced by many designs that employ multiple server machines—is 
+ensuring <span class="docEmphasis">server affinity</span>;
+ that is, ensuring that a sequence of requests from the same client are 
+all directed to the same server, so that any state information 
+maintained by the server about the client remains accurate.</p><p class="docText">A more flexible, but also more complex, solution is <span class="docEmphasis">server load balancing</span>.
+ In this scenario, a single load-balancing server routes incoming client
+ requests to one of the members of the server farm. (To ensure high 
+availability, there may be a backup server that takes over if the 
+primary load-balancing server crashes.) This eliminates the problems 
+associated with remote DNS caching, since the server farm presents a 
+single IP address (that of the load-balancing server) to the outside 
+world. The load-balancing server incorporates algorithms to measure or 
+estimate server load (perhaps based on metrics supplied by the members 
+of the server farm) and intelligently distribute the load across the 
+members of the server farm. The load-balancing server also automatically
+ detects failures in members of the server farm (and the addition of new
+ servers, if demand requires it). Finally, a load-balancing server may 
+also provide support for server affinity. Further information about 
+server load balancing can be found in [Kopparapu, 2002].</p>
+</div>
+</body>
+</html>

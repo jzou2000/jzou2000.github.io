@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>44.9. Nonblocking I/O</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">44.9. Nonblocking I/O</h3><p class="docText">As
+ noted earlier, when a process opens one end of a FIFO, it blocks if the
+ other end of the FIFO has not yet been opened. Sometimes, it is 
+desirable not to block, and for this purpose, the <tt>O_NONBLOCK</tt> flag can be specified when calling <span class="docEmphasis">open()</span>:</p><pre>fd = open("fifopath", O_RDONLY | O_NONBLOCK);
+if (fd == -1)
+    errExit("open");</pre><br/>
+<p class="docText">If the other end of the FIFO is already open, then the <tt>O_NONBLOCK</tt> flag has no effect on the <span class="docEmphasis">open()</span> call—it successfully opens the FIFO immediately, as usual. The <tt>O_NONBLOCK</tt>
+ flag changes things only if the other end of the FIFO is not yet open, 
+and the effect depends on whether we are opening the FIFO for reading or
+ writing:</p><ul><li><p class="docList">If the FIFO is being opened for reading, and no process currently has the write end of the FIFO open, then the <span class="docEmphasis">open()</span> call succeeds immediately (just as though the other end of the FIFO was already open).</p></li><li><p class="docList">If the FIFO is being opened FIFO for writing, and the other end of the FIFO is not already open for reading, then <span class="docEmphasis">open()</span> fails, setting <span class="docEmphasis">errno</span> to <tt>ENXIO</tt>.</p></li></ul><p class="docText">The asymmetry of the <tt>O_NONBLOCK</tt>
+ flag depending on whether the FIFO is being opened for reading or for 
+writing can be explained as follows. It is okay to open a FIFO for 
+reading when there is no writer at the other end of the FIFO, since any 
+attempt to read from the FIFO simply returns no data. However, 
+attempting to write to a FIFO for which there is no reader would result 
+in the generation of the <tt>SIGPIPE</tt> signal and an <tt>EPIPE</tt> error from <span class="docEmphasis">write()</span>.</p><p class="docText">Table 44-1 summarizes the semantics of opening a FIFO, including the effects of <tt>O_NONBLOCK</tt> described above.</p><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 44-1. Semantics of <span class="docEmphasis">open()</span> for a FIFO</h5></caption><colgroup span="4"><col></col><col></col><col></col><col></col></colgroup><thead><tr><th align="left" class="docTableCell thead" colspan="2" scope="col" style="text-align:left" valign="bottom">Type of <span class="docEmphasis">open()</span></th><th align="left" class="docTableCell thead" colspan="2" scope="col" style="text-align:left" valign="bottom">Result of <span class="docEmphasis">open()</span></th></tr><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">open for</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">additional flags</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">other end of FIFO open</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">other end of FIFO closed</th></tr></thead><tbody><tr><td align="center" class="docTableCell" rowspan="2" valign="top">reading</td><td align="left" class="docTableCell" valign="top">none (blocking)</td><td align="left" class="docTableCell" valign="top">succeeds immediately</td><td align="left" class="docTableCell" valign="top">blocks</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>O_NONBLOCK</tt></td><td align="left" class="docTableCell" valign="top">succeeds immediately</td><td align="left" class="docTableCell" valign="top">succeeds immediately</td></tr><tr><td align="center" class="docTableCell" rowspan="2" valign="top">writing</td><td align="left" class="docTableCell" valign="top">none (blocking)</td><td align="left" class="docTableCell" valign="top">succeeds immediately</td><td align="left" class="docTableCell" valign="top">blocks</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>O_NONBLOCK</tt></td><td align="left" class="docTableCell" valign="top">succeeds immediately</td><td align="left" class="docTableCell" valign="top">fails (<tt>ENXIO</tt>)</td></tr></tbody></table><p></p><br/><p class="docText">Using the <tt>O_NONBLOCK</tt> flag when opening a FIFO serves two main purposes:</p><ul><li><p class="docList">It allows a single process to open both ends of a FIFO. The process first opens the FIFO for reading specifying <tt>O_NONBLOCK</tt>, and then opens the FIFO for writing.</p></li><li><p class="docList">It prevents deadlocks between processes opening two FIFOs.</p></li></ul><p class="docText">A <span class="docEmphasis">deadlock</span>
+ is a situation where two or more process are blocked because each is 
+waiting on the other process(es) to complete some action. The two 
+processes shown in Figure 44-8
+ are deadlocked. Each process is blocked waiting to open a FIFO for 
+reading. This blocking would not happen if each process could perform 
+its second step (opening the other FIFO for writing). This particular 
+deadlock problem could be solved by reversing the order of steps 1 and 2
+ in process Y, while leaving the order in process X unchanged, or vice 
+versa. However, such an arrangement of steps may not be easy to achieve 
+in some applications. Instead, we can resolve the problem by having 
+either process, or both, specify the <tt>O_NONBLOCK</tt> flag when opening the FIFOs for reading.</p><p></p><center><h5 class="docFigureTitle">Figure 44-8. Deadlock between processes opening two FIFOs</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-85.png"/></p></center><p></p><br/><h4 class="docSection2Title" id="title-ID0E2GBM">44.9.1. </h4><h5 class="docSection3Title" id="title-ID0E6GBM">44.9.1.1. Nonblocking <span class="docEmphasis">read()</span> and <span class="docEmphasis">write()</span></h5><p class="docText">The <tt>O_NONBLOCK</tt> flag affects not only the semantics of <span class="docEmphasis">open()</span> but also—because the flag then remains set for the open file description—the semantics of subsequent <span class="docEmphasis">read()</span> and <span class="docEmphasis">write()</span> calls. We describe these effects in the next section.</p><p class="docText">Sometimes, we need to change the state of the <tt>O_NONBLOCK</tt> flag for a FIFO (or another type of file) that is already open. Scenarios where this need may arise include the following:</p><ul><li><p class="docList">We opened a FIFO using <tt>O_NONBLOCK</tt>, but we want subsequent <span class="docEmphasis">read()</span> and <span class="docEmphasis">write()</span> calls to operate in blocking mode.</p></li><li><p class="docList">We want to enable nonblocking mode for a file descriptor that was returned by <span class="docEmphasis">pipe()</span>.
+ More generally, we might want to change the nonblocking status of any 
+file descriptor that was obtained other than from a call to <span class="docEmphasis">open()</span>—for
+ example, one of the three standard descriptors that are automatically 
+opened for each new program run by the shell or a file descriptor 
+returned by <span class="docEmphasis">socket()</span>.</p></li><li><p class="docList">For some application-specific purpose, we need to switch the setting of the <tt>O_NONBLOCK</tt> setting of a file descriptor on and off.</p></li></ul><p class="docText">For these purposes, we can use <span class="docEmphasis">fcntl()</span> to enable or disable the <tt>O_NONBLOCK</tt> open file status flag. To enable the flag, we write the following (omitting error checking):</p><pre>int flags;
+
+flags = fcntl(fd, F_GETFL);       /* Fetch open files status flags */
+flags |= O_NONBLOCK;              /* Enable O_NONBLOCK bit */
+fcntl(fd, F_SETFL, flags);        /* Update open files status flags */</pre><br/>
+<p class="docText">And to disable it, we write the following:</p><pre>flags = fcntl(fd, F_GETFL);
+flags &amp;= ~O_NONBLOCK;             /* Disable O_NONBLOCK bit */
+fcntl(fd, F_SETFL, flags);</pre><br/>
+</div>
+</body>
+</html>

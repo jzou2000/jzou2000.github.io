@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 36. Class-Specific Memory Management</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 36. Class-Specific Memory Management</h2>
+		
+<p class="docText">If you don’t like the way standard <tt>operator new</tt> and <tt>operator delete</tt> are treating one of your class types, you don’t have to stand for it. Instead, your types can have their own <tt>operator new</tt> and <tt>operator delete</tt> customized to their needs.</p>
+		
+<p class="docText">Note that we can’t do anything with the <tt>new</tt> operator or the <tt>delete</tt> operator, since their behavior is fixed, but we can change which <tt>operator new</tt> and <tt>operator delete</tt> they invoke (see <span class="docEmphasis">Placement New</span> [35, 119]). The best way to do this is to declare member <tt>operator new</tt> and <tt>operator delete</tt> functions:</p>
+		
+<div class="docText">
+  <pre>class Handle {
+  public:
+    //...
+    void *operator new( size_t );
+    void operator delete( void * );
+    //...
+};
+//...
+Handle *h = new Handle; // uses Handle::operator new
+//...
+delete h; // uses Handle::operator delete
+</pre>
+</div>
+<br/>
+		
+<p class="docText">When we allocate an object of type <tt>Handle</tt> in a new expression, the compiler will first look in the scope of <tt>Handle</tt> for an <tt>operator new</tt>. If it doesn’t find one, then it will use an <tt>operator new</tt> from the global scope. A similar situation holds for <tt>operator delete</tt>, so it generally makes sense to define a member <tt>operator delete</tt> if you define a member <tt>operator new</tt>, and vice versa.</p>
+		
+<p class="docText">Member <tt>operator new</tt> and <tt>operator delete</tt> are static member functions (see <span class="docEmphasis">Optional Keywords</span> [63, 231]), which makes sense. Recall that static member functions have no <tt>this</tt>
+ pointer, and these functions are charged with simply getting and 
+releasing the storage for an object, so they have no use for a <tt>this</tt> pointer. Like other static member functions, they are inherited by derived classes:</p>
+		
+<div class="docText">
+  <pre>class MyHandle : public Handle {
+    //...
+};
+//...
+MyHandle *mh = new MyHandle; // uses Handle::operator new
+//...
+delete mh; // uses Handle::operator delete
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Of course, if <tt>MyHandle</tt> had declared its own <tt>operator new</tt> and <tt>operator delete</tt>,
+ those would have been found first by the compiler during lookup, and 
+they would have been used instead of the inherited versions from the <tt>Handle</tt> base class.</p>
+		
+<p class="docText">If you define member <tt>operator new</tt> and <tt>operator delete</tt> in a base class, ensure that the base class destructor is virtual:</p>
+		
+<div class="docText">
+  <pre>class Handle {
+  public:
+    //...
+    virtual ~Handle();
+    void *operator new( size_t );
+    void operator delete( void * );
+    //...
+};
+class MyHandle : public Handle {
+    //...
+    void *operator new( size_t );
+    void operator delete( void *, size_t ); // note 2nd arg
+    //...
+};
+//...
+Handle *h = new MyHandle; // uses MyHandle::operator new
+//...
+delete h; // uses MyHandle::operator delete
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Without
+ a virtual destructor, the effect of deleting a derived class object 
+through a base class pointer is undefined! The implementation may simply
+ (and probably incorrectly) invoke <tt>Handle::operator delete</tt> rather than <tt>MyHandle::operator delete</tt>, but anything at all could happen. Notice also that we’ve employed a two-argument version of <tt>operator delete</tt> rather than the usual one-argument version. This two-argument version is another “usual” version of member <tt>operator delete</tt> often employed by base classes that expect derived classes to inherit their <tt>operator delete</tt>
+ implementation. The second argument will contain the size of the object
+ being deleted—information that is often useful in implementing custom 
+memory management.</p>
+		
+<p class="docText">A common misconception is that use of the <tt>new</tt> and <tt>delete</tt> operators implies use of the heap (or freestore) memory, but this is not the case. The only implication in using the <tt>new</tt> operator is that a function called <tt>operator new</tt> will be called and that function will return a pointer to some memory. The standard, global <tt>operator new</tt> and <tt>operator delete</tt> do indeed allocate memory from the heap, but member <tt>operator new</tt> and <tt>operator delete</tt>
+ can do whatever they like. There is no restriction as to where that 
+memory comes from; it may come from a special heap, from a statically 
+allocated block, from the guts of a standard container, or from a block 
+of storage local to a function. The only limit to where the memory comes
+ from is your creativity and common sense. For example, <tt>Handle</tt> objects could be allocated from a static block like this:</p>
+		
+<div class="docText">
+  <pre class="preFixedHeight">struct rep {
+    enum { max = 1000 };
+    static rep *free; // head of freelist
+    static int num_used; // number of slots used
+    union {
+        char store[sizeof(Handle)];
+        rep *next;
+    };
+};
+static rep mem[ rep::max ]; // block of static storage
+void *Handle::operator new( size_t ) {
+    if( rep::free ) { // if something on freelist
+        rep *tmp = rep::free; // take from freelist
+        rep::free = rep::free-&gt;next;
+        return tmp;
+    }
+    else if( rep::num_used &lt; rep::max ) // if slots left
+        return &amp;mem[ rep::num_used++ ]; // return unused slot
+    else // otherwise, we're...
+        throw std::bad_alloc(); // ...out of memory!
+}
+void Handle::operator delete( void *p ) { // add to freelist
+    static_cast&lt;rep *&gt;(p)-&gt;next = rep::free;
+    rep::free = static_cast&lt;rep *&gt;(p);
+}
+
+
+					  </pre>
+</div>
+<br/>
+		
+<p class="docText">A
+ production-quality version of this implementation would take care to be
+ more robust in out-of-memory conditions, deal with types derived from <tt>Handle</tt> and arrays of <tt>Handle</tt>s, and so on, but this simple code nevertheless shows that <tt>new</tt> and <tt>delete</tt> don’t necessarily have to deal with heap memory.</p>
+		
+
+
+</body>
+</html>

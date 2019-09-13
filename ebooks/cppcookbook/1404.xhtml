@@ -1,0 +1,654 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 14.3. Parsing a Complex XML Document</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 14.3. Parsing a Complex XML Document</h3>
+
+<h4 class="docSection2Title" id="title-ID0EMABK">Problem</h4>
+<p class="docText">You have a collection of data stored in an XML document 
+
+
+that uses an internal DTD or XML
+Namespaces. You want to parse the document and turn the data it
+contains into a collection of C++ objects.</p>
+
+<h4 class="docSection2Title" id="title-ID0ENBBK">Solution</h4>
+<p class="docText">Use Xerces's implementation of the SAX2 API (the
+Simple API for XML, Version 2.0). First, derive a class from
+<tt>xercesc::ContentHandler</tt>; this class will receive
+notifications about the structure and content of your XML document as
+it is being parsed. Next, if you like, derive a class from
+<tt>xercesc::ErrorHandler</tt> to receive warnings and
+error notifications. Construct a parser of type
+<tt>xercesc::SAX2XMLReader</tt>, register instances of your
+handler classes using the parser's
+<tt>setContentHandler( )</tt> and <tt>setErrorHandler()</tt> methods. Finally, invoke the parser's
+<tt>parse( )</tt> method, passing the file pathname of your
+document as its argument.</p>
+<p class="docText">For example, suppose you want to parse the XML document
+<i>animals.xml</i> from Example 14-1
+and construct a <tt>std::vector</tt> of
+<tt>Animal</tt>s representing the animals listed in the
+document. (See Example 14-2 for the definition of the
+class <tt>Animal</tt>.) In Example 14-3, I
+showed how to do this using TinyXml. To make the problem more
+challenging, let's add namespaces
+to
+
+the document, as shown in Example 14-5.</p>
+<h5 class="docExampleTitle" id="title-ID0EKDBK">Example 14-5. List of circus animals, using XML Namespaces</h5><p></p><div class="box">
+<pre>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+
+&lt;!-- Feldman Family Circus Animals with Namespaces --&gt;
+
+&lt;ffc:animalList xmlns:ffc="http://www.feldman-family-circus.com"&gt;
+    &lt;ffc:animal&gt;
+        &lt;ffc:name&gt;Herby&lt;/ffc:name&gt;
+        &lt;ffc:species&gt;elephant&lt;/ffc:species&gt;
+        &lt;ffc:dateOfBirth&gt;1992-04-23&lt;/ffc:dateOfBirth&gt;
+        &lt;ffc:veterinarian name="Dr. Hal Brown" phone="(801)595-9627"/&gt;
+        &lt;ffc:trainer name="Bob Fisk" phone="(801)881-2260"/&gt;
+    &lt;/ffc:animal&gt;
+    
+    &lt;!-- etc. --&gt;
+
+&lt;/ffc:animalList&gt;</pre><br/>
+</div><p></p>
+<p class="docText">To parse this document with SAX2, define a
+<tt>ContentHandler</tt>, as shown in Example 14-6, and an <tt>ErrorHandler</tt>, as
+shown in Example 14-7. Then construct a
+<tt>SAX2XMLReader</tt>, register your handlers, and run the
+parser. This is illustrated in Example 14-8.</p>
+<h5 class="docExampleTitle" id="title-ID0ENEBK">Example 14-6. A SAX2 ContentHandler for parsing the document animals.xml</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;stdexcept&gt;                       // runtime_error
+#include &lt;vector&gt;
+#include &lt;xercesc/sax2/Attributes.hpp&gt;
+#include &lt;xercesc/sax2/DefaultHandler.hpp&gt; // Contains no-op 
+                                           // implementations of
+                                           // the various handlers
+#include "xerces_strings.hpp"              // Example 14-4
+#include "animal.hpp"
+
+using namespace std;
+using namespace xercesc;
+
+// Returns an instance of Contact based 
+// on the given collection of attributes
+Contact contactFromAttributes(const Attributes &amp;attrs)
+{
+    // For efficiency, store frequently used string 
+    // in static variables
+    static XercesString name = fromNative("name");
+    static XercesString phone = fromNative("phone");
+
+    Contact result;    // Contact to be returned.
+    const XMLCh* val;  // Value of name or phone attribute.
+
+    // Set Contact's name.
+    if ((val = attrs.getValue(name.c_str( ))) != 0) {
+        result.setName(toNative(val));
+    } else {
+        throw runtime_error("contact missing name attribute");
+    }
+
+    // Set Contact's phone number.
+    if ((val = attrs.getValue(phone.c_str( ))) != 0) {
+        result.setPhone(toNative(val));
+    } else {
+        throw runtime_error("contact missing phone attribute");
+    }
+
+    return result;
+}
+
+// Implements callbacks that receive character data and
+// notifications about the beginnings and ends of elements 
+class CircusContentHandler : public DefaultHandler {
+public:
+    CircusContentHandler(vector&lt;Animal&gt;&amp; animalList) 
+        : animalList_(animalList)
+        { }
+
+    // If the current element represents a veterinarian or trainer,
+    // use attrs to construct a Contact object for the current 
+    // Animal; otherwise, clear currentText_ in preparation for the 
+    // characters( ) callback
+    void startElement( 
+           const XMLCh *const uri,        // namespace URI
+           const XMLCh *const localname,  // tagname w/ out NS prefix
+           const XMLCh *const qname,      // tagname + NS pefix
+           const Attributes &amp;attrs )      // elements's attributes
+    {
+        static XercesString animalList = fromNative("animalList");
+        static XercesString animal = fromNative("animal");
+        static XercesString vet = fromNative("veterinarian");
+        static XercesString trainer = fromNative("trainer");
+        static XercesString xmlns = 
+            fromNative("http://www.feldman-family-circus.com");
+
+        // Check namespace URI
+        if (uri != xmlns)
+            throw runtime_error(
+                      string("wrong namespace uri: ") + toNative(uri)
+                  );
+        if (localname == animal) {
+            // Add an Animal to the list; this is the new
+            // "current Animal"
+            animalList_.push_back(Animal( ));
+        } else if (localname!= animalList) {
+            Animal&amp; animal = animalList_.back( );
+            if (localname == vet) {
+                // We've encountered a "veterinarian" element.
+                animal.setVeterinarian(contactFromAttributes(attrs));
+            } else if (localname == trainer) {
+                // We 've encountered a "trainer" element.
+                animal.setTrainer(contactFromAttributes(attrs));
+            } else {
+                // We've encountered a "name" , "species", or 
+                // "dateOfBirth" element. Its content will be supplied
+                // by the callback function characters( ).
+                currentText_.clear( );
+            }
+        }
+    }
+
+    // If the current element represents a name, species, or date
+    // of birth, use the text stored in currentText_ to set the
+    // appropriate property of the current Animal.
+    void endElement(          
+           const XMLCh *const uri,        // namespace URI
+           const XMLCh *const localname,  // tagname w/ out NS prefix
+           const XMLCh *const qname )     // tagname + NS pefix
+    {
+        static XercesString animalList = fromNative("animal-list");
+        static XercesString animal = fromNative("animal");
+        static XercesString name = fromNative("name");
+        static XercesString species = fromNative("species");
+        static XercesString dob = fromNative("dateOfBirth");
+
+        if (localname!= animal &amp;&amp; localname!= animalList) {
+            // currentText_ contains the content of the element 
+            // which has ended. Use it to set the current Animal's 
+            // properties.
+            Animal&amp; animal = animalList_.back( );
+            if (localname == name) {
+                animal.setName(toNative(currentText_));
+            } else if (localname == species) {
+                animal.setSpecies(toNative(currentText_));
+            } else if (localname == dob) {
+                animal.setDateOfBirth(toNative(currentText_));
+            } 
+        }
+    }
+    // Receives notifications when character data is encountered
+    void characters( const XMLCh* const chars, 
+                     const unsigned int length ) 
+    {
+        // Append characters to currentText_ for processing by
+        // the method endElement( )
+        currentText_.append(chars, length);
+    }
+private:
+    vector&lt;Animal&gt;&amp;  animalList_;
+    XercesString     currentText_;
+};
+
+					  </pre><br/>
+</div><p></p>
+<h5 class="docExampleTitle" id="title-ID0E3EBK">Example 14-7. A SAX2 ErrorHandler</h5><p></p><div class="box">
+<pre>#include &lt;stdexcept&gt; // runtime_error
+#include &lt;xercesc/sax2/DefaultHandler.hpp&gt;
+
+// Receives Error notifications.
+class CircusErrorHandler : public DefaultHandler {
+public: 
+    void warning(const SAXParseException&amp; e)
+    {
+        /* do nothing */
+    }
+    void error(const SAXParseException&amp; e)
+    {
+        throw runtime_error(toNative(e.getMessage( )));
+    }
+    void fatalError(const SAXParseException&amp; e) { error(e); }
+};</pre><br/>
+</div><p></p>
+<h5 class="docExampleTitle" id="title-ID0EFFBK">Example 14-8. Parsing the document animals.xml with the SAX2 API</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;exception&gt;
+#include &lt;iostream&gt;     // cout
+#include &lt;memory&gt;       // auto_ptr
+#include &lt;vector&gt;
+#include &lt;xercesc/sax2/SAX2XMLReader.hpp&gt;
+#include &lt;xercesc/sax2/XMLReaderFactory.hpp&gt;
+#include &lt;xercesc/util/PlatformUtils.hpp&gt;
+#include "animal.hpp"
+#include "xerces_strings.hpp"  // Example 14-4
+
+using namespace std;
+using namespace xercesc;
+
+// RAII utility that initializes the parser and frees resources
+// when it goes out of scope
+class XercesInitializer {
+public:
+    XercesInitializer( ) { XMLPlatformUtils::Initialize( ); }
+    ~XercesInitializer( ) { XMLPlatformUtils::Terminate( ); }
+private:
+    // Prohibit copying and assignment
+    XercesInitializer(const XercesInitializer&amp;);
+    XercesInitializer&amp; operator=(const XercesInitializer&amp;);
+};
+
+int main( )
+{
+    try {
+        vector&lt;Animal&gt; animalList;
+
+        // Initialze Xerces and obtain parser
+        XercesInitializer        init; 
+        auto_ptr&lt;SAX2XMLReader&gt;  ]
+            parser(XMLReaderFactory::createXMLReader( ));
+
+        // Register handlers
+        CircusContentHandler     content(animalList);
+        CircusErrorHandler       error;
+        parser-&gt;setContentHandler(&amp;content);
+        parser-&gt;setErrorHandler(&amp;error);
+
+        // Parse the XML document
+        parser-&gt;parse("animals.xml");
+       
+        // Print animals' names
+        for ( vector&lt;Animal&gt;::size_type i = 0,
+                                        n = animalList.size( );
+              i &lt; n;
+              ++i )
+        {
+            cout &lt;&lt; animalList[i] &lt;&lt; "\n";
+        }
+    } catch (const SAXException&amp; e) {
+        cout &lt;&lt; "xml error: " &lt;&lt; toNative(e.getMessage( )) &lt;&lt; "\n";
+        return EXIT_FAILURE;
+    } catch (const XMLException&amp; e) {
+        cout &lt;&lt; "xml error: " &lt;&lt; toNative(e.getMessage( )) &lt;&lt; "\n";
+        return EXIT_FAILURE;
+    } catch (const exception&amp; e) {
+        cout &lt;&lt; e.what( ) &lt;&lt; "\n";
+        return EXIT_FAILURE;
+    }
+}
+
+					  </pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0EUFBK">Discussion</h4>
+<p class="docText">Some XML parsers parse an XML document and return it to the user as a
+complex C++ object. The TinyXml parser and the W3C DOM parser that
+you'll see in the next recipe both work this way.
+The SAX2 parser, by contrast, uses a collection of callback function
+to deliver information about an XML document to the user as the
+document is being parsed. The callback functions are grouped into
+several handler interfaces: a <tt>ContentHandler</tt>
+receives notifications about an XML document's
+elements, attributes, and text, an <tt>ErrorHandler</tt>
+receives warnings and error notifications, and a
+<tt>DTDHandler</tt> receives notifications about an XML
+document's DTD.</p>
+<p class="docText">Designing a parser around a collection of callback function has
+several important advantages. For example, it makes it possible to
+parse documents that are too large to fit into memory. In addition,
+it can save processing time by avoiding the numerous dynamic
+allocations needed to construct nodes in an internal representation
+of an XML document, and by allowing the user to construct her own
+representation of a document's data directly,
+instead of having to traverse the document tree as I did in Example 14-3.</p>
+<p class="docText">Example 14-8 is pretty straightforward: I obtain a
+SAX2 parser, register a ContentHandler and ErrorHandler, parse the
+document <tt>animals.xml</tt>, and print the list of
+<tt>Animal</tt>s populated by the
+<tt>ContentHandler</tt>. There are two interesting points:
+First, the function <tt>XMLReaderFactory::createXMLReader()</tt> returns a dynamically allocated instance of
+<tt>SAX2XMLReader</tt> that must be freed explicitly by the
+user; I use a <tt>std::auto_ptr</tt> for this purpose to
+make sure that the parser is deleted even in the event of an
+exception. Second, the Xerces framework must be initialized using
+<tt>xercesc::XMLPlatformUtils::Initialize( )</tt> and be
+cleaned up using <tt>xercesc::XMLPlatformUtils::Terminate(
+)</tt>. I encapsulate this initialization and cleanup in a class
+called <tt>XercesInitializer</tt>, which calls
+<tt>XMLPlatformUtils::Initialize( )</tt> in its constructor
+and <tt>XMLPlatformUtils::Terminate( )</tt> in its
+destructor. This ensures that <tt>Terminate( )</tt> is
+called even if an exception is thrown. This is an example of the
+<span class="docEmphasis">Resource Acquisition Is
+Initialization</span>
+ (RAII)
+technique demonstrated in Example 8-3.</p>
+<p class="docText">Let's look at how the class
+<tt>CircusContentHandler</tt> from Example 14-6 implements the SAX2
+<tt>ContentHandler</tt> interface. The SAX 2 parser calls
+the method <tt>startElement( )</tt> each time it encounters
+the opening tag of an element. If the element has an associated
+namespace, the first argument, <tt>uri</tt>, contains the
+element's namespace URI, and the second argument,
+<tt>localname</tt>, contains the portion of the
+element's tag name following its namespace prefix.
+If the element has no associated namespace, these two arguments are
+empty strings. The third argument contains the
+element's tag name, if the element has no associated
+namespace; if the element does have an associated namespace, this
+argument may contain the element's tag name as it
+appears in the document being parsed, but it may also be an empty
+string. The fourth argument is an instance of the class
+<tt>Attributes</tt>, which represents the
+element's collection of attributes.</p>
+<p class="docText">In the implementation of <tt>startElement( )</tt> in Example 14-6, I ignore the <tt>animalList</tt>
+element. When I encounter an <tt>animal</tt> element, I add
+a new <tt>Animal</tt> to its list of
+animals—let's call this
+<tt>Animal</tt> the <i>current</i>
+<tt>Animal</tt>—and delegate the job of setting the
+<tt>Animal</tt>'s properties to the
+handlers for other elements. When I encounter a
+<tt>veterinarian</tt> or <tt>trainer</tt>
+element, I call the function <tt>contactFromAttributes</tt>
+to construct an instance of <tt>Contact</tt> from the
+element's collection of attributes, and then use
+this <tt>Contact</tt> to set the current
+<tt>Animal</tt>'s veterinarian or trainer
+property. When I encounter a <tt>name</tt>,
+<tt>species</tt>, or <tt>dateOfBirth</tt>
+element, I clear the member variable <tt>currentText_</tt>,
+which will be used to store the element's textual
+content.</p>
+<p class="docText">The SAX2 parser calls the method <tt>characters(
+)</tt>
+ to deliver the character data contained by
+an element. The parser is allowed to deliver an
+element's character in a series of calls to
+<tt>characters( )</tt>; until an element's
+closing tag is encountered, there's no guarantee
+that all its character data has been delivered. Consequently, in the
+implementation of <tt>characters( )</tt>, I simply append
+the provided characters to the member variable
+<tt>currentText_</tt>, which I use to set the current
+<tt>Animal</tt>'s name, species, or date
+of birth as soon as a closing <tt>name</tt>,
+<tt>species</tt>, or <tt>dateOfBirth</tt> tag is
+encountered.</p>
+<p class="docText">The SAX2 parser calls the method <tt>endElement(
+)</tt>
+ each time it leaves an element. Its
+arguments have the same interpretation as the first three arguments
+to <tt>startElement()</tt>
+. In the implementation of
+<tt>endElement( )</tt> in Example 14-6, I
+ignore all elements other than <tt>name</tt>,
+<tt>species</tt>, and <tt>dateOBirth</tt>. When a
+callback corresponding to one of these elements
+occurs—signaling that the parser is just leaving the
+element—I use the character data stored in
+<tt>currentText_</tt> to set the current
+<tt>Animal</tt>'s name, species, or date
+of birth.</p>
+<p class="docText">Several important features of SAX2 are not illustrated in Examples
+Example 14-6, Example 14-7, and Example 14-8. For example, the class
+<tt>SAX2XMLReader</tt> provides an overload of the
+<tt>method</tt>
+<tt>parse( )</tt> taking an
+instance of <tt>xercesc::InputSource</tt> as an argument
+instead of a C-style string. <tt>InputSource</tt> is an
+abstract class encapsulating a source of character data; its concrete
+subclasses, including <tt>xercesc::MemBufInputSource</tt>
+and <tt>xercesc::URLInputSource</tt>, allow the SAX2 parser
+to parse XML documents stored in locations other than the local
+filesystem.</p>
+<p class="docText">Furthermore, the <tt>ContentHandler</tt> interface contains
+many additional methods, such as <tt>startDocument( )</tt>
+and <tt>endDocmuent( )</tt>, which signal the start and end
+of the XML document, and <tt>setLocator( )</tt>, which
+allows you to specify a <tt>Locator</tt> object which keeps
+track of the current position in the file being parsed. There are
+also other handler interfaces, including
+<tt>DTDHandler</tt> and
+<tt>EntityResolver--</tt>from the core SAX 2.0
+specification—and <tt>DeclarationHandler</tt> and
+<tt>LexicalHandler--</tt>from the standardized extensions
+to SAX 2.0.</p>
+<p class="docText">It's also possible for a single class to implement
+several handler interfaces. The class
+<tt>xercesc::DefaultHandler</tt> makes this easy, because
+it derives from all the handler interfaces and provides no-op
+implementations of their virtual functions. Consequently, I could
+have added the methods from <tt>CircusErrorHandler</tt> to
+<tt>CircusContentHandler</tt>, and modified Example 14-8 as follows:</p>
+<pre>// Register handlers
+CircusContentHandler handler(animalList);
+parser-&gt;setContentHandler(&amp;handler);
+parser-&gt;setErrorHandler(&amp;handler);</pre><br/>
+<p class="docText">There's one last feature of Example 14-8 you should notice:
+<tt>CircusContentHandler</tt> makes no attempt to verify
+that the document being parsed has the correct structure—for
+instance, that its root is an <tt>animalList</tt> element
+or that all the children of the root are <tt>animal</tt>
+elements. This is in sharp contrast with Example 14-3. For example, the <tt>main( )</tt>
+function in Example 14-3 verifies that the top-level
+element is an <tt>animalList</tt>, and the function
+<tt>nodeToAnimal( )</tt> verifies that its argument
+represents an <tt>animal</tt> element with exactly five
+child elements of type <tt>name</tt>,
+<tt>species</tt>, <tt>dateOfBirth</tt>,
+<tt>veterinarian</tt>, and <tt>trainer</tt>.</p>
+<p class="docText">It's possible to modify Example 14-6
+so that it performs this type of error checking. The
+<tt>ContentHandler</tt> in Example 14-9,
+for instance, verifies that the document's root
+element is an <tt>animalList</tt>, that its children are of
+type <tt>animal</tt>, and the children of an
+<tt>animal</tt> element don't contain
+other elements. It works by maintaining three
+<tt>boolean</tt> flags,
+<tt>parsingAnimalList_</tt>,
+<tt>parsingAnimal_</tt>, and
+<tt>parsingAnimalChild_</tt>, which record the region of
+the document that is being parsed at any given time. The methods
+<tt>startElement( )</tt> and <tt>endElement()</tt> simply update these flags and check them for consistency,
+delegating the task of updating the current <tt>Animal</tt>
+to the helper methods <tt>startAnimalChild( )</tt> and
+<tt>endElementChild( )</tt>, whose implementations are very
+similar to the implementations of <tt>startElement( )</tt>
+and <tt>endElement( )</tt> in Example 14-6.</p>
+<h5 class="docExampleTitle" id="title-ID0ETQBK">Example 14-9. A SAX2 ContentHandler for animals.xml that checks the document's structure</h5><p></p><div class="box">
+<pre class="preFixedHeight">// Implements callbacks which receive character data and
+// notifications about the beginnings and ends of elements
+class CircusContentHandler : public DefaultHandler {
+public:
+    CircusContentHandler(vector&lt;Animal&gt;&amp; animalList) 
+        : animalList_(animalList),   // list to be populated
+          parsingAnimalList_(false), // parsing state
+          parsingAnimal_(false),     // parsing state
+          parsingAnimalChild_(false) // parsing state
+        { }
+
+    // Receives notifications from the parser each time 
+    // beginning of an element is encountered
+    void startElement( 
+             const XMLCh *const uri,       // Namespace uri
+             const XMLCh *const localname, // simple tag name
+             const XMLCh *const qname,     // qualified tag name
+             const Attributes &amp;attrs )     // Collection of attributes
+    {
+        static XercesString animalList = fromNative("animalList");
+        static XercesString animal = fromNative("animal");
+        static XercesString xmlns = 
+            fromNative("http://www.feldman-family-circus.com");
+
+        // Validate the namespace uri
+        if (uri != xmlns)
+            throw runtime_error(
+                      string("wrong namespace uri: ") + toNative(uri)
+                  );
+
+        // (i) Update the flags parsingAnimalList_, parsingAnimal_, 
+        //     and parsingAnimalChild_, which indicate where we are
+        //     within the document 
+        // (ii) verify that the elements are correctly
+        //      nested; 
+        // (iii) Delegate most of the work to the method 
+        //       startAnimalChild( )
+        if (!parsingAnimalList_) { 
+            // We've just encountered the document root
+            if (localname == animalList) {     
+                parsingAnimalList_ = true; // Update parsing state.
+            } else {
+                // Incorrect nesting
+                throw runtime_error(
+                          string("expected 'animalList', got ") + 
+                          toNative(localname )
+                      );
+            }
+        } else if (!parsingAnimal_) {
+            // We've just encountered a new animal
+            if (localname == animal) {
+                parsingAnimal_ = true;           // Update parsing state.
+                animalList_.push_back(Animal( )); // Add an Animal to the list.
+            } else {
+                // Incorrect nesting
+                throw runtime_error(
+                          string("expected 'animal', got ") + 
+                          toNative(localname )
+                      );
+            }
+        } else {
+            // We're in the middle of parsing an animal element.
+            if (parsingAnimalChild_) {
+                // Incorrect nesting
+                throw runtime_error("bad animal element"); 
+            } 
+            // Update parsing state.
+            parsingAnimalChild_ = true; 
+
+            // Let startAnimalChild( ) do the real work
+            startAnimalChild(uri, localname, qname, attrs); 
+        }
+    }
+
+    
+    void endElement( 
+             const XMLCh *const uri,       // Namespace uri
+             const XMLCh *const localname, // simple tag name
+             const XMLCh *const qname )    // qualified tag name
+    {
+        static XercesString animalList = fromNative("animal-list");
+        static XercesString animal = fromNative("animal");
+
+        // Update the flags parsingAnimalList, parsingAnimal_,
+        // and parsingAnimalChild_; delegate most of the work
+        // to endAnimalChild( )
+        if (localname == animal) {
+            parsingAnimal_ = false;
+        } else if (localname == animalList) {
+            parsingAnimalList_ = false;
+        } else {
+            endAnimalChild(uri, localname, qname);
+            parsingAnimalChild_ = false;
+        }
+    }
+
+    // Receives notifications when character data is encountered
+    void characters(const XMLCh* const chars, const unsigned int length) 
+    {
+        // Append characters to currentText_ for processing by
+        // the method endAnimalChild( )
+        currentText_.append(chars, length);
+    }
+private:
+    // If the current element represents a veterinarian or trainer,
+    // use attrs to construct a Contact object for the current 
+    // Animal; otherwise, clear currentText_ in preparation for the 
+    // characters( ) callback
+    void startAnimalChild(
+             const XMLCh *const uri,       // Namespace uri
+             const XMLCh *const localname, // simple tag name
+             const XMLCh *const qname,     // qualified tag name
+             const Attributes &amp;attrs )     // Collection of attributes
+    {
+        static XercesString vet = fromNative("veterinarian");
+        static XercesString trainer = fromNative("trainer");
+
+        Animal&amp; animal = animalList_.back( );
+        if (localname == vet) {
+            // We've encountered a "veterinarian" element.
+            animal.setVeterinarian(contactFromAttributes(attrs));
+        } else if (localname == trainer) {
+            // We've encountered a "trainer" element.
+            animal.setTrainer(contactFromAttributes(attrs));
+        } else {
+            // We've encountered a "name" , "species", or 
+            // "dateOfBirth" element. Its content will be supplied
+            // by the callback function characters( ).
+            currentText_.clear( );
+        }
+    }
+
+    // If the current element represents a name, species, or date
+    // of birth, use the text stored in currentText_ to set the
+    // appropriate property of the current Animal.
+    void endAnimalChild(
+             const XMLCh *const uri,       // Namespace uri
+             const XMLCh *const localname, // simple tag name
+             const XMLCh *const qname )    // qualified tag name
+    {
+        static XercesString name = fromNative("name");
+        static XercesString species = fromNative("species");
+        static XercesString dob = fromNative("dateOfBirth");
+
+        // currentText_ contains the content of the element which has
+        // just ended. Use it to set the current Animal's properties.
+        Animal&amp; animal = animalList_.back( );
+        if (localname == name) {
+            animal.setName(toNative(currentText_));
+        } else if (localname == species) {
+            animal.setSpecies(toNative(currentText_));
+        } else if (localname == dob) {
+            animal.setDateOfBirth(toNative(currentText_));
+        } 
+    }
+
+    vector&lt;Animal&gt;&amp;  animalList_;         // list to be populated
+    bool             parsingAnimalList_;  // parsing state
+    bool             parsingAnimal_;      // parsing state
+    bool             parsingAnimalChild_; // parsing state
+    XercesString     currentText_;        // character data of the
+                                          // current text node
+};
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Comparing Example 14-9 with Example 14-6, you can see how complex it can be to verify a
+document's structure using callbacks.
+What's more, Example 14-6 still
+doesn't perform as much checking as Example 14-3: it doesn't verify that the
+children of an animal element appear in the correct order, for
+instance. Fortunately, there are much easier ways to verify a
+document's 
+
+
+structure using SAX2, as
+you'll see in the Recipe 14.5 and Recipe 14.6.</p>
+
+<h4 class="docSection2Title" id="title-ID0EOSBK">See Also</h4>
+<p class="docText">Recipe 14.1, Recipe 14.4,
+Recipe 14.5, and Recipe 14.6</p>
+</div>
+</body>
+</html>

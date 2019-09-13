@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 9.3. Making an Initializer List Exception-Safe</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 9.3. Making an Initializer List Exception-Safe</h3>
+
+<h4 class="docSection2Title" id="title-ID0E6LCI">Problem</h4>
+<p class="docText">You have to initialize
+
+ your data members in
+the constructor's initializer list, and, therefore,
+cannot use the approach described in Recipe 9.2.</p>
+
+<h4 class="docSection2Title" id="title-ID0E5MCI">Solution</h4>
+<p class="docText">Use a special syntax for try and catch that catches exceptions
+thrown in the initializer list. Example 9-3 shows
+how.</p>
+<h5 class="docExampleTitle" id="title-ID0EPNCI">Example 9-3. Handling exceptions in an initializer</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;iostream&gt;
+#include &lt;stdexcept&gt;
+
+using namespace std;
+
+// Some device
+class Device {
+public:
+   Device(int devno) {
+      if (devno == 2)
+         throw runtime_error("Big problem");
+   }
+  ~Device( ) {}
+private:
+   Device( );
+};
+
+class Broker {
+  
+public:
+   Broker (int devno1, int devno2)
+      try : dev1_(Device(devno1)),   // Create these in the initializer
+            dev2_(Device(devno2)) {} // list.
+      catch (...) {
+         throw; // Log the message or translate the error here (see
+                // the discussion)
+      }
+  ~Broker( ) {}
+
+private:
+   Broker( );
+   Device dev1_;
+   Device dev2_;
+};
+
+int main( ) {
+
+   try {
+      Broker b(1, 2);
+   }
+   catch(exception&amp; e) {
+      cerr &lt;&lt; "Exception: " &lt;&lt; e.what( ) &lt;&lt; endl;
+   }
+}
+
+					  </pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0EYNCI">Discussion</h4>
+<p class="docText">The syntax for handling exceptions in initializers looks a little
+different from the traditional C++ syntax because it uses the
+<tt>try</tt> block as the constructor body. The critical
+part of Example 9-3 is the <tt>Broker</tt>
+constructor:</p>
+<pre>Broker (int devno1, int devno2)   // Constructor header is the same
+   try :                          // Same idea as a try {...} block
+         dev1_(Device(devno1)),   // The initializers follow
+         dev2_(Device(devno2)) {
+       // This is the constructor body.
+   }
+   catch (...) {                  // The catch handler is *after*
+      throw;                      // the constructor body
+   }</pre><br/>
+<p class="docText"><tt>try</tt> and <tt>catch</tt> behave as you
+would expect; the only difference from the usual syntax of a
+<tt>try</tt> block is that when you want to catch
+exceptions thrown in an initializer list, <tt>try</tt> is
+followed by a colon, then the initializer list, and
+<span class="docEmphasis">then</span> the <tt>try</tt> block, which is
+also the body of the constructor. If anything is thrown in either the
+initializer list or the constructor body, the
+<tt>catch</tt> handler that follows the constructor body
+will get it. You can still embed additional
+<tt>try</tt>/<tt>catch</tt> pairs in the body of
+the constructor if you have to, but nested
+<tt>try</tt>/<tt>catch</tt> blocks usually get
+ugly.</p>
+<p class="docText">In addition to moving the member initialization to the initializer
+list, Example 9-3 is different from Example 9-2 for another reason. The
+<tt>Device</tt> object members aren't
+created on the heap this time with <tt>new</tt>. I did this
+to illustrate a couple of points regarding safety and member objects.</p>
+<p class="docText">First, using stack instead of heap objects lets the compiler provide
+its built-in safety. If any of the objects in the initializer list
+throws an exception during construction, its memory is deallocated
+automatically as the stack unwinds in the exception-handling process.
+Second, and even better, any other objects that have already been
+successfully constructed are destroyed without you having to catch
+the exception and <tt>delete</tt> them explicitly.</p>
+<p class="docText">But maybe you require or prefer heap members. Consider an approach
+like the original <tt>Broker</tt> class in Example 9-2. You can just initialize your pointers in the
+initializer list, right?</p>
+<pre class="preFixedHeight">class BrokerBad {
+  
+public:
+   BrokerBad (int devno1, int devno2)
+      try : dev1_(<b>new Device(devno1)</b>),   // Create heap objects with
+            dev2_(<b>new Device(devno2)</b>) {} // initializers
+      catch (...) {
+         if (dev1_) {
+            delete dev1_;                // Shouldn't compile, and
+            delete dev2_;                // is a bad approach if it
+         }                               // does
+         throw; // Rethrow the same exception
+      }
+  ~BrokerBad( ) {
+     delete dev1_;
+     delete dev2_;
+  }
+
+private:
+   BrokerBad( );
+   <span class="docEmphBold">Device* dev1_;</span>
+					<span class="docEmphBold">Device* dev2_;</span>
+};
+
+					  </pre><br/>
+<p class="docText">No. There are two problems here. To begin with, this should not be
+allowed by your compiler because the catch block of a constructor
+should not allow program code to access member variables—at
+that point, they don't exist. Second, even if your
+compiler permits it, it is a bad idea. Consider the case where the
+construction of <tt>dev1_</tt>'s object
+throws an exception. This is the code that will be executed in the
+catch handler:</p>
+<pre>catch (...) {
+   if (dev1_) {     // What value does this contain?
+      delete dev1_; // Now you are deleting an undefined value
+      delete dev2_;
+   }
+   throw; // Rethrow the same exception
+}</pre><br/>
+<p class="docText">If an exception is thrown during the construction of
+<tt>dev1_</tt>, then <tt>new</tt>
+doesn't get a chance to return the address to the
+newly allocated memory and <tt>dev1_</tt> is unchanged.
+Then what does it contain? It's undefined, because
+it was never initialized with a value. As a result, when you call
+<tt>delete</tt>
+<tt>dev1_</tt>, you will probably
+be deleting a garbage pointer address, which means your program will
+crash, you will get fired, and you will have to live with that shame
+for the rest of your life.</p>
+<p class="docText">To avoid such a life-altering fiasco, initialize your pointers to
+<tt>NULL</tt> in the initializer list, and then create the
+heap objects in the constructor. This way it's easy
+to catch anything that goes wrong and clean up the mess, since
+calling <tt>delete</tt> on <tt>NULL</tt> pointers
+is okay.</p>
+<pre>BrokerBetter (int devno1, int devno2) :
+dev1_(NULL), dev2_(NULL) {
+   try {
+      dev1_ = new Device(devno1);
+      dev2_ = new Device(devno2);
+   }
+   catch (...) {
+      delete dev1_; // This will always be valid
+      throw;
+   }
+}</pre><br/>
+<p class="docText">So, to summarize, if you must use pointer members, initialize them to
+<tt>NULL</tt> in the initializer list, then allocate their
+objects in the constructor using a
+<tt>try</tt>/<tt>catch</tt> block. You can
+deallocate any memory in the catch handler. However, if you can work
+with automatic members, construct 
+
+them in the initializer list and use
+the special <tt>try</tt>/<tt>catch</tt> syntax to
+deal with any exceptions.</p>
+
+<h4 class="docSection2Title" id="title-ID0EKSCI">See Also</h4>
+<p class="docText">Recipe 9.2</p>
+</div>
+</body>
+</html>

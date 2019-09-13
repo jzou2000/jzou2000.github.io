@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 12.3. Notifying One Thread from Another</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 12.3. Notifying One Thread from Another</h3>
+
+<h4 class="docSection2Title" id="title-ID0EUMAK">Problem</h4>
+<p class="docText">You are using a 
+
+
+
+pattern where one
+thread (or group of threads) does something and it needs to let
+another thread (or group of threads) know about it. You may have a
+master thread that is handing out work to slave threads, or you may
+use one group of threads to populate a queue and another to remove
+the data from it and do something useful.</p>
+
+<h4 class="docSection2Title" id="title-ID0E2NAK">Solution</h4>
+<p class="docText">Use <tt>mutex</tt> and <tt>condition</tt>
+objects, declared in <i>boost/thread/mutex.hpp</i> and
+<i>boost/thread/condition.hpp</i>. You can create a
+condition for each situation you want threads to wait for, and notify
+any waiting threads on the condition. Example 12-4
+shows how to use signaling in a
+master/slave
+
+threading model.</p>
+<h5 class="docExampleTitle" id="title-ID0EZOAK">Example 12-4. Signaling between threads</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;iostream&gt;
+#include &lt;boost/thread/thread.hpp&gt;
+#include &lt;boost/thread/condition.hpp&gt;
+#include &lt;boost/thread/mutex.hpp&gt;
+#include &lt;list&gt;
+#include &lt;string&gt;
+
+class Request { /*...*/ };
+
+// A simple job queue class; don't do this, use std::queue
+template&lt;typename T&gt;
+class JobQueue {
+public:
+   JobQueue( ) {}
+  ~JobQueue( ) {}
+
+   void submitJob(const T&amp; x) {
+      boost::mutex::scoped_lock lock(mutex_);
+      list_.push_back(x);
+      workToBeDone_.notify_one( );
+   } 
+
+   T getJob( ) {
+      boost::mutex::scoped_lock lock(mutex_);
+
+      workToBeDone_.wait(lock); // Wait until this condition is
+                                // satisfied, then lock the mutex
+      T tmp = list_.front( );
+      list_.pop_front( );
+      return(tmp);
+   }
+
+private:
+   std::list&lt;T&gt; list_;
+   boost::mutex mutex_;
+   boost::condition workToBeDone_;
+};
+
+JobQueue&lt;Request&gt; myJobQueue;
+
+void boss( ) {
+   for (;;) {
+      // Get the request from somewhere
+      Request req;
+      myJobQueue.submitJob(req);
+   }
+}
+
+void worker( ) {
+   for (;;) {
+      Request r(myJobQueue.getJob( ));
+      // Do something with the job...
+   }
+}
+
+int main( ) {
+   boost::thread thr1(boss);
+   boost::thread thr2(worker);
+   boost::thread thr3(worker);
+
+   thr1.join( );
+   thr2.join( );
+   thr3.join( );
+}
+
+					  </pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0ECPAK">Discussion</h4>
+<p class="docText">A condition object uses a <tt>mutex</tt>, and lets you wait
+for a situation other than its becoming unlocked. Consider Example 12-4, which is a modified version of the
+<tt>Queue</tt> class presented in Example 12-2. I have modified <tt>Queue</tt> to
+be a specific kind of queue, namely a <tt>JobQueue</tt>,
+where objects representing jobs are submitted by a master thread and
+are retrieved by slave threads.</p>
+<p class="docText">The most important change for the
+<tt>JobQueue</tt>
+
+class is the <tt>condition</tt> member variable
+<tt>workToBeDone_</tt>. This is a condition that indicates
+whether or not there is work in the queue. When a thread wants to
+retrieve an element from the job queue, it calls
+<tt>getJob</tt>, which tries to acquire a lock on the mutex
+and then waits for the new condition with the following lines:</p>
+<pre>boost::mutex::scoped_lock lock(mutex_);
+workToBeDone_.wait(lock);</pre><br/>
+<p class="docText">The first line locks the mutex in the usual
+
+
+manner. The second line then
+<span class="docEmphasis">unlocks</span> the mutex and waits, or goes to sleep,
+until the condition is met. The unlocking of the mutex allows other
+threads to use that mutex—one of them might need it to set up
+the condition we are waiting for—otherwise, other threads would
+be unable to lock the mutex while one thread was waiting on the
+condition.</p>
+<p class="docText">In <tt>submitJob</tt>, after the job has been added to the
+internal list, I added the following line:</p>
+<pre>workToBeDone_.notify_one( );</pre><br/>
+<p class="docText">This "satisfies" the condition that
+<tt>getJob</tt> is waiting for. Technically, this means
+that if there are any threads who have called <tt>wait</tt>
+on this condition, that one of them is put in a run state. In
+<tt>getJob</tt>, that means that execution continues at the
+following line:</p>
+<pre>workToBeDone_.wait(lock);</pre><br/>
+<p class="docText">But not just yet. <tt>wait</tt> does two things: it waits
+until someone calls <tt>notify_one</tt> or
+<tt>notify_all</tt> on the condition that
+it's waiting on, then it tries to lock the mutex
+it's associated with. So what actually happens when
+<tt>submitJob</tt> calls <tt>notify_all</tt> is
+that the waiting thread is put in a run state and the next thing it
+does is try to lock the mutex that <tt>submitJob</tt> still
+has locked, so it goes back into a wait state until
+<tt>submitJob</tt> is complete. Thus,
+<tt>condition::wait</tt> requires that the mutex be locked
+when you call it, at which point it is unlocked, then locked again
+when the condition is met.</p>
+<p class="docText">Notify all threads that are waiting for some condition to be true by
+calling <tt>notify_all</tt>. This works the same way as
+<tt>notify_one</tt>, except that all threads that are
+waiting on the condition are changed to a run state. They all try and
+acquire the next lock though, so what happens after that depends on
+the kind of mutex and the type of locks used.</p>
+<p class="docText">A condition gives you something subtle that you
+don't get when you are using mutexes and locks
+alone. Consider the case of the <tt>Queue</tt> class
+presented earlier. Threads waiting to <tt>dequeue</tt>
+something wait until they can acquire a write lock, then pop the next
+item off the queue. This may appear to work fine without any sort of
+signaling mechanism, but does it really? What about when the queue is
+empty? You have a few choices for how you implement
+<tt>dequeue</tt> if you are waiting for a condition to
+become true: acquire the lock; check to see if there are items in the
+queue or not, if not, return; use another mutex that is locked when
+the queue is empty and unlocked when it has data (not a good idea);
+or return a special value when the queue is empty. These are either
+problematic or inefficient. If you simply return when the queue is
+empty by throwing an exception or returning a special value, then
+your clients have to keep checking to see when something arrives.
+This is a needless drain on resources.</p>
+<p class="docText">A <tt>condition</tt> lets consumer threads sleep so the
+processor can do something else while a condition is not met. Imagine
+a web server that uses a pool of worker threads to handle incoming
+requests. It is far better to have child threads in a wait state when
+there is no activity then to have them looping, or 
+
+
+
+sleeping and waking
+up occasionally to check the queue.</p>
+</div>
+</body>
+</html>

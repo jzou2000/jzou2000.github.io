@@ -1,0 +1,352 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Smart Pointer Template Classes</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Smart Pointer Template Classes</h3>
+<p class="docText">A <span class="docEmphasis">smart pointer</span>
+ is a class object that acts like a pointer but has additional features.
+ Here we’ll look at three smart pointer templates that can help with 
+managing the use of dynamic memory allocation. Let’s begin by taking a 
+look at what might be needed and how it can be accomplished. Consider 
+the following function:</p>
+<div class="docText"><pre>void remodel(std::string &amp; str)
+{
+    std::string * ps = new std::string(str);
+    ...
+    str = ps;
+    return;
+}</pre></div><br/>
+<p class="docText">You probably see its flaw. Each
+ time the function is called, it allocates memory from the heap but 
+never frees the memory, thus creating a memory leak. You also know the 
+solution—just remember to free the allocated memory by adding the 
+following statement just before the <tt>return</tt> statement:</p>
+<div class="docText"><pre>delete ps;</pre></div><br/>
+<p class="docText">However, a solution 
+involving the phrase “just remember to” is seldom the best solution. 
+Sometimes you won’t remember. Or you will remember but accidentally 
+remove or comment out the code. And even if you do remember, there can 
+still be problems. Consider the following variation:</p>
+<div class="docText"><pre>void remodel(std::string &amp; str)
+{
+    std::string * ps = new std::string(str);
+    ...
+    if (weird_thing())
+        throw exception();
+    str = *ps;
+    delete ps;
+    return;
+}</pre></div><br/>
+<p class="docText">If the exception is thrown, the <tt>delete</tt> statement isn’t reached, and again there is a memory leak.</p>
+<p class="docText">You can fix that oversight, as illustrated in Chapter 14,
+ “Reusing Code in C++,” but it would be nice if there were a neater 
+solution. Let’s think about what is needed. When a function such as <tt>remodel()</tt>
+ terminates, either normally or by throwing an exception, local 
+variables are removed from the stack memory—so the memory occupied by 
+the pointer <tt>ps</tt> is freed. It would be nice if, in addition, the memory pointed to by <tt>ps</tt> was freed. If <tt>ps</tt> had a destructor, that destructor could free the pointed-to memory when <tt>ps</tt> expires. Thus, the problem with <tt>ps</tt>
+ is that it is just an ordinary pointer and not a class object having a 
+destructor. If it were an object, you could have its destructor delete 
+the pointed-to memory when the object expires. And that is the idea 
+behind <tt>auto_ptr</tt>, <tt>unique_ptr</tt>, and <tt>shared_ptr</tt>. The <tt>auto_ptr</tt> template is the C++98 solution. C++11 deprecates <tt>auto_ptr</tt> and provides the other two as alternatives. However, although deprecated, <tt>auto_ptr</tt> has been used for years and may be your only choice if your compiler doesn’t support the other two.</p>
+
+<h4 class="docSection2Title" id="title-ID0EPDGK">Using Smart Pointers</h4>
+<p class="docText">These three smart pointer templates (<tt>auto_ptr</tt>, <tt>unique_ptr</tt>, and <tt>shared_ptr</tt> ) each defines a pointer-like object intended to be assigned an address obtained (directly or indirectly) by <tt>new</tt>. When the smart pointer expires, its destructor uses <tt>delete</tt> to free the memory. Thus, if you assign an address returned by <tt>new</tt>
+ to one of these objects, you don’t have to remember to free the memory 
+later; it will be freed automatically when the smart pointer object 
+expires. Figure 16.2 illustrates the behavioral difference between <tt>auto_ptr</tt> and a regular pointer. The <tt>shared_ptr</tt> and <tt>unique_ptr</tt> share the same behavior in this situation.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 16.2. A regular pointer versus <tt>auto_ptr</tt>.</h5>
+<p class="docText">
+<img alt="" border="0" height="583" id="" src="Images/getfile-48.jpg" width="354"/></p>
+</center><p></p><br/>
+<p class="docText">To create one of these smart pointer objects, you include the <tt>memory</tt>
+ header file, which includes the template definitions. Then you use the 
+usual template syntax to instantiate the kind of pointer you require. 
+The <tt>auto_ptr</tt> template, for instance, includes the following constructor:</p>
+<div class="docText"><pre>template&lt;class X&gt; class auto_ptr {
+public:
+    explicit auto_ptr(X* p =0) throw();
+...};</pre></div><br/>
+<p class="docText">(The <tt>throw()</tt> notation, recall, means this constructor doesn’t throw an exception. Like <tt>auto_ptr</tt>, it is deprecated.) Thus, asking for an <tt>auto_ptr</tt> object of type <tt>X</tt> gives you an <tt>auto_ptr</tt> object that points to type <tt>X</tt>:</p>
+<div class="docText"><pre>auto_ptr&lt;double&gt; pd(new double);  // pd an auto_ptr to double
+                                  // (use in place of double * pd)
+auto_ptr&lt;string&gt; ps(new string);  // ps an auto_ptr to string
+                                  // (use in place of string * ps)</pre></div><br/>
+<p class="docText">Here <tt>new double</tt> is a pointer returned by <tt>new</tt> to a newly allocated chunk of memory. It is the argument to the <tt>auto_ptr&lt;double&gt;</tt> constructor; that is, it is the actual argument corresponding to the formal parameter <tt>p</tt> in the prototype. Similarly, <tt>new string</tt> is also an actual argument for a constructor. The other two smart pointers use the same syntax:</p>
+<div class="docText"><pre>unique_ptr&lt;double&gt; pdu(new double);  // pdu an unique_ptr to double
+shared_ptr&lt;string&gt; pss(new string);  // pss a shared_ptr to string</pre></div><br/>
+<p class="docText">Thus, to convert the <tt>remodel()</tt> function, you would follow these three steps:</p>
+
+<table border="0" class="docText"><tbody><tr><td valign="top" width="25"><div class="docText"><b>1. </b></div></td><td><div class="docText">Include the <tt>memory</tt> header file.<br/><br/></div></td></tr><tr><td valign="top" width="25"><div class="docText"><b>2. </b></div></td><td><div class="docText">Replace the pointer-to-<tt>string</tt> with a smart pointer object that points to <tt>string</tt>.<br/><br/></div></td></tr><tr><td valign="top" width="25"><div class="docText"><b>3. </b></div></td><td><div class="docText">Remove the <tt>delete</tt> statement.<br/><br/></div></td></tr></tbody></table>
+<p class="docText">Here’s the function with those changes made using <tt>auto_ptr</tt>:</p>
+<div class="docText"><pre>#include &lt;memory&gt;
+void remodel(std::string &amp; str)
+{
+    std::auto_ptr&lt;std::string&gt; ps (new std::string(str));
+    ...
+    if (weird_thing())
+        throw exception();
+    str = *ps;
+    // delete ps;  NO LONGER NEEDED
+    return;
+}</pre></div><br/>
+<p class="docText">Note that smart pointers belong to the <tt>std</tt> namespace. Listing 16.5 presents a simple program using all three of these smart pointers. (Your compiler will need to support the C++11 <tt>shared_ptr</tt> and <tt>unique_ptr</tt> classes.) Each use is placed inside a block so that the pointer expires when execution leaves the block. The <tt>Report</tt> class uses verbose methods to report when an object is created or destroyed.</p>
+<h5 class="docExampleTitle" id="title-ID0EEKGK">Listing 16.5. <tt>smrtptrs.cpp</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// smrtptrs.cpp -- using three kinds of smart pointers
+// requires support of C++11 shared_ptr and unique_ptr
+#include &lt;iostream&gt;
+#include &lt;string&gt;
+#include &lt;memory&gt;
+
+class Report
+{
+private:
+    std::string str;
+public:
+    Report(const std::string s) : str(s)
+           { std::cout &lt;&lt; "Object created!\n"; }
+    ~Report() { std::cout &lt;&lt; "Object deleted!\n"; }
+    void comment() const { std::cout &lt;&lt; str &lt;&lt; "\n"; }
+};
+
+int main()
+{
+    {
+        std::auto_ptr&lt;Report&gt; ps (new Report("using auto_ptr"));
+        ps-&gt;comment();   // use -&gt; to invoke a member function
+    }
+    {
+        std::shared_ptr&lt;Report&gt; ps (new Report("using shared_ptr"));
+        ps-&gt;comment();
+    }
+    {
+        std::unique_ptr&lt;Report&gt; ps (new Report("using unique_ptr"));
+        ps-&gt;comment();
+    }
+    return 0;
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Here is the output:</p>
+<div class="docText"><pre>Object created!
+using auto_ptr
+Object deleted!
+Object created!
+using shared_ptr
+Object deleted!
+Object created!
+using unique_ptr
+Object deleted!</pre></div><br/>
+<p class="docText">Each of these classes has an <tt>explicit</tt> constructor taking a pointer as an argument. Thus, there is no automatic type cast from a pointer to a smart pointer object:</p>
+<div class="docText"><pre>shared_ptr&lt;double&gt; pd;
+double *p_reg = new double;
+pd = p_reg;                         // not allowed (implicit conversion)
+pd = shared_ptr&lt;double&gt;(p_reg);     // allowed (explicit conversion
+shared_ptr&lt;double&gt; pshared = p_reg; // not allowed (implicit conversion)
+shared_ptr&lt;double&gt; pshared(p_reg);  // allowed (explicit conversion)</pre></div><br/>
+<p class="docText">The smart pointer template 
+classes are defined so that in most respects a smart pointer object acts
+ like a regular pointer. For example, given that <tt>ps</tt> is a smart pointer object, you can dereference it (<tt>*ps</tt>), use it to access structure members (<tt>ps-&gt;puffIndex</tt>),
+ and assign it to a regular pointer that points to the same type. You 
+can also assign one smart pointer object to another of the same type, 
+but that raises an issue that the next section faces.</p>
+<p class="docText">But first, here’s something you should avoid with all three of these smart pointers:</p>
+<div class="docText"><pre>string vacation("I wandered lonely as a cloud.");
+shared_ptr&lt;string&gt; pvac(&amp;vacation);  // NO!</pre></div><br/>
+<p class="docText">When <tt>pvac</tt> expires, the program would apply the <tt>delete</tt> operator to non-heap memory, which is wrong.</p>
+<p class="docText">If Listing 16.5
+ represents the pinnacle of your programming aspirations, any of these 
+three smart pointers will serve your purposes. But there is more to the 
+story.</p>
+
+<h4 class="docSection2Title" id="title-ID0ESPGK">Smart Pointer Considerations</h4>
+<p class="docText">Why three smart pointers? (Actually, there are four, but we won’t discuss <tt>weak_ptr</tt>.) And why is <tt>auto_ptr</tt> being deprecated?</p>
+<p class="docText">Begin by considering assignment:</p>
+<div class="docText"><pre>auto_ptr&lt;string&gt; ps (new string("I reigned lonely as a cloud."));
+auto_ptr&lt;string&gt; vocation;
+vocation = ps;</pre></div><br/>
+<p class="docText">What should the assignment statement accomplish? If <tt>ps</tt> and <tt>vocation</tt> were ordinary pointers, the result would be two pointers pointing to the same <tt>string</tt> object. That is not acceptable here because the program would wind up attempting to delete the same object twice—once when <tt>ps</tt> expires, and once when <tt>vocation</tt> expires. There are ways to avoid this problem:</p>
+<ul><li><p class="docList">Define the assignment 
+operator so that it makes a deep copy. This results in two pointers 
+pointing to two distinct objects, one of which is a copy of the other.</p></li><li><p class="docList">Institute the concept of <span class="docEmphasis">ownership</span>,
+ with only one smart pointer allowed to own a particular object. Only if
+ the smart pointer owns the object will its destructor delete the 
+object. Then have assignment transfer ownership. This is the strategy 
+used for <tt>auto_ptr</tt> and for <tt>unique_ptr</tt>, although <tt>unique_ptr</tt> is somewhat more restrictive.</p></li><li><p class="docList">Create an even smarter pointer that keeps track of how many smart pointers refer to a particular object. This is called <span class="docEmphasis">reference counting</span>.
+ Assignment, for example, would increase the count by one, and the 
+expiration of a pointer would decrease the count by one. Only when the 
+final pointer expires would <tt>delete</tt> be invoked. This is the <tt>shared_ptr</tt> strategy.</p></li></ul>
+<p class="docText">The same strategies we’ve discussed for assignment, of course, would also apply to the copy constructors.</p>
+<p class="docText">Each approach has its uses. Listing 16.6 shows an example for which <tt>auto_ptr</tt> is poorly suited.</p>
+<h5 class="docExampleTitle" id="title-ID0EDSGK">Listing 16.6. <tt>fowl.cpp</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// fowl.cpp  -- auto_ptr a poor choice
+#include &lt;iostream&gt;
+#include &lt;string&gt;
+#include &lt;memory&gt;
+
+int main()
+{
+    using namespace std;
+    auto_ptr&lt;string&gt; films[5] =
+    {
+        auto_ptr&lt;string&gt; (new string("Fowl Balls")),
+        auto_ptr&lt;string&gt; (new string("Duck Walks")),
+        auto_ptr&lt;string&gt; (new string("Chicken Runs")),
+        auto_ptr&lt;string&gt; (new string("Turkey Errors")),
+        auto_ptr&lt;string&gt; (new string("Goose Eggs"))
+    };
+    auto_ptr&lt;string&gt; pwin;
+    pwin = films[2];   // films[2] loses ownership
+
+    cout &lt;&lt; "The nominees for best avian baseball film are\n";
+    for (int i = 0; i &lt; 5; i++)
+        cout &lt;&lt; *films[i] &lt;&lt; endl;
+    cout &lt;&lt; "The winner is " &lt;&lt; *pwin &lt;&lt; "!\n";
+    cin.get();
+    return 0;
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Here is some sample output:</p>
+<div class="docText"><pre>The nominees for best avian baseball film are
+Fowl Balls
+Duck Walks
+Segmentation fault (core dumped)</pre></div><br/>
+<p class="docText">The “core dumped” message should help fix in your memory that a misused <tt>auto_ptr</tt>
+ can be a problem. (The behavior for this sort of code is undefined, so 
+you might encounter different behavior, depending on your system.) Here 
+the problem is that the following statement transfers ownership from <tt>films[2]</tt> to <tt>pwin</tt>:</p>
+<div class="docText"><pre>pwin = films[2];   // films[2] loses ownership</pre></div><br/>
+<p class="docText">That causes <tt>films[2]</tt> to no longer refer to the string. After an <tt>auto_ptr</tt>
+ gives up ownership of an object, it no longer provides access to the 
+object. When the program goes to print the string pointed to by <tt>films[2]</tt>, it finds the null pointer, which apparently is an unpleasant surprise.</p>
+<p class="docText">Suppose you go back to Listing 16.6 but use <tt>shared_ptr</tt> instead of <tt>auto_ptr</tt>. (You’ll need a compiler that supports the C++11 <tt>shared_ptr</tt> class.) Then the program runs fine and gives this output:</p>
+<div class="docText"><pre>The nominees for best avian baseball film are
+Fowl Balls
+Duck Walks
+Chicken Runs
+Turkey Errors
+Goose Eggs
+The winner is Chicken Runs!</pre></div><br/>
+<p class="docText">The difference occurs in this part of the program:</p>
+<div class="docText"><pre>shared_ptr&lt;string&gt; pwin;
+pwin = films[2];</pre></div><br/>
+<p class="docText">This time both <tt>pwin</tt> and <tt>films[2]</tt> point to the same object, and the reference count is upped from 1 to 2. At the end of the program, <tt>pwin</tt>,
+ which was declared last, is the first object to have its destructor 
+called. The destructor decreases the reference count to 1. Then the 
+members of the array of <tt>shared_ptr</tt>s are freed. The destructor for <tt>films[2]</tt> decrements the count to 0 and frees the previously allocated space.</p>
+<p class="docText">So with <tt>shared_ptr</tt>, Listing 16.6 runs fine. With <tt>auto_ptr</tt> it experienced a runtime crash. What happens if you use <tt>unique_ptr</tt>? Like <tt>auto-ptr</tt>, <tt>unique_ptr</tt> incorporates the ownership model. Yet instead of crashing, the <tt>unique_ptr</tt> version yields a compile-time error objecting to this line:</p>
+<div class="docText"><pre>pwin = films[2];</pre></div><br/>
+<p class="docText">Clearly, it is time to look further into the differences between these last two types.</p>
+
+<h4 class="docSection2Title" id="title-ID0ESWGK">Why <tt>unique_ptr</tt> Is Better than <tt>auto_ptr</tt></h4>
+<p class="docText">Consider the following statements:</p>
+<div class="docText"><pre>auto_ptr&lt;string&gt; p1(new string("auto");  //#1
+auto_ptr&lt;string&gt; p2;                     //#2
+p2 = p1;                                 //#3</pre></div><br/>
+<p class="docText">When, in statement #3, <tt>p2</tt> takes over ownership of the <tt>string</tt> object, <tt>p1</tt> is stripped of ownership. This, recall, is good because it prevents the destructors for both <tt>p1</tt> and <tt>p2</tt> from trying to delete the same object. But it also is bad if the program subsequently tries to use <tt>p1</tt> because <tt>p1</tt> no longer points to valid data.</p>
+<p class="docText">Now consider the <tt>unique_ptr</tt> equivalent:</p>
+<div class="docText"><pre>unique_ptr&lt;string&gt; p3(new string("auto");  //#4
+unique_ptr&lt;string&gt; p4;                     //#5
+p4 = p3;                                   //#6</pre></div><br/>
+<p class="docText">In this case, the compiler does not allow statement #6, so we avoid the problem of <tt>p3</tt> not pointing to valid data. Hence, <tt>unique_ptr</tt> is safer (compile-time error versus potential program crash) than <tt>auto_ptr</tt>.</p>
+<p class="docText">But there are times when 
+assigning one smart pointer to another doesn’t leave a dangerous orphan 
+behind. Suppose we have this function definition:</p>
+<div class="docText"><pre>unique_ptr&lt;string&gt; demo(const char * s)
+{
+    unique_ptr&lt;string&gt; temp(new string(s));
+    return temp;
+}</pre></div><br/>
+<p class="docText">And suppose we then have this code:</p>
+<div class="docText"><pre>unique_ptr&lt;string&gt; ps;
+ps = demo("Uniquely special");</pre></div><br/>
+<p class="docText">Here, <tt>demo()</tt> returns a temporary <tt>unique_ptr</tt>, and then <tt>ps</tt> takes over ownership of the object originally owned by the returned <tt>unique_ptr</tt>. Then the returned <tt>unique_ptr</tt> is destroyed. That’s okay because <tt>ps</tt> now has ownership of the <tt>string</tt> object. But another good thing has happened. Because the temporary <tt>unique_ptr</tt> returned by <tt>demo()</tt>
+ is soon destroyed, there’s no possibility of it being misused in an 
+attempt to access invalid data. In other words, there is no reason to 
+forbid assignment in this case. And, miraculously enough, the compiler 
+does allow it!</p>
+<p class="docText">In short, if a program attempts to assign one <tt>unique_ptr</tt>
+ to another, the compiler allows it if the source object is a temporary 
+rvalue and disallows it if the source object has some duration:</p>
+<div class="docText"><pre>using namespace std;
+unique_ptr&lt; string&gt; pu1(new string "Hi ho!");
+unique_ptr&lt; string&gt; pu2;
+pu2 = pu1;                                   //#1 not allowed
+unique_ptr&lt;string&gt; pu3;
+pu3 = unique_ptr&lt;string&gt;(new string "Yo!");  //#2 allowed</pre></div><br/>
+<p class="docText">Assignment #1 would leave a dangling <tt>unique_ptr</tt> behind (that is, <tt>pu1</tt>), a possible source of mischief. Assignment #2 leaves no <tt>unique_ptr</tt> behind because it invokes the <tt>unique_ptr</tt> constructor, which constructs a temporary object that is destroyed when ownership is transferred to <tt>pu3</tt>. This selective behavior is one indication that <tt>unique_ptr</tt> is superior to <tt>auto_ptr</tt>, which would allow both forms of assignment. It’s also the reason that <tt>auto_ptr</tt>s are banned (by recommendation, not by the compiler) from being used in container objects, whereas <tt>unique_ptr</tt>s
+ are allowed. If a container algorithm tries to do something along the 
+lines of assignment #1 to the contents of a container of <tt>unique_ptr</tt>s,
+ you get a compile-time error. If the algorithm tries to do something 
+like assignment #2, that’s okay, and the program proceeds. With <tt>auto_ptr</tt>s, cases like assignment #1 could lead to undefined behavior and mysterious crashes.</p>
+<p class="docText">Of course, it could be 
+possible that you really want to do something like statement #1. The 
+assignment is unsafe only if you use the abandoned smart pointer in an 
+unsmart manner, such as dereferencing it. But you could safely reuse the
+ pointer by assigning a new value to it. C++ has a standard library 
+function called <tt>std::move()</tt> that lets you assign one <tt>unique_ptr</tt> to another. Here is an example using the previously defined <tt>demo()</tt> function, which returns a <tt>unique_ptr&lt;string&gt;</tt> object:</p>
+<div class="docText"><pre>using namespace std;
+unique_ptr&lt;string&gt; ps1, ps2;
+ps1 = demo("Uniquely special");
+ps2 = move(ps1);                 // enable assignment
+ps1 = demo(" and more");
+cout &lt;&lt; *ps2 &lt;&lt; *ps1 &lt;&lt; endl;</pre></div><br/>
+<p class="docText">You may be wondering how <tt>unique_ptr</tt>, unlike <tt>auto_ptr</tt>,
+ is able to discriminate between safe and possibly unsafe uses. The 
+answer is that it uses the C++11 additions of move constructors and 
+rvalue references, as discussed in Chapter 18.</p>
+<p class="docText">Also <tt>unique_ptr</tt> has another advantage over <tt>auto_ptr</tt>. It has a variant that can be used with arrays. Remember, you must pair <tt>delete</tt> with <tt>new</tt> and <tt>delete []</tt> with <tt>new []</tt>. The <tt>auto_ptr</tt> template uses <tt>delete</tt>, not <tt>delete []</tt>, so it can only be used with <tt>new</tt>, not with <tt>new []</tt>. But <tt>unique_ptr</tt> has a <tt>new[]</tt>, <tt>delete[]</tt> version:</p>
+<div class="docText"><pre>std::unique_ptr&lt; double[]&gt;pda(new double(5));  // will use delete []</pre></div><br/>
+<div class="docNote"><p class="docNoteTitle">Caution</p>
+<p class="docText">You should use an <tt>auto_prt</tt> or <tt>shared_ptr</tt> object only for memory allocated by <tt>new</tt>, not for memory allocated by <tt>new []</tt>. You should not use <tt>auto_ptr</tt>, <tt>shared_ptr</tt>, or <tt>unique_ptr</tt> for memory not allocated via <tt>new</tt> or, in the case of <tt>unique_ptr</tt>, via <tt>new</tt> or <tt>new[]</tt>.</p>
+</div><br/>
+
+<h4 class="docSection2Title" id="title-ID0ET5GK">Selecting a Smart Pointer</h4>
+<p class="docText">Which pointer type should you use? If the program uses more than one pointer to an object, <tt>shared_ptr</tt>
+ is your choice. For instance, you may have an array of pointers and use
+ some auxiliary pointers to identify particular elements, such as the 
+largest and the smallest. Or you could have two kinds of objects that 
+contain pointers to the same third object. Or you might have an STL 
+container of pointers. Many of the STL algorithms include copy or 
+assignment operations that will work with <tt>shared_ptr</tt> but not with <tt>unique_ptr</tt> (you’ll get a compiler warning) or <tt>auto_ptr</tt> (you’ll get undefined behavior). If your compiler doesn’t offer <tt>shared_ptr</tt>, you can get a version from the Boost library.</p>
+<p class="docText">If the program doesn’t need multiple pointers to the same object, <tt>unique_ptr</tt> works. It’s a good choice for the return type for a function that returns a pointer to memory allocated by <tt>new</tt>. That way, ownership is transferred to the <tt>unique_ptr</tt> assigned the return value, and that smart pointer takes on the responsibility of calling <tt>delete</tt>. You can store <tt>unique_ptr</tt> objects in an STL container providing you don’t invoke methods or algorithms, such as <tt>sort()</tt>, that copy or assign one <tt>unique_ptr</tt> to another. For example, assuming the proper <tt>include</tt>s and <tt>using</tt> statements, code fragments like the following could be used in a program:</p>
+<div class="docText"><pre>unique_ptr&lt;int&gt; make_int(int n)
+{
+    return unique_ptr&lt;int&gt;(new int(n));
+}
+void show(unique_ptr&lt;int&gt; &amp; pi)             // pass by reference
+{
+    cout &lt;&lt; *a &lt;&lt; ' ';
+}
+int main()
+{
+...
+    vector&lt;unique_ptr&lt;int&gt; &gt; vp(size);
+    for (int i = 0; i &lt; vp.size(); i++)
+        vp[i] = make_int(rand() % 1000);    // copy temporary unique_ptr
+    vp.push_back(make_int(rand() % 1000))   // ok because arg is temporary
+    for_each(vp.begin(), vp.end(), show);   // use for_each()
+...
+}</pre></div><br/>
+<p class="docText">The call to <tt>push_back()</tt> works because it passes a temporary <tt>unique_ptr</tt> to be assigned to a <tt>unique_ptr</tt> in <tt>vp</tt>. Also note the <tt>for_each()</tt> statement would fail if <tt>show()</tt> were passed an object by value instead of by reference because then it would be necessary to initialize <tt>pi</tt> to a nontemporary <tt>unique_ptr</tt> from <tt>vp</tt>, which isn’t allowed. As mentioned before, the compiler will catch attempts to use <tt>unique_ptr</tt> inappropriately.</p>
+<p class="docText">You can assign a <tt>unique_ptr</tt> to <tt>shared_ptr</tt> under the same conditions that you can assign one <tt>unique_ptr</tt> to another—the source has to be an rvalue. As previously, in the following code <tt>make_int()</tt> is a function with a <tt>unique_ptr&lt;int&gt;</tt> return type:</p>
+<div class="docText"><pre>unique_ptr&lt;int&gt; pup(make_int(rand() % 1000);  // ok
+shared_ptr&lt;int&gt; spp(pup);                     // not allowed, pup an lvalue
+shared_ptr&lt;int&gt; spr(make_int(rand() % 1000);  // ok</pre></div><br/>
+<p class="docText">The <tt>shared_ptr</tt> template includes an explicit constructor for converting an rvalue <tt>unique_ptr</tt> to a <tt>shared_ptr</tt>. The <tt>shared_ptr</tt> takes over ownership of the object previously owned by the <tt>unique_ptr</tt>.</p>
+<p class="docText">You would use a<tt>uto_ptr</tt> in the same situation as <tt>unique_ptr</tt>, but the latter is preferred. If your compiler doesn’t provide <tt>unique_ptr</tt>, you might consider the BOOST library <tt>scoped_ptr</tt>, which is similar.</p>
+</div>
+</body>
+</html>

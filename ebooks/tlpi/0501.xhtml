@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>5.1. Atomicity and Race Conditions</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">5.1. Atomicity and Race Conditions</h3><p class="docText">Atomicity
+ is a concept that we’ll encounter repeatedly when discussing the 
+operation of system calls. All system calls are executed atomically. By 
+this, we mean that the kernel guarantees that all of the steps in a 
+system call are completed as a single operation, without being 
+interrupted by another process or thread.</p><p class="docText">Atomicity is essential to the successful completion of some operations. In particular, it allows us to avoid <span class="docEmphasis">race conditions</span> (sometimes known as <span class="docEmphasis">race hazards</span>).
+ A race condition is a situation where the result produced by two 
+processes (or threads) operating on shared resources depends in an 
+unexpected way on the relative order in which the processes gain access 
+to the CPU(s).</p><p class="docText">In
+ the next few pages, we look at two situations involving file I/O where 
+race conditions occur, and show how these conditions are eliminated 
+through the use of <span class="docEmphasis">open()</span> flags that guarantee the atomicity of the relevant file operations.</p><p class="docText">We revisit the topic of race conditions when we describe <span class="docEmphasis">sigsuspend()</span> in Section 22.9 and <span class="docEmphasis">fork()</span> in Section 24.4.</p><h4 class="docSection2Title" id="title-ID0EZ1AG">5.1.1. </h4><h5 class="docSection3Title" id="title-ID0E41AG">5.1.1.1. Creating a file exclusively</h5><p class="docText">In Section 4.3.1, we noted that specifying <tt>O_EXCL</tt> in conjunction with <tt>O_CREAT</tt> causes <span class="docEmphasis">open()</span>
+ to return an error if the file already exists. This provides a way for a
+ process to ensure that it is the creator of a file. The check on the 
+prior existence of the file and the creation of the file are performed 
+atomically. To see why this is important, consider the code shown in Example 5-1, which we might resort to in the absence of the <tt>O_EXCL</tt> flag. (In this code, we display the process ID returned by the <span class="docEmphasis">getpid()</span> system call, which enables us to distinguish the output of two different runs of this program.)</p><h5 class="docExampleTitle" id="title-ID0ES3AG">Example 5-1. Incorrect code to exclusively open a file</h5><p></p><div class="box"><pre class="preFixedWidth"><span class="docEmphasis">from</span> <b>fileio/bad_exclusive_open.c </b>
+fd = open(argv[1], O_WRONLY);       /* Open 1: check if file exists */
+    if (fd != -1) {                     /* Open succeeded */
+        printf("[PID %ld] File \"%s\" already exists\n",
+                (long) getpid(), argv[1]);
+        close(fd);
+    } else {
+        if (errno != ENOENT) {          /* Failed for unexpected reason */
+            errExit("open");
+        } else {
+            /* WINDOW FOR FAILURE */
+            fd = open(argv[1], O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
+            if (fd == -1)
+                errExit("open");
+
+            printf("[PID %ld] Created file \"%s\" exclusively\n",
+                    (long) getpid(), argv[1]);          /* MAY NOT BE TRUE! */
+        }
+    }
+      <i> from</i> <b>fileio/bad_exclusive_open.c </b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Aside from the long-winded use of two calls to <span class="docEmphasis">open()</span>, the code in Example 5-1 also contains a bug. Suppose that when our process first called <span class="docEmphasis">open()</span>, the file did not exist, but by the time of the second <span class="docEmphasis">open()</span>,
+ some other process had created the file. This could happen if the 
+kernel scheduler decided that the process’s time slice had expired and 
+gave control to another process, as shown in Figure 5-1, or if the two processes were running at the same time on a multiprocessor system. Figure 5-1 portrays the case where two processes are both executing the code shown in Example 5-1. In this scenario, process A would wrongly conclude that it had created the file, since the second <span class="docEmphasis">open()</span> succeeds whether or not the file exists.</p><p class="docText">While
+ the chance of the process wrongly believing it was the creator of the 
+file is relatively small, the possibility that it may occur nevertheless
+ renders this code unreliable. The fact that the outcome of these 
+operations depends on the order of scheduling of the two processes means
+ that this is a race condition.</p><p></p><center><h5 class="docFigureTitle">Figure 5-1. Failing to exclusively create a file</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-5.png"/></p></center><p></p><br/><p class="docText">To demonstrate that there is indeed a problem with this code, we could replace the commented line <tt>WINDOW FOR FAILURE</tt> in Example 5-1 with a piece of code that creates an artificially long delay between the check for file existence and the creation of the file:</p><pre class="preFixedWidth">printf("[PID %ld] File \"%s\" doesn't exist yet\n", (long) getpid(), argv[1]);
+if (argc &gt; 2) {                 /* Delay between check and create */
+    sleep(5);                   /* Suspend execution for 5 seconds */
+    printf("[PID %ld] Done sleeping\n", (long) getpid());
+}
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">sleep()</span>
+ library function suspends the execution of a process for a specified 
+number of seconds. We discuss this function in Section 23.4.</p><hr noshade="noshade" size="1"/><p class="docText">If we run two simultaneous instances of the program in Example 5-1, we see that they both claim to have exclusively created the file:</p><pre>$ <b>./bad_exclusive_open tfile sleep &amp; </b>
+[PID 3317] File "tfile" doesn't exist yet
+[1] 3317
+$ <b>./bad_exclusive_open tfile </b>
+[PID 3318] File "tfile" doesn't exist yet
+[PID 3318] Created file "tfile" exclusively
+$ [PID 3317] Done sleeping
+[PID 3317] Created file "tfile" exclusively                 <i> Not true</i></pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In
+ the penultimate line of the above output, we see the shell prompt mixed
+ with output from the first instance of the test program.</p><hr noshade="noshade" size="1"/><p class="docText">Both
+ processes claim to have created the file because the code of the first 
+process was interrupted between the existence check and the creation of 
+the file. Using a single <span class="docEmphasis">open()</span> call that specifies the <tt>O_CREAT</tt> and <tt>O_EXCL</tt>
+ flags prevents this possibility by guaranteeing that the check and 
+creation steps are carried out as a single atomic (i.e., 
+uninterruptible) operation.</p><h5 class="docSection3Title" id="title-ID0EY6AG">5.1.1.2. Appending data to a file</h5><p class="docText">A
+ second example of the need for atomicity is when we have multiple 
+processes appending data to the same file (e.g., a global log file). For
+ this purpose, we might consider using a piece of code such as the 
+following in each of our writers:</p><pre>if (lseek(fd, 0, SEEK_END) == -1)
+    errExit("lseek");
+if (write(fd, buf, len) != len)
+    fatal("Partial/failed write");</pre><br/>
+<p class="docText">However, this code suffers 
+the same defect as the previous example. If the first process executing 
+the code is interrupted between the <span class="docEmphasis">lseek()</span> and <span class="docEmphasis">write()</span><a name="second process"></a>
+ calls by a second process doing the same thing, then both processes 
+will set their file offset to the same location before writing, and when
+ the first process is rescheduled, it will overwrite the data already 
+written by the second process. Again, this is a race condition because 
+the results depend on the order of scheduling of the two processes.</p><p class="docText">Avoiding
+ this problem requires that the seek to the next byte past the end of 
+the file and the write operation happen atomically. This is what opening
+ a file with the <tt>O_APPEND</tt> flag guarantees.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Some file systems (e.g., NFS) don’t support <tt>O_APPEND</tt>.
+ In this case, the kernel reverts to the nonatomic sequence of calls 
+shown above, with the consequent possibility of file corruption as just 
+described.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

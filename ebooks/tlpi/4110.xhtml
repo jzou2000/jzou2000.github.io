@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>41.10. Specifying Library Search Directories in an Object File</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">41.10. Specifying Library Search Directories in an Object File</h3><p class="docText">We have already seen two ways of informing the dynamic linker of the location of shared libraries: using the <tt>LD_LIBRARY_PATH</tt> environment variable and installing a shared library into one of the standard library directories (<tt>/lib</tt>, <tt>/usr/lib</tt>, or one of the directories listed in <tt>/etc/ld.so.conf</tt>).</p><p class="docText">There
+ is a third way: during the static editing phase, we can insert into the
+ executable a list of directories that should be searched at run time 
+for shared libraries. This is useful if we have libraries that reside in
+ fixed locations that are not among the standard locations searched by 
+the dynamic linker. To do this, we employ the <span class="docEmphasis">-rpath</span> linker option when creating an executable:</p><pre>$ <b>gcc -g -Wall -Wl,-rpath,/home/mtk/pdir -o prog prog.c libdemo.so</b></pre><br/>
+<p class="docText">The above command copies the string <span class="docEmphasis">/home/mtk/pdir</span> into the run-time library path (<span class="docEmphasis">rpath</span>) list of the executable <span class="docEmphasis">prog</span>, so, that when the program is run, the dynamic linker will also search this directory when resolving shared library references.</p><p class="docText">If necessary, the <span class="docEmphasis">-rpath</span> option can be specified multiple times; all of the directories are concatenated into a single ordered <span class="docEmphasis">rpath</span>
+ list placed in the executable file. Alternatively, multiple directories
+ can be specified as a colon-separated list within a single <span class="docEmphasis">-rpath</span> option. At run time, the dynamic linker searches the directories in the order they were specified in the <span class="docEmphasis">-rpath</span> option(s).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">An alternative to the <span class="docEmphasis">-rpath</span> option is the <tt>LD_RUN_PATH</tt>
+ environment variable. This variable can be assigned a string containing
+ a series of colon-separated directories that are to be used as the <span class="docEmphasis">rpath</span> list when building the executable file. <tt>LD_RUN_PATH</tt> is employed only if the <span class="docEmphasis">-rpath</span> option is not specified when building the executable.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0EI4HK">41.10.1. </h4><h5 class="docSection3Title" id="title-ID0EM4HK">41.10.1.1. Using the <span class="docEmphasis">-rpath</span> linker option when building a shared library</h5><p class="docText">The <span class="docEmphasis">-rpath</span> linker option can also be useful when building a shared library. Suppose we have one shared library, <tt>libx1.so</tt>, that depends on another, <tt>libx2.so</tt>, as shown in Figure 41-4. Suppose also that these libraries reside in the nonstandard directories <tt>d1</tt> and <tt>d2</tt>, respectively. We now go through the steps required to build these libraries and the program that uses them.</p><p></p><center><h5 class="docFigureTitle">Figure 41-4. A shared library that depends on another shared library</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-70.png"/></p></center><p></p><br/><p class="docText">First, we build <tt>libx2.so</tt>, in the directory <tt>pdir/d2</tt>. (To keep the example simple, we dispense with library version numbering and explicit sonames.)</p><pre>$ <b>cd /home/mtk/pdir/d2</b>
+$ <b>gcc -g -c -fPIC -Wall modx2.c</b>
+$ <b>gcc -g -shared -o libx2.so modx2.o</b></pre><br/>
+<p class="docText">Next, we build <tt>libx1.so</tt>, in the directory <tt>pdir/d1</tt>. Since <tt>libx1.so</tt> depends on <tt>libx2.so</tt>, which is not in a standard directory, we specify the latter’s run-time location with the <span class="docEmphasis">-rpath</span> linker option. This could be different from the link-time location of the library (specified by the <span class="docEmphasis">-L</span> option), although in this case the two locations are the same.</p><pre>$ <b>cd /home/mtk/pdir/d1</b>
+$ <b>gcc -g -c -Wall -fPIC modx1.c</b>
+$ <b>gcc -g -shared -o libx1.so modx1.o -Wl,-rpath,/home/mtk/pdir/d2 \</b>
+            <b>-L/home/mtk/pdir/d2 -lx2</b></pre><br/>
+<p class="docText">Finally, we build the main program, in the <tt>pdir</tt> directory. Since the main program makes use of <tt>libx1.so</tt>, and this library resides in a nonstandard directory, we again employ the <span class="docEmphasis">-rpath</span> linker option:</p><pre>$ <b>cd /home/mtk/pdir</b>
+$ <b>gcc -g -Wall -o prog prog.c -Wl,-rpath,/home/mtk/pdir/d1 \</b>
+<b>           -L/home/mtk/pdir/d1 -lx1</b></pre><br/>
+<p class="docText">Note that we did not need to mention <tt>libx2.so</tt> when linking the main program. Since the linker is capable of analyzing the <span class="docEmphasis">rpath</span> list in <tt>libx1.so</tt>, it can find <tt>libx2.so</tt>, and thus is able to satisfy the requirement that all symbols can be resolved at static link time.</p><p class="docText">We can use the following commands to examine <tt>prog</tt> and <tt>libx1.so</tt> in order to see the contents of their <span class="docEmphasis">rpath</span> lists:</p><pre class="preFixedWidth">$ <b>objdump -p prog | grep PATH </b>
+  RPATH       /home/mtk/pdir/d1         libx1.so <i> will be sought here at run time</i>
+$ <b>objdump -p d1/libx1.so | grep PATH </b>
+  RPATH       /home/mtk/pdir/d2         libx2.so <i> will be sought here at run time</i>
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">We can also view the <span class="docEmphasis">rpath</span> lists by grepping the output of the <span class="docEmphasis">readelf --dynamic</span> (or, equivalently, <span class="docEmphasis">readelf -d</span>) command.</p><hr noshade="noshade" size="1"/><p class="docText">We can use the <span class="docEmphasis">ldd</span> command to show the complete set of dynamic dependencies of <tt>prog</tt>:</p><pre>$ <b>ldd prog</b>
+        libx1.so =&gt; /home/mtk/pdir/d1/libx1.so (0x40017000)
+        libc.so.6 =&gt; /lib/tls/libc.so.6 (0x40024000)
+        libx2.so =&gt; /home/mtk/pdir/d2/libx2.so (0x4014c000)
+        /lib/ld-linux.so.2 =&gt; /lib/ld-linux.so.2 (0x40000000)</pre><br/>
+<h5 class="docSection3Title" id="title-ID0EBDAM">41.10.1.2. The ELF <tt>DT_RPATH</tt> and <tt>DT_RUNPATH</tt> entries</h5><p class="docText">In the original ELF specification, only one type of <span class="docEmphasis">rpath</span> list could be embedded in an executable or shared library. This corresponded to the <tt>DT_RPATH</tt> tag in an ELF file. Later ELF specifications deprecated <tt>DT_RPATH</tt>, and introduced a new tag, <tt>DT_RUNPATH</tt>, for representing <span class="docEmphasis">rpath</span> lists. The difference between these two types of <span class="docEmphasis">rpath</span> lists is their relative precedence with respect to the <tt>LD_LIBRARY_PATH</tt> environment variable when the dynamic linker searches for shared libraries at run time: <tt>DT_RPATH</tt> has higher precedence, while <tt>DT_RUNPATH</tt> has lower precedence (refer to Section 41.11).</p><p class="docText">By default, the linker creates the <span class="docEmphasis">rpath</span> list as a <tt>DT_RPATH</tt> tag. To have the linker instead create the <span class="docEmphasis">rpath</span> list as a <tt>DT_RUNPATH</tt> entry, we must additionally employ the <span class="docEmphasis">—enable-new-dtags (enable new dynamic tags)</span> linker option. If we rebuild our program using this option, and inspect the resulting executable file with <span class="docEmphasis">objdump</span>, we see the following:</p><pre>$ <b>gcc -g -Wall -o prog prog.c -Wl,--enable-new-dtags \</b>
+        <b>-Wl,-rpath,/home/mtk/pdir/d1 -L/home/mtk/pdir/d1 -lx1</b>
+$ <b>objdump -p prog | grep PATH</b>
+  RPATH       /home/mtk/pdir/d1
+  RUNPATH     /home/mtk/pdir/d1</pre><br/>
+<p class="docText">As can be seen, the executable contains both <tt>DT_RPATH</tt> and <tt>DT_RUNPATH</tt> tags. The linker duplicates the <span class="docEmphasis">rpath</span> list in this way for the benefit of older dynamic linkers that may not understand the <tt>DT_RUNPATH</tt> tag. (Support for <tt>DT_RUNPATH</tt> was added in version 2.2 of <span class="docEmphasis">glibc</span>.) Dynamic linkers that understand the <tt>DT_RUNPATH</tt> tag ignore the <tt>DT_RPATH</tt> tag (see Section 41.11).</p><h5 class="docSection3Title" id="title-ID0EDHAM">41.10.1.3. Using <tt>$ORIGIN</tt> in <span class="docEmphasis">rpath</span></h5><p class="docText">Suppose
+ that we want to distribute an application that uses some of its own 
+shared libraries, but we don’t want to require the user to install the 
+libraries in one of the standard directories. Instead, we would like to 
+allow the user to unpack the application under an arbitrary directory of
+ their choice and then immediately be able to run the application. The 
+problem is that the application has no way of determining where its 
+shared libraries are located, unless it requests the user to set <tt>LD_LIBRARY_PATH</tt>
+ or we require the user to run some sort of installation script that 
+identifies the required directories. Neither of these approaches is 
+desirable.</p><p class="docText">To get around this problem, the dynamic linker is built to understand a special string, <tt>$ORIGIN</tt> (or, equivalently, <tt>${ORIGIN}</tt>), in an <span class="docEmphasis">rpath</span>
+ specification. The dynamic linker interprets this string to mean “the 
+directory containing the application.” This means that we can, for 
+example, build an application with the following command:</p><pre>$ <b>gcc -Wl,-rpath,'$ORIGIN'/lib</b> ...</pre><br/>
+<p class="docText">This presumes that at run time the application’s shared libraries will reside in the subdirectory <tt>lib</tt>
+ under the directory that contains the application executable. We can 
+then provide the user with a simple installation package that contains 
+the application and associated libraries, and the user can install the 
+package in any location and then run the application (i.e., a so-called 
+“turn-key application”).</p>
+</div>
+</body>
+</html>

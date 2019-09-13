@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>5.5. Duplicating File Descriptors</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">5.5. Duplicating File Descriptors</h3><p class="docText">Using the (Bourne shell) I/O redirection syntax <tt>2&gt;&amp;1</tt>
+ informs the shell that we wish to have standard error (file descriptor 
+2) redirected to the same place to which standard output (file 
+descriptor 1) is being sent. Thus, the following command would (since 
+the shell evaluates I/O directions from left to right) send both 
+standard output and standard error to the file <tt>results.log</tt>:</p><pre>$ <b>./myscript &gt; results.log 2&gt;&amp;1</b></pre><br/>
+<p class="docText">The shell achieves the 
+redirection of standard error by duplicating file descriptor 2 so that 
+it refers to the same open file description as file descriptor 1 (in the
+ same way that descriptors 1 and 20 of process A refer to the same open 
+file description in Figure 5-2). This effect can be achieved using the <span class="docEmphasis">dup()</span> and <span class="docEmphasis">dup2()</span> system calls.</p><p class="docText">Note that it is not sufficient for the shell simply to open the <tt>results.log</tt>
+ file twice: once on descriptor 1 and once on descriptor 2. One reason 
+for this is that the two file descriptors would not share a file offset 
+pointer, and hence could end up overwriting each other’s output. Another
+ reason is that the file may not be a disk file. Consider the following 
+command, which sends standard error down the same pipe as standard 
+output:</p><pre>$ <b>./myscript 2&gt;&amp;1 | less</b></pre><br/>
+<p class="docText">The <span class="docEmphasis">dup()</span> call takes <span class="docEmphasis">oldfd</span>,
+ an open file descriptor, and returns a new descriptor that refers to 
+the same open file description. The new descriptor is guaranteed to be 
+the lowest unused file descriptor.</p><pre>#include &lt;unistd.h&gt;
+
+int <b>dup</b>(int <span class="docEmphasis">oldfd</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns (new) file descriptor on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">Suppose we make the following call:</p><pre>newfd = dup(1);</pre><br/>
+<p class="docText">Assuming the normal situation
+ where the shell has opened file descriptors 0, 1, and 2 on the 
+program’s behalf, and no other descriptors are in use, <span class="docEmphasis">dup()</span> will create the duplicate of descriptor 1 using file 3.</p><p class="docText">If we wanted the duplicate to be descriptor 2, we could use the following technique:</p><pre>close(2);               /* Frees file descriptor 2 */
+newfd = dup(1);         /* Should reuse file descriptor 2 */</pre><br/>
+<p class="docText">This code works only if 
+descriptor 0 was open. To make the above code simpler, and to ensure we 
+always get the file descriptor we want, we can use <span class="docEmphasis">dup2()</span>.</p><pre>#include &lt;unistd.h&gt;
+
+int <b>dup2</b>(int <span class="docEmphasis">oldfd</span>, int <span class="docEmphasis">newfd</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns (new) file descriptor on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">dup2()</span> system call makes a duplicate of the file descriptor given in <span class="docEmphasis">oldfd</span> using the descriptor number supplied in <span class="docEmphasis">newfd</span>. If the file descriptor specified in <span class="docEmphasis">newfd</span> is already open, <span class="docEmphasis">dup2()</span> closes it first. (Any error that occurs during this close is silently ignored; safer programming practice is to explicitly <span class="docEmphasis">close() newfd</span> if it is open before the call to <span class="docEmphasis">dup2()</span>.)</p><p class="docText">We could simplify the preceding calls to <span class="docEmphasis">close()</span> and <span class="docEmphasis">dup()</span> to the following:</p><pre>dup2(1, 2);</pre><br/>
+<p class="docText">A successful <span class="docEmphasis">dup2()</span> call returns the number of the duplicate descriptor (i.e., the value passed in <span class="docEmphasis">newfd</span>).</p><p class="docText">If <span class="docEmphasis">oldfd</span> is not a valid file descriptor, then <span class="docEmphasis">dup2()</span> fails with the error <tt>EBADF</tt> and <span class="docEmphasis">newfd</span> is not closed. If <span class="docEmphasis">oldfd</span> is a valid file descriptor, and <span class="docEmphasis">oldfd</span> and <span class="docEmphasis">newfd</span> have the same value, then <span class="docEmphasis">dup2()</span> does nothing—<span class="docEmphasis">newfd</span> is not closed, and <span class="docEmphasis">dup2()</span> returns the <span class="docEmphasis">newfd</span> as its function result.</p><p class="docText">A further interface that provides some extra flexibility for duplicating file descriptors is the <span class="docEmphasis">fcntl()</span> <tt>F_DUPFD</tt> operation:</p><pre>newfd = fcntl(oldfd, F_DUPFD, startfd);</pre><br/>
+<p class="docText">This call makes a duplicate of <span class="docEmphasis">oldfd</span> by using the lowest unused file descriptor greater than or equal to <span class="docEmphasis">startfd</span>. This is useful if we want a guarantee that the new descriptor (<span class="docEmphasis">newfd</span>) falls in a certain range of values. Calls to <span class="docEmphasis">dup()</span> and <span class="docEmphasis">dup2()</span> can always be recoded as calls to <span class="docEmphasis">close()</span> and <span class="docEmphasis">fcntl()</span>, although the former calls are more concise. (Note also that some of the <span class="docEmphasis">errno</span> error codes returned by <span class="docEmphasis">dup2()</span> and <span class="docEmphasis">fcntl()</span> differ, as described in the manual pages.)</p><p class="docText">From Figure 5-2,
+ we can see that duplicate file descriptors share the same file offset 
+value and status flags in their shared open file description. However, 
+the new file descriptor has its own set of file descriptor flags, and 
+its close-on-exec flag (<tt>FD_CLOEXEC</tt>)
+ is always turned off. The interfaces that we describe next allow 
+explicit control of the new file descriptor’s close-on-exec flag.</p><p class="docText">The <span class="docEmphasis">dup3()</span> system call performs the same task as <span class="docEmphasis">dup2()</span>, but adds an additional argument, <span class="docEmphasis">flags</span>, that is a bit mask that modifies the behavior of the system call.</p><pre>#define _GNU_SOURCE
+#include &lt;unistd.h&gt;
+
+int <b>dup3</b>(int <span class="docEmphasis">oldfd</span>, int <span class="docEmphasis">newfd</span>, int <span class="docEmphasis">flags</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns (new) file descriptor on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">Currently, <span class="docEmphasis">dup3()</span> supports one flag, <tt>O_CLOEXEC</tt>, which causes the kernel to enable the close-on-exec flag (<tt>FD_CLOEXEC</tt>) for the new file descriptor. This flag is useful for the same reasons as the <span class="docEmphasis">open()</span> <tt>O_CLOEXEC</tt> flag described in Section 4.3.1.</p><p class="docText">The <span class="docEmphasis">dup3()</span> system call is new in Linux 2.6.27, and is Linux-specific.</p><p class="docText">Since Linux 2.6.24, Linux also supports an additional <span class="docEmphasis">fcntl()</span> operation for duplicating file descriptors: <tt>F_DUPFD_CLOEXEC</tt>. This flag does the same thing as <tt>F_DUPFD</tt>, but additionally sets the close-on-exec flag (<tt>FD_CLOEXEC</tt>) for the new file descriptor. Again, this operation is useful for the same reasons as the <span class="docEmphasis">open()</span> <tt>O_CLOEXEC</tt> flag. <tt>F_DUPFD_CLOEXEC</tt> is not specified in SUSv3, but is specified in SUSv4.</p>
+</div>
+</body>
+</html>

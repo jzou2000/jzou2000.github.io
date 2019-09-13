@@ -1,0 +1,357 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>62.6. Terminal I/O Modes</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">62.6. Terminal I/O Modes</h3><p class="docText">We
+ have already noted that the terminal driver is capable of handling 
+input in either canonical or noncanonical mode, depending on the setting
+ of the <tt>ICANON</tt> flag. We now describe 
+these two modes in detail. We then describe three useful terminal 
+modes—cooked, cbreak, and raw—that were available in Seventh Edition 
+UNIX, and show how these modes are emulated on modern UNIX systems by 
+setting appropriate values in the <span class="docEmphasis">termios</span> structure.</p><h4 class="docSection2Title" id="title-ID0EBZHM">62.6.1. Canonical Mode</h4><p class="docText">Canonical mode input is enabled by setting the <tt>ICANON</tt> flag. Terminal input in canonical mode is distinguished by the following features:</p><ul><li><p class="docList">Input is gathered into lines, terminated by one of the line-delimiter characters: NL, EOL, EOL2 (if the <tt>IEXTEN</tt> flag is set), EOF (at anything other than the initial position in the line), or CR (if the <tt>ICRNL</tt>
+ flag is enabled). Except in the case of EOF, the line delimiter is 
+passed back to the reading process (as the last character in the line).</p></li><li><p class="docList">Line
+ editing is enabled, so that the current line of input can be modified. 
+Thus, the following characters are enabled: ERASE, KILL, and, if the <tt>IEXTEN</tt> flag is set, WERASE.</p></li><li><p class="docList">If the <tt>IEXTEN</tt> flag is set, the REPRINT and LNEXT characters are also enabled.</p></li></ul><p class="docText">In canonical mode, a terminal <span class="docEmphasis">read()</span> returns when a complete line of input is available. (The <span class="docEmphasis">read()</span> itself may fetch only part of that line if it requested fewer bytes; remaining bytes will be fetched by subsequent calls to <span class="docEmphasis">read()</span>.) A <span class="docEmphasis">read()</span> may also terminate if interrupted by a signal handler and restarting of system calls is not enabled for this signal (Section 21.5).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">While describing the <tt>NOFLSH</tt> flag in Section 62.5,
+ we noted that the characters that generate signals also cause the 
+terminal driver to flush the terminal input queue. This flushing occurs 
+regardless of whether the signal is caught or ignored by an application.
+ We can prevent such flushing by enabling the <tt>NOFLSH</tt> flag.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0EL5HM">62.6.2. Noncanonical Mode</h4><p class="docText">Some applications (e.g., <span class="docEmphasis">vi</span> and <span class="docEmphasis">less</span>)
+ need to read characters from the terminal without the user supplying a 
+line delimiter. Noncanonical mode is provided for this purpose. In 
+noncanonical mode (<tt>ICANON</tt> unset), no 
+special input processing is performed. In particular, input is no longer
+ gathered into lines, but is instead available immediately.</p><p class="docText">In what circumstances does a noncanonical <span class="docEmphasis">read()</span> complete? We can specify that a noncanonical <span class="docEmphasis">read()</span> terminates after a certain time, after a certain number of bytes have been read, or both in combination. Two elements of the <span class="docEmphasis">termios c_cc</span> array determine the behavior: TIME and MIN. The TIME element (indexed using the constant <tt>VTIME</tt>) specifies a timeout value in tenths of a second. The MIN element (indexed using <tt>VMIN</tt>) specifies the minimum number of bytes to be read. (The MIN and TIME settings have no effect on canonical-mode terminal I/O.)</p><p class="docText">The
+ precise operation and interaction of the MIN and TIME parameters 
+depends on whether they each have nonzero values. The four possible 
+cases are described below. Note that in all cases, if, at the time of a <span class="docEmphasis">read()</span>, sufficient bytes are already available to satisfy the requirements specified by MIN, <span class="docEmphasis">read()</span> returns immediately with the lesser of the number of bytes available and the number of bytes requested.</p><h5 class="docSection3Title" id="title-ID0EM6HM">62.6.2.1. MIN == 0, TIME == 0 (polling read)</h5><p class="docText">If data is available at the time of the call, then <span class="docEmphasis">read()</span>
+ returns immediately with the lesser of the number of bytes available or
+ the number of bytes requested. If no bytes are available, <span class="docEmphasis">read()</span> completes immediately, returning 0.</p><p class="docText">This
+ case serves the usual requirements of polling, allowing the application
+ to check if input is available without blocking if it is not. This mode
+ is somewhat similar to setting the <tt>O_NONBLOCK</tt> flag for the terminal (Section 5.9). However, with <tt>O_NONBLOCK</tt>, if no bytes are available for reading, then <span class="docEmphasis">read()</span> returns -1 with the error <tt>EAGAIN</tt>.</p><h5 class="docSection3Title" id="title-ID0EPAIM">62.6.2.2. MIN &gt; 0, TIME == 0 (blocking read)</h5><p class="docText">The <span class="docEmphasis">read()</span>
+ blocks (possibly indefinitely) until the lesser of the number of bytes 
+requested or MIN bytes are available, and returns the lesser of the two 
+values.</p><p class="docText">Programs such as <span class="docEmphasis">less</span>
+ typically set MIN to 1 and TIME to 0. This allows the program to wait 
+for single key presses without needing to waste CPU time by polling in a
+ busy loop.</p><p class="docText">If a terminal is placed in noncanonical mode with MIN set to 1 and TIME set to 0, then the techniques described in Chapter 63 can be used to check whether a single character (rather than a complete line) has been typed at the terminal.</p><h5 class="docSection3Title" id="title-ID0ECBIM">62.6.2.3. MIN == 0, TIME &gt; 0 (read with timeout)</h5><p class="docText">A timer is started when <span class="docEmphasis">read()</span>
+ is called. The call returns as soon as at least 1 byte is available, or
+ when TIME tenths of a second have elapsed. In the latter case, <span class="docEmphasis">read()</span> returns 0.</p><p class="docText">This
+ case is useful for programs talking to a serial device (e.g., a modem).
+ The program can send data to the device and then wait for a response, 
+using a timeout to avoid hanging forever in case the device doesn’t 
+respond.</p><h5 class="docSection3Title" id="title-ID0ENBIM">62.6.2.4. MIN &gt; 0, TIME &gt; 0 (read with interbyte timeout)</h5><p class="docText">After the initial byte of input becomes available, a timer is restarted as each further byte is received. The <span class="docEmphasis">read()</span>
+ returns when either the lesser of MIN bytes or the number of bytes 
+requested have been read, or when the time between receiving successive 
+bytes exceeds TIME tenths of a second. Since the timer is started only 
+after the initial byte becomes available, at least 1 byte is returned. 
+(A <span class="docEmphasis">read()</span> can block indefinitely for this case.)</p><p class="docText">This
+ case is useful for handling terminal keys that generate escape 
+sequences. For example, on many terminals, the left-arrow key generates 
+the 3-character sequence consisting of <span class="docEmphasis">Escape</span> followed by <tt>OD</tt>.
+ These characters are transmitted in quick succession. Applications 
+handling such sequences need to distinguish the pressing of such a key 
+from the situation where the user slowly types each of the characters 
+individually. This can be done by performing a <span class="docEmphasis">read()</span> with a small interbyte timeout, say 0.2 seconds. Such a technique is used in the command mode of some versions of <span class="docEmphasis">vi</span>.
+ (Depending on the length of the timeout, in such applications, we may 
+be able to simulate a left-arrow key press by quickly typing the 
+aforementioned 3-character sequence.)</p><h5 class="docSection3Title" id="title-ID0ECCIM">62.6.2.5. Portably modifying and restoring MIN and TIME</h5><p class="docText">For historical compatibility with some UNIX implementations, SUSv3 allows the values of the <tt>VMIN</tt> and <tt>VTIME</tt> constants to be the same as <tt>VEOF</tt> and <tt>VEOL</tt>, respectively, which means that these elements of the <span class="docEmphasis">termios c_cc</span> array may coincide. (On Linux, the values of these constants are distinct.) This is possible because <tt>VEOF</tt> and <tt>VEOL</tt> are unused in noncanonical mode. The fact that <tt>VMIN</tt> and <tt>VEOF</tt>
+ may have the same value means that caution is needed in a program that 
+enters noncanonical mode, sets MIN (typically to 1), and then later 
+returns to canonical mode. On return to canonical mode, EOF will no 
+longer have its usual value of ASCII 4 (<span class="docEmphasis">Control-D</span>). The portable way to deal with this problem is to save a copy of the <span class="docEmphasis">termios</span> settings prior to changing to noncanonical mode, and then use this saved structure to return to canonical mode.</p><h4 class="docSection2Title" id="title-ID0EOEIM">62.6.3. Cooked, Cbreak, and Raw Modes</h4><p class="docText">The terminal driver in Seventh Edition UNIX (as well as in early versions of BSD) was capable of handling input in three modes: <span class="docEmphasis">cooked</span>, <span class="docEmphasis">cbreak</span>, and <span class="docEmphasis">raw</span>. The differences between the three modes are summarized in Table 62-3.</p><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 62-3. Differences between cooked, cbreak, and raw terminal modes</h5></caption><colgroup span="4"><col></col><col></col><col></col><col></col></colgroup><thead><tr><th align="center" class="docTableCell thead" rowspan="2" scope="col" style="text-align:center" valign="bottom">Feature</th><th align="center" class="docTableCell thead" colspan="3" scope="col" style="text-align:center" valign="bottom">Mode</th></tr><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Cooked</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Cbreak</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Raw</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top">Input available</td><td align="left" class="docTableCell" valign="top">line by line</td><td align="left" class="docTableCell" valign="top">char. by char.</td><td align="left" class="docTableCell" valign="top">char. by char.</td></tr><tr><td align="left" class="docTableCell" valign="top">Line-editing?</td><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">no</td><td align="left" class="docTableCell" valign="top">no</td></tr><tr><td align="left" class="docTableCell" valign="top">Signal-generating characters interpreted?</td><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">no</td></tr><tr><td align="left" class="docTableCell" valign="top">START/STOP interpreted?</td><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">no</td></tr><tr><td align="left" class="docTableCell" valign="top">Other special characters interpreted?</td><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">no</td><td align="left" class="docTableCell" valign="top">no</td></tr><tr><td align="left" class="docTableCell" valign="top">Other input processing performed?</td><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">no</td></tr><tr><td align="left" class="docTableCell" valign="top">Other output processing performed?</td><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">no</td></tr><tr><td align="left" class="docTableCell" valign="top">Input echoed?</td><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">maybe</td><td align="left" class="docTableCell" valign="top">no</td></tr></tbody></table><p></p><br/><p class="docText">Cooked
+ mode was essentially canonical mode with all of the default special 
+character processing enabled (i.e., interpretation of <tt>CR</tt>, <tt>NL</tt>, and <tt>EOF</tt>; enabling of line editing; handling of signal-generating characters; <tt>ICRNL</tt>; <tt>OCRNL</tt>; and so on).</p><p class="docText">Raw
+ mode was the converse: noncanonical mode, with all input and output 
+processing, as well as echoing, switched off. (An application that 
+needed to ensure that the terminal driver makes absolutely no changes to
+ the data transferred across a serial line would use this mode.)</p><p class="docText">Cbreak
+ mode was intermediate between cooked and raw modes. Input was 
+noncanonical, but signal-generating characters were interpreted, and the
+ various input and output transformations could still occur (depending 
+on individual flag settings). Cbreak mode did not disable echoing, but 
+applications employing this mode would usually disable echoing as well. 
+Cbreak mode was useful in screen-handling applications (such as <span class="docEmphasis">less</span>)
+ that permitted character-by-character input, but still needed to allow 
+interpretation of characters such as INTR, QUIT, and SUSP.</p><h5 class="docSection3Title" id="title-ID0EJLIM">62.6.3.1. Example: setting raw and cbreak mode</h5><p class="docText">In
+ the Seventh Edition and the original BSD terminal drivers, it was 
+possible to switch to raw or cbreak mode by tweaking single bits (called
+ <tt>RAW</tt> and <tt>CBREAK</tt>) in the terminal driver data structures. With the transition to the POSIX <span class="docEmphasis">termios</span>
+ interface (now supported on all UNIX implementations), single bits for 
+selecting raw and cbreak mode are no longer available, and applications 
+emulating these modes must explicitly change the required fields of the <span class="docEmphasis">termios</span> structure. Example 62-3 provides two functions, <span class="docEmphasis">ttySetCbreak()</span> and <span class="docEmphasis">ttySetRaw()</span>, that implement the equivalents of these terminal modes.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Applications that use the <span class="docEmphasis">ncurses</span> library can call the functions <span class="docEmphasis">cbreak()</span> and <span class="docEmphasis">raw()</span>, which perform similar tasks to our functions in Example 62-3.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0EUXIM">Example 62-3. Switching a terminal to cbreak and raw modes</h5><p></p><div class="box"><pre class="preFixedHeight"><b>tty/tty_functions.c</b>
+#include &lt;termios.h&gt;
+#include &lt;unistd.h&gt;
+#include "tty_functions.h"              /* Declares functions defined here */
+
+/* Place terminal referred to by 'fd' in cbreak mode (noncanonical mode
+   with echoing turned off). This function assumes that the terminal is
+   currently in cooked mode (i.e., we shouldn't call it if the terminal
+   is currently in raw mode, since it does not undo all of the changes
+   made by the ttySetRaw() function below). Return 0 on success, or -1
+   on error. If 'prevTermios' is non-NULL, then use the buffer to which
+   it points to return the previous terminal settings. */
+
+int
+ttySetCbreak(int fd, struct termios *prevTermios)
+{
+    struct termios t;
+
+    if (tcgetattr(fd, &amp;t) == -1)
+        return -1;
+
+    if (prevTermios != NULL)
+        *prevTermios = t;
+
+    t.c_lflag &amp;= ~(ICANON | ECHO);
+    t.c_lflag |= ISIG;
+
+    t.c_iflag &amp;= ~ICRNL;
+
+    t.c_cc[VMIN] = 1;                   /* Character-at-a-time input */
+    t.c_cc[VTIME] = 0;                  /* with blocking */
+
+    if (tcsetattr(fd, TCSAFLUSH, &amp;t) == -1)
+        return -1;
+
+    return 0;
+}
+
+/* Place terminal referred to by 'fd' in raw mode (noncanonical mode
+   with all input and output processing disabled). Return 0 on success,
+   or -1 on error. If 'prevTermios' is non-NULL, then use the buffer to
+   which it points to return the previous terminal settings. */
+
+int
+ttySetRaw(int fd, struct termios *prevTermios)
+{
+    struct termios t;
+
+    if (tcgetattr(fd, &amp;t) == -1)
+        return -1;
+
+    if (prevTermios != NULL)
+        *prevTermios = t;
+
+    t.c_lflag &amp;= ~(ICANON | ISIG | IEXTEN | ECHO);
+                        /* Noncanonical mode, disable signals, extended
+                           input processing, and echoing */
+
+    t.c_iflag &amp;= ~(BRKINT | ICRNL | IGNBRK | IGNCR | INLCR |
+                      INPCK | ISTRIP | IXON | PARMRK);
+                        /* Disable special handling of CR, NL, and BREAK.
+                           No 8th-bit stripping or parity error handling.
+                           Disable START/STOP output flow control. */
+
+    t.c_oflag &amp;= ~OPOST;                /* Disable all output processing */
+
+    t.c_cc[VMIN] = 1;                   /* Character-at-a-time input */
+    t.c_cc[VTIME] = 0;                  /* with blocking */
+
+    if (tcsetattr(fd, TCSAFLUSH, &amp;t) == -1)
+        return -1;
+
+    return 0;
+}
+      <b>tty/tty_functions.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">A
+ program that places the terminal in raw or cbreak mode must be careful 
+to return the terminal to a usable mode when it terminates. Among other 
+tasks, this entails handling all of the signals that are likely to be 
+sent to the program, so that the program is not prematurely terminated. 
+(Job-control signals can still be generated from the keyboard in cbreak 
+mode.)</p><p class="docText">An example of how to do this is provided in Example 62-4. This program performs the following steps:</p><ul><li><p class="docList">Set the terminal to either cbreak mode <img alt="" border="0" id="" src="Images/getfile_015-2.png"/> or raw mode <img alt="" border="0" id="" src="Images/getfile_011-11.png"/>, depending on whether a command-line argument (any string) is supplied <img alt="" border="0" id="" src="Images/getfile_007-35.png"/>. The previous terminal settings are saved in the global variable <span class="docEmphasis">userTermios</span> <img alt="" border="0" id="" src="Images/getfile_009-27.png"/>.</p></li><li><p class="docList">If
+ the terminal was placed in cbreak mode, then signals can be generated 
+from the terminal. These signals need to be handled so that terminating 
+or suspending the program leaves the terminal in a state that the user 
+expects. The program installs the same handler for <tt>SIGQUIT</tt> and <tt>SIGINT</tt> <img alt="" border="0" id="" src="Images/getfile_004-33.png"/>. The <tt>SIGTSTP</tt> signal requires special treatment, so a different handler is installed for that signal <img alt="" border="0" id="" src="Images/getfile_017.png"/>.</p></li><li><p class="docList">Install a handler for the <tt>SIGTERM</tt> signal, in order to catch the default signal sent by the <span class="docEmphasis">kill</span> command <img alt="" border="0" id="" src="Images/getfile_005-53.png"/>.</p></li><li><p class="docList">Execute a loop that reads characters one at a time from <span class="docEmphasis">stdin</span> and echoes them on standard output <img alt="" border="0" id="" src="Images/getfile_016.png"/>. The program treats various input characters specially before outputting them <img alt="" border="0" id="" src="Images/getfile_003-65.png"/>:</p><ul><li><p class="docList">All letters are converted to lowercase before being output.</p></li><li><p class="docList">The newline (<tt>\n</tt>) and carriage return (<tt>\r</tt>) characters are echoed without change.</p></li><li><p class="docList">Control characters other than the newline and carriage return are echoed as a 2-character sequence: caret (<tt>^</tt>) plus the corresponding uppercase letter (e.g., <span class="docEmphasis">Control-A</span> echoes as <tt>^A</tt>).</p></li><li><p class="docList">All other characters are echoed as asterisks (<tt>*</tt>).</p></li><li><p class="docList">The letter <span class="docEmphasis">q</span> causes the loop to terminate <img alt="" border="0" id="" src="Images/getfile-124.png"/>.</p></li></ul></li><li><p class="docList">On exit from the loop, restore the terminal to its state as last set by the user, and then terminate <img alt="" border="0" id="" src="Images/getfile_013-6.png"/>.</p></li></ul><p class="docText">The program installs the same handler for <tt>SIGQUIT</tt>, <tt>SIGINT</tt>, and <tt>SIGTERM</tt>. This handler restores the terminal to its state as last set by the user and terminates the program <img alt="" border="0" id="" src="Images/getfile_012-6.png"/>.</p><p class="docText">The handler for the <tt>SIGTSTP</tt> signal <img alt="" border="0" id="" src="Images/getfile_008-25.png"/> deals with the signal in the manner described in Section 34.7.3. Note the following additional details of the operation of this signal handler:</p><ul><li><p class="docList">Upon entry, the handler saves the current terminal settings (in <span class="docEmphasis">ourTermios</span>) <img alt="" border="0" id="" src="Images/getfile_010-20.png"/>, and then resets the terminal to the settings that were in effect (saved in <span class="docEmphasis">userTermios</span>) when the program was started <img alt="" border="0" id="" src="Images/getfile_002-66.png"/>, before once more raising <tt>SIGTSTP</tt> to actually stop the process.</p></li><li><p class="docList">Upon resumption of execution after receipt of <tt>SIGCONT</tt>, the handler once more saves the current terminal settings in <span class="docEmphasis">userTermios</span> <img alt="" border="0" id="" src="Images/getfile_006.png"/>, since the user may have changed the settings while the program was stopped (using the <span class="docEmphasis">stty</span> command, for example). The handler then returns the terminal to the state (<span class="docEmphasis">ourTermios</span>) required by the program <img alt="" border="0" id="" src="Images/getfile_014-2.png"/>.</p></li></ul><h5 class="docExampleTitle" id="title-ID0EU6IM">Example 62-4. Demonstrating cbreak and raw modes</h5><p></p><div class="box"><pre class="preFixedHeight"><b>tty/test_tty_functions.c</b>
+    #include &lt;termios.h&gt;
+    #include &lt;signal.h&gt;
+    #include &lt;ctype.h&gt;
+    #include "tty_functions.h"              /* Declarations of ttySetCbreak()
+                                               and ttySetRaw() */
+    #include "tlpi_hdr.h"
+
+<img alt="" border="0" id="" src="Images/getfile_009-28.png"/>static struct termios userTermios;
+                            /* Terminal settings as defined by user */
+
+    static void             /* General handler: restore tty settings and exit */
+    handler(int sig)
+    {
+<img alt="" border="0" id="" src="Images/getfile_012-7.png"/>    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &amp;userTermios) == -1)
+            errExit("tcsetattr");
+        _exit(EXIT_SUCCESS);
+    }
+
+    static void             /* Handler for SIGTSTP */
+<img alt="" border="0" id="" src="Images/getfile_008-26.png"/>tstpHandler(int sig)
+    {
+        struct termios ourTermios;          /* To save our tty settings */
+        sigset_t tstpMask, prevMask;
+        struct sigaction sa;
+        int savedErrno;
+
+        savedErrno = errno;                 /* We might change 'errno' here */
+
+        /* Save current terminal settings, restore terminal to
+           state at time of program startup */
+
+<img alt="" border="0" id="" src="Images/getfile_010-21.png"/>    if (tcgetattr(STDIN_FILENO, &amp;ourTermios) == -1)
+            errExit("tcgetattr");
+<img alt="" border="0" id="" src="Images/getfile_002-67.png"/>    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &amp;userTermios) == -1)
+            errExit("tcsetattr");
+
+        /* Set the disposition of SIGTSTP to the default, raise the signal
+           once more, and then unblock it so that we actually stop */
+
+        if (signal(SIGTSTP, SIG_DFL) == SIG_ERR)
+            errExit("signal");
+        raise(SIGTSTP);
+
+        sigemptyset(&amp;tstpMask);
+        sigaddset(&amp;tstpMask, SIGTSTP);
+        if (sigprocmask(SIG_UNBLOCK, &amp;tstpMask, &amp;prevMask) == -1)
+            errExit("sigprocmask");
+
+        /* Execution resumes here after SIGCONT */
+
+        if (sigprocmask(SIG_SETMASK, &amp;prevMask, NULL) == -1)
+            errExit("sigprocmask");         /* Reblock SIGTSTP */
+
+            sigemptyset(&amp;sa.sa_mask);           /* Reestablish handler */
+        sa.sa_flags = SA_RESTART;
+        sa.sa_handler = tstpHandler;
+        if (sigaction(SIGTSTP, &amp;sa, NULL) == -1)
+            errExit("sigaction");
+
+        /* The user may have changed the terminal settings while we were
+           stopped; save the settings so we can restore them later */
+
+<img alt="" border="0" id="" src="Images/getfile_006.png"/>    if (tcgetattr(STDIN_FILENO, &amp;userTermios) == -1)
+            errExit("tcgetattr");
+
+        /* Restore our terminal settings */
+
+<img alt="" border="0" id="" src="Images/getfile_014-3.png"/>    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &amp;ourTermios) == -1)
+            errExit("tcsetattr");
+
+        errno = savedErrno;
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        char ch;
+        struct sigaction sa, prev;
+        ssize_t n;
+
+        sigemptyset(&amp;sa.sa_mask);
+        sa.sa_flags = SA_RESTART;
+
+<img alt="" border="0" id="" src="Images/getfile_007-36.png"/>    if (argc &gt; 1) {                     /* Use cbreak mode */
+<img alt="" border="0" id="" src="Images/getfile_015-3.png"/>        if (ttySetCbreak(STDIN_FILENO, &amp;userTermios) == -1)
+                errExit("ttySetCbreak");
+
+            /* Terminal special characters can generate signals in cbreak
+               mode. Catch them so that we can adjust the terminal mode.
+               We establish handlers only if the signals are not being ignored. */
+
+<img alt="" border="0" id="" src="Images/getfile_004-34.png"/>        sa.sa_handler = handler;
+
+            if (sigaction(SIGQUIT, NULL, &amp;prev) == -1)
+                errExit("sigaction");
+            if (prev.sa_handler != SIG_IGN)
+                if (sigaction(SIGQUIT, &amp;sa, NULL) == -1)
+                    errExit("sigaction");
+
+            if (sigaction(SIGINT, NULL, &amp;prev) == -1)
+                errExit("sigaction");
+            if (prev.sa_handler != SIG_IGN)
+                if (sigaction(SIGINT, &amp;sa, NULL) == -1)
+                    errExit("sigaction");
+
+<img alt="" border="0" id="" src="Images/getfile_017.png"/>        sa.sa_handler = tstpHandler;
+                if (sigaction(SIGTSTP, NULL, &amp;prev) == -1)
+                errExit("sigaction");
+            if (prev.sa_handler != SIG_IGN)
+                if (sigaction(SIGTSTP, &amp;sa, NULL) == -1)
+                    errExit("sigaction");
+        } else {                            /* Use raw mode */
+<img alt="" border="0" id="" src="Images/getfile_011-12.png"/>        if (ttySetRaw(STDIN_FILENO, &amp;userTermios) == -1)
+                errExit("ttySetRaw");
+        }
+
+<img alt="" border="0" id="" src="Images/getfile_005-54.png"/>    sa.sa_handler = handler;
+        if (sigaction(SIGTERM, &amp;sa, NULL) == -1)
+            errExit("sigaction");
+
+        setbuf(stdout, NULL);               /* Disable stdout buffering */
+
+<img alt="" border="0" id="" src="Images/getfile_016.png"/>    for (;;) {                          /* Read and echo stdin */
+            n = read(STDIN_FILENO, &amp;ch, 1);
+            if (n == -1) {
+                errMsg("read");
+                break;
+            }
+
+            if (n == 0)                     /* Can occur after terminal disconnect */
+                break;
+
+<img alt="" border="0" id="" src="Images/getfile_003-66.png"/>        if (isalpha((unsigned char) ch))          /* Letters --&gt; lowercase */
+                putchar(tolower((unsigned char) ch));
+            else if (ch == '\n' || ch == '\r')
+                putchar(ch);
+            else if (iscntrl((unsigned char) ch))
+                printf("^%c", ch ^ 64);     /* Echo Control-A as ^A, etc. */
+            else
+                putchar('*');               /* All other chars as '*' */
+
+<img alt="" border="0" id="" src="Images/getfile-125.png"/>        if (ch == 'q')                  /* Quit loop */
+                break;
+        }
+
+<img alt="" border="0" id="" src="Images/getfile_013-7.png"/>    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &amp;userTermios) == -1)
+            errExit("tcsetattr");
+        exit(EXIT_SUCCESS);
+    }
+          <b>tty/test_tty_functions.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Here is an example of what we see when we ask the program in Example 62-4 to use raw mode:</p><pre class="preFixedWidth">$ <b>stty </b>                              <i> Initial terminal mode is sane (cooked)</i>
+speed 38400 baud; line = 0;
+$ <b>./test_tty_functions </b>
+<b>abc </b>                                 <i> Type abc, and Control-J</i>
+   <b>def </b>                              <i> Type DEF, Control-J, and Enter</i>
+<b>^C^Z </b>                                <i> Type Control-C, Control-Z, and Control-J</i>
+    <b>q </b>$                              <i> Type q to exit</i>
+
+					  </pre><br/>
+<p class="docText">In the last line of the preceding shell session, we see that the shell printed its prompt on the same line as the <span class="docEmphasis">q</span> character that caused the program to terminate.</p><p class="docText">The following shows an example run using cbreak mode:</p><pre class="preFixedWidth">$ <b>./test_tty_functions x </b>
+<b>XYZ </b>                                 <i> Type XYZ and Control-Z</i>
+[1]+  Stopped       ./test_tty_functions x
+$ <b>stty </b>                              <i> Verify that terminal mode was restored</i>
+speed 38400 baud; line = 0;
+$ <b>fg </b>                                <i> Resume in foreground</i>
+./test_tty_functions x
+***                                 <i> Type 123 and Control-J</i>
+   $                                <i> Type Control-C to terminate program</i>
+<i> Press Enter to get next shell prompt</i>
+$ <b>stty </b>                              <i> Verify that terminal mode was restored</i>
+speed 38400 baud; line = 0;
+
+					  </pre><br/>
+</div>
+</body>
+</html>

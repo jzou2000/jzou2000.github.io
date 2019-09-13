@@ -1,0 +1,332 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>63.4. The epoll API</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">63.4. The <span class="docEmphasis">epoll</span> API</h3><p class="docText">Like the I/O multiplexing system calls and signal-driven I/O, the Linux <span class="docEmphasis">epoll</span> (event poll) API is used to monitor multiple file descriptors to see if they are ready for I/O. The primary advantages of the <span class="docEmphasis">epoll</span> API are the following:</p><ul><li><p class="docList">The performance of <span class="docEmphasis">epoll</span> scales much better than <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> when monitoring large numbers of file descriptors.</p></li><li><p class="docList">The <span class="docEmphasis">epoll</span> API permits either level-triggered or edge-triggered notification. By contrast, <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> provide only level-triggered notification, and signal-driven I/O provides only edge-triggered notification.</p></li></ul><p class="docText">The performance of <span class="docEmphasis">epoll</span> and signal-driven I/O is similar. However, <span class="docEmphasis">epoll</span> has some advantages over signal-driven I/O:</p><ul><li><p class="docList">We avoid the complexities of signal handling (e.g., signal-queue overflow).</p></li><li><p class="docList">We
+ have greater flexibility in specifying what kind of monitoring we want 
+to perform (e.g., checking to see if a file descriptor for a socket is 
+ready for reading, writing, or both).</p></li></ul><p class="docText">The <span class="docEmphasis">epoll</span> API is Linux-specific, and is new in Linux 2.6.</p><p class="docText">The central data structure of the <span class="docEmphasis">epoll</span> API is an <span class="docEmphasis">epoll instance</span>,
+ which is referred to via an open file descriptor. This file descriptor 
+is not used for I/O. Instead, it is a handle for kernel data structures 
+that serve two purposes:</p><ul><li><p class="docList">recording a list of file descriptors that this process has declared an interest in monitoring—the <span class="docEmphasis">interest list</span>; and</p></li><li><p class="docList">maintaining a list of file descriptors that are ready for I/O—the <span class="docEmphasis">ready list</span>.</p></li></ul><p class="docText">The membership of the ready list is a subset of the interest list.</p><p class="docText">For each file descriptor monitored by <span class="docEmphasis">epoll</span>,
+ we can specify a bit mask indicating events that we are interested in 
+knowing about. These bit masks correspond closely to the bit masks used 
+with <span class="docEmphasis">poll()</span>.</p><p class="docText">The <span class="docEmphasis">epoll</span> API consists of three system calls:</p><ul><li><p class="docList">The <span class="docEmphasis">epoll_create()</span> system call creates an <span class="docEmphasis">epoll</span> instance and returns a file descriptor referring to the instance.</p></li><li><p class="docList">The <span class="docEmphasis">epoll_ctl()</span> system call manipulates the interest list associated with an <span class="docEmphasis">epoll</span> instance. Using <span class="docEmphasis">epoll_ctl()</span>,
+ we can add a new file descriptor to the list, remove an existing 
+descriptor from the list, and modify the mask that determines which 
+events are to be monitored for a descriptor.</p></li><li><p class="docList">The <span class="docEmphasis">epoll_wait()</span> system call returns items from the ready list associated with an <span class="docEmphasis">epoll</span> instance.</p></li></ul><h4 class="docSection2Title" id="title-ID0EETIM">63.4.1. Creating an <span class="docEmphasis">epoll</span> Instance: <span class="docEmphasis">epoll_create()</span></h4><p class="docText">The <span class="docEmphasis">epoll_create()</span> system call creates a new <span class="docEmphasis">epoll</span> instance whose interest list is initially empty.</p><pre>#include &lt;sys/epoll.h&gt;
+
+int <b>epoll_create</b>(int <span class="docEmphasis">size</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns file descriptor on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">size</span> argument specifies the number of file descriptors that we expect to monitor via the <span class="docEmphasis">epoll</span>
+ instance. This argument is not an upper limit, but rather a hint to the
+ kernel about how to initially dimension internal data structures. 
+(Since Linux 2.6.8, the <span class="docEmphasis">size</span>
+ argument must be greater than zero but is otherwise ignored, because 
+changes in the implementation meant that the information it provided is 
+no longer required.)</p><p class="docText">As its function result, <span class="docEmphasis">epoll_create()</span> returns a file descriptor referring to the new <span class="docEmphasis">epoll</span> instance. This file descriptor is used to refer to the <span class="docEmphasis">epoll</span> instance in other <span class="docEmphasis">epoll</span> system calls. When the file descriptor is no longer required, it should be closed in the usual way, using <span class="docEmphasis">close()</span>. When all file descriptors referring to an <span class="docEmphasis">epoll</span>
+ instance are closed, the instance is destroyed and its associated 
+resources are released back to the system. (Multiple file descriptors 
+may refer to the same <span class="docEmphasis">epoll</span> instance as a consequence of calls to <span class="docEmphasis">fork()</span> or descriptor duplication using <span class="docEmphasis">dup()</span> or similar.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Starting with kernel 2.6.27, Linux supports a new system call, <span class="docEmphasis">epoll_create1()</span>. This system call performs the same task as <span class="docEmphasis">epoll_create()</span>, but drops the obsolete <span class="docEmphasis">size</span>
+ argument and adds a flags argument that can be used to modify the 
+behavior of the system call. One flag is currently supported: <tt>EPOLL_CLOEXEC</tt>, which causes the kernel to enable the close-on-exec flag <tt>(FD_CLOEXEC)</tt> for the new file descriptor. This flag is useful for the same reasons as the <span class="docEmphasis">open()</span> <tt>O_CLOEXEC</tt> flag described in Section 4.3.1.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0ELXIM">63.4.2. Modifying the <span class="docEmphasis">epoll</span> Interest List: <span class="docEmphasis">epoll_ctl()</span></h4><p class="docText">The <span class="docEmphasis">epoll_ctl()</span> system call modifies the interest list of the <span class="docEmphasis">epoll</span> instance referred to by the file descriptor <span class="docEmphasis">epfd</span>.</p><pre>#include &lt;sys/epoll.h&gt;
+
+int <b>epoll_ctl</b>(int <span class="docEmphasis">epfd</span>, int <span class="docEmphasis">op</span>, int <span class="docEmphasis">fd</span>, struct epoll_event *<span class="docEmphasis">ev</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">fd</span>
+ argument identifies which of the file descriptors in the interest list 
+is to have its settings modified. This argument can be a file descriptor
+ for a pipe, FIFO, socket, POSIX message queue, <span class="docEmphasis">inotify</span> instance, terminal, device, or even another <span class="docEmphasis">epoll</span> descriptor (i.e., we can build a kind of hierarchy of monitored descriptors). However, <span class="docEmphasis">fd</span> can’t be a file descriptor for a regular file or a directory (the error <tt>EPERM</tt> results).</p><p class="docText">The <span class="docEmphasis">op</span> argument specifies the operation to be performed, and has one of the following values:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">EPOLL_CTL_ADD</span></span></span></p></dt><dd><p class="docList">Add the file descriptor <span class="docEmphasis">fd</span> to the interest list for <span class="docEmphasis">epfd</span>. The set of events that we are interested in monitoring for <span class="docEmphasis">fd</span> is specified in the buffer pointed to by <span class="docEmphasis">ev</span>, as described below. If we attempt to add a file descriptor that is already in the interest list, <span class="docEmphasis">epoll_ctl()</span> fails with the error <tt>EEXIST</tt>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">EPOLL_CTL_MOD</span></span></span></p></dt><dd><p class="docList">Modify the events setting for the file descriptor <span class="docEmphasis">fd</span>, using the information specified in the buffer pointed to by <span class="docEmphasis">ev</span>. If we attempt to modify the settings of a file descriptor that is not in the interest list for <span class="docEmphasis">epfd</span>, <span class="docEmphasis">epoll_ctl()</span> fails with the error <tt>ENOENT</tt>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">EPOLL_CTL_DEL</span></span></span></p></dt><dd><p class="docList">Remove the file descriptor <span class="docEmphasis">fd</span> from the interest list for <span class="docEmphasis">epfd</span>. The <span class="docEmphasis">ev</span> argument is ignored for this operation. If we attempt to remove a file descriptor that is not in the interest list for <span class="docEmphasis">epfd</span>, <span class="docEmphasis">epoll_ctl()</span> fails with the error <tt>ENOENT</tt>. Closing a file descriptor automatically removes it from all of the epoll interest lists of which it is a member.</p></dd></dl><p class="docText">The <span class="docEmphasis">ev</span> argument is a pointer to a structure of type <span class="docEmphasis">epoll_event</span>, defined as follows:</p><pre>struct epoll_event {
+    uint32_t     events;        /* epoll events (bit mask) */
+    epoll_data_t data;          /* User data */
+};</pre><br/>
+<p class="docText">The <span class="docEmphasis">data</span> field of the <span class="docEmphasis">epoll_event</span> structure is typed as follows:</p><pre>typedef union epoll_data {
+    void        *ptr;           /* Pointer to user-defined data */
+    int          fd;            /* File descriptor */
+    uint32_t     u32;           /* 32-bit integer */
+    uint64_t     u64;           /* 64-bit integer */
+} epoll_data_t;</pre><br/>
+<p class="docText">The <span class="docEmphasis">ev</span> argument specifies settings for the file descriptor <span class="docEmphasis">fd</span>, as follows:</p><ul><li><p class="docList">The <span class="docEmphasis">events</span> subfield is a bit mask specifying the set of events that we are interested in monitoring for <span class="docEmphasis">fd</span>. We say more about the bit values that can be used in this field in the next section.</p></li><li><p class="docList">The <span class="docEmphasis">data</span> subfield is a union, one of whose members can be used to specify information that is passed back to the calling process (via <span class="docEmphasis">epoll_wait()</span>) if <span class="docEmphasis">fd</span> later becomes ready.</p></li></ul><p class="docText">Example 63-4 shows an example of the use of <span class="docEmphasis">epoll_create()</span> and <span class="docEmphasis">epoll_ctl()</span>.</p><h5 class="docExampleTitle" id="title-ID0EK5IM">Example 63-4. Using <span class="docEmphasis">epoll_create()</span> and <span class="docEmphasis">epoll_ctl()</span></h5><p></p><div class="box"><pre>int epfd;
+    struct epoll_event ev;
+
+    epfd = epoll_create(5);
+    if (epfd == -1)
+        errExit("epoll_create");
+
+    ev.data.fd = fd;
+    ev.events = EPOLLIN;
+    if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd, ev) == -1)
+        errExit("epoll_ctl");</pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0EU5IM">63.4.2.1. The <tt>max_user_watches</tt> limit</h5><p class="docText">Because each file descriptor registered in an <span class="docEmphasis">epoll</span>
+ interest list requires a small amount of nonswappable kernel memory, 
+the kernel provides an interface that defines a limit on the total 
+number of file descriptors that each user can register in all <span class="docEmphasis">epoll</span> interest lists. The value of this limit can be viewed and modified via <tt>max_user_watches</tt>, a Linux-specific file in the <tt>/proc/sys/fs/epoll</tt> directory. The default value of this limit is calculated based on available system memory (see the <span class="docEmphasis">epoll(7)</span> manual page).</p><h4 class="docSection2Title" id="title-ID0ENAJM">63.4.3. Waiting for Events: <span class="docEmphasis">epoll_wait()</span></h4><p class="docText">The <span class="docEmphasis">epoll_wait()</span> system call returns information about ready file descriptors from the <span class="docEmphasis">epoll</span> instance referred to by the file descriptor <span class="docEmphasis">epfd</span>. A single <span class="docEmphasis">epoll_wait()</span> call can return information about multiple ready file descriptors.</p><pre>#include &lt;sys/epoll.h&gt;
+
+int <b>epoll_wait</b>(int <span class="docEmphasis">epfd</span>, struct epoll_event *<span class="docEmphasis">evlist</span>, int
+ <span class="docEmphasis">maxevents</span>, int <span class="docEmphasis">timeout</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of ready file descriptors, 0 on timeout, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The information about ready file descriptors is returned in the array of <span class="docEmphasis">epoll_event</span> structures pointed to by <span class="docEmphasis">evlist</span>. (The <span class="docEmphasis">epoll_event</span> structure was described in the previous section.) The <span class="docEmphasis">evlist</span> array is allocated by the caller, and the number of elements it contains is specified in <span class="docEmphasis">maxevents</span>.</p><p class="docText">Each item in the array <span class="docEmphasis">evlist</span> returns information about a single ready file descriptor. The <span class="docEmphasis">events</span> subfield returns a mask of the events that have occurred on this descriptor. The <span class="docEmphasis">data</span> subfield returns whatever value was specified in <span class="docEmphasis">ev.data</span> when we registered interest in this file descriptor using <span class="docEmphasis">epoll_ctl()</span>. Note that the <span class="docEmphasis">data</span>
+ field provides the only mechanism for finding out the number of the 
+file descriptor associated with this event. Thus, when we make the <span class="docEmphasis">epoll_ctl()</span> call that places a file descriptor in the interest list, we should either set <span class="docEmphasis">ev.data.fd</span> to the file descriptor number (as shown in Example 63-4) or set <span class="docEmphasis">ev.data.ptr</span> to point to a structure that contains the file descriptor number.</p><p class="docText">The <span class="docEmphasis">timeout</span> argument determines the blocking behavior of <span class="docEmphasis">epoll_wait()</span>, as follows:</p><ul><li><p class="docList">If <span class="docEmphasis">timeout</span> equals -1, block until an event occurs for one of the file descriptors in the interest list for <span class="docEmphasis">epfd</span> or until a signal is caught.</p></li><li><p class="docList">If <span class="docEmphasis">timeout</span>
+ equals 0, perform a nonblocking check to see which events are currently
+ available on the file descriptors in the interest list for <span class="docEmphasis">epfd</span>.</p></li><li><p class="docList">If <span class="docEmphasis">timeout</span> is greater than 0, block for up to <span class="docEmphasis">timeout</span> milliseconds, until an event occurs on one of the file descriptors in the interest list for <span class="docEmphasis">epfd</span>, or until a signal is caught.</p></li></ul><p class="docText">On success, <span class="docEmphasis">epoll_wait()</span> returns the number of items that have been placed in the array <span class="docEmphasis">evlist</span>, or 0 if no file descriptors were ready within the interval specified by <span class="docEmphasis">timeout</span>. On error, <span class="docEmphasis">epoll_wait()</span> returns -1, with <span class="docEmphasis">errno</span> set to indicate the error.</p><p class="docText">In a multithreaded program, it is possible for one thread to use <span class="docEmphasis">epoll_ctl()</span> to add file descriptors to the interest list of an epoll instance that is already being monitored by <span class="docEmphasis">epoll_wait()</span> in another thread. These changes to the interest list will be taken into account immediately, and the <span class="docEmphasis">epoll_wait()</span> call will return readiness information about the newly added file descriptors.</p><h5 class="docSection3Title" id="title-ID0EXEJM">63.4.3.1. <span class="docEmphasis">epoll</span> events</h5><p class="docText">The bit values that can be specified in <span class="docEmphasis">ev.events</span> when we call <span class="docEmphasis">epoll_ctl()</span> and that are placed in the <span class="docEmphasis">evlist[].events</span> fields returned by <span class="docEmphasis">epoll_wait()</span> are shown in Table 63-8. With the addition of an <tt>E</tt> prefix, most of these bits have names that are the same as the corresponding event bits used with <span class="docEmphasis">poll()</span>. (The exceptions are <tt>EPOLLET</tt> and <tt>EPOLLONESHOT</tt>, which we describe in more detail below.) The reason for this correspondence is that, when specified as input to <span class="docEmphasis">epoll_ctl()</span> or returned as output via <span class="docEmphasis">epoll_wait()</span>, these bits convey exactly the same meaning as the corresponding <span class="docEmphasis">poll()</span> event bits.</p><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 63-8. Bit-mask values for the <span class="docEmphasis">epoll events</span> field</h5></caption><colgroup span="4"><col></col><col></col><col></col><col></col></colgroup><thead><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Bit</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Input to <span class="docEmphasis">epoll_ctl()?</span></th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Returned by <span class="docEmphasis">epoll_wait()?</span></th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Description</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top"><tt>EPOLLIN</tt></td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">Data other than high-priority data can be read</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>EPOLLPRI</tt></td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">High-priority data can be read</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>EPOLLRDHUP</tt></td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">Shutdown on peer socket (since Linux 2.6.17)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>EPOLLOUT</tt></td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">Normal data can be written</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>EPOLLET</tt></td><td align="left" class="docTableCell" valign="top">•</td><td class="docTableCell"> </td><td align="left" class="docTableCell" valign="top">Employ edge-triggered event notification</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>EPOLLONESHOT</tt></td><td align="left" class="docTableCell" valign="top">•</td><td class="docTableCell"> </td><td align="left" class="docTableCell" valign="top">Disable monitoring after event notification</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>EPOLLERR</tt></td><td class="docTableCell"> </td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">An error has occurred</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>EPOLLHUP</tt></td><td class="docTableCell"> </td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">A hangup has occurred</td></tr></tbody></table><p></p><br/><h5 class="docSection3Title" id="title-ID0EMNJM">63.4.3.2. The EPOLLONESHOT flag</h5><p class="docText">By default, once a file descriptor is added to an <span class="docEmphasis">epoll</span> interest list using the <span class="docEmphasis">epoll_ctl()</span> <tt>EPOLL_CTL_ADD</tt> operation, it remains active (i.e., subsequent calls to <span class="docEmphasis">epoll_wait()</span> will inform us whenever the file descriptor is ready) until we explicitly remove it from the list using the <span class="docEmphasis">epoll_ctl()</span> <tt>EPOLL_CTL_DEL</tt> operation. If we want to be notified only once about a particular file descriptor, then we can specify the <tt>EPOLLONESHOT</tt> flag (available since Linux 2.6.2) in the <span class="docEmphasis">ev.events</span> value passed in <span class="docEmphasis">epoll_ctl()</span>. If this flag is specified, then, after the next <span class="docEmphasis">epoll_wait()</span>
+ call that informs us that the corresponding file descriptor is ready, 
+the file descriptor is marked inactive in the interest list, and we 
+won’t be informed about its state by future <span class="docEmphasis">epoll_wait()</span> calls. If desired, we can subsequently reenable monitoring of this file descriptor using the <span class="docEmphasis">epoll_ctl()</span> <tt>EPOLL_CTL_MOD</tt> operation. (We can’t use the <tt>EPOLL_CTL_ADD</tt> operation for this purpose, because the inactive file descriptor is still part of the <span class="docEmphasis">epoll</span> interest list.)</p><h5 class="docSection3Title" id="title-ID0EVOJM">63.4.3.3. Example program</h5><p class="docText">Example 63-5 demonstrates the use of the <span class="docEmphasis">epoll</span>
+ API. As command-line arguments, this program expects the pathnames of 
+one or more terminals or FIFOs. The program performs the following 
+steps:</p><ul><li><p class="docList">Create an <span class="docEmphasis">epoll</span> instance <img alt="" border="0" id="" src="Images/getfile_004-35.png"/>.</p></li><li><p class="docList">Open each of the files named on the command line for input <img alt="" border="0" id="" src="Images/getfile_007-37.png"/> and add the resulting file descriptor to the interest list of the <span class="docEmphasis">epoll</span> instance <img alt="" border="0" id="" src="Images/getfile_010-22.png"/>, specifying the set of events to be monitored as <tt>EPOLLIN</tt>.</p></li><li><p class="docList">Execute a loop <img alt="" border="0" id="" src="Images/getfile_005-55.png"/> that calls <span class="docEmphasis">epoll_wait()</span> <img alt="" border="0" id="" src="Images/getfile_006-46.png"/> to monitor the interest list of the <span class="docEmphasis">epoll</span> instance and handles the returned events from each call. Note the following points about this loop:</p><ul><li><p class="docList">After the <span class="docEmphasis">epoll_wait()</span> call, the program checks for an <tt>EINTR</tt> return <img alt="" border="0" id="" src="Images/getfile_002-68.png"/>, which may occur if the program was stopped by a signal in the middle of the <span class="docEmphasis">epoll_wait()</span> call and then resumed by <tt>SIGCONT</tt>. (Refer to Section 21.5.) If this occurs, the program restarts the <span class="docEmphasis">epoll_wait()</span> call.</p></li><li><p class="docList">It the <span class="docEmphasis">epoll_wait()</span> call was successful, the program uses a further loop to check each of the ready items in <span class="docEmphasis">evlist</span> <img alt="" border="0" id="" src="Images/getfile_008-27.png"/>. For each item in <span class="docEmphasis">evlist</span>, the program checks the <span class="docEmphasis">events</span> field for the presence of not just <tt>EPOLLIN</tt> <img alt="" border="0" id="" src="Images/getfile_003-67.png"/>, but also <tt>EPOLLHUP</tt> and <tt>EPOLLERR</tt> <img alt="" border="0" id="" src="Images/getfile_009-29.png"/>. These latter events can occur if the other end of a FIFO was closed or a terminal hangup occurred. If <tt>EPOLLIN</tt>
+ was returned, then the program reads some input from the corresponding 
+file descriptor and displays it on standard output. Otherwise, if either
+ <tt>EPOLLHUP</tt> or <tt>EPOLLERR</tt> occurred, the program closes the corresponding file descriptor <img alt="" border="0" id="" src="Images/getfile-126.png"/> and decrements the counter of open files (<span class="docEmphasis">numOpenFds</span>).</p></li><li><p class="docList">The loop terminates when all open file descriptors have been closed (i.e., when <span class="docEmphasis">numOpenFds</span> equals 0).</p></li></ul></li></ul><p class="docText">The following shell session logs demonstrate the use of the program in Example 63-5. We use two terminal windows. In one window, we use the program in Example 63-5
+ to monitor two FIFOs for input. (Each open of a FIFO for reading by 
+this program will complete only after another process has opened the 
+FIFO for writing, as described in Section 44.7.) In the other window, we
+ run instances of <span class="docEmphasis">cat(1)</span> that write data to these FIFOs.</p><pre><b>Terminal window 1 </b>                   <b>Terminal window 2 </b>
+$ <b>mkfifo p q </b>
+$ <b>./epoll_input p q </b>
+                                    $ <b>cat &gt; p </b>
+Opened "p" on fd 4
+                                    <i> Type Control-Z to suspend cat</i>
+                                    [1]+  Stopped      cat &gt;p
+                                    $ <b>cat &gt; q </b>
+Opened "q" on fd 5
+About to epoll_wait()
+<i> Type Control-Z to suspend the epoll_input program</i>
+[1]+  Stopped     ./epoll_input p q</pre><br/>
+<p class="docText">Above, we suspended our 
+monitoring program so that we can now generate input on both FIFOs, and 
+close the write end of one of them:</p><pre><b>qqq </b>
+                                    <i> Type Control-D to terminate “cat &gt; q”</i>
+                                    $ <b>fg %1 </b>
+                                    cat &gt;p
+                                    <b>ppp </b></pre><br/>
+<p class="docText">Now we resume our monitoring program by bringing it into the foreground, at which point <span class="docEmphasis">epoll_wait()</span> returns two events:</p><pre>$ <b>fg</b>
+./epoll_input p q
+About to epoll_wait()
+Ready: 2
+  fd=4; events: EPOLLIN
+    read 4 bytes: ppp
+
+  fd=5; events: EPOLLIN EPOLLHUP
+    read 4 bytes: qqq
+
+    closing fd 5
+About to epoll_wait()</pre><br/>
+<p class="docText">The two blank lines in the above output are the newlines that were read by the instances of <span class="docEmphasis">cat</span>, written to the FIFOs, and then read and echoed by our monitoring program.</p><p class="docText">Now we type <span class="docEmphasis">Control-D</span> in the second terminal window in order to terminate the remaining instance of <span class="docEmphasis">cat</span>, which causes <span class="docEmphasis">epoll_wait()</span> to once more return, this time with a single event:</p><pre><i>Type Control-D to terminate “cat &gt;p”</i>
+Ready: 1
+  fd=4; events: EPOLLHUP
+    closing fd 4
+All file descriptors closed; bye</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EIXJM">Example 63-5. Using the <span class="docEmphasis">epoll</span> API</h5><p></p><div class="box"><pre class="preFixedHeight"><b>altio/epoll_input.c</b>
+    #include &lt;sys/epoll.h&gt;
+    #include &lt;fcntl.h&gt;
+    #include "tlpi_hdr.h"
+
+    #define MAX_BUF     1000        /* Maximum bytes fetched by a single read() */
+    #define MAX_EVENTS     5        /* Maximum number of events to be returned from
+                                       a single epoll_wait() call */
+
+    int
+    main(int argc, char *argv[])
+    {
+        int epfd, ready, fd, s, j, num0penFds;
+        struct epoll_event ev;
+        struct epoll_event evlist[MAX_EVENTS];
+        char buf[MAX_BUF];
+
+        if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+            usageErr("%s file...\n", argv[0]);
+
+<img alt="" border="0" id="" src="Images/getfile_004-36.png"/>    epfd = epoll_create(argc - 1);
+        if (epfd == -1)
+            errExit("epoll_create");
+
+        /* Open each file on command line, and add it to the "interest
+           list" for the epoll instance */
+
+<img alt="" border="0" id="" src="Images/getfile_007-38.png"/>    for (j = 1; j &lt; argc; j++) {
+            fd = open(argv[j], O_RDONLY);
+            if (fd == -1)
+                errExit("open");
+            printf("Opened \"%s\" on fd %d\n", argv[j], fd);
+
+            ev.events = EPOLLIN;            /* Only interested in input events */
+            ev.data.fd = fd;
+<img alt="" border="0" id="" src="Images/getfile_010-23.png"/>        if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &amp;ev) == -1)
+                errExit("epoll_ctl");
+        }
+
+        numOpenFds = argc - 1;
+
+<img alt="" border="0" id="" src="Images/getfile_005-56.png"/>    while (numOpenFds &gt; 0) {
+
+            /* Fetch up to MAX_EVENTS items from the ready list */
+
+            printf("About to epoll_wait()\n");
+<img alt="" border="0" id="" src="Images/getfile_006-47.png"/>        ready = epoll_wait(epfd, evlist, MAX_EVENTS, -1);
+            if (ready == -1) {
+<img alt="" border="0" id="" src="Images/getfile_002-69.png"/>            if (errno == EINTR)
+                    continue;               /* Restart if interrupted by signal */
+                else
+                    errExit("epoll_wait");
+            }
+
+                printf("Ready: %d\n", ready);
+
+            /* Deal with returned list of events */
+
+<img alt="" border="0" id="" src="Images/getfile_008-28.png"/>        for (j = 0; j &lt; ready; j++) {
+                printf("  fd=%d; events: %s%s%s\n", evlist[j].data.fd,
+                        (evlist[j].events &amp; EPOLLIN)  ? "EPOLLIN "  : "",
+                        (evlist[j].events &amp; EPOLLHUP) ? "EPOLLHUP " : "",
+                        (evlist[j].events &amp; EPOLLERR) ? "EPOLLERR " : "");
+
+<img alt="" border="0" id="" src="Images/getfile_003-68.png"/>            if (evlist[j].events &amp; EPOLLIN) {
+                    s = read(evlist[j].data.fd, buf, MAX_BUF);
+                    if (s == -1)
+                        errExit("read");
+                    printf("    read %d bytes: %.*s\n", s, s, buf);
+
+<img alt="" border="0" id="" src="Images/getfile_009-30.png"/>            } else if (evlist[j].events &amp; (EPOLLHUP | EPOLLERR)) {
+
+                    /* If EPOLLIN and EPOLLHUP were both set, then there might
+                       be more than MAX_BUF bytes to read. Therefore, we close
+                       the file descriptor only if EPOLLIN was not set.
+                       We'll read further bytes after the next epoll_wait(). */
+
+                    printf("    closing fd %d\n", evlist[j].data.fd);
+<img alt="" border="0" id="" src="Images/getfile-127.png"/>                if (close(evlist[j].data.fd) == -1)
+                        errExit("close");
+                    numOpenFds--;
+                }
+            }
+        }
+
+        printf("All file descriptors closed; bye\n");
+        exit(EXIT_SUCCESS);
+    }
+
+          <b>altio/epoll_input.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0E3ZJM">63.4.4. A Closer Look at <span class="docEmphasis">epoll</span> Semantics</h4><p class="docText">We now look at some subtleties of the interaction of open files, file descriptors, and <span class="docEmphasis">epoll</span>. For the purposes of this discussion, it is worth reviewing Figure 5-2
+ (page 95), which shows the relationship between file descriptors, open 
+file descriptions, and the system-wide file i-node table.</p><p class="docText">When we create an <span class="docEmphasis">epoll</span> instance using <span class="docEmphasis">epoll_create()</span>,
+ the kernel creates a new in-memory i-node and open file description, 
+and allocates a new file descriptor in the calling process that refers 
+to the open file description. The interest list for an <span class="docEmphasis">epoll</span> instance is associated with the open file description, not with the <span class="docEmphasis">epoll</span> file descriptor. This has the following consequences:</p><ul><li><p class="docList">If we duplicate an <span class="docEmphasis">epoll</span> file descriptor using <span class="docEmphasis">dup()</span> (or similar), then the duplicated descriptor refers to the same <span class="docEmphasis">epoll</span>
+ interest and ready lists as the original descriptor. We may modify the 
+interest list by specifying either file descriptor as the <span class="docEmphasis">epfd</span> argument in a call to <span class="docEmphasis">epoll_ctl()</span>. Similarly, we can retrieve items from the ready list by specifying either file descriptor as the <span class="docEmphasis">epfd</span> argument in a call to <span class="docEmphasis">epoll_wait()</span>.</p></li><li><p class="docList">The preceding point also applies after a call to <span class="docEmphasis">fork()</span>. The child inherits a duplicate of the parent’s <span class="docEmphasis">epoll</span> file descriptor, and this duplicate descriptor refers to the same <span class="docEmphasis">epoll</span> data structures.</p></li></ul><p class="docText">When we perform an <span class="docEmphasis">epoll_ctl()</span> <tt>EPOLL_CTL_ADD</tt> operation, the kernel adds an item to the <span class="docEmphasis">epoll</span>
+ interest list that records both the number of the monitored file 
+descriptor and a reference to the corresponding open file description. 
+For the purpose of <span class="docEmphasis">epoll_wait()</span>
+ calls, the kernel monitors the open file description. This means that 
+we must refine our earlier statement that when a file descriptor is 
+closed, it is automatically removed from any <span class="docEmphasis">epoll</span> interest lists of which it is a member. The refinement is this: an open file description is removed from the <span class="docEmphasis">epoll</span>
+ interest list once all file descriptors that refer to it have been 
+closed. This means that if we create duplicate descriptors referring to 
+an open file—using <span class="docEmphasis">dup()</span> (or similar) or <span class="docEmphasis">fork()</span>—then the open file will be removed only after the original descriptor and all of the duplicates have been closed.</p><p class="docText">These semantics can lead to some behavior that at first appears surprising. Suppose that we execute the code shown in Example 63-6. The <span class="docEmphasis">epoll_wait()</span> call in this code will tell us that the file descriptor <span class="docEmphasis">fd1</span> is ready (in other words, <span class="docEmphasis">evlist[0].data.fd</span> will be equal to <span class="docEmphasis">fd1</span>), even though <span class="docEmphasis">fd1</span> has been closed. This is because there is still one open file descriptor, <span class="docEmphasis">fd2</span>, referring to the open file description contained in the <span class="docEmphasis">epoll</span>
+ interest list. A similar scenario occurs when two processes hold 
+duplicate descriptors for the same open file description (typically, as a
+ result of a <span class="docEmphasis">fork()</span>), and the process performing the <span class="docEmphasis">epoll_wait()</span> has closed its file descriptor, but the other process still holds the duplicate descriptor open.</p><h5 class="docExampleTitle" id="title-ID0ER4JM">Example 63-6. Semantics of <span class="docEmphasis">epoll</span> with duplicate file descriptors</h5><p></p><div class="box"><pre class="preFixedWidth">int epfd, fd1, fd2;
+    struct epoll_event ev;
+    struct epoll_event evlist[MAX_EVENTS];
+
+    /* Omitted: code to open 'fd1' and create epoll file descriptor 'epfd' ... */
+
+    ev.data.fd = fd1
+    ev.events = EPOLLIN;
+    if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd1, ev) == -1)
+        errExit("epoll_ctl");
+
+    /* Suppose that 'fd1' now happens to become ready for input */
+
+    fd2 = dup(fd1);
+    close(fd1);
+    ready = epoll_wait(epfd, evlist, MAX_EVENTS, -1);
+    if (ready == -1)
+        errExit("epoll_wait");
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0E14JM">63.4.5. Performance of <span class="docEmphasis">epoll</span> Versus I/O Multiplexing</h4><p class="docText">Table 63-9 shows the results (on Linux 2.6.25) when we monitor <span class="docEmphasis">N</span> contiguous file descriptors in the range <span class="docEmphasis">0</span> to <span class="docEmphasis">N - 1</span> using <span class="docEmphasis">poll()</span>, <span class="docEmphasis">select()</span>, and <span class="docEmphasis">epoll</span>.
+ (The test was arranged such that during each monitoring operation, 
+exactly one randomly selected file descriptor is ready.) From this 
+table, we see that as the number of file descriptors to be monitored 
+grows large, <span class="docEmphasis">poll()</span> and <span class="docEmphasis">select()</span> perform poorly. By contrast, the performance of <span class="docEmphasis">epoll</span> hardly declines as <span class="docEmphasis">N</span> grows large. (The small decline in performance as <span class="docEmphasis">N</span> increases is possibly a result of reaching CPU caching limits on the test system.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">For the purposes of this test, <tt>FD_SETSIZE</tt> was changed to 16,384 in the <span class="docEmphasis">glibc</span> header files to allow the test program to monitor large numbers of file descriptors using <span class="docEmphasis">select()</span>.</p><hr noshade="noshade" size="1"/><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 63-9. Times taken by <span class="docEmphasis">poll()</span>, <span class="docEmphasis">select()</span>, and <span class="docEmphasis">epoll</span> for 100,000 monitoring operations</h5></caption><colgroup span="4"><col></col><col></col><col></col><col></col></colgroup><thead><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Number of descriptors monitored (<span class="docEmphasis">N</span>)</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom"><span class="docEmphasis">poll()</span> CPU time (seconds)</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom"><span class="docEmphasis">select()</span> CPU time (seconds)</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom"><span class="docEmphasis">epoll</span> CPU time (seconds)</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top"><tt>10</tt></td><td align="left" class="docTableCell" valign="top"><tt>0.61</tt></td><td align="left" class="docTableCell" valign="top"><tt>0.73</tt></td><td align="left" class="docTableCell" valign="top"><tt>0.41</tt></td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>100</tt></td><td align="left" class="docTableCell" valign="top"><tt>2.9</tt></td><td align="left" class="docTableCell" valign="top"><tt>3.0</tt></td><td align="left" class="docTableCell" valign="top"><tt>0.42</tt></td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>1000</tt></td><td align="left" class="docTableCell" valign="top"><tt>35</tt></td><td align="left" class="docTableCell" valign="top"><tt>35</tt></td><td align="left" class="docTableCell" valign="top"><tt>0.53</tt></td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>10000</tt></td><td align="left" class="docTableCell" valign="top"><tt>990</tt></td><td align="left" class="docTableCell" valign="top"><tt>930</tt></td><td align="left" class="docTableCell" valign="top"><tt>0.66</tt></td></tr></tbody></table><p></p><br/><p class="docText">In Section 63.2.5, we saw why <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> perform poorly when monitoring large numbers of file descriptors. We now look at the reasons why <span class="docEmphasis">epoll</span> performs better:</p><ul><li><p class="docList">On each call to <span class="docEmphasis">select()</span> or <span class="docEmphasis">poll()</span>,
+ the kernel must check all of the file descriptors specified in the 
+call. By contrast, when we mark a descriptor to be monitored with <span class="docEmphasis">epoll_ctl()</span>,
+ the kernel records this fact in a list associated with the underlying 
+open file description, and whenever an I/O operation that makes the file
+ descriptor ready is performed, the kernel adds an item to the ready 
+list for the <span class="docEmphasis">epoll</span>
+ descriptor. (An I/O event on a single open file description may cause 
+multiple file descriptors associated with that description to become 
+ready.) Subsequent <span class="docEmphasis">epoll_wait()</span> calls simply fetch items from the ready list.</p></li><li><p class="docList">Each time we call <span class="docEmphasis">select()</span> or <span class="docEmphasis">poll()</span>,
+ we pass a data structure to the kernel that identifies all of the file 
+descriptors that are to be monitored, and, on return, the kernel passes 
+back a data structure describing the readiness of all of these 
+descriptors. By contrast, with <span class="docEmphasis">epoll</span>, we use <span class="docEmphasis">epoll_ctl()</span> to build up a data structure <span class="docEmphasis">in kernel space</span> that lists the set of file descriptors to be monitored. Once this data structure has been built, each later call to <span class="docEmphasis">epoll_wait()</span>
+ doesn’t need to pass any information about file descriptors to the 
+kernel, and the call returns information about only those descriptors 
+that are ready.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In addition to the above points, for <span class="docEmphasis">select()</span>, we must initialize the input data structure prior to each call, and for both <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>, we must inspect the returned data structure to find out which of the <span class="docEmphasis">N</span>
+ file descriptors are ready. However, some testing showed that the time 
+required for these other steps was insignificant compared to the time 
+required for the system call to monitor <span class="docEmphasis">N</span> descriptors. Table 63-9 doesn’t include the times for the inspection step.</p><hr noshade="noshade" size="1"/><p class="docText">Very roughly, we can say that for large values of <span class="docEmphasis">N</span> (the number of file descriptors being monitored), the performance of <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> scales linearly with <span class="docEmphasis">N</span>. We start to see this behavior for the <span class="docEmphasis">N = 100</span> and <span class="docEmphasis">N = 1000</span> cases in Table 63-9. By the time we reach <span class="docEmphasis">N = 10000</span>, the scaling has actually become worse than linear.</p><p class="docText">By contrast, <span class="docEmphasis">epoll</span> scales (linearly) according to the number of I/O events that occur. The <span class="docEmphasis">epoll</span>
+ API is thus particularly efficient in a scenario that is common in 
+servers that handle many simultaneous clients: of the many file 
+descriptors being monitored, most are idle; only a few descriptors are 
+ready.</p><h4 class="docSection2Title" id="title-ID0EKHKM">63.4.6. Edge-Triggered Notification</h4><p class="docText">By default, the <span class="docEmphasis">epoll</span> mechanism provides <span class="docEmphasis">level-triggered</span> notification. By this, we mean that <span class="docEmphasis">epoll</span>
+ tells us whether an I/O operation can be performed on a file descriptor
+ without blocking. This is the same type of notification as is provided 
+by <span class="docEmphasis">poll()</span> and <span class="docEmphasis">select()</span>.</p><p class="docText">The <span class="docEmphasis">epoll</span> API also allows for <span class="docEmphasis">edge-triggered</span> notification—that is, a call to <span class="docEmphasis">epoll_wait()</span> tells us if there has been I/O activity on a file descriptor since the previous call to <span class="docEmphasis">epoll_wait()</span> (or since the descriptor was opened, if there was no previous call). Using <span class="docEmphasis">epoll</span> with edge-triggered notification is semantically similar to signal-driven I/O, except that if multiple I/O events occur, <span class="docEmphasis">epoll</span> coalesces them into a single notification returned via <span class="docEmphasis">epoll_wait()</span>; with signal-driven I/O, multiple signals may be generated.</p><p class="docText">To employ edge-triggered notification, we specify the <tt>EPOLLET</tt> flag in <span class="docEmphasis">ev.events</span> when calling <span class="docEmphasis">epoll_ctl()</span>:</p><pre>struct epoll_event ev;
+
+ev.data.fd = fd
+ev.events = EPOLLIN | EPOLLET;
+if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd, ev) == -1)
+    errExit("epoll_ctl");</pre><br/>
+<p class="docText">We illustrate the difference between level-triggered and edge-triggered <span class="docEmphasis">epoll</span> notification using an example. Suppose that we are using <span class="docEmphasis">epoll</span> to monitor a socket for input (<tt>EPOLLIN</tt>), and the following steps occur:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Input arrives on the socket.</p></div></li><li><div style="font-weight:normal"><p class="docList">We perform an <span class="docEmphasis">epoll_wait()</span>.
+ This call will tell us that the socket is ready, regardless of whether 
+we are employing level-triggered or edge-triggered notification.</p></div></li><li><div style="font-weight:normal"><p class="docList">We perform a second call to <span class="docEmphasis">epoll_wait()</span>.</p></div></li></ol></div><p class="docText">If we are employing level-triggered notification, then the second <span class="docEmphasis">epoll_wait()</span> call will inform us that the socket is ready. If we are employing edge-triggered notification, then the second call to <span class="docEmphasis">epoll_wait()</span> will block, because no new input has arrived since the previous call to <span class="docEmphasis">epoll_wait()</span>.</p><p class="docText">As we noted in Section 63.1.1,
+ edge-triggered notification is usually employed in conjunction with 
+nonblocking file descriptors. Thus, the general framework for using 
+edge-triggered <span class="docEmphasis">epoll</span> notification is as follows:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Make all file descriptors that are to be monitored nonblocking.</p></div></li><li><div style="font-weight:normal"><p class="docList">Build the <span class="docEmphasis">epoll</span> interest list using <span class="docEmphasis">epoll_ctl()</span>.</p></div></li><li><div style="font-weight:normal"><p class="docList">Handle I/O events using the following loop:</p><div style="font-weight:bold"><ol class="docList" type="a"><li><div style="font-weight:normal"><p class="docList">Retrieve a list of ready descriptors using <span class="docEmphasis">epoll_wait()</span>.</p></div></li><li><div style="font-weight:normal"><p class="docList">For each file descriptor that is ready, process I/O until the relevant system call (e.g., <span class="docEmphasis">read()</span>, <span class="docEmphasis">write()</span>, <span class="docEmphasis">recv()</span>, <span class="docEmphasis">send()</span>, or <span class="docEmphasis">accept()</span>) returns with the error <span class="docEmphasis">EAGAIN</span> or <tt>EWOULDBLOCK</tt>.</p></div></li></ol></div></div></li></ol></div><h5 class="docSection3Title" id="title-ID0EAMKM">63.4.6.1. Preventing file-descriptor starvation when using edge-triggered notification</h5><p class="docText">Suppose
+ that we are monitoring multiple file descriptors using edge-triggered 
+notification, and that a ready file descriptor has a large amount 
+(perhaps an endless stream) of input available. If, after detecting that
+ this file descriptor is ready, we attempt to consume all of the input 
+using nonblocking reads, then we risk starving the other file 
+descriptors of attention (i.e., it may be a long time before we again 
+check them for readiness and perform I/O on them). One solution to this 
+problem is for the application to maintain a list of file descriptors 
+that have been notified as being ready, and execute a loop that 
+continuously performs the following actions:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Monitor the file descriptors using <span class="docEmphasis">epoll_wait()</span>
+ and add ready descriptors to the application list. If any file 
+descriptors are already registered as being ready in the application 
+list, then the timeout for this monitoring step should be small or 0, so
+ that if no new file descriptors are ready, the application can quickly 
+proceed to the next step and service any file descriptors that are 
+already known to be ready.</p></div></li><li><div style="font-weight:normal"><p class="docList">Perform
+ a limited amount of I/O on those file descriptors registered as being 
+ready in the application list (perhaps cycling through them in 
+round-robin fashion, rather than always starting from the beginning of 
+the list after each call to <span class="docEmphasis">epoll_wait()</span>). A file descriptor can be removed from the application list when the relevant nonblocking I/O system call fails with the <tt>EAGAIN</tt> or <tt>EWOULDBLOCK</tt> error.</p></div></li></ol></div><p class="docText">Although
+ it requires extra programming work, this approach offers other benefits
+ in addition to preventing file-descriptor starvation. For example, we 
+can include other steps in the above loop, such as handling timers and 
+accepting signals with <span class="docEmphasis">sigwaitinfo()</span> (or similar).</p><p class="docText">Starvation
+ considerations can also apply when using signal-driven I/O, since it 
+also presents an edge-triggered notification mechanism. By contrast, 
+starvation considerations don’t necessarily apply in applications 
+employing a level-triggered notification mechanism. This is because we 
+can employ blocking file descriptors with level-triggered notification 
+and use a loop that continuously checks descriptors for readiness, and 
+then performs <span class="docEmphasis">some</span> I/O on the ready descriptors before once more checking for ready file descriptors.</p>
+</div>
+</body>
+</html>

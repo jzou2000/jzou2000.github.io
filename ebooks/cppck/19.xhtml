@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 19. Commands and Hollywood</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 19. Commands and Hollywood</h2>
+		
+<p class="docText">When a function object is used as a callback, that’s an instance of the Command pattern.</p>
+		
+<p class="docText">What’s a callback? Suppose 
+you’re taking a long trip, and I lend you my car for the purpose. Given 
+the condition of my car, I’ll probably also hand you a sealed envelope 
+with a telephone number in it, along with instructions to call the 
+number in the envelope if you experience any engine problems. That’s a 
+callback. You do not have to know the number in advance (it may be the 
+number of a good repair shop, a bus line, or the city dump), and in fact
+ you may never have to call the number. In effect, the task of handling 
+the “engine trouble” event has been partitioned between you (also known 
+as the “framework”) and me (also known as the “client of the 
+framework”). You know when it’s time to do something but not what to do.
+ I know what to do if a particular event occurs but not when to do it. 
+Together we make a complete application.</p>
+		
+<p class="docText">Callbacks are a common programming technique and have traditionally been implemented as simple pointers to functions (see <span class="docEmphasis">Function Pointers</span> [14,
+ 49]). For example, consider an interactive button type that displays a 
+labeled button on the screen and executes an action if it’s clicked.</p>
+		
+<div class="docText">
+  <pre>				<span class="docEmphMark">class Button {                                                        </span>
+				<span class="docEmphMark">    public:                                                           </span>
+				<span class="docEmphMark">      Button( const string &amp;label )                                   </span>
+				<span class="docEmphMark">          : label_(label), action_(0) {}                              </span>
+				<span class="docEmphMark">      void setAction( void (*newAction)() )                           </span>
+				<span class="docEmphMark">          { action_ = newAction; }                                    </span>
+				<span class="docEmphMark">      void onClick() const                                            </span>
+				<span class="docEmphMark">          { if( action_ ) action_(); }                                </span>
+				<span class="docEmphMark">    private:                                                          </span>
+				<span class="docEmphMark">      string label_;                                                  </span>
+				<span class="docEmphMark">      void (*action_)();                                              </span>
+				<span class="docEmphMark">    //...                                                             </span>
+				<span class="docEmphMark">};                                                                    </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">A user of a <tt>Button</tt> would set a callback function and then hand the <tt>Button</tt> over to framework code that could detect when the <tt>Button</tt> is clicked and execute the action.</p>
+		
+<div class="docText">
+  <pre>extern void playMusic();
+//...                                                 
+Button *b = new Button( "Anoko no namaewa" );
+b-&gt;setAction( playMusic );                 
+registerButtonWithFramework( b );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This partitioning of 
+responsibility is often called the “Hollywood Principle,” as in “Don’t 
+call us; we’ll call you.” We set up the button to perform the correct 
+action if it should ever be clicked, and the framework code knows to 
+invoke that action if the button is clicked.</p>
+		
+<p class="docText">However, using a simple 
+function pointer as a callback has severe limitations. Functions often 
+need data with which to work, but a function pointer has no associated 
+data. In the example above, how does the <tt>playMusic</tt> function know what song to play? The usual quick fix is either to severely limit the scope of the function</p>
+		
+<div class="docText">
+  <pre class="preFixedWidth">				<span class="docEmphMark">extern void playAnokoNoNamaewa();                                       </span>
+				<span class="docEmphMark">//...                                                                   </span>
+				<span class="docEmphMark">b-&gt;setAction( playAnokoNoNamaewa );                                     </span>
+			
+
+					  </pre>
+</div>
+<br/>
+		
+<p class="docText">or to resort to disreputable and dangerous coding practices, such as the use of a global variable:</p>
+		
+<div class="docText">
+  <pre>				<span class="docEmphMark">extern const MP3 *theCurrentSong = 0;                                  </span>
+				<span class="docEmphMark">//...                                                                  </span>
+				<span class="docEmphMark">const MP3 anokoNoNamaewa ( "AnokoNoNamaewa.mp3" );                     </span>
+				<span class="docEmphMark">theCurrentSong = &amp;anokoNoNamaewa;                                      </span>
+				<span class="docEmphMark">b-&gt;setAction( playMusic );                                             </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">A better approach is 
+typically to use a function object rather than a function pointer. Use 
+of a function object—or more typically a function object hierarchy—in 
+conjunction with the Hollywood Principle is an instance of the Command 
+pattern.</p>
+		
+<p class="docText">One
+ obvious benefit of the object-oriented approach is that a function 
+object can have encapsulated data. Another advantage is that a function 
+object can have dynamic behavior though virtual members; that is, we can
+ have a hierarchy of related function objects (see <span class="docEmphasis">Function Objects</span> [18, 63]). We gain a third advantage as well, but we’ll get to that later. First let’s redesign our <tt>Button</tt> to employ the Command pattern:</p>
+		
+<div class="docText">
+  <pre class="preFixedHeight">class Action { // Command
+  public:
+    virtual ~Action();
+    virtual void operator ()() = 0;
+    virtual Action *clone() const = 0; // Prototype
+};
+class Button {
+  public:
+    Button( const std::string &amp;label )
+        : label_(label), action_(0) {}
+    void setAction( const Action *newAction ) {
+        Action *temp = newAction-&gt;clone();
+        delete action_;
+        action_ = temp;
+    }
+    void onClick() const
+        { if( action_ ) (*action_)(); }
+  private:
+    std::string label_;
+    Action *action_; // Command
+    //...
+};
+
+
+					  </pre>
+</div>
+<br/>
+		
+<p class="docText">A <tt>Button</tt> can now work with any function object that is-a <tt>Action</tt>, like this one:</p>
+		
+<div class="docText">
+  <pre>class PlayMusic : public Action {
+  public:
+    PlayMusic( const string &amp;songFile )
+        : song_(songFile) {}
+    void operator ()(); // plays the song
+//...
+  private:
+    MP3 song_;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The encapsulated data (in this case, the song to play) preserves both the flexibility and safety of the <tt>PlayMusic</tt> function object.</p>
+		
+<div class="docText">
+  <pre>Button *b = new Button( "Anoko no namaewa" );
+auto_ptr&lt;PlayMusic&gt;
+    song( new PlayMusic( "AnokoNoNamaewa.mp3" ) );
+b-&gt;setAction( song.get() );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">So what’s the mysterious 
+third advantage of Command to which we referred earlier? Simply that 
+it’s advantageous to work with a class hierarchy rather than a more 
+primitive, less flexible structure like a function pointer. Because of 
+the presence of a Command hierarchy, we’ve already been able to compose 
+the Prototype pattern with Command in order to produce clonable commands
+ (see <span class="docEmphasis">Virtual Constructors and Prototype</span> [29, 99]). We can continue in this vein and compose additional patterns with Command and Prototype for additional flexibility.</p>
+		
+
+
+</body>
+</html>

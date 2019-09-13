@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>34.3. Sessions</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">34.3. Sessions</h3><p class="docText">A <span class="docEmphasis">session</span>
+ is a collection of process groups. The session membership of a process 
+is defined by its numeric session ID. A new process inherits its 
+parent’s session ID. The <span class="docEmphasis">getsid()</span> system call returns the session ID of the process specified by <span class="docEmphasis">pid</span>.</p><pre>#define _XOPEN_SOURCE 500
+#include &lt;unistd.h&gt;
+
+pid_t <b>getsid</b>(pid_t <span class="docEmphasis">pid</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns session ID of specified process, or <span class="docEmphasis">(pid_t)</span> -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">If <span class="docEmphasis">pid</span> is specified as 0, <span class="docEmphasis">getsid()</span> returns the session ID of the calling process.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On a few UNIX implementations (e.g., HP-UX 11), <span class="docEmphasis">getsid()</span>
+ can be used to retrieve the session ID of a process only if it is in 
+the same session as the calling process. (SUSv3 permits this 
+possibility.) In other words, the call merely serves, by its success or 
+failure (<tt>EPERM</tt>), to inform us if the 
+specified process is in the same session as the caller. This restriction
+ doesn’t apply on Linux or on most other implementations.</p><hr noshade="noshade" size="1"/><p class="docText">If the calling process is not a process group leader, <span class="docEmphasis">setsid()</span> creates a new session.</p><pre>#include &lt;unistd.h&gt;
+
+pid_t <b>setsid</b>(void);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns session ID of new session, or <span class="docEmphasis">(pid_t)</span> -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">setsid()</span> system call creates a new session as follows:</p><ul><li><p class="docList">The
+ calling process becomes the leader of a new session, ands is made the 
+leader of a new process group within that session. The calling process’s
+ process group ID and session ID are set to the same value as its 
+process ID.</p></li><li><p class="docList">The calling process has no controlling terminal. Any previously existing connection to a controlling terminal is broken.</p></li></ul><p class="docText">If the calling process is a process group leader, <span class="docEmphasis">setsid()</span> fails with the error <tt>EPERM</tt>. The simplest way of ensuring that this doesn’t happen is to perform a <span class="docEmphasis">fork()</span> and have the parent exit while the child carries on to call <span class="docEmphasis">setsid()</span>.
+ Since the child inherits its parent’s process group ID and receives its
+ own unique process ID, it can’t be a process group leader.</p><p class="docText">The restriction against a process group leader being able to call <span class="docEmphasis">setsid()</span>
+ is necessary because, without it, the process group leader would be 
+able to place itself in another (new) session, while other members of 
+the process group remained in the original session. (A new process group
+ would not be created, since, by definition, the process group leader’s 
+process group ID is already the same as its process ID.) This would 
+violate the strict two-level hierarchy of sessions and process groups, 
+whereby all members of a process group must be part of the same session.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">When a new process is created via <span class="docEmphasis">fork()</span>,
+ the kernel ensures not only that it has a unique process ID, but also 
+that the process ID doesn’t match the process group ID or session ID of 
+any existing process. Thus, even if the leader of a process group or a 
+session has exited, a new process can’t reuse the leader’s process ID 
+and thereby accidentally become the leader of an existing session or 
+process group.</p><hr noshade="noshade" size="1"/><p class="docText">Example 34-2 demonstrates the use of <span class="docEmphasis">setsid()</span> to create a new session. To check that it no longer has a controlling terminal, this program attempts to open the special file <tt>/dev/tty</tt> (described in the next section). When we run this program, we see the following:</p><pre class="preFixedWidth">$ <b>ps -p $$ -o 'pid pgid sid command' </b>            <i> $$ is PID of shell</i>
+  PID  PGID   SID COMMAND
+12243 12243 12243 bash                          <i> PID, PGID, and SID of shell</i>
+$ <b>./t_setsid </b>
+$ PID=12352, PGID=12352, SID=12352
+ERROR [ENXIO Device not configured] open /dev/tty
+
+					  </pre><br/>
+<p class="docText">As can be seen from the 
+output, the process successfully places itself in a new process group 
+within a new session. Since this session has no controlling terminal, 
+the <span class="docEmphasis">open()</span>
+ call fails. (In the penultimate line of program output above, we see a 
+shell prompt mixed with the program output, because the shell notices 
+that the parent process has exited after the <span class="docEmphasis">fork()</span> call, and so prints its next prompt before the child has completed.)</p><h5 class="docExampleTitle" id="title-ID0EIOFK">Example 34-2. Creating a new session</h5><p></p><div class="box"><pre><b>pgsjc/t_setsid.c</b>
+#define _XOPEN_SOURCE 500
+#include &lt;unistd.h&gt;
+#include &lt;fcntl.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    if (fork() != 0)            /* Exit if parent, or on error */
+        _exit(EXIT_SUCCESS);
+
+    if (setsid() == -1)
+        errExit("setsid");
+
+    printf("PID=%ld, PGID=%ld, SID=%ld\n", (long) getpid(),
+            (long) getpgrp(), (long) getsid(0));
+
+    if (open("/dev/tty", O_RDWR) == -1)
+        errExit("open /dev/tty");
+    exit(EXIT_SUCCESS);
+}
+     <b>pgsjc/t_setsid.c</b></pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

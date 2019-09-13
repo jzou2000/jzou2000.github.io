@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>14.9. Advanced Mount Features</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">14.9. Advanced Mount Features</h3><p class="docText">We
+ now look at a number of more advanced features that can be employed 
+when mounting file systems. We demonstrate the use of most of these 
+features using the <span class="docEmphasis">mount(8)</span> command. The same effects can also be accomplished from a program via calls to <span class="docEmphasis">mount(2)</span>.</p><h4 class="docSection2Title" id="title-ID0EO6BI">14.9.1. Mounting a File System at Multiple Mount Points</h4><p class="docText">In
+ kernel versions before 2.4, a file system could be mounted only on a 
+single mount point. From kernel 2.4 onward, a file system can be mounted
+ at multiple locations within the file system. Because each of the mount
+ points shows the same subtree, changes made via one mount point are 
+visible through the other(s), as demonstrated by the following shell 
+session:</p><pre class="preFixedWidth">$ <b>su </b>                                  <i> Privilege is required to use mount(8)</i>
+Password:
+# <b>mkdir /testfs </b>                       <i> Create two directories for mount points</i>
+# <b>mkdir /demo </b>
+# <b>mount /dev/sda12 /testfs </b>            <i> Mount file system at one mount point</i>
+# <b>mount /dev/sda12 /demo </b>              <i> Mount file system at second mount point</i>
+# <b>mount | grep sda12 </b>                  <i> Verify the setup</i>
+/dev/sda12 on /testfs type ext3 (rw)
+/dev/sda12 on /demo type ext3 (rw)
+# <b>touch /testfs/myfile </b>                <i> Make a change via first mount point</i>
+# <b>ls /demo </b>                            <i> View files at second mount point</i>
+lost+found  myfile
+
+					  </pre><br/>
+<p class="docText">The output of the <span class="docEmphasis">ls</span> command shows that the change made via the first mount point (<tt>/testfs</tt>) was visible via the second mount point (<tt>/demo</tt>).</p><p class="docText">We present one example of why it is useful to mount a file system at multiple points when we describe bind mounts in Section 14.9.4.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">It is because a device can be mounted at multiple points that the <span class="docEmphasis">umount()</span> system call can’t take a device as its argument in Linux 2.4 and later.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0EACCI">14.9.2. Stacking Multiple Mounts on the Same Mount Point</h4><p class="docText">In
+ kernel versions before 2.4, a mount point could be used only once. 
+Since kernel 2.4, Linux allows multiple mounts to be stacked on a single
+ mount point. Each new mount hides the directory subtree previously 
+visible at that mount point. When the mount at the top of the stack is 
+unmounted, the previously hidden mount becomes visible once more, as 
+demonstrated by the following shell session:</p><pre class="preFixedWidth">$ <b>su </b>                                  <i> Privilege is required to use mount(8)</i>
+Password:
+# <b>mount /dev/sda12 /testfs </b>            <i> Create first mount on</i> /testfs
+# <b>touch /testfs/myfile </b>                <i> Make a file in this subtree</i>
+# <b>mount /dev/sda13 /testfs </b>            <i> Stack a second mount on</i> /testfs
+# <b>mount | grep testfs </b>                 <i> Verify the setup</i>
+/dev/sda12 on /testfs type ext3 (rw)
+/dev/sda13 on /testfs type reiserfs (rw)
+# <b>touch /testfs/newfile </b>               <i> Create a file in this subtree</i>
+# <b>ls /testfs </b>                          <i> View files in this subtree</i>
+newfile
+# <b>umount /testfs </b>                      <i> Pop a mount from the stack</i>
+# <b>mount | grep testfs </b>
+/dev/sda12 on /testfs type ext3 (rw)
+  <i> Now only one mount on</i> /testfs
+# <b>ls /testfs </b>                          <i> Previous mount is now visible</i>
+lost+found  myfile
+
+					  </pre><br/>
+<p class="docText">One use of mount stacking is 
+to stack a new mount on an existing mount point that is busy. Processes 
+that hold file descriptors open, that are <span class="docEmphasis">chroot()</span>-jailed,
+ or that have current working directories within the old mount point 
+continue to operate under that mount, but processes making new accesses 
+to the mount point use the new mount. Combined with a <tt>MNT_DETACH</tt>
+ unmount, this can provide a smooth migration off a file system without 
+needing to take the system into single-user mode. We’ll see another 
+example of how stacking mounts is useful when we discuss the <span class="docEmphasis">tmpfs</span> file system in Section 14.10.</p><h4 class="docSection2Title" id="title-ID0EJECI">14.9.3. Mount Flags That Are Per-Mount Options</h4><p class="docText">In
+ kernel versions before 2.4, there was a one-to-one correspondence 
+between file systems and mount points. Because this no longer holds in 
+Linux 2.4 and later, some of the <span class="docEmphasis">mountflags</span> values described in Section 14.8.1 can be set on a per-mount basis. These flags are <tt>MS_NOATIME</tt> (since Linux 2.6.16), <tt>MS_NODEV</tt>, <tt>MS_NODIRATIME</tt> (since Linux 2.6.16), <tt>MS_NOEXEC</tt>, <tt>MS_NOSUID</tt>, <tt>MS_RDONLY</tt> (since Linux 2.6.26), and <tt>MS_RELATIME</tt>. The following shell session demonstrates this effect for the <tt>MS_NOEXEC</tt> flag:</p><pre>$ <b>su</b>
+Password:
+# <b>mount /dev/sda12 /testfs</b>
+# <b>mount -o noexec /dev/sda12 /demo</b>
+# <b>cat /proc/mounts | grep sda12</b>
+/dev/sda12 /testfs ext3 rw 0 0
+/dev/sda12 /demo ext3 rw,noexec 0 0
+# <b>cp /bin/echo /testfs</b>
+# <b>/testfs/echo "Art is something which is well done"</b>
+Art is something which is well done
+# <b>/demo/echo "Art is something which is well done"</b>
+bash: /demo/echo: Permission denied</pre><br/>
+<h4 class="docSection2Title" id="title-ID0EGICI">14.9.4. Bind Mounts</h4><p class="docText">Starting with kernel 2.4, Linux permits the creation of bind mounts. A <span class="docEmphasis">bind mount</span> (created using the <span class="docEmphasis">mount()</span> <tt>MS_BIND</tt>
+ flag) allows a directory or a file to be mounted at some other location
+ in the file-system hierarchy. This results in the directory or file 
+being visible in both locations. A bind mount is somewhat like a hard 
+link, but differs in two respects:</p><ul><li><p class="docList">A bind mount can cross file-system mount points (and even <span class="docEmphasis">chroot</span> jails).</p></li><li><p class="docList">It is possible to make a bind mount for a directory.</p></li></ul><p class="docText">We can create a bind mount from the shell using the <span class="docEmphasis">—bind</span> option to <span class="docEmphasis">mount(8)</span>, as shown in the following examples.</p><p class="docText">In
+ the first example, we bind mount a directory at another location and 
+show that files created in one directory are visible at the other 
+location:</p><pre class="preFixedWidth">$ <b>su </b>                            <i> Privilege is required to use mount(8)</i>
+Password:
+# <b>pwd </b>
+/testfs
+# <b>mkdir d1 </b>                      <i> Create directory to be bound at another location</i>
+# <b>touch d1/x </b>                    <i> Create file in the directory</i>
+# <b>mkdir d2 </b>                      <i> Create mount point to which</i> d1 <i> will be bound</i>
+# <b>mount --bind d1 d2 </b>            <i> Create bind mount:</i> d1 <i> visible via</i> d2
+# <b>ls d2 </b>                         <i> Verify that we can see contents of</i> d1 <i> via</i> d2
+x
+# <b>touch d2/y </b>                    <i> Create second file in directory</i> d2
+# <b>ls d1 </b>                         <i> Verify that this change is visible via</i> d1
+x  y
+
+					  </pre><br/>
+<p class="docText"><a name="second example"></a>In the second example, 
+we bind mount a file at another location and demonstrate that changes to
+ the file via one mount are visible via the other mount:</p><pre class="preFixedWidth"># <b>cat &gt; f1 </b>                      <i> Create file to be bound to another location</i>
+<b>Chance is always powerful. Let your hook be always cast. </b>
+<i> Type Control-D</i>
+# <b>touch f2 </b>                      <i> This is the new mount point</i>
+# <b>mount --bind f1 f2 </b>            <i> Bind</i> f1 <i> as</i> f2
+# <b>mount | egrep '(d1|f1)' </b>       <i> See how mount points look</i>
+/testfs/d1 on /testfs/d2 type none (rw,bind)
+/testfs/f1 on /testfs/f2 type none (rw,bind)
+# <b>cat &gt;&gt; f2 </b>                     <i> Change</i> f2
+<b>In the pool where you least expect it, will be a fish. </b>
+# <b>cat f1 </b>                        <i> The change is visible via original file</i> f1
+Chance is always powerful. Let your hook be always cast.
+In the pool where you least expect it, will be a fish.
+# <b>rm f2 </b>                         <i> Can't do this because it is a mount point</i>
+rm: cannot unlink `f2': Device or resource busy
+# <b>umount f2 </b>                     <i> So unmount</i>
+# <b>rm f2 </b>                         <i> Now we can remove</i> f2
+
+					  </pre><br/>
+<p class="docText">One example of when we might use a bind mount is in the creation of a <span class="docEmphasis">chroot</span> jail (Section 18.12). Rather than replicating various standard directories (such as <tt>/lib</tt>) in the jail, we can simply create bind mounts for these directories (possibly mounted read-only) within the jail.</p><h4 class="docSection2Title" id="title-ID0EJNCI">14.9.5. Recursive Bind Mounts</h4><p class="docText">By default, if we create a bind mount for a directory using <tt>MS_BIND</tt>,
+ then only that directory is mounted at the new location; if there are 
+any submounts under the source directory, they are not replicated under 
+the mount <span class="docEmphasis">target</span>. Linux 2.4.11 added the <tt>MS_REC</tt> flag, which can be ORed with <tt>MS_BIND</tt> as part of the <span class="docEmphasis">flags</span> argument to <span class="docEmphasis">mount()</span> so that submounts <span class="docEmphasis">are</span> replicated under the mount target. This is referred to as a <span class="docEmphasis">recursive bind mount</span>. The <span class="docEmphasis">mount(8)</span> command provides the <span class="docEmphasis">—rbind</span> option to achieve the same effect from the shell, as shown in the following shell session.</p><p class="docText">We begin by creating a directory tree (<tt>src1</tt>) mounted under <tt>top</tt>. This tree includes a submount (<tt>src2</tt>) at <tt>top/sub</tt>.</p><pre>$ <b>su </b>
+Password:
+# <b>mkdir top </b>                     <i> This is our top-level mount point</i>
+# <b>mkdir src1 </b>                    <i> We'll mount this under</i> top
+# <b>touch src1/aaa </b>
+# <b>mount --bind src1 top </b>         <i> Create a normal bind mount</i>
+# <b>mkdir top/sub </b>                 <i> Create directory for a submount under</i> top
+# <b>mkdir src2 </b>                    <i> We'll mount this under</i> top/sub
+# <b>touch src2/bbb </b>
+# <b>mount --bind src2 top/sub </b>     <i> Create a normal bind mount</i>
+# <b>find top </b>                      <i> Verify contents under</i> top <i> mount tree</i>
+top
+top/aaa
+top/sub                         <i> This is the submount</i>
+top/sub/bbb</pre><br/>
+<p class="docText">Now we create another bind mount (<tt>dir1</tt>) using <tt>top</tt> as the source. Since this new mount is nonrecursive, the submount is not replicated.</p><pre># <b>mkdir dir1 </b>
+# <b>mount --bind top dir1 </b>         <i> Here we use a normal bind mount</i>
+# <b>find dir1 </b>
+dir1
+dir1/aaa
+dir1/sub</pre><br/>
+<p class="docText">The absence of <tt>dir1/sub/bbb</tt> in the output of <span class="docEmphasis">find</span> shows that the submount <tt>top/sub</tt> was not replicated.</p><p class="docText">Now we create a recursive bind mount (<tt>dir2</tt>) using <tt>top</tt> as the source.</p><pre># <b>mkdir dir2</b>
+# <b>mount --rbind top dir2</b>
+# <b>find dir2</b>
+dir2
+dir2/aaa
+dir2/sub
+dir2/sub/bbb</pre><br/>
+<p class="docText">The presence of <tt>dir2/sub/bbb</tt> in the output of <span class="docEmphasis">find</span> shows that the submount <tt>top/sub</tt> was replicated.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>46.1. Creating or Opening a Message Queue</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">46.1. Creating or Opening a Message Queue</h3><p class="docText">The <span class="docEmphasis">msgget()</span> system call creates a new message queue or obtains the identifier of an existing queue.</p><pre>#include &lt;sys/types.h&gt;        /* For portability */
+#include &lt;sys/msg.h&gt;
+
+int <b>msgget</b>(key_t <span class="docEmphasis">key</span>, int <span class="docEmphasis">msgflg</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns message queue identifier on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">key</span> argument is a key generated using one of the methods described in Section 45.2 (i.e., usually the value <tt>IPC_PRIVATE</tt> or a key returned by <span class="docEmphasis">ftok()</span>). The <span class="docEmphasis">msgflg</span> argument is a bit mask that specifies the permissions (Table 15-4, in Section 15.4.1)
+ to be placed on a new message queue or checked against an existing 
+queue. In addition, zero or more of the following flags can be ORed (|) 
+in <span class="docEmphasis">msgflg</span> to control the operation of <span class="docEmphasis">msgget()</span>:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">IPC_CREAT</span></span></span></p></dt><dd><p class="docList">If no message queue with the specified <span class="docEmphasis">key</span> exists, create a new queue.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">IPC_EXCL</span></span></span></p></dt><dd><p class="docList">If <tt>IPC_CREAT</tt> was also specified, and a queue with the specified <span class="docEmphasis">key</span> already exists, fail with the error <tt>EEXIST</tt>.</p></dd></dl><p class="docText">These flags are described in more detail in Section 45.1.</p><p class="docText">The <span class="docEmphasis">msgget()</span>
+ system call begins by searching the set of all existing message queues 
+for one with the specified key. If a matching queue is found, the 
+identifier of that queue is returned (unless both <tt>IPC_CREAT</tt> and <tt>IPC_EXCL</tt> were specified in <span class="docEmphasis">msgflg</span>, in which case an error is returned). If no matching queue was found and <tt>IPC_CREAT</tt> was specified in <span class="docEmphasis">msgflg</span>, a new queue is created and its identifier is returned.</p><p class="docText">The program in Example 46-1 provides a command-line interface to the <span class="docEmphasis">msgget()</span> system call. The program permits the use of command-line options and arguments to specify all possibilities for the <span class="docEmphasis">key</span> and <span class="docEmphasis">msgflg</span> arguments to <span class="docEmphasis">msgget()</span>. Details of the command format accepted by this program are shown in the <span class="docEmphasis">usageError()</span> function. Upon successful queue creation, the program prints the queue identifier. We demonstrate the use of this program in Section 46.2.2.</p><h5 class="docExampleTitle" id="title-ID0EXSBM">Example 46-1. Using <span class="docEmphasis">msgget()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>svmsg/svmsg_create.c</b>
+#include &lt;sys/types.h&gt;
+#include &lt;sys/ipc.h&gt;
+#include &lt;sys/msg.h&gt;
+#include &lt;sys/stat.h&gt;
+#include "tlpi_hdr.h"
+
+static void             /* Print usage info, then exit */
+usageError(const char *progName, const char *msg)
+{
+    if (msg != NULL)
+        fprintf(stderr, "%s", msg);
+    fprintf(stderr, "Usage: %s [-cx] {-f pathname | -k key | -p} "
+                            "[octal-perms]\n", progName);
+    fprintf(stderr, "    -c           Use IPC_CREAT flag\n");
+    fprintf(stderr, "    -x           Use IPC_EXCL flag\n");
+    fprintf(stderr, "    -f pathname  Generate key using ftok()\n");
+    fprintf(stderr, "    -k key       Use 'key' as key\n");
+    fprintf(stderr, "    -p           Use IPC_PRIVATE key\n");
+    exit(EXIT_FAILURE);
+}
+
+int
+main(int argc, char *argv[])
+{
+    int numKeyFlags;            /* Counts -f, -k, and -p options */
+    int flags, msqid, opt;
+    unsigned int perms;
+    long lkey;
+    key_t key;
+
+    /* Parse command-line options and arguments */
+
+    numKeyFlags = 0;
+    flags = 0;
+
+    while ((opt = getopt(argc, argv, "cf:k:px")) != -1) {
+        switch (opt) {
+        case 'c':
+            flags |= IPC_CREAT;
+            break;
+
+        case 'f':               /* -f pathname */
+            key = ftok(optarg, 1);
+            if (key == -1)
+                errExit("ftok");
+            numKeyFlags++;
+            break;
+
+        case 'k':               /* -k key (octal, decimal or hexadecimal) */
+            if (sscanf(optarg, "%li", &amp;lkey) != 1)
+                cmdLineErr("-k option requires a numeric argument\n");
+            key = lkey;
+            numKeyFlags++;
+            break;
+
+        case 'p':
+            key = IPC_PRIVATE;
+            numKeyFlags++;
+            break;
+
+        case 'x':
+            flags |= IPC_EXCL;
+            break;
+
+        default:
+            usageError(argv[0], "Bad option\n");
+        }
+    }
+
+    if (numKeyFlags != 1)
+        usageError(argv[0], "Exactly one of the options -f, -k, "
+                            "or -p must be supplied\n");
+
+    perms = (optind == argc) ? (S_IRUSR | S_IWUSR) :
+                getInt(argv[optind], GN_BASE_8, "octal-perms");
+
+    msqid = msgget(key, flags | perms);
+    if (msqid == -1)
+        errExit("msgget");
+
+    printf("%d\n", msqid);
+    exit(EXIT_SUCCESS);
+}
+      <b>svmsg/svmsg_create.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

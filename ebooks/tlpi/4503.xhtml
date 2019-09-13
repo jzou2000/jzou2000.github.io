@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>45.3. Associated Data Structure and Object Permissions</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">45.3. Associated Data Structure and Object Permissions</h3><p class="docText">The
+ kernel maintains an associated data structure for each instance of a 
+System V IPC object. The form of this data structure varies according to
+ the IPC mechanism (message queue, semaphore, or shared memory) and is 
+defined in the corresponding header file for the IPC mechanism (see Table 45-1). We discuss mechanism-specific details of each of these data structures in the following chapters.</p><p class="docText">The associated data structure for an IPC object is initialized when the object is created via the appropriate <span class="docEmphasis">get</span> system call. Once the object has been created, a program can obtain a copy of this data structure using the appropriate <span class="docEmphasis">ctl</span> system call, by specifying an operation type of <tt>IPC_STAT</tt>. Conversely, some parts of the data structure can be modified using the <tt>IPC_SET</tt> operation.</p><p class="docText">As
+ well as data specific to the type of IPC object, the associated data 
+structure for all three IPC mechanisms includes a substructure, <span class="docEmphasis">ipc_perm</span>, that holds information used to determine permissions granted on the object:</p><pre>struct ipc_perm {
+    key_t          __key;           /* Key, as supplied to 'get' call */
+    uid_t          uid;             /* Owner's user ID */
+    gid_t          gid;             /* Owner's group ID */
+    uid_t          cuid;            /* Creator's user ID */
+    gid_t          cgid;            /* Creator's group ID */
+    unsigned short mode;            /* Permissions */
+    unsigned short __seq;           /* Sequence number */
+};</pre><br/>
+<p class="docText">SUSv3 mandates all of the <span class="docEmphasis">ipc_perm</span> fields shown here, except <span class="docEmphasis">__key</span> and <span class="docEmphasis">__seq</span>. However, most UNIX implementations provide some version of these fields.</p><p class="docText">The <span class="docEmphasis">uid</span> and <span class="docEmphasis">gid</span> fields specify the ownership of the IPC object. The <span class="docEmphasis">cuid</span> and <span class="docEmphasis">cgid</span>
+ fields hold the user and group IDs of the process that created the 
+object. Initially, the corresponding user and creator ID fields have the
+ same values, which are taken from the effective IDs of the calling 
+processes. The creator IDs are immutable, but the owner IDs can be 
+changed via the <tt>IPC_SET</tt> operation. 
+The following code demonstrates how to change the uid field for a shared
+ memory segment (the associated data structure is of type <span class="docEmphasis">shmid_ds</span>):</p><pre>struct shmid_ds shmds;
+
+if (shmctl(id, IPC_STAT, &amp;shmds) == -1)     /* Fetch from kernel */
+    errExit("shmctl");
+shmds.shm_perm.uid = newuid;                /* Change owner UID */
+if (shmctl(id, IPC_SET, &amp;shmds) == -1)      /* Update kernel copy */
+    errExit("shmctl");</pre><br/>
+<p class="docText">The <span class="docEmphasis">mode</span> field of the <span class="docEmphasis">ipc_perm</span> substructure holds the permissions mask for the IPC object. These permissions are initialized using the lower 9 bits of the <span class="docEmphasis">flags</span> specified in the <span class="docEmphasis">get</span> system call used to create the object, but can be changed subsequently using the <tt>IPC_SET</tt> operation.</p><p class="docText">As with files, permissions are broken into three categories—<span class="docEmphasis">owner</span> (also known as <span class="docEmphasis">user</span>), <span class="docEmphasis">group</span>, and <span class="docEmphasis">other</span>—and
+ it is possible to specify different permissions for each category. 
+There are, however, some notable differences from the scheme used for 
+files:</p><ul><li><p class="docList">Only read and write permissions are meaningful for IPC objects. (For semaphores, write permission is commonly referred to as <span class="docEmphasis">alter</span> permission.) Execute permission is meaningless, and is ignored when performing most access checks.</p></li><li><p class="docList">Permission
+ checks are made according to a process’s effective user ID, effective 
+group IDs, and supplementary group IDs. (This contrasts with file-system
+ permission checks on Linux, which are performed using the process’s 
+file-system IDs, as described in Section 9.5.)</p></li></ul><p class="docText">The precise rules governing the permissions a process is granted on an IPC object are as follows:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">If the process is privileged (<tt>CAP_IPC_OWNER</tt>), then all permissions are granted on the IPC object.</p></div></li><li><div style="font-weight:normal"><p class="docList">If
+ the effective user ID of the process matches either the owner or the 
+creator user ID of the IPC object, then the process is granted the 
+permissions defined for the <span class="docEmphasis">owner</span> (<span class="docEmphasis">user</span>) of the object.</p></div></li><li><div style="font-weight:normal"><p class="docList">If
+ the effective group ID or any of the supplementary group IDs of the 
+process match either the owner group ID or the creator group ID of the 
+IPC object, then the process is granted the <span class="docEmphasis">group</span> permissions defined for the object.</p></div></li><li><div style="font-weight:normal"><p class="docList">Otherwise, the process is granted the permissions defined for <span class="docEmphasis">other</span>.</p></div></li></ol></div><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In
+ the kernel code, the above tests are constructed so that the test to 
+see whether a process is privileged is performed only if the process is 
+not granted the permissions it needs via one of the other tests. This is
+ done to avoid unnecessarily setting the <tt>ASU</tt> process accounting flag, which indicates that the process made use of superuser privileges (Section 28.1).</p><p class="docText">Note that neither the use of the <tt>IPC_PRIVATE</tt> key value nor the presence of <tt>IPC_EXCL</tt>
+ flag has any bearing on which processes may access an IPC object; such 
+access is determined solely by the ownership and permissions of the 
+object.</p><hr noshade="noshade" size="1"/><p class="docText">How
+ read and write permissions are interpreted for an object, and whether 
+they are required, depend on the type of object and on the operation 
+being performed.</p><p class="docText">When a <span class="docEmphasis">get</span>
+ call is performed to obtain the identifier of an existing IPC object, 
+an initial permission check is made to ascertain whether the permissions
+ specified in the <span class="docEmphasis">flags</span> argument are compatible with those on the existing object. If not, then the <span class="docEmphasis">get</span> call fails with the error <tt>EACCES</tt>.
+ (Except as otherwise noted, this error code is also returned when 
+permissions are denied in each of the cases listed below.) To 
+illustrate, consider the example of two different users in the same 
+group, with one user creating a message queue using the following call:</p><pre>msgget(key, IPC_CREAT | S_IRUSR | S_IWUSR | S_IRGRP);
+                        /* rw-r----- */</pre><br/>
+<p class="docText">An attempt by the second user to
+ obtain an identifier for this message queue using the following call 
+would fail, since the user is not permitted write access to the message 
+queue:</p><pre>msgget(key, S_IRUSR | S_IWUSR);</pre><br/>
+<p class="docText">The second user could bypass this check by specifying 0 for the second argument of the <span class="docEmphasis">msgget()</span>
+ call, in which case an error would occur only when the program 
+attempted an operation requiring write permission on the IPC object 
+(e.g., writing a message with <span class="docEmphasis">msgsnd()</span>).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">get</span>
+ call represents the one case where execute permission is not ignored. 
+Even though it has no meaning for IPC objects, if execute permission is 
+requested in a <span class="docEmphasis">get</span> call for an existing object, then a check is made to see if that permission is granted.</p><hr noshade="noshade" size="1"/><p class="docText">The permissions required for other common operations are as follows:</p><ul><li><p class="docList">To
+ retrieve information from the object (e.g., to read a message from a 
+message queue, obtain the value of a semaphore, or attach a shared 
+memory segment for read access) requires read permission.</p></li><li><p class="docList">To
+ update information within the object (e.g., to write a message to a 
+message queue, change the value of a semaphore, or attach a shared 
+memory segment for write access) requires write permission.</p></li><li><p class="docList">To obtain a copy of the associated data structure for an IPC object (the <tt>IPC_STAT</tt> <span class="docEmphasis">ctl</span> operation) requires read permission.</p></li><li><p class="docList">To remove an IPC object (the <tt>IPC_RMID</tt> <span class="docEmphasis">ctl</span> operation) or change its associated data structure (the <tt>IPC_SET</tt> <span class="docEmphasis">ctl</span> operation) requires neither read nor write permission. Rather, the calling process must either be privileged (<tt>CAP_SYS_ADMIN</tt>) or have an effective user ID matching either the owner user ID or the creator user ID of the object (otherwise, the error <tt>EPERM</tt> results).</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">It is possible to set the permissions on an IPC object so that the owner or creator can no longer use <tt>IPC_STAT</tt>
+ to obtain the associated data structure containing the object 
+permissions (which means that the object won’t be displayed by the <span class="docEmphasis">ipcs(1)</span> command described in Section 45.6), although <tt>IPC_SET</tt> can still be used to change them.</p><hr noshade="noshade" size="1"/><p class="docText">Various other mechanism-specific operations require read or write permission, or the <tt>CAP_IPC_OWNER</tt> capability. We note the required permissions in the following chapters as the operations are described.</p>
+</div>
+</body>
+</html>

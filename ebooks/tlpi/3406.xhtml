@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>34.6. The SIGHUP Signal</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">34.6. The <tt>SIGHUP</tt> Signal</h3><p class="docText">When a controlling process loses its terminal connection, the kernel sends it a <tt>SIGHUP</tt> signal to inform it of this fact. (A <tt>SIGCONT</tt>
+ signal is also sent, to ensure that the process is restarted in case it
+ had been previously stopped by a signal.) Typically, this may occur in 
+two circumstances:</p><ul><li><p class="docList">When a “disconnect” is detected by the terminal driver, indicating a loss of signal on a modem or terminal line.</p></li><li><p class="docList">When
+ a terminal window is closed on a workstation. This occurs because the 
+last open file descriptor for the master side of the pseudoterminal 
+associated with the terminal window is closed.</p></li></ul><p class="docText">The default action of <tt>SIGHUP</tt>
+ is to terminate a process. If the controlling process instead handles 
+or ignores this signal, then further attempts to read from the terminal 
+return end-of-file.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">SUSv3 states that if both a terminal disconnect occurs and one of the conditions giving rise to an <tt>EIO</tt> error from <span class="docEmphasis">read()</span> exists, then it is unspecified whether <span class="docEmphasis">read()</span> returns end-of-file or fails with the error <tt>EIO</tt>. Portable programs must allow for both possibilities. We look at the circumstances in which <span class="docEmphasis">read()</span> may fail with the <tt>EIO</tt> error in Section 34.7.2 and Section 34.7.4.</p><hr noshade="noshade" size="1"/><p class="docText">The delivery of <tt>SIGHUP</tt> to the controlling process can set off a kind of chain reaction, resulting in the delivery of <tt>SIGHUP</tt> to many other processes. This may occur in two ways:</p><ul><li><p class="docList">The controlling process is typically a shell. The shell establishes a handler for <tt>SIGHUP</tt>, so that, before terminating, it can send a <tt>SIGHUP</tt>
+ to each of the jobs that it has created. This signal terminates those 
+jobs by default, but if instead they catch the signal, then they are 
+thus informed of the shell’s demise.</p></li><li><p class="docList">Upon
+ termination of the controlling process for a terminal, the kernel 
+disassociates all processes in the session from the controlling 
+terminal, disassociates the controlling terminal from the session (so 
+that it may be acquired as the controlling terminal by another session 
+leader), and informs the members of the foreground process group of the 
+terminal of the loss of their controlling terminal by sending them a <tt>SIGHUP</tt> signal.</p></li></ul><p class="docText">We go into the details of each of these two cases in the next sections.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <tt>SIGHUP</tt> signal also finds other uses. In Section 34.7.4, we’ll see that <tt>SIGHUP</tt> is generated when a process group becomes orphaned. In addition, manually sending <tt>SIGHUP</tt>
+ is conventionally used as a way of triggering a daemon process to 
+reinitialize itself or reread its configuration file. (By definition, a 
+daemon process doesn’t have a controlling terminal, and so can’t 
+otherwise receive <tt>SIGHUP</tt> from the kernel.) We describe the use of <tt>SIGHUP</tt> with daemon processes in Section 37.4.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0E1PFK">34.6.1. Handling of <tt>SIGHUP</tt> by the Shell</h4><p class="docText">In
+ a login session, the shell is normally the controlling process for the 
+terminal. Most shells are programmed so that, when run interactively, 
+they establish a handler for <tt>SIGHUP</tt>. This handler terminates the shell, but beforehand sends a <tt>SIGHUP</tt> signal to each of the process groups (both foreground and background) created by the shell. (The <tt>SIGHUP</tt> signal may be followed by a <tt>SIGCONT</tt> signal, depending on the shell and whether or not the job is currently stopped.) How the processes in these groups respond to <tt>SIGHUP</tt> is application-dependent; if no special action is taken, they are terminated by default.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Some job-control shells also send <tt>SIGHUP</tt> to stopped background jobs if the shell exits normally (e.g., when we explicitly log out or type <span class="docEmphasis">Control-D</span> in a shell window). This is done by both <span class="docEmphasis">bash</span> and the Korn shell (after printing a message on the first logout attempt).</p><p class="docText">The <span class="docEmphasis">nohup(1)</span> command can be used to make a command immune to the <tt>SIGHUP</tt> signal—that is, start it with the disposition of <tt>SIGHUP</tt> set to <tt>SIG_IGN.</tt> The <span class="docEmphasis">bash</span> built-in command <span class="docEmphasis">disown</span> serves a similar purpose, removing a job from the shell’s list of jobs, so that the job is not sent <tt>SIGHUP</tt> when the shell terminates.</p><hr noshade="noshade" size="1"/><p class="docText">We can use the program in Example 34-3 to demonstrate that when the shell receives <tt>SIGHUP</tt>, it in turn sends <tt>SIGHUP</tt>
+ to the jobs it has created. The main task of this program is to create a
+ child process, and then have both the parent and the child pause to 
+catch <tt>SIGHUP</tt> and display a message if 
+it is received. If the program is given an optional command-line 
+argument (which may be any string), the child places itself in a 
+different process group (within the same session). This is useful to 
+show that the shell doesn’t send <tt>SIGHUP</tt> to a process group that it did not create, even if it is in the same session as the shell. (Since the final <tt>for</tt> loop of the program loops forever, this program uses <span class="docEmphasis">alarm()</span> to establish a timer to deliver <tt>SIGALRM</tt>. The arrival of an unhandled <tt>SIGALRM</tt> signal guarantees process termination, if the process is not otherwise terminated.)</p><h5 class="docExampleTitle" id="title-ID0E3TFK">Example 34-3. Catching <tt>SIGHUP</tt></h5><p></p><div class="box"><pre class="preFixedHeight"><b>pgsjc/catch_SIGHUP.c</b>
+#define _XOPEN_SOURCE 500
+#include &lt;unistd.h&gt;
+#include &lt;signal.h&gt;
+#include "tlpi_hdr.h"
+
+static void
+handler(int sig)
+{
+}
+int
+main(int argc, char *argv[])
+{
+    pid_t childPid;
+    struct sigaction sa;
+
+    setbuf(stdout, NULL);       /* Make stdout unbuffered */
+
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = 0;
+    sa.sa_handler = handler;
+    if (sigaction(SIGHUP, &amp;sa, NULL) == -1)
+        errExit("sigaction");
+
+    childPid = fork();
+    if (childPid == -1)
+        errExit("fork");
+
+    if (childPid == 0 &amp;&amp; argc &gt; 1)
+        if (setpgid(0, 0) == -1)        /* Move to new process group */
+            errExit("setpgid");
+
+    printf("PID=%ld; PPID=%ld; PGID=%ld; SID=%ld\n", (long) getpid(),
+            (long) getppid(), (long) getpgrp(), (long) getsid(0));
+
+    alarm(60);                 /* An unhandled SIGALRM ensures this process
+                                  will die if nothing else terminates it */
+    for(;;) {                  /* Wait for signals */
+        pause();
+        printf("%ld: caught SIGHUP\n", (long) getpid());
+    }
+}
+     <b>pgsjc/catch_SIGHUP.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Suppose that we enter the following commands in a terminal window in order to run two instances of the program in Example 34-3, and then we close the terminal window:</p><pre>$ <b>echo $$ </b>                                   <i> PID of shell is ID of session</i>
+5533
+$ <b>./catch_SIGHUP &gt; samegroup.log 2&gt;&amp;1 &amp; </b>
+$ <b>./catch_SIGHUP x &gt; diffgroup.log 2&gt;&amp;1 </b></pre><br/>
+<p class="docText">The first command results
+ in the creation of two processes that remain in the process group 
+created by the shell. The second command creates a child that places 
+itself in a separate process group.</p><p class="docText">When we look at <tt>samegroup.log</tt>, we see that it contains the following output, indicating that both members of this process group were signaled by the shell:</p><pre>$ <b>cat samegroup.log </b>
+PID=5612; PPID=5611; PGID=5611; SID=5533    <i> Child</i>
+PID=5611; PPID=5533; PGID=5611; SID=5533    <i> Parent</i>
+5611: caught SIGHUP
+5612: caught SIGHUP</pre><br/>
+<p class="docText">When we examine <tt>diffgroup.log</tt>, we find the following output, indicating that when the shell received <tt>SIGHUP</tt>, it did not send a signal to the process group that it did not create:</p><pre class="preFixedWidth">$ <b>cat diffgroup.log </b>
+PID=5614; PPID=5613; PGID=5614; SID=5533    <i> Child</i>
+PID=5613; PPID=5533; PGID=5613; SID=5533    <i> Parent</i>
+5613: caught SIGHUP                         <i> Parent was signaled, but not child</i>
+
+					  </pre><br/>
+<h4 class="docSection2Title" id="title-ID0EDWFK">34.6.2. <tt>SIGHUP</tt> and Termination of the Controlling Process</h4><p class="docText">If the <tt>SIGHUP</tt>
+ signal that is sent to the controlling process as the result of a 
+terminal disconnect causes the controlling process to terminate, then <tt>SIGHUP</tt> is sent to all of the members of the terminal’s foreground process group (refer to Section 25.2).
+ This behavior is a consequence of the termination of the controlling 
+process, rather than a behavior associated specifically with the <tt>SIGHUP</tt> signal. If the controlling process terminates for any reason, then the foreground process group is signaled with <tt>SIGHUP</tt>.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On Linux, the <tt>SIGHUP</tt> signal is followed by a <tt>SIGCONT</tt>
+ signal to ensure that the process group is resumed if it had earlier 
+been stopped by a signal. However, SUSv3 doesn’t specify this behavior, 
+and most other UNIX implementations don’t send a <tt>SIGCONT</tt> in this circumstance.</p><hr noshade="noshade" size="1"/><p class="docText">We can use the program in Example 34-4 to demonstrate that termination of the controlling process causes a <tt>SIGHUP</tt>
+ signal to be sent to all members of the terminal’s foreground process 
+group. This program creates one child process for each of its 
+command-line arguments <img alt="" border="0" id="" src="Images/getfile_002-30.png"/>. If the corresponding command-line argument is the letter <span class="docEmphasis">d</span>, then the child process places itself in its own (different) process group <img alt="" border="0" id="" src="Images/getfile-60.png"/>; otherwise, the child remains in the same process group as its parent. (We use the letter <span class="docEmphasis">s</span> to specify the latter action, although any letter other than <span class="docEmphasis">d</span> can be used.) Each child then establishes a handler for <tt>SIGHUP</tt> <img alt="" border="0" id="" src="Images/getfile_004.png"/>. To ensure that they terminate if no event occurs that would otherwise terminate them, the parent and the children both call <span class="docEmphasis">alarm()</span> to set a timer that delivers a <tt>SIGALRM</tt> signal after 60 seconds <img alt="" border="0" id="" src="Images/getfile_006-12.png"/>. Finally, all processes (including the parent) print out their process ID and process group ID <img alt="" border="0" id="" src="Images/getfile_007.png"/> and then loop waiting for signals to arrive <img alt="" border="0" id="" src="Images/getfile_005-20.png"/>. When a signal is delivered, the handler prints the process ID of the process and signal number <img alt="" border="0" id="" src="Images/getfile_003-26.png"/>.</p><h5 class="docExampleTitle" id="title-ID0EK2FK">Example 34-4. Catching <tt>SIGHUP</tt> when a terminal disconnect occurs</h5><p></p><div class="box"><pre class="preFixedHeight"><b>pgsjc/disc_SIGHUP.c</b>
+    #define _GNU_SOURCE     /* Get strsignal() declaration from &lt;string.h&gt; */
+    #include &lt;string.h&gt;
+    #include &lt;signal.h&gt;
+    #include "tlpi_hdr.h"
+
+    static void             /* Handler for SIGHUP */
+    handler(int sig)
+    {
+<img alt="" border="0" id="" src="Images/getfile_003-27.png"/>    printf("PID %ld: caught signal %2d (%s)\n", (long) getpid(),
+                sig, strsignal(sig));
+                            /* UNSAFE (see Section 21.1.2) */
+    }
+        int
+    main(int argc, char *argv[])
+    {
+        pid_t parentPid, childPid;
+        int j;
+        struct sigaction sa;
+
+        if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+            usageErr("%s {d|s}... [ &gt; sig.log 2&gt;&amp;1 ]\n", argv[0]);
+
+        setbuf(stdout, NULL);               /* Make stdout unbuffered */
+
+        parentPid = getpid();
+        printf("PID of parent process is:       %ld\n", (long) parentPid);
+        printf("Foreground process group ID is: %ld\n",
+                (long) tcgetpgrp(STDIN_FILENO));
+<img alt="" border="0" id="" src="Images/getfile_002-31.png"/>    for (j = 1; j &lt; argc; j++) {        /* Create child processes */
+            childPid = fork();
+            if (childPid == -1)
+                errExit("fork");
+
+            if (childPid == 0) {            /* If child... */
+<img alt="" border="0" id="" src="Images/getfile-61.png"/>            if (argv[j][0] == 'd')     /* 'd' --&gt; to different pgrp */
+                    if (setpgid(0, 0) == -1)
+                        errExit("setpgid");
+
+                sigemptyset(&amp;sa.sa_mask);
+                sa.sa_flags = 0;
+                sa.sa_handler = handler;
+<img alt="" border="0" id="" src="Images/getfile_004.png"/>            if (sigaction(SIGHUP, &amp;sa, NULL) == -1)
+                    errExit("sigaction");
+                break;                      /* Child exits loop */
+            }
+        }
+
+        /* All processes fall through to here */
+<img alt="" border="0" id="" src="Images/getfile_006-13.png"/>    alarm(60);          /* Ensure each process eventually terminates */
+
+<img alt="" border="0" id="" src="Images/getfile_007.png"/>    printf("PID=%ld PGID=%ld\n", (long) getpid(), (long) getpgrp());
+        for (;;)
+<img alt="" border="0" id="" src="Images/getfile_005-21.png"/>        pause();        /* Wait for signals */
+      }
+          <b>pgsjc/disc_SIGHUP.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Suppose that we run the program in Example 34-4 in a terminal window with the following command:</p><pre>$ <b>exec ./disc_SIGHUP d s s &gt; sig.log 2&gt;&amp;1</b></pre><br/>
+<p class="docText">The <span class="docEmphasis">exec</span> command is a shell built-in command that causes the shell to do an <span class="docEmphasis">exec()</span>,
+ replacing itself with the named program. Since the shell was the 
+controlling process for the terminal, our program is now the controlling
+ process and will receive <tt>SIGHUP</tt> when the terminal window is closed. After closing the terminal window, we find the following lines in the file <tt>sig.log</tt>:</p><pre class="preFixedWidth">PID of parent process is:       12733
+Foreground process group ID is: 12733
+PID=12755 PGID=12755                <i>First child is in a different process group</i>
+PID=12756 PGID=12733                <i>Remaining children are in same PG as parent</i>
+PID=12757 PGID=12733
+PID=12733 PGID=12733                <i>This is the parent process</i>
+PID 12756: caught signal  1 (Hangup)
+PID 12757: caught signal  1 (Hangup)
+
+					  </pre><br/>
+<p class="docText">Closing the terminal window caused <tt>SIGHUP</tt>
+ to be sent to the controlling process (the parent), which terminated as
+ a result. We see that the two children that were in the same process 
+group as the parent (i.e., the foreground process group for the 
+terminal) also both received <tt>SIGHUP</tt>. However, the child that was in a separate (background) process group did not receive this signal.</p>
+</div>
+</body>
+</html>

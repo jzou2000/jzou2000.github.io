@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>49.11. Nonlinear Mappings: remap_file_pages()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">49.11. Nonlinear Mappings: <span class="docEmphasis">remap_file_pages()</span></h3><p class="docText">File mappings created with <span class="docEmphasis">mmap()</span>
+ are linear: there is a sequential, one-to-one correspondence between 
+the pages of the mapped file and the pages of the memory region. For 
+most applications, a linear mapping suffices. However, some applications
+ need to create large numbers of nonlinear mappings—mappings where the 
+pages of the file appear in a different order within contiguous memory. 
+We show an example of a nonlinear mapping in Figure 49-5.</p><p class="docText">We described one way of creating nonlinear mappings in the previous section: using multiple calls to <span class="docEmphasis">mmap()</span> with the <tt>MAP_FIXED</tt> flag. However, this approach doesn’t scale well. The problem is that each of these <span class="docEmphasis">mmap()</span>
+ calls creates a separate kernel virtual memory area (VMA) data 
+structure. Each VMA takes time to set up and consumes some nonswappable 
+kernel memory. Furthermore, the presence of a large number of VMAs can 
+degrade the performance of the virtual memory manager; in particular, 
+the time taken to process each page fault can significantly increase 
+when there are tens of thousands of VMAs. (This was a problem for some 
+large database management systems that maintain multiple different views
+ in a database file.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Each line in the <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/maps</tt> file (Section 48.5) represents one VMA.</p><hr noshade="noshade" size="1"/><p class="docText">From kernel 2.6 onward, Linux provides the <span class="docEmphasis">remap_file_pages()</span> system call to create nonlinear mappings without creating multiple VMAs. We do this as follows:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Create a mapping with <span class="docEmphasis">mmap()</span>.</p></div></li><li><div style="font-weight:normal"><p class="docList">Use one or more calls to <span class="docEmphasis">remap_file_pages()</span> to rearrange the correspondence between the pages of memory and the pages of the file. (All that <span class="docEmphasis">remap_file_pages()</span> is doing is manipulating process page tables.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">It is possible to use <span class="docEmphasis">remap_file_pages()</span> to map the same page of a file into multiple locations within the mapped region.</p><hr noshade="noshade" size="1"/></div></li></ol></div><pre>#define _GNU_SOURCE
+#include &lt;sys/mman.h&gt;
+
+int <b>remap_file_pages</b>(void *<span class="docEmphasis">addr</span>, size_t <span class="docEmphasis">size</span>, int <span class="docEmphasis">prot</span>, size_t
+ <span class="docEmphasis">pgoff</span>, int <span class="docEmphasis">flags</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">pgoff</span> and <span class="docEmphasis">size</span> arguments identify a file region whose position in memory is to be changed. The <span class="docEmphasis">pgoff</span> argument specifies the start of the file region in units of the system page size (as returned by <span class="docEmphasis">sysconf(_SC_PAGESIZE)</span>). The <span class="docEmphasis">size</span> argument specifies the length of the file region, in bytes. The <span class="docEmphasis">addr</span> argument serves two purposes:</p><ul><li><p class="docList">It identifies the existing mapping whose pages we want to rearrange. In other words, <span class="docEmphasis">addr</span> must be an address that falls somewhere within a region that was previously mapped with <span class="docEmphasis">mmap()</span>.</p></li><li><p class="docList">It specifies the memory address at which the file pages identified by <span class="docEmphasis">pgoff</span> and <span class="docEmphasis">size</span> are to be located.</p></li></ul><p class="docText">Both <span class="docEmphasis">addr</span> and <span class="docEmphasis">size</span>
+ should be specified as multiples of the system page size. If they are 
+not, they are rounded down to the nearest multiple of the page size.</p><p class="docText">Suppose that we use the following call to <span class="docEmphasis">mmap()</span> to map three pages of the open file referred to by the descriptor <span class="docEmphasis">fd</span>, and that the call assigns the returned address <tt>0x4001a000</tt> to <span class="docEmphasis">addr</span>:</p><pre>ps = sysconf(_SC_PAGESIZE);               /* Obtain system page size */
+addr = mmap(0, 3 * ps, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);</pre><br/>
+<p class="docText">The following calls would then create the nonlinear mapping shown in Figure 49-5:</p><pre>remap_file_pages(addr, ps, 0, 2, 0);
+                            /* Maps page 0 of file into page 2 of region */
+remap_file_pages(addr + 2 * ps, ps, 0, 0, 0);
+                            /* Maps page 2 of file into page 0 of region */</pre><br/>
+<p></p><center><h5 class="docFigureTitle">Figure 49-5. A nonlinear file mapping</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-100.png"/></p></center><p></p><br/><p class="docText">There are two other arguments to <span class="docEmphasis">remap_file_pages()</span> that we haven’t yet described:</p><ul><li><p class="docList">The <span class="docEmphasis">prot</span>
+ argument is ignored, and must be specified as 0. In the future, it may 
+be possible to use this argument to change the protection of the memory 
+region affected by <span class="docEmphasis">remap_file_pages()</span>. In the current implementation, the protection remains the same as that on the entire VMA.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Virtual
+ machines and garbage collectors are other applications that employ 
+multiple VMAs. Some of these applications need to be able to 
+write-protect individual pages. It was intended that <span class="docEmphasis">remap_file_pages()</span> would allow permissions on individual pages within a VMA to be changed, but this facility has not so far been implemented.</p><hr noshade="noshade" size="1"/></li><li><p class="docList">The <span class="docEmphasis">flags</span> argument is currently unused.</p></li></ul><p class="docText">As currently implemented, <span class="docEmphasis">remap_file_pages()</span> can be applied only to shared (<tt>MAP_SHARED</tt>) mappings.</p><p class="docText">The <span class="docEmphasis">remap_file_pages()</span> system call is Linux-specific; it is not specified in SUSv3 and is not available on other UNIX implementations.</p>
+</div>
+</body>
+</html>

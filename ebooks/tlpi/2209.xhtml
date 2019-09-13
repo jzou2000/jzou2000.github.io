@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>22.9. Waiting for a Signal Using a Mask: sigsuspend()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">22.9. Waiting for a Signal Using a Mask: <span class="docEmphasis">sigsuspend()</span></h3><p class="docText">Before we explain what <span class="docEmphasis">sigsuspend()</span>
+ does, we first describe a situation where we need to use it. Consider 
+the following scenario that is sometimes encountered when programming 
+with signals:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">We
+ temporarily block a signal so that the handler for the signal doesn’t 
+interrupt the execution of some critical section of code.</p></div></li><li><div style="font-weight:normal"><p class="docList">We unblock the signal, and then suspend execution until the signal is delivered.</p></div></li></ol></div><p class="docText">In order to do this, we might try using code such as that shown in Example 22-4.</p><h5 class="docExampleTitle" id="title-ID0EFKBK">Example 22-4. Incorrectly unblocking and waiting for a signal</h5><p></p><div class="box"><pre>sigset_t prevMask, intMask;
+    struct sigaction sa;
+
+    sigemptyset(&amp;intMask);
+    sigaddset(&amp;intMask, SIGINT);
+
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = 0;
+    sa.sa_handler = handler;
+
+    if (sigaction(SIGINT, &amp;sa, NULL) == -1)
+        errExit("sigaction");
+
+    /* Block SIGINT prior to executing critical section. (At this
+       point we assume that SIGINT is not already blocked.) */
+
+    if (sigprocmask(SIG_BLOCK, &amp;intMask, &amp;prevMask) == -1)
+        errExit("sigprocmask - SIG_BLOCK");
+
+    /* Critical section: do some work here that must not be
+       interrupted by the SIGINT handler */
+
+    /* End of critical section - restore old mask to unblock SIGINT */
+
+    if (sigprocmask(SIG_SETMASK, &amp;prevMask, NULL) == -1)
+        errExit("sigprocmask - SIG_SETMASK");
+
+    /* BUG: what if SIGINT arrives now... */
+
+    pause();                            /* Wait for SIGINT */</pre><br/>
+</div><p></p><p class="docText">There is a problem with the code in Example 22-4. Suppose that the <tt>SIGINT</tt> signal is delivered after execution of the second <span class="docEmphasis">sigprocmask()</span>, but before the <span class="docEmphasis">pause()</span>
+ call. (The signal might actually have been generated at any time during
+ the execution of the critical section, and then be delivered only when 
+it is unblocked.) Delivery of the <tt>SIGINT</tt> signal will cause the handler to be invoked, and after the handler returns and the main program resumes, the <span class="docEmphasis">pause()</span> call will block until a <span class="docEmphasis">second</span> instance of <tt>SIGINT</tt> is delivered. This defeats the purpose of the code, which was to unblock <tt>SIGINT</tt> and then wait for its <span class="docEmphasis">first</span> occurrence.</p><p class="docText">Even if the likelihood of <tt>SIGINT</tt> being generated between the start of the critical section (i.e., the first <span class="docEmphasis">sigprocmask()</span> call) and the <span class="docEmphasis">pause()</span>
+ call is small, this nevertheless constitutes a bug in the above code. 
+This time-dependent bug is an example of a race condition (Section 5.1).
+ Normally, race conditions occur where two processes or threads share 
+common resources. However, in this case, the main program is racing 
+against its own signal handler.</p><p class="docText">To avoid this problem, we require a means of <span class="docEmphasis">atomically</span> unblocking a signal and suspending the process. That is the purpose of the <span class="docEmphasis">sigsuspend()</span> system call.</p><pre>#include &lt;signal.h&gt;
+
+int <b>sigsuspend</b>(const sigset_t *<span class="docEmphasis">mask</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">(Normally) returns -1 with <span class="docEmphasis">errno</span> set to <tt>EINTR</tt></p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">sigsuspend()</span> system call replaces the process signal mask by the signal set pointed to by <span class="docEmphasis">mask</span>, and then suspends execution of the process until a signal is caught and its handler returns. Once the handler returns, <span class="docEmphasis">sigsuspend()</span> restores the process signal mask to the value it had prior to the call.</p><p class="docText">Calling <span class="docEmphasis">sigsuspend()</span> is equivalent to atomically performing these operations:</p><pre>sigprocmask(SIG_SETMASK, &amp;mask, &amp;prevMask);     /* Assign new mask */
+pause();
+sigprocmask(SIG_SETMASK, &amp;prevMask, NULL);      /* Restore old mask */</pre><br/>
+<p class="docText">Although restoring the old 
+signal mask (i.e., the last step in the above sequence) may at first 
+appear inconvenient, it is essential to avoid race conditions in 
+situations where we need to repeatedly wait for signals. In such 
+situations, the signals must remain blocked except during the <span class="docEmphasis">sigsuspend()</span> calls. If we later need to unblock the signals that were blocked prior to the <span class="docEmphasis">sigsuspend()</span> call, we can employ a further call to <span class="docEmphasis">sigprocmask()</span>.</p><p class="docText">When <span class="docEmphasis">sigsuspend()</span> is interrupted by delivery of a signal, it returns -1, with <span class="docEmphasis">errno</span> set to <tt>EINTR</tt>. If <span class="docEmphasis">mask</span> doesn’t point to a valid address, <span class="docEmphasis">sigsuspend()</span> fails with the error <tt>EFAULT</tt>.</p><h4 class="docSection2Title" id="title-ID0ECOBK">22.9.1. </h4><h5 class="docSection3Title" id="title-ID0EGOBK">22.9.1.1. Example program</h5><p class="docText">Example 22-5 demonstrates the use of <span class="docEmphasis">sigsuspend()</span>. This program performs the following steps:</p><ul><li><p class="docList">Display the initial value of the process signal mask using the <span class="docEmphasis">printSigMask()</span> function (Example 20-4, in Section 20.9.1.1) <img alt="" border="0" id="" src="Images/getfile_003-6.png"/>.</p></li><li><p class="docList">Block <tt>SIGINT</tt> and <tt>SIGQUIT</tt>, and save the original process signal mask <img alt="" border="0" id="" src="Images/getfile_002-7.png"/>.</p></li><li><p class="docList">Establish the same handler for both <tt>SIGINT</tt> and <tt>SIGQUIT</tt> <img alt="" border="0" id="" src="Images/getfile-34.png"/>. This handler displays a message, and, if it was invoked via delivery of <tt>SIGQUIT</tt>, sets the global variable <span class="docEmphasis">gotSigquit</span>.</p></li><li><p class="docList">Loop until <span class="docEmphasis">gotSigquit</span> is set <img alt="" border="0" id="" src="Images/getfile_004.png"/>. Each loop iteration performs the following steps:</p><ul><li><p class="docList">Display the current value of the signal mask using our <span class="docEmphasis">printSigMask()</span> function.</p></li><li><p class="docList">Simulate a critical section by executing a CPU busy loop for a few seconds.</p></li><li><p class="docList">Display the mask of pending signals using our <span class="docEmphasis">printPendingSigs()</span> function (Example 20-4).</p></li><li><p class="docList">Uses <span class="docEmphasis">sigsuspend()</span> to unblock <tt>SIGINT</tt> and <tt>SIGQUIT</tt> and wait for a signal (if one is not already pending).</p></li></ul></li><li><p class="docList">Use <span class="docEmphasis">sigprocmask()</span> to restore the process signal mask to its original state <img alt="" border="0" id="" src="Images/getfile_005-4.png"/>, and then display the signal mask using <span class="docEmphasis">printSigMask()</span><img alt="" border="0" id="" src="Images/getfile_006.png"/>.</p></li></ul><h5 class="docExampleTitle" id="title-ID0EMUBK">Example 22-5. Using <span class="docEmphasis">sigsuspend()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>signals/t_sigsuspend.c</b>
+    #define _GNU_SOURCE     /* Get strsignal() declaration from &lt;string.h&gt; */
+    #include &lt;string.h&gt;
+    #include &lt;signal.h&gt;
+    #include &lt;time.h&gt;
+    #include "signal_functions.h"           /* Declarations of printSigMask()
+                                               and printPendingSigs() */
+    #include "tlpi_hdr.h"
+
+    static volatile sig_atomic_t gotSigquit = 0;
+
+    static void
+    handler(int sig)
+    {
+        printf("Caught signal %d (%s)\n", sig, strsignal(sig));
+                                            /* UNSAFE (see Section 21.1.2) */
+        if (sig == SIGQUIT)
+            gotSigquit = 1;
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        int loopNum;
+        time_t startTime;
+        sigset_t origMask, blockMask;
+        struct sigaction sa;
+
+<img alt="" border="0" id="" src="Images/getfile_003-7.png"/>    printSigMask(stdout, "Initial signal mask is:\n");
+
+        sigemptyset(&amp;blockMask);
+        sigaddset(&amp;blockMask, SIGINT);
+        sigaddset(&amp;blockMask, SIGQUIT);
+<img alt="" border="0" id="" src="Images/getfile_002-8.png"/>    if (sigprocmask(SIG_BLOCK, &amp;blockMask, &amp;origMask) == -1)
+            errExit("sigprocmask - SIG_BLOCK");
+
+        sigemptyset(&amp;sa.sa_mask);
+        sa.sa_flags = 0;
+        sa.sa_handler = handler;
+    <img alt="" border="0" id="" src="Images/getfile-35.png"/>     if (sigaction(SIGINT, &amp;sa, NULL) == -1)
+            errExit("sigaction");
+        if (sigaction(SIGQUIT, &amp;sa, NULL) == -1)
+            errExit("sigaction");
+
+<img alt="" border="0" id="" src="Images/getfile_004.png"/>     for (loopNum = 1; !gotSigquit; loopNum++) {
+            printf("=== LOOP %d\n", loopNum);
+
+            /* Simulate a critical section by delaying a few seconds */
+
+            printSigMask(stdout, "Starting critical section, signal mask is:\n");
+            for (startTime = time(NULL); time(NULL) &lt; startTime + 4; )
+                continue;                   /* Run for a few seconds elapsed time */
+
+            printPendingSigs(stdout,
+                    "Before sigsuspend() - pending signals:\n");
+            if (sigsuspend(&amp;origMask) == -1 &amp;&amp; errno != EINTR)
+                errExit("sigsuspend");
+        }
+
+<img alt="" border="0" id="" src="Images/getfile_003-8.png"/>     if (sigprocmask(SIG_SETMASK, &amp;origMask, NULL) == -1)
+            errExit("sigprocmask - SIG_SETMASK");
+
+<img alt="" border="0" id="" src="Images/getfile_006.png"/>     printSigMask(stdout, "=== Exited loop\nRestored signal mask to:\n");
+
+        /* Do other processing... */
+
+        exit(EXIT_SUCCESS);
+    }
+         <b>signals/t_sigsuspend.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The following shell session log shows an example of what we see when running the program in Example 22-5:</p><pre class="preFixedWidth">$ <b>./t_sigsuspend </b>
+Initial signal mask is:
+                &lt;empty signal set&gt;
+=== LOOP 1
+Starting critical section, signal mask is:
+                2 (Interrupt)
+                3 (Quit)
+<i> Type Control-C;</i> SIGINT <i> is generated, but remains pending because it is blocked</i>
+Before sigsuspend() - pending signals:
+                2 (Interrupt)
+Caught signal 2 (Interrupt)         <i> sigsuspend() is called, signals are unblocked</i>
+
+					  </pre><br/>
+<p class="docText">The last line of output appeared when the program called <span class="docEmphasis">sigsuspend()</span>, which caused <tt>SIGINT</tt> to be unblocked. At that point, the signal handler was called and displayed that line of output.</p><p class="docText">The main program continues its loop:</p><pre class="preFixedWidth">=== LOOP 2
+Starting critical section, signal mask is:
+                2 (Interrupt)
+                3 (Quit)
+<i>Type Control-\ to generate</i> SIGQUIT
+Before sigsuspend() - pending signals:
+                3 (Quit)
+Caught signal 3 (Quit)              <i>sigsuspend() is called, signals are unblocked</i>
+=== Exited loop                     <i>Signal handler set gotSigquit</i>
+Restored signal mask to:
+                &lt;empty signal set&gt;
+
+					  </pre><br/>
+<p class="docText">This time, we typed <span class="docEmphasis">Control-\</span>, which caused the signal handler to set the <span class="docEmphasis">gotSigquit</span> flag, which in turn caused the main program to terminate its loop.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,286 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>31.3. Thread-Specific Data</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">31.3. Thread-Specific Data</h3><p class="docText">The
+ most efficient way of making a function thread-safe is to make it 
+reentrant. All new library functions should be implemented in this way. 
+However, for an existing nonreentrant library function (one that was 
+perhaps designed before the use of threads became common), this approach
+ usually requires changing the function’s interface, which means 
+modifying all of the programs that use the function.</p><p class="docText">Thread-specific
+ data is a technique for making an existing function thread-safe without
+ changing its interface. A function that uses thread-specific data may 
+be slightly less efficient than a reentrant function, but allows us to 
+leave the programs that call the function unchanged.</p><p class="docText">Thread-specific
+ data allows a function to maintain a separate copy of a variable for 
+each thread that calls the function, as illustrated in Figure 31-1.
+ Thread-specific data is persistent; each thread’s variable continues to
+ exist between the thread’s invocations of the function. This allows the
+ function to maintain per-thread information between calls to the 
+function, and allows the function to pass distinct result buffers (if 
+required) to each calling thread.</p><p></p><center><h5 class="docFigureTitle">Figure 31-1. Thread-specific data (TSD) provides per-thread storage for a function</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_008-6.png"/></p></center><p></p><br/><h4 class="docSection2Title" id="title-ID0EGPEK">31.3.1. Thread-Specific Data from the Library Function’s Perspective</h4><p class="docText">In
+ order to understand the use of the thread-specific data API, we need to
+ consider things from the point of view of a library function that uses 
+thread-specific data:</p><ul><li><p class="docList">The
+ function must allocate a separate block of storage for each thread that
+ calls the function. This block needs to be allocated once, the first 
+time the thread calls the function.</p></li><li><p class="docList">On
+ each subsequent call from the same thread, the function needs to be 
+able to obtain the address of the storage block that was allocated the 
+first time this thread called the function. The function can’t maintain a
+ pointer to the block in an automatic variable, since automatic 
+variables disappear when the function returns; nor can it store the 
+pointer in a static variable, since only one instance of each static 
+variable exists in the process. The Pthreads API provides functions to 
+handle this task.</p></li><li><p class="docList">Different
+ (i.e., independent) functions may each need thread-specific data. Each 
+function needs a method of identifying its thread-specific data (a key),
+ as distinct from the thread-specific data used by other functions.</p></li><li><p class="docList">The
+ function has no direct control over what happens when the thread 
+terminates. When the thread terminates, it is probably executing code 
+outside the function. Nevertheless, there must be some mechanism (a 
+destructor) to ensure that the storage block allocated for this thread 
+is automatically deallocated when the thread terminates. If this is not 
+done, then a memory leak could occur as threads are continuously 
+created, call the function, and then terminate.</p></li></ul><h4 class="docSection2Title" id="title-ID0EUPEK">31.3.2. Overview of the Thread-Specific Data API</h4><p class="docText">The general steps that a library function performs in order to use thread-specific data are as follows:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">The function creates a <span class="docEmphasis">key</span>,
+ which is the means of differentiating the thread-specific data item 
+used by this function from the thread-specific data items used by other 
+functions. The key is created by calling the <span class="docEmphasis">pthread_key_create()</span> function. Creating a key needs to be done only once, when the first thread calls the function. For this purpose, <span class="docEmphasis">pthread_once()</span> is employed. Creating a key doesn’t allocate any blocks of thread-specific data.</p></div></li><li><div style="font-weight:normal"><p class="docList">The call to <span class="docEmphasis">pthread_key_create()</span>
+ serves a second purpose: it allows the caller to specify the address of
+ the programmer-defined destructor function that is used to deallocate 
+each of the storage blocks allocated for this key (see the next step). 
+When a thread that has thread-specific data terminates, the Pthreads API
+ automatically invokes the destructor, passing it a pointer to the data 
+block for this thread.</p></div></li><li><div style="font-weight:normal"><p class="docList">The function allocates a thread-specific data block for each thread from which it is called. This is done using <span class="docEmphasis">malloc()</span> (or a similar function). This allocation is done once for each thread, the first time the thread calls the function.</p></div></li><li><div style="font-weight:normal"><p class="docList">In order to save a pointer to the storage allocated in the previous step, the function employs two Pthreads functions: <span class="docEmphasis">pthread_setspecific()</span> and <span class="docEmphasis">pthread_getspecific()</span>. A call to <span class="docEmphasis">pthread_setspecific()</span>
+ is a request to the Pthreads implementation to say “save this pointer, 
+recording the fact that it is associated with a particular key (the one 
+for this function) and a particular thread (the calling thread).” 
+Calling <span class="docEmphasis">pthread_getspecific()</span>
+ performs the complementary task, returning the pointer previously 
+associated with a given key for the calling thread. If no pointer was 
+previously associated with a particular key and thread, then <span class="docEmphasis">pthread_getspecific()</span> returns <tt>NULL</tt>.
+ This is how a function can determine that it is being called for the 
+first time by this thread, and thus must allocate the storage block for 
+the thread.</p></div></li></ol></div><h4 class="docSection2Title" id="title-ID0EAREK">31.3.3. Details of the Thread-Specific Data API</h4><p class="docText">In
+ this section, we provide details of each of the functions mentioned in 
+the previous section, and elucidate the operation of thread-specific 
+data by describing how it is typically implemented. The next section 
+shows how to use thread-specific data to write a thread-safe 
+implementation of the standard C library function <span class="docEmphasis">strerror()</span>.</p><p class="docText">Calling <span class="docEmphasis">pthread_key_create()</span> creates a new thread-specific data key that is returned to the caller in the buffer pointed to by <span class="docEmphasis">key</span>.</p><pre>#include &lt;pthread.h&gt;
+
+int <b>pthread_key_create</b>(pthread_key_t *<span class="docEmphasis">key</span>, void (*<span class="docEmphasis">destructor</span>)(void *));</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or a positive error number on error</p><hr noshade="noshade" size="1"/><p class="docText">Because the returned key is used by all threads in the process, <span class="docEmphasis">key</span> should point to a global variable.</p><p class="docText">The <span class="docEmphasis">destructor</span> argument points to a programmer-defined function of the following form:</p><pre>void
+dest(void *value)
+{
+    /* Release storage pointed to by 'value' */
+}</pre><br/>
+<p class="docText">Upon termination of a thread that has a non-<tt>NULL</tt> value associated with <span class="docEmphasis">key</span>,
+ the destructor function is automatically invoked by the Pthreads API 
+and given that value as its argument. The passed value is normally a 
+pointer to this thread’s thread-specific data block for this key. If a 
+destructor is not required, then <span class="docEmphasis">destructor</span> can be specified as <tt>NULL</tt>.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">If
+ a thread has multiple thread-specific data blocks, then the order in 
+which the destructors are called is unspecified. Destructor functions 
+should be designed to operate independently of one another.</p><hr noshade="noshade" size="1"/><p class="docText">Looking
+ at the implementation of thread-specific data helps us to understand 
+how it is used. A typical implementation (NPTL is typical), involves the
+ following arrays:</p><ul><li><p class="docList">a single global (i.e., process-wide) array of information about thread-specific data keys; and</p></li><li><p class="docList">a
+ set of per-thread arrays, each containing pointers to all of the 
+thread-specific data blocks allocated for a particular thread (i.e., 
+this array contains the pointers stored by calls to <span class="docEmphasis">pthread_setspecific()</span>).</p></li></ul><p class="docText">In this implementation, the <span class="docEmphasis">pthread_key_t</span> value returned by <span class="docEmphasis">pthread_key_create()</span> is simply an index into the global array, which we label <span class="docEmphasis">pthread_keys</span>, whose form is shown in Figure 31-2.
+ Each element of this array is a structure containing two fields. The 
+first field indicates whether this array element is in use (i.e., has 
+been allocated by a previous call to <span class="docEmphasis">pthread_key_create()</span>).
+ The second field is used to store the pointer to the destructor 
+function for the thread-specific data blocks for this key (i.e., it is a
+ copy of the <span class="docEmphasis">destructor</span> argument to <span class="docEmphasis">pthread_key_create()</span>).</p><p></p><center><h5 class="docFigureTitle">Figure 31-2. Implementation of thread-specific data keys</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_007-11.png"/></p></center><p></p><br/><p class="docText">The <span class="docEmphasis">pthread_setspecific()</span> function requests the Pthreads API to save a copy of <span class="docEmphasis">value</span> in a data structure that associates it with the calling thread and with <span class="docEmphasis">key</span>, a key returned by a previous call to <span class="docEmphasis">pthread_key_create()</span>. The <span class="docEmphasis">pthread_getspecific()</span> function performs the converse operation, returning the value that was previously associated with the given <span class="docEmphasis">key</span> for this thread.</p><pre>#include &lt;pthread.h&gt;
+
+int <b>pthread_setspecific</b>(pthread_key_t <span class="docEmphasis">key</span>, const void *<span class="docEmphasis">value</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or a positive error number on error</p><hr noshade="noshade" size="1"/><pre>void <b>*pthread_getspecific</b>(pthread_key_t <span class="docEmphasis">key</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns pointer, or <tt>NULL</tt> if no thread-specific data isassociated with <span class="docEmphasis">key</span></p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">value</span> argument given to <span class="docEmphasis">pthread_setspecific()</span>
+ is normally a pointer to a block of memory that has previously been 
+allocated by the caller. This pointer will be passed as the argument for
+ the destructor function for this <span class="docEmphasis">key</span> when the thread terminates.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">value</span>
+ argument doesn’t need to be a pointer to a block of memory. It could be
+ some scalar value that can be assigned (with a cast) to <span class="docEmphasis">void *</span>. In this case, the earlier call to <span class="docEmphasis">pthread_key_create()</span> would specify <span class="docEmphasis">destructor</span> as <tt>NULL</tt>.</p><hr noshade="noshade" size="1"/><p class="docText">Figure 31-3 shows a typical implementation of the data structure used to store <span class="docEmphasis">value</span>. In this diagram, we assume that <span class="docEmphasis">pthread_keys[1]</span> was allocated to a function named <span class="docEmphasis">myfunc()</span>.
+ For each thread, the Pthreads API maintains an array of pointers to 
+thread-specific data blocks. The elements of each of these 
+thread-specific arrays have a one-to-one correspondence with the 
+elements of the global <span class="docEmphasis">pthread_keys</span> array shown in Figure 31-2. The <span class="docEmphasis">pthread_setspecific()</span> function sets the element corresponding to <span class="docEmphasis">key</span> in the array for the calling thread.</p><p></p><center><h5 class="docFigureTitle">Figure 31-3. Data structure used to implement thread-specific data (TSD) pointers</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_006-9.png"/></p></center><p></p><br/><p class="docText">When a thread is first created, all of its thread-specific data pointers are initialized to <tt>NULL</tt>. This means that when our library function is called by a thread for the first time, it must begin by using <span class="docEmphasis">pthread_getspecific()</span> to check whether the thread already has an associated value for <span class="docEmphasis">key</span>. If it does not, then the function allocates a block of memory and saves a pointer to the block using <span class="docEmphasis">pthread_setspecific()</span>. We show an example of this in the thread-safe <span class="docEmphasis">strerror()</span> implementation presented in the next section.</p><h4 class="docSection2Title" id="title-ID0EFZEK">31.3.4. Employing the Thread-Specific Data API</h4><p class="docText">When we first described the standard <span class="docEmphasis">strerror()</span> function in Section 3.4, we noted that it may return a pointer to a statically allocated string as its function result. This means that <span class="docEmphasis">strerror()</span> may not be thread-safe. In the next few pages, we look at a non-thread-safe implementation of <span class="docEmphasis">strerror()</span>, and then show how thread-specific data can be used to make this function thread-safe.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On many UNIX implementations, including Linux, the <span class="docEmphasis">strerror()</span> function provided by the standard C library <span class="docEmphasis">is</span> thread-safe. However, we use the example of <span class="docEmphasis">strerror()</span>
+ anyway, because SUSv3 doesn’t require this function to be thread-safe, 
+and its implementation provides a simple example of the use of 
+thread-specific data.</p><hr noshade="noshade" size="1"/><p class="docText">Example 31-1 shows a simple non-thread-safe implementation of <span class="docEmphasis">strerror()</span>. This function makes use of a pair of global variables defined by <span class="docEmphasis">glibc</span>: <span class="docEmphasis">_sys_errlist</span> is an array of pointers to strings corresponding to the error numbers in <span class="docEmphasis">errno</span> (thus, for example, <span class="docEmphasis">_sys_errlist[EINVAL]</span> points to the string <span class="docEmphasis">Invalid operation</span>), and <span class="docEmphasis">_sys_nerr</span> specifies the number of elements in <span class="docEmphasis">_sys_errlist</span>.</p><h5 class="docExampleTitle" id="title-ID0E22EK">Example 31-1. An implementation of <span class="docEmphasis">strerror()</span> that is not thread-safe</h5><p></p><div class="box"><pre class="preFixedWidth"><b>threads/strerror.c</b>
+
+#define _GNU_SOURCE                 /* Get '_sys_nerr' and '_sys_errlist'
+                                       declarations from &lt;stdio.h&gt; */
+
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;           /* Get declaration of strerror() */
+
+#define MAX_ERROR_LEN 256            /* Maximum length of string
+                                        returned by strerror() */
+
+static char buf[MAX_ERROR_LEN];     /* Statically allocated return buffer */
+
+char *
+strerror(int err)
+{
+    if (err &lt; 0 || err &gt;= _sys_nerr || _sys_errlist[err] == NULL) {
+        snprintf(buf, MAX_ERROR_LEN, "Unknown error %d", err);
+    } else {
+        strncpy(buf, _sys_errlist[err], MAX_ERROR_LEN - 1);
+        buf[MAX_ERROR_LEN - 1] = '\0';          /* Ensure null termination */
+    }
+
+    return buf;
+
+}
+
+      <b>threads/strerror.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">We can use the program in Example 31-2 to demonstrate the consequences of the fact that the <span class="docEmphasis">strerror()</span> implementation in Example 31-1 is not thread-safe. This program calls <span class="docEmphasis">strerror()</span> from two different threads, but displays the returned value only after both threads have called <span class="docEmphasis">strerror()</span>. Even though each thread specifies a different value (<tt>EINVAL</tt> and <tt>EPERM</tt>) as the argument to <span class="docEmphasis">strerror()</span>, this is what we see when we compile and link this program with the version of <span class="docEmphasis">strerror()</span> shown in Example 31-1:</p><pre>$ <b>./strerror_test</b>
+Main thread has called strerror()
+Other thread about to call strerror()
+Other thread: str (0x804a7c0) = Operation not permitted
+Main thread:  str (0x804a7c0) = Operation not permitted</pre><br/>
+<p class="docText">Both threads displayed the <span class="docEmphasis">errno</span> string corresponding to <tt>EPERM</tt>, because the call to <span class="docEmphasis">strerror()</span> by the second thread (in <span class="docEmphasis">threadFunc</span>) overwrote the buffer that was written by the call to <span class="docEmphasis">strerror()</span> in the main thread. Inspection of the output shows that the local variable <span class="docEmphasis">str</span> in the two threads points to the same memory address.</p><h5 class="docExampleTitle" id="title-ID0E44EK">Example 31-2. Calling <span class="docEmphasis">strerror()</span> from two different threads</h5><p></p><div class="box"><pre class="preFixedHeight"><b>threads/strerror_test.c</b>
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;                 /* Get declaration of strerror() */
+#include &lt;pthread.h&gt;
+#include "tlpi_hdr.h"
+
+static void *
+threadFunc(void *arg)
+{
+    char *str;
+
+    printf("Other thread about to call strerror()\n");
+    str = strerror(EPERM);
+    printf("Other thread: str (%p) = %s\n", str, str);
+
+    return NULL;
+}
+
+int
+main(int argc, char *argv[])
+{
+    pthread_t t;
+    int s;
+    char *str;
+
+    str = strerror(EINVAL);
+    printf("Main thread has called strerror()\n");
+
+    s = pthread_create(&amp;t, NULL, threadFunc, NULL);
+    if (s != 0)
+        errExitEN(s, "pthread_create");
+
+    s = pthread_join(t, NULL);
+    if (s != 0)
+        errExitEN(s, "pthread_join");
+
+    printf("Main thread:  str (%p) = %s\n", str, str);
+
+    exit(EXIT_SUCCESS);
+}
+
+      <b>threads/strerror_test.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Example 31-3 shows a reimplementation of <span class="docEmphasis">strerror()</span> that uses thread-specific data to ensure thread safety.</p><p class="docText">The first step performed by the revised <span class="docEmphasis">strerror()</span> is to call <span class="docEmphasis">pthread_once()</span> <img alt="" border="0" id="" src="Images/getfile_002-26.png"/> to ensure that the first invocation of this function (from any thread) calls <span class="docEmphasis">createKey()</span> <img alt="" border="0" id="" src="Images/getfile_003-22.png"/> . The <span class="docEmphasis">createKey()</span> function calls <span class="docEmphasis">pthread_key_create()</span> to allocate a thread-specific data key that is stored in the global variable <span class="docEmphasis">strerrorKey</span> <img alt="" border="0" id="" src="Images/getfile-55.png"/>. The call to <span class="docEmphasis">pthread_key_create()</span> also records the address of the destructor <img alt="" border="0" id="" src="Images/getfile_004-8.png"/> that will be used to free the thread-specific buffers corresponding to this key.</p><p class="docText">The <span class="docEmphasis">strerror()</span> function then calls <span class="docEmphasis">pthread_getspecific()</span> <img alt="" border="0" id="" src="Images/getfile_009-3.png"/> to retrieve the address of this thread’s unique buffer corresponding to <span class="docEmphasis">strerrorKey</span>. If <span class="docEmphasis">pthread_getspecific()</span> returns <tt>NULL</tt>, then this thread is calling <span class="docEmphasis">strerror()</span> for the first time, and so the function allocates a new buffer using <span class="docEmphasis">malloc()</span> <img alt="" border="0" id="" src="Images/getfile_010-2.png"/>, and saves the address of the buffer using <span class="docEmphasis">pthread_setspecific()</span> <img alt="" border="0" id="" src="Images/getfile_005-16.png"/>. If the <span class="docEmphasis">pthread_getspecific()</span> call returns a non-<tt>NULL</tt> value, then that pointer refers to an existing buffer that was allocated when this thread previously called <span class="docEmphasis">strerror()</span>.</p><p class="docText">The remainder of this <span class="docEmphasis">strerror()</span> implementation is similar to the implementation that we showed earlier, with the difference that <span class="docEmphasis">buf</span> is the address of a thread-specific data buffer, rather than a static variable.</p><h5 class="docExampleTitle" id="title-ID0ETBFK">Example 31-3. A thread-safe implementation of <span class="docEmphasis">strerror()</span> using thread-specific data</h5><p></p><div class="box"><pre class="preFixedHeight"><b>threads/strerror_tsd.c</b>
+    #define _GNU_SOURCE             /* Get '_sys_nerr' and '_sys_errlist'
+                                   declarations from &lt;stdio.h&gt; */
+    #include &lt;stdio.h&gt;
+    #include &lt;string.h&gt;             /* Get declaration of strerror() */
+    #include &lt;pthread.h&gt;
+    #include "tlpi_hdr.h"
+
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    static pthread_key_t strerrorKey;
+
+    #define MAX_ERROR_LEN 256       /* Maximum length of string in per-thread
+                                 buffer returned by strerror() */
+
+    static void                     /* Free thread-specific data buffer */
+<img alt="" border="0" id="" src="Images/getfile_004-9.png"/>  destructor(void *buf)
+    {
+        free(buf);
+    }
+
+    static void                     /* One-time key creation function */
+<img alt="" border="0" id="" src="Images/getfile_003-23.png"/>  createKey(void)
+    {
+        int s;
+
+        /* Allocate a unique thread-specific data key and save the address
+           of the destructor for thread-specific data buffers */
+
+<img alt="" border="0" id="" src="Images/getfile-56.png"/>    s = pthread_key_create(&amp;strerrorKey, destructor);
+        if (s != 0)
+            errExitEN(s, "pthread_key_create");
+    }
+        char *
+    strerror(int err)
+    {
+        int s;
+        char *buf;
+
+        /* Make first caller allocate key for thread-specific data */
+
+<img alt="" border="0" id="" src="Images/getfile_002-27.png"/>    s = pthread_once(&amp;once, createKey);
+      if (s != 0)
+            errExitEN(s, "pthread_once");
+
+<img alt="" border="0" id="" src="Images/getfile_009-4.png"/>    buf = pthread_getspecific(strerrorKey);
+      if (buf == NULL) {          /* If first call from this thread, allocate
+                                       buffer for thread, and save its location */
+<img alt="" border="0" id="" src="Images/getfile_010-3.png"/>        buf = malloc(MAX_ERROR_LEN);
+          if (buf == NULL)
+              errExit("malloc");
+
+<img alt="" border="0" id="" src="Images/getfile_005-17.png"/>     s = pthread_setspecific(strerrorKey, buf);
+       if (s != 0)
+          errExitEN(s, "pthread_setspecific");
+        }
+
+        if (err &lt; 0 || err &gt;= _sys_nerr || _sys_errlist[err] == NULL) {
+            snprintf(buf, MAX_ERROR_LEN, "Unknown error %d", err);
+        } else {
+            strncpy(buf, _sys_errlist[err], MAX_ERROR_LEN - 1);
+            buf[MAX_ERROR_LEN - 1] = '\0';          /* Ensure null termination */
+        }
+
+        return buf;
+    }
+
+        <b>threads/strerror_tsd.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">If we compile and link our test program (Example 31-2) with the new version of <span class="docEmphasis">strerror()</span> (Example 31-3) to create an executable file, <tt>strerror_test_tsd</tt>, then we see the following results when running the program:</p><pre>$ <b>./strerror_test_tsd</b>
+Main thread has called strerror()
+Other thread about to call strerror()
+Other thread: str (0x804b158) = Operation not permitted
+Main thread:  str (0x804b008) = Invalid argument</pre><br/>
+<p class="docText">From this output, we see that the new version of <span class="docEmphasis">strerror()</span> is thread-safe. We also see that the address pointed to by the local variable <span class="docEmphasis">str</span> in the two threads is different.</p><h4 class="docSection2Title" id="title-ID0EOEFK">31.3.5. Thread-Specific Data Implementation Limits</h4><p class="docText">As
+ implied by our description of how thread-specific data is typically 
+implemented, an implementation may need to impose limits on the number 
+of thread-specific data keys that it supports. SUSv3 requires that an 
+implementation support at least 128 (<tt>_POSIX_THREAD_KEYS_MAX</tt>) keys. An application can determine how many keys an implementation actually supports either via the definition of <tt>PTHREAD_KEYS_MAX</tt> (defined in <tt>&lt;limits.h&gt;</tt>) or by calling <span class="docEmphasis">sysconf(_SC_THREAD_KEYS_MAX)</span>. Linux supports up to 1024 keys.</p><p class="docText">Even
+ 128 keys should be more than sufficient for most applications. This is 
+because each library function should employ only a small number of 
+keys—often just one. If a function requires multiple thread-specific 
+data values, these can usually be placed in a single structure that has 
+just one associated thread-specific data key.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>47.1. Overview</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">47.1. Overview</h3><p class="docText">The general steps for using a System V semaphore are the following:</p><ul><li><p class="docList">Create or open a semaphore set using <span class="docEmphasis">semget()</span>.</p></li><li><p class="docList">Initialize the semaphores in the set using the <span class="docEmphasis">semctl()</span> <tt>SETVAL</tt> or <tt>SETALL</tt> operation. (Only one process should do this.)</p></li><li><p class="docList">Perform operations on semaphore values using <span class="docEmphasis">semop()</span>. The processes using the semaphore typically use these operations to indicate acquisition and release of a shared resource.</p></li><li><p class="docList">When all processes have finished using the semaphore set, remove the set using the <span class="docEmphasis">semctl()</span> <tt>IPC_RMID</tt> operation. (Only one process should do this.)</p></li></ul><p class="docText">Most
+ operating systems provide some type of semaphore primitive for use in 
+application programs. However, System V semaphores are rendered 
+unusually complex by the fact that they are allocated in groups called <span class="docEmphasis">semaphore sets</span>. The number of semaphores in a set is specified when the set is created using the <span class="docEmphasis">semget()</span> system call. While it is common to operate on a single semaphore at a time, the <span class="docEmphasis">semop()</span> system call allows us to atomically perform a group of operations on multiple semaphores in the same set.</p><p class="docText">Because
+ System V semaphores are created and initialized in separate steps, race
+ conditions can result if two processes try to perform these steps at 
+the same time. Describing this race condition and how to avoid it 
+requires that we describe <span class="docEmphasis">semctl()</span> before describing <span class="docEmphasis">semop()</span>,
+ which means that there is quite a lot of material to cover before we 
+have all of the details required to fully understand semaphores.</p><p class="docText">In the meantime, we provide Example 47-1 as a simple example of the use of the various semaphore system calls. This program operates in two modes:</p><ul><li><p class="docList">Given
+ a single integer command-line argument, the program creates a new 
+semaphore set containing a single semaphore, and initializes the 
+semaphore to the value supplied in the command-line argument. The 
+program displays the identifier of the new semaphore set.</p></li><li><p class="docList">Given
+ two command-line arguments, the program interprets them as (in order) 
+the identifier of an existing semaphore set and a value to be added to 
+the first semaphore (numbered 0) in that set. The program carries out 
+the specified operation on that semaphore. To enable us to monitor the 
+semaphore operation, the program prints messages before and after the 
+operation. Each of these messages begins with the process ID, so that we
+ can distinguish the output of multiple instances of the program.</p></li></ul><p class="docText">The following shell session log demonstrates the use of the program in Example 47-1. We begin by creating a semaphore that is initialized to 0:</p><pre>$ <b>./svsem_demo 0 </b>
+Semaphore ID = 98307                    <i> ID of new semaphore set</i></pre><br/>
+<p class="docText">We then execute a background command that tries to decrease the semaphore value by 2:</p><pre>$ <b>./svsem_demo 98307 -2 &amp;</b>
+23338: about to semop at  10:19:42
+[1] 23338</pre><br/>
+<p class="docText">This command blocked, 
+because the value of the semaphore can’t be decreased below 0. Now, we 
+execute a command that adds 3 to the semaphore value:</p><pre>$ <b>./svsem_demo 98307 +3</b>
+23339: about to semop at  10:19:55
+23339: semop completed at 10:19:55
+23338: semop completed at 10:19:55
+[1]+  Done              ./svsem_demo 98307 -2</pre><br/>
+<p class="docText">The semaphore increment 
+operation succeeded immediately, and caused the semaphore decrement 
+operation in the background command to proceed, since that operation 
+could now be performed without leaving the semaphore’s value below 0.</p><h5 class="docExampleTitle" id="title-ID0EZ5BM">Example 47-1. Creating and operating on System V semaphores</h5><p></p><div class="box"><pre class="preFixedHeight"><b>svsem/svsem_demo.c</b>
+#include &lt;sys/types.h&gt;
+#include &lt;sys/sem.h&gt;
+#include &lt;sys/stat.h&gt;
+#include "curr_time.h"                  /* Declaration of currTime() */
+#include "semun.h"                      /* Definition of semun union */
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int semid;
+
+    if (argc &lt; 2 || argc &gt; 3 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s init-value\n"
+                 "   or: %s semid operation\n", argv[0], argv[0]);
+
+    if (argc == 2) {            /* Create and initialize semaphore */
+        union semun arg;
+
+        semid = semget(IPC_PRIVATE, 1, S_IRUSR | S_IWUSR);
+        if (semid == -1)
+            errExit("semid");
+
+        arg.val = getInt(argv[1], 0, "init-value");
+        if (semctl(semid, /* semnum= */ 0, SETVAL, arg) == -1)
+            errExit("semctl");
+
+        printf("Semaphore ID = %d\n", semid);
+
+    } else {                    /* Perform an operation on first semaphore */
+
+        struct sembuf sop;              /* Structure defining operation */
+
+        semid = getInt(argv[1], 0, "semid");
+
+        sop.sem_num = 0;                /* Specifies first semaphore in set */
+        sop.sem_op = getInt(argv[2], 0, "operation");
+                                        /* Add, subtract, or wait for 0 */
+        sop.sem_flg = 0;                /* No special options for operation */
+
+        printf("%ld: about to semop at  %s\n", (long) getpid(), currTime("%T"));
+        if (semop(semid, &amp;sop, 1) == -1)
+            errExit("semop");
+
+        printf("%ld: semop completed at %s\n", (long) getpid(), currTime("%T"));
+    }
+
+    exit(EXIT_SUCCESS);
+}
+     <b>svsem/svsem_demo.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

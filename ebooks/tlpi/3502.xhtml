@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>35.2. Overview of Realtime Process Scheduling</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">35.2. Overview of Realtime Process Scheduling</h3><p class="docText">The
+ standard kernel scheduling algorithm usually provides adequate 
+performance and responsiveness for the mixture of interactive and 
+background processes typically run on a system. However, realtime 
+applications have more stringent requirements of a scheduler, including 
+the following:</p><ul><li><p class="docList">A
+ realtime application must provide a guaranteed maximum response time 
+for external inputs. In many cases, these guaranteed maximum response 
+times must be quite small (e.g., of the order of a fraction of a 
+second). For example, a slow response by a vehicle navigation system 
+could be catastrophic. To satisfy this requirement, the kernel must 
+provide the facility for a high-priority process to obtain control of 
+the CPU in a timely fashion, preempting any process that may currently 
+be running.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">A
+ time-critical application may need to take other steps to avoid 
+unacceptable delays. For example, to avoid being delayed by a page 
+fault, an application can lock all of its virtual memory into RAM using <span class="docEmphasis">mlock()</span> or <span class="docEmphasis">mlockall()</span> (described in Section 50.2).</p><hr noshade="noshade" size="1"/></li><li><p class="docList">A
+ high-priority process should be able to maintain exclusive access to 
+the CPU until it completes or voluntarily relinquishes the CPU.</p></li><li><p class="docList">A realtime application should be able to control the precise order in which its component processes are scheduled.</p></li></ul><p class="docText">SUSv3
+ specifies a realtime process scheduling API (originally defined in 
+POSIX.1b) that partly addresses these requirements. This API provides 
+two realtime scheduling policies: <tt>SCHED_RR</tt> and <tt>SCHED_FIFO</tt>.
+ Processes operating under either of these policies always have priority
+ over processes scheduled using the standard round-robin time-sharing 
+policy described in Section 35.1, which the realtime scheduling API identifies using the constant <tt>SCHED_OTHER</tt>.</p><p class="docText">Each
+ of the realtime policies allows for a range of priority levels. SUSv3 
+requires that an implementation provide at least 32 discrete priorities 
+for the realtime policies. In each scheduling policy, runnable processes
+ with higher priority always have precedence over lower-priority 
+processes when seeking access to the CPU.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The
+ statement that runnable processes with higher priority always have 
+precedence over lower-priority processes needs to be qualified for 
+multiprocessor Linux systems (including hyperthreaded systems). On a 
+multiprocessor system, each CPU has a separate run queue (this provides 
+better performance than a single system-wide run queue), and processes 
+are prioritized only per CPU run queue. For example, on a dual-processor
+ system with three processes, process A with realtime priority 20 could 
+be queued waiting for CPU 0, which is currently running process B with 
+priority 30, even though CPU 1 is running process C with a priority of 
+10.</p><p class="docText">Realtime applications that employ multiple processes (or threads) can use the CPU affinity API described in Section 35.4
+ to avoid any problems that might result from this scheduling behavior. 
+For example, on a four-processor system, all noncritical processes could
+ be isolated onto a single CPU, leaving the other three CPUs available 
+for use by the application.</p><hr noshade="noshade" size="1"/><p class="docText">Linux
+ provides 99 realtime priority levels, numbered 1 (lowest) to 99 
+(highest), and this range applies in both realtime scheduling policies. 
+The priorities in each policy are equivalent. This means that, given two
+ processes with the same priority, one operating under the <tt>SCHED_RR</tt> policy and the other under <tt>SCHED_FIFO</tt>,
+ either may be the next one eligible for execution, depending on the 
+order in which they were scheduled. In effect, each priority level 
+maintains a queue of runnable processes, and the next process to run is 
+selected from the front of the highest-priority nonempty queue.</p><h4 class="docSection2Title" id="title-ID0EV1FK">35.2.1. </h4><h5 class="docSection3Title" id="title-ID0EZ1FK">35.2.1.1. POSIX realtime versus hard realtime</h5><p class="docText">Applications with all of the requirements listed at the start of this section are sometimes referred to as <span class="docEmphasis">hard</span>
+ realtime applications. However, the POSIX realtime process scheduling 
+API doesn’t satisfy all of these requirements. In particular, it 
+provides no way for an application to guarantee response times for 
+handling input. To make such guarantees requires operating system 
+features that are not part of the mainline Linux kernel (nor most other 
+standard operating systems). The POSIX API merely provides us with 
+so-called <span class="docEmphasis">soft</span> realtime, allowing us to control which processes are scheduled for use of the CPU.</p><p class="docText">Adding
+ support for hard realtime applications is difficult to achieve without 
+imposing an overhead on the system that conflicts with the performance 
+requirements of the time-sharing applications that form the majority of 
+applications on typical desktop and server systems. This is why most 
+UNIX kernels—including, historically, Linux—have not natively supported 
+realtime applications. Nevertheless, starting from around version 
+2.6.18, various features have been added to the Linux kernel with the 
+eventual aim of allowing Linux to natively provide full support for hard
+ realtime applications, without imposing the aforementioned overhead for
+ time-sharing operation.</p><h4 class="docSection2Title" id="title-ID0ET2FK">35.2.2. The <tt>SCHED_RR</tt> Policy</h4><p class="docText">Under the <tt>SCHED_RR</tt>
+ (round-robin) policy, processes of equal priority are executed in a 
+round-robin time-sharing fashion. A process receives a fixed-length time
+ slice each time it uses the CPU. Once scheduled, a process employing 
+the <tt>SCHED_RR</tt> policy maintains control of the CPU until either:</p><ul><li><p class="docList">it reaches the end of its time slice;</p></li><li><p class="docList">it voluntarily relinquishes the CPU, either by performing a blocking system call or by calling the <span class="docEmphasis">sched_yield()</span> system call (described in Section 35.3.3);</p></li><li><p class="docList">it terminates; or</p></li><li><p class="docList">it is preempted by a higher-priority process.</p></li></ul><p class="docText">For the first two events above, when a process running under the <tt>SCHED_RR</tt>
+ policy loses access to the CPU, it is placed at the back of the queue 
+for its priority level. In the final case, when the higher-priority 
+process has ceased execution, the preempted process continues execution,
+ consuming the remainder of its time slice (i.e., the preempted process 
+remains at the head of the queue for its priority level).</p><p class="docText">In both the <tt>SCHED_RR</tt> and the <tt>SCHED_FIFO</tt> policies, the currently running process may be preempted for one of the following reasons:</p><ul><li><p class="docList">a higher-priority process that was blocked became unblocked (e.g., an I/O operation on which it was waiting completed);</p></li><li><p class="docList">the priority of another process was raised to a higher level than the currently running process; or</p></li><li><p class="docList">the priority of the currently running process was decreased to a lower value than that of some other runnable process.</p></li></ul><p class="docText">The <tt>SCHED_RR</tt> policy is similar to the standard round-robin time-sharing scheduling algorithm (<tt>SCHED_OTHER</tt>),
+ in that it allows a group of processes with the same priority to share 
+access to the CPU. The most notable difference is the existence of 
+strictly distinct priority levels, with higher-priority processes always
+ taking precedence over lower-priority processes. By contrast, a low 
+nice value (i.e., high priority) doesn’t give a process exclusive access
+ to the CPU; it merely gives the process a favorable weighting in 
+scheduling decisions. As noted in Section 35.1,
+ a process with a low priority (i.e., high nice value) always receives 
+at least some CPU time. The other important difference is that the <tt>SCHED_RR</tt> policy allows us to precisely control the order in which processes are scheduled.</p><h4 class="docSection2Title" id="title-ID0EP5FK">35.2.3. The <tt>SCHED_FIFO</tt> Policy</h4><p class="docText">The <tt>SCHED_FIFO</tt> (first-in, first-out) policy is similar to the <tt>SCHED_RR</tt> policy. The major difference is that there is no time slice. Once a <tt>SCHED_FIFO</tt> process gains access to the CPU, it executes until either:</p><ul><li><p class="docList">it voluntarily relinquishes the CPU (in the same manner as described for the <tt>SCHED_FIFO</tt> policy above);</p></li><li><p class="docList">it terminates; or</p></li><li><p class="docList">it is preempted by a higher-priority process (in the same circumstances as described for the <tt>SCHED_FIFO</tt> policy above).</p></li></ul><p class="docText">In
+ the first case, the process is placed at the back of the queue for its 
+priority level. In the last case, when the higher-priority process has 
+ceased execution (by blocking or terminating), the preempted process 
+continues execution (i.e., the preempted process remains at the head of 
+the queue for its priority level).</p><h4 class="docSection2Title" id="title-ID0EX6FK">35.2.4. The <tt>SCHED_BATCH</tt> and <tt>SCHED_IDLE</tt> Policies</h4><p class="docText">The Linux 2.6 kernel series added two nonstandard scheduling policies: <tt>SCHED_BATCH</tt> and <tt>SCHED_IDLE</tt>. Although these policies are set via the POSIX realtime scheduling API, they are not actually realtime policies.</p><p class="docText">The <tt>SCHED_BATCH</tt> policy, added in kernel 2.6.16, is similar to the default <tt>SCHED_OTHER</tt> policy. The difference is that the <tt>SCHED_BATCH</tt>
+ policy causes jobs that frequently wake up to be scheduled less often. 
+This policy is intended for batch-style execution of processes.</p><p class="docText">The <tt>SCHED_IDLE</tt> policy, added in kernel 2.6.23, is also similar to <tt>SCHED_OTHER</tt>,
+ but provides functionality equivalent to a very low nice value (i.e., 
+lower than +19). The process nice value has no meaning for this policy. 
+It is intended for running low-priority jobs that will receive a 
+significant proportion of the CPU only if no other job on the system 
+requires the CPU.</p>
+</div>
+</body>
+</html>

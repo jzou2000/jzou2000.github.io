@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>57.2. Stream Sockets in the UNIX Domain</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">57.2. Stream Sockets in the UNIX Domain</h3><p class="docText">We now present a simple client-server application that uses stream sockets in the UNIX domain. The client program (Example 57-4) connects to the server, and uses the connection to transfer data from its standard input to the server. The server program (Example 57-3)
+ accepts client connections, and transfers all data sent on the 
+connection by the client to standard output. The server is a simple 
+example of an <span class="docEmphasis">iterative</span>
+ server—a server that handles one client at a time before proceeding to 
+the next client. (We consider server design in more detail in Chapter 60.)</p><p class="docText">Example 57-2 is the header file used by both of these programs.</p><h5 class="docExampleTitle" id="title-ID0E5PFM">Example 57-2. Header file for <tt>us_xfr_sv.c</tt> and <tt>us_xfr_cl.c</tt></h5><p></p><div class="box"><pre><b>sockets/us_xfr.h</b>
+#include &lt;sys/un.h&gt;
+#include &lt;sys/socket.h&gt;
+#include "tlpi_hdr.h"
+
+#define SV_SOCK_PATH "/tmp/us_xfr"
+
+#define BUF_SIZE 100
+      <b>sockets/us_xfr.h</b></pre><br/>
+</div><p></p><p class="docText">In
+ the following pages, we first present the source code of the server and
+ client, and then discuss the details of these programs and show an 
+example of their use.</p><h5 class="docExampleTitle" id="title-ID0EQQFM">Example 57-3. A simple UNIX domain stream socket server</h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/us_xfr_sv.c</b>
+#include "us_xfr.h"
+
+#define BACKLOG 5
+
+int
+main(int argc, char *argv[])
+{
+    struct sockaddr_un addr;
+    int sfd, cfd;
+    ssize_t numRead;
+    char buf[BUF_SIZE];
+
+    sfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sfd == -1)
+        errExit("socket");
+
+    /* Construct server socket address, bind socket to it,
+       and make this a listening socket */
+
+    if (remove(SV_SOCK_PATH) == -1 &amp;&amp; errno != ENOENT)
+        errExit("remove-%s", SV_SOCK_PATH);
+
+    memset(&amp;addr, 0, sizeof(struct sockaddr_un));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, SV_SOCK_PATH, sizeof(addr.sun_path) - 1);
+
+    if (bind(sfd, (struct sockaddr *) &amp;addr, sizeof(struct sockaddr_un)) == -1)
+        errExit("bind");
+
+    if (listen(sfd, BACKLOG) == -1)
+        errExit("listen");
+
+    for (;;) {          /* Handle client connections iteratively */
+
+        /* Accept a connection. The connection is returned on a new
+           socket, 'cfd'; the listening socket ('sfd') remains open
+           and can be used to accept further connections. */
+
+        cfd = accept(sfd, NULL, NULL);
+        if (cfd == -1)
+            errExit("accept");
+
+        /* Transfer data from connected socket to stdout until EOF */
+
+        while ((numRead = read(cfd, buf, BUF_SIZE)) &gt; 0)
+            if (write(STDOUT_FILENO, buf, numRead) != numRead)
+                fatal("partial/failed write");
+
+        if (numRead == -1)
+            errExit("read");
+        if (close(cfd) == -1)
+            errMsg("close");
+    }
+}
+     <b>sockets/us_xfr_sv.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docExampleTitle" id="title-ID0E2QFM">Example 57-4. A simple UNIX domain stream socket client</h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/us_xfr_cl.c</b>
+#include "us_xfr.h"
+
+int
+main(int argc, char *argv[])
+{
+    struct sockaddr_un addr;
+    int sfd;
+    ssize_t numRead;
+    char buf[BUF_SIZE];
+
+    sfd = socket(AF_UNIX, SOCK_STREAM, 0);       /* Create client socket */
+    if (sfd == -1)
+        errExit("socket");
+
+    /* Construct server address, and make the connection */
+
+    memset(&amp;addr, 0, sizeof(struct sockaddr_un));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, SV_SOCK_PATH, sizeof(addr.sun_path) - 1);
+
+    if (connect(sfd, (struct sockaddr *) &amp;addr,
+                sizeof(struct sockaddr_un)) == -1)
+        errExit("connect");
+
+    /* Copy stdin to socket */
+
+    while ((numRead = read(STDIN_FILENO, buf, BUF_SIZE)) &gt; 0)
+        if (write(sfd, buf, numRead) != numRead)
+            fatal("partial/failed write");
+
+    if (numRead == -1)
+        errExit("read");
+
+    exit(EXIT_SUCCESS);         /* Closes our socket; server sees EOF */
+}
+     <b>sockets/us_xfr_cl.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The server program is shown in Example 57-3. The server performs the following steps:</p><ul><li><p class="docList">Create a socket.</p></li><li><p class="docList">Remove any existing file with the same pathname as that to which we want to bind the socket.</p></li><li><p class="docList">Construct
+ an address structure for the server’s socket, bind the socket to that 
+address, and mark the socket as a listening socket.</p></li><li><p class="docList">Execute an infinite loop to handle incoming client requests. Each loop iteration performs the following steps:</p><ul><li><p class="docList">Accept a connection, obtaining a new socket, <span class="docEmphasis">cfd</span>, for the connection.</p></li><li><p class="docList">Read all of the data from the connected socket and write it to standard output.</p></li><li><p class="docList">Close the connected socket <span class="docEmphasis">cfd</span>.</p></li></ul></li></ul><p class="docText">The server must be terminated manually (e.g., by sending it a signal).</p><p class="docText">The client program (Example 57-4) performs the following steps:</p><ul><li><p class="docList">Create a socket.</p></li><li><p class="docList">Construct the address structure for the server’s socket and connect to the socket at that address.</p></li><li><p class="docList">Execute
+ a loop that copies its standard input to the socket connection. Upon 
+encountering end-of-file in its standard input, the client terminates, 
+with the result that its socket is closed and the server sees 
+end-of-file when reading from the socket on the other end of the 
+connection.</p></li></ul><p class="docText">The following shell session log demonstrates the use of these programs. We begin by running the server in the background:</p><pre>$ <b>./us_xfr_sv &gt; b &amp; </b>
+[1] 9866
+$ <b>ls -lF /tmp/us_xfr </b>                        <i> Examine socket file with ls</i>
+srwxr-xr-x    1 mtk      users         0 Jul 18 10:48 /tmp/us_xfr=</pre><br/>
+<p class="docText">We then create a test file to be used as input for the client, and run the client:</p><pre class="preFixedWidth">$ <b>cat *.c &gt; a </b>
+$ <b>./us_xfr_cl &lt; a </b>                           <i> Client takes input from test file</i>
+
+					  </pre><br/>
+<p class="docText">At this point, the child 
+has completed. Now we terminate the server as well, and check that the 
+server’s output matches the client’s input:</p><pre class="preFixedWidth">$ <b>kill %1 </b>                                   <i> Terminate server</i>
+ [1]+  Terminated   ./us_xfr_sv &gt;b          <i> Shell sees server’s termination</i>
+$ <b>diff a b </b>
+$
+
+					  </pre><br/>
+<p class="docText">The <span class="docEmphasis">diff</span> command produces no output, indicating that the input and output files are identical.</p><p class="docText">Note that after the server terminates, the socket pathname continues to exist. This is why the server uses <span class="docEmphasis">remove()</span> to remove any existing instance of the socket pathname before calling <span class="docEmphasis">bind()</span>. (Assuming we have appropriate permissions, this <span class="docEmphasis">remove()</span> call would remove any type of file with this pathname, even if it wasn’t a socket.) If we did not do this, then the <span class="docEmphasis">bind()</span> call would fail if a previous invocation of the server had already created this socket pathname.</p>
+</div>
+</body>
+</html>

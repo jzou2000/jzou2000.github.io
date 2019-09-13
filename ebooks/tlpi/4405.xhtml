@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>44.5. Talking to a Shell Command via a Pipe: popen()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">44.5. Talking to a Shell Command via a Pipe: <span class="docEmphasis">popen()</span></h3><p class="docText">A common use for pipes is to execute a shell command and either read its output or send it some input. The <span class="docEmphasis">popen()</span> and <span class="docEmphasis">pclose()</span> functions are provided to simplify this task.</p><pre>#include &lt;stdio.h&gt;
+
+FILE *<b>popen</b>(const char *<span class="docEmphasis">command</span>, const char *<span class="docEmphasis">mode</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns file stream, or <tt>NULL</tt> on error</p><hr noshade="noshade" size="1"/><pre>int <b>pclose</b>(FILE *<span class="docEmphasis">stream</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns termination status of child process, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">popen()</span>
+ function creates a pipe, and then forks a child process that execs a 
+shell, which in turn creates a child process to execute the string given
+ in <span class="docEmphasis">command</span>. The <span class="docEmphasis">mode</span> argument is a string that determines whether the calling process will read from the pipe (<span class="docEmphasis">mode</span> is <span class="docEmphasis">r</span>) or write to it (<span class="docEmphasis">mode</span> is <span class="docEmphasis">w</span>). (Since pipes are unidirectional, two-way communication with the executed <span class="docEmphasis">command</span> is not possible.) The value of <span class="docEmphasis">mode</span>
+ determines whether the standard output of the executed command is 
+connected to the write end of the pipe or its standard input is 
+connected to the read end of the pipe, as shown in Figure 44-4.</p><p></p><center><h5 class="docFigureTitle">Figure 44-4. Overview of process relationships and pipe usage for <span class="docEmphasis">popen()</span></h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_005-32.png"/></p></center><p></p><br/><p class="docText">On success, <span class="docEmphasis">popen()</span> returns a file stream pointer that can be used with the <span class="docEmphasis">stdio</span> library functions. If an error occurs (e.g., <span class="docEmphasis">mode</span> is not <span class="docEmphasis">r</span> or <span class="docEmphasis">w</span>, pipe creation fails, or the <span class="docEmphasis">fork()</span> to create the child fails), then <span class="docEmphasis">popen()</span> returns <tt>NULL</tt> and sets <span class="docEmphasis">errno</span> to indicate the cause of the error.</p><p class="docText">After the <span class="docEmphasis">popen()</span> call, the calling process uses the pipe to read the output of <span class="docEmphasis">command</span> or to send input to it. Just as with pipes created using <span class="docEmphasis">pipe()</span>, when reading from the pipe, the calling process encounters end-of-file once <span class="docEmphasis">command</span> has closed the write end of the pipe; when writing to the pipe, it is sent a <tt>SIGPIPE</tt> signal, and gets the <tt>EPIPE</tt> error, if <span class="docEmphasis">command</span> has closed the read end of the pipe.</p><p class="docText">Once I/O is complete, the <span class="docEmphasis">pclose()</span> function is used to close the pipe and wait for the child shell to terminate. (The <span class="docEmphasis">fclose()</span> function should not be used, since it doesn’t wait for the child.) On success, <span class="docEmphasis">pclose()</span> yields the termination status (Section 26.1.3)
+ of the child shell (which is the termination status of the last command
+ that the shell executed, unless the shell was killed by a signal). As 
+with <span class="docEmphasis">system()</span> (Section 27.6), if a shell could not be execed, then <span class="docEmphasis">pclose()</span> returns a value as though the child shell had terminated with the call <span class="docEmphasis">_exit(127)</span>. If some other error occurs, <span class="docEmphasis">pclose()</span> returns -1. One possible error is that the termination status could not be obtained. We explain how this may occur shortly.</p><p class="docText">When performing a wait to obtain the status of the child shell, SUSv3 requires that <span class="docEmphasis">pclose()</span>, like <span class="docEmphasis">system()</span>, should automatically restart the internal call that it makes to <span class="docEmphasis">waitpid()</span> if that call is interrupted by a signal handler.</p><p class="docText">In general, we can make the same statements for <span class="docEmphasis">popen()</span> as were made in Section 27.6 for <span class="docEmphasis">system()</span>. Using <span class="docEmphasis">popen()</span>
+ offers convenience. It builds the pipe, performs descriptor 
+duplication, closes unused descriptors, and handles all of the details 
+of <span class="docEmphasis">fork()</span> and <span class="docEmphasis">exec()</span>
+ on our behalf. In addition, shell processing is performed on the 
+command. This convenience comes at the cost of efficiency. At least two 
+extra processes must be created: one for the shell and one or more for 
+the command(s) executed by the shell. As with <span class="docEmphasis">system()</span>, <span class="docEmphasis">popen()</span> should never be used from privileged programs.</p><p class="docText">While there are several similarities between <span class="docEmphasis">system()</span> and <span class="docEmphasis">popen()</span> plus <span class="docEmphasis">pclose()</span>, there are also significant differences. These stem from the fact that, with <span class="docEmphasis">system()</span>, the execution of the shell command is encapsulated within a single function call, whereas with <span class="docEmphasis">popen()</span>, the calling process runs in parallel with the shell command and then calls <span class="docEmphasis">pclose()</span>. The differences are as follows:</p><ul><li><p class="docList">Since the calling process and the executed command are operating in parallel, SUSv3 requires that <span class="docEmphasis">popen()</span> should <span class="docEmphasis">not</span> ignore <tt>SIGINT</tt> and <tt>SIGQUIT</tt>.
+ If generated from the keyboard, these signals are sent to both the 
+calling process and the executed command. This occurs because both 
+processes reside in the same process group, and terminal-generated 
+signals are sent to all of the members of the (foreground) process 
+group, as described in Section 34.5.</p></li><li><p class="docList">Since the calling process may create other child processes between the execution of <span class="docEmphasis">popen()</span> and <span class="docEmphasis">pclose()</span>, SUSv3 requires that <span class="docEmphasis">popen()</span> should <span class="docEmphasis">not</span> block <tt>SIGCHLD</tt>. This means that if the calling process performs a wait operation before the <span class="docEmphasis">pclose()</span> call, it may retrieve the status of the child created by <span class="docEmphasis">popen()</span>. In this case, when <span class="docEmphasis">pclose()</span> is later called, it will return -1, with <span class="docEmphasis">errno</span> set to <tt>ECHILD</tt>, indicating that <span class="docEmphasis">pclose()</span> could not retrieve the status of the child.</p></li></ul><h4 class="docSection2Title" id="title-ID0ERABM">44.5.1. </h4><h5 class="docSection3Title" id="title-ID0EVABM">44.5.1.1. Example program</h5><p class="docText">Example 44-5 demonstrates the use of <span class="docEmphasis">popen()</span> and <span class="docEmphasis">pclose()</span>. This program repeatedly reads a filename wildcard pattern <img alt="" border="0" id="" src="Images/getfile_002-40.png"/>, and then uses <span class="docEmphasis">popen()</span> to obtain the results from passing this pattern to the <span class="docEmphasis">ls</span> command <img alt="" border="0" id="" src="Images/getfile_006-22.png"/>. (Techniques similar to this were used on older UNIX implementations to perform filename generation, also known as <span class="docEmphasis">globbing</span>, prior to the existence of the <span class="docEmphasis">glob()</span> library function.)</p><h5 class="docExampleTitle" id="title-ID0EXCBM">Example 44-5. Globbing filename patterns with <span class="docEmphasis">popen()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>pipes/popen_glob.c</b>
+    #include &lt;ctype.h&gt;
+    #include &lt;limits.h&gt;
+    #include "print_wait_status.h"          /* For printWaitStatus() */
+    #include "tlpi_hdr.h"
+
+<img alt="" border="0" id="" src="Images/getfile_003-38.png"/>#define POPEN_FMT "/bin/ls -d %s 2&gt; /dev/null"
+    #define PAT_SIZE 50
+    #define PCMD_BUF_SIZE (sizeof(POPEN_FMT) + PAT_SIZE)
+
+    int
+    main(int argc, char *argv[])
+    {
+        char pat[PAT_SIZE];                 /* Pattern for globbing */
+        char popenCmd[PCMD_BUF_SIZE];
+        FILE *fp;                           /* File stream returned by popen() */
+        Boolean badPattern;                 /* Invalid characters in 'pat'? */
+        int len, status, fileCnt, j;
+        char pathname[PATH_MAX];
+
+        for (;;) {                  /* Read pattern, display results of globbing */
+            printf("pattern: ");
+            fflush(stdout);
+<img alt="" border="0" id="" src="Images/getfile_002-41.png"/>        if (fgets(pat, PAT_SIZE, stdin) == NULL)
+                break;                      /* EOF */
+            len = strlen(pat);
+            if (len &lt;= 1)                   /* Empty line */
+                continue;
+
+            if (pat[len - 1] == '\n')       /* Strip trailing newline */
+                pat[len - 1] = '\0';
+
+            /* Ensure that the pattern contains only valid characters,
+               i.e., letters, digits, underscore, dot, and the shell
+               globbing characters. (Our definition of valid is more
+               restrictive than the shell, which permits other characters
+               to be included in a filename if they are quoted.) */
+
+<img alt="" border="0" id="" src="Images/getfile-78.png"/>        for (j = 0, badPattern = FALSE; j &lt; len &amp;&amp; !badPattern; j++)
+                if (!isalnum((unsigned char) pat[j]) &amp;&amp;
+                        strchr("_*?[^-].", pat[j]) == NULL)
+                    badPattern = TRUE;
+
+            if (badPattern) {
+                printf("Bad pattern character: %c\n", pat[j - 1]);
+                continue;
+            }
+
+            /* Build and execute command to glob 'pat' */
+
+<img alt="" border="0" id="" src="Images/getfile_004.png"/>        snprintf(popenCmd, PCMD_BUF_SIZE, POPEN_FMT, pat);
+            popenCmd[PCMD_BUF_SIZE - 1] = '\0';     /* Ensure string is
+                                                       null-terminated */
+    <img alt="" border="0" id="" src="Images/getfile_006-23.png"/>        fp = popen(popenCmd, "r");
+            if (fp == NULL) {
+                printf("popen() failed\n");
+                continue;
+            }
+
+            /* Read resulting list of pathnames until EOF */
+
+            fileCnt = 0;
+            while (fgets(pathname, PATH_MAX, fp) != NULL) {
+                printf("%s", pathname);
+                fileCnt++;
+            }
+
+            /* Close pipe, fetch and display termination status */
+
+            status = pclose(fp);
+            printf("    %d matching file%s\n", fileCnt, (fileCnt != 1) ? "s" : "");
+            printf("    pclose() status == %#x\n", (unsigned int) status);
+            if (status != -1)
+                printWaitStatus("\t", status);
+        }
+
+        exit(EXIT_SUCCESS);
+    }
+         <b>pipes/popen_glob.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The following shell session demonstrates the use of the program in Example 44-5. In this example, we first provide a pattern that matches two filenames, and then a pattern that matches no filename:</p><pre>$ <b>./popen_glob </b>
+pattern: <b>popen_glob* </b>                          <i> Matches two filenames</i>
+popen_glob
+popen_glob.c
+    2 matching files
+    pclose() status = 0
+        child exited, status=0
+pattern: <b>x* </b>                                   <i> Matches no filename</i>
+    0 matching files
+    pclose() status = 0x100                   <span class="docEmphasis">ls(1)</span> <i> exits with status 1</i>
+        child exited, status=1
+pattern: <b>^D </b>$                                  <i> Type Control-D to terminate</i></pre><br/>
+<p class="docText">The construction of the command <img alt="" border="0" id="" src="Images/getfile_003-39.png"/><img alt="" border="0" id="" src="Images/getfile_004.png"/> for globbing in Example 44-5 requires some explanation. Actual globbing of a pattern is performed by the shell. The <span class="docEmphasis">ls</span> command is merely being used to list the matching filenames, one per line. We could have tried using the <span class="docEmphasis">echo</span>
+ command instead, but this would have had the undesirable result that if
+ a pattern matched no filenames, then the shell would leave the pattern 
+unchanged, and <span class="docEmphasis">echo</span> would simply display the pattern. By contrast, if <span class="docEmphasis">ls</span> is given the name of a file that doesn’t exist, it prints an error message on <span class="docEmphasis">stderr</span> (which we dispose of by redirecting <span class="docEmphasis">stderr</span> to <tt>/dev/null</tt>), prints nothing on <span class="docEmphasis">stdout</span>, and exits with a status of 1.</p><p class="docText">Note also the input checking performed in Example 44-5 <img alt="" border="0" id="" src="Images/getfile-79.png"/>. This is done to prevent invalid input causing <span class="docEmphasis">popen()</span> to execute an unexpected shell command. Suppose that these checks were omitted, and the user entered the following input:</p><pre>pattern: <b>; rm *</b></pre><br/>
+<p class="docText">The program would then pass the following command to <span class="docEmphasis">popen()</span>, with disastrous results:</p><pre>/bin/ls -d ; rm * 2&gt; /dev/null</pre><br/>
+<p class="docText">Such checking of input is always required in programs that use <span class="docEmphasis">popen()</span> (or <span class="docEmphasis">system()</span>)
+ to execute a shell command built from user input. (An alternative would
+ be for the application to quote any characters other than those being 
+checked for, so that those characters don’t undergo special processing 
+by the shell.)</p>
+</div>
+</body>
+</html>

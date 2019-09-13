@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 20. STL Function Objects</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 20. STL Function Objects</h2>
+		
+<p class="docText">How
+ did we ever get by without the STL? Not only is it easier and faster to
+ write complex code, but that code is both standard and highly 
+optimized.</p>
+		
+<div class="docText">
+  <pre>std::vector&lt;std::string&gt; names;
+//...
+std::sort( names.begin(), names.end() );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Another nice thing about the STL is that it’s highly configurable. In the code above, we used <tt>string</tt>’s
+ less-than operator to sort a vector of strings, but we don’t always 
+have a less-than operator to work with, or we may not want to sort in 
+ascending order.</p>
+		
+<div class="docText">
+  <pre>class State {
+  public:
+    //...
+    int population() const;
+    float aveTempF() const;
+    //...
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The <tt>State</tt> class 
+(which represents a state of the union) doesn’t have a less-than 
+operator, and we probably don’t want to implement one because it’s not 
+clear what it would mean for one state to be less than another (do we 
+compare names, population, percentage of elected officials under 
+indictment, ...?). Fortunately, the STL generally allows us to specify 
+an alternate less-than-like operation in situations like this. Such an 
+operation is called a “comparator,” because it compares two values:</p>
+		
+<div class="docText">
+  <pre>inline bool popLess( const State &amp;a, const State &amp;b )
+    { return a.population() &lt; b.population(); }
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Once we have a comparator for <tt>State</tt>s, we can use it to sort them:</p>
+		
+<div class="docText">
+  <pre>State states[50];
+//...
+std::sort( state, states+50, popLess ); // by population
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Here we’ve passed a pointer to the <tt>popLess</tt>
+ function as the comparator (recall that a function name “decays” into a
+ pointer to function when passed as an argument, just as the array name <tt>state</tt> decays into a pointer to its first element). Because <tt>popLess</tt> is passed as a function pointer, it will not be inlined in <tt>sort</tt>, which is unfortunate if we want a fast sort operation (see <span class="docEmphasis">Function Pointers</span> [14, 49]).</p>
+		
+<p class="docText">We can do better if we use a function object as a comparator:</p>
+		
+<div class="docText">
+  <pre>struct PopLess : public std::binary_function&lt;State,State,bool&gt; {
+    bool operator ()( const State &amp;a, const State &amp;b ) const
+        { return popLess( a, b ); }
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The <tt>PopLess</tt> 
+type is a typical example of a properly constructed STL function object.
+ First, it’s a function object. It overloads the function call operator 
+so that it may be called with the usual function call syntax. This is 
+important, because STL generic algorithms like <tt>sort</tt>
+ are written in such a way that either a function pointer or function 
+object may be used to instantiate them, provided that they may be called
+ with the typical function call syntax; a function object with an 
+overloaded <tt>operator ()</tt> satisfies this syntactic requirement.</p>
+		
+<p class="docText">Second, it’s derived from the standard <tt>binary_function</tt>
+ base class. This is a mechanism that allows other parts of the STL 
+implementation to ask compile-time questions of the function object (see
+ <span class="docEmphasis">Embedded Type Information</span> [53, 189]). In this case, deriving from <tt>binary_function</tt>
+ allows one to find out the argument and return types of the function 
+object. We’re not using that capability here, but you can bet that 
+somebody else will, and we want our <tt>PopLess</tt> type to be used by others.</p>
+		
+<p class="docText">Third, the function
+ object has no data members, no virtual functions, and no explicitly 
+declared constructors or destructor, and the implementation of <tt>operator ()</tt>
+ is inline. Function objects used as STL comparators are assumed to be 
+small, simple, and fast. It’s possible to design STL function objects
+ with significant implementations, but it’s rarely advisable. Another 
+reason to avoid or minimize the use of data members in a function object
+ to be used with the STL is that STL implementations may make several 
+copies of a function object and may assume that all the copies are 
+identical. One easy way to ensure that all copies of an object are 
+identical is for the object to have no data at all.</p>
+		
+<p class="docText">Now we can sort this country out by using a function object:</p>
+		
+<div class="docText">
+  <pre>sort( states, states+50, PopLess() );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Note the parentheses that follow <tt>PopLess</tt> in this call to <tt>sort</tt>. <tt>PopLess</tt> is a type, but we have to pass an object of that type as a function argument. By appending parentheses to the <tt>PopLess</tt> type name, we create an unnamed temporary <tt>PopLess</tt>
+ object that exists for the duration of the function call. (These 
+nameless objects are known as “anonymous temporaries,” a term I’ve 
+always enjoyed because it sounds vaguely racy.) We could have declared 
+and passed a named object:</p>
+		
+<div class="docText">
+  <pre>PopLess comp;
+sort( states, states+50, comp );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">However, it’s more conventional, and less typing, simply to pass an anonymous temporary object.</p>
+		
+<p class="docText">A beneficial side effect 
+of using a function object as our comparator is that the comparison will
+ be inlined whereas use of a function pointer did not permit inlining. 
+The reason the call is inlined is that the compiler knows that the type 
+of the comparator is <tt>PopLess</tt> when the <tt>sort</tt> function template is instantiated, which in turn allows it to know that <tt>PopLess::operator ()</tt> will be called, which in turn allows it to inline that function, which in turn allows it to inline the nested call to <tt>popLess</tt>.</p>
+		
+<p class="docText">Another common use of a 
+function object in the STL is as a predicate. A predicate is an 
+operation that asks a true/false question about a single object. (You 
+can think of a comparator as a kind of binary predicate.)</p>
+		
+<div class="docText">
+  <pre>struct IsWarm : public std::unary_function&lt;State,bool&gt; {
+    bool operator ()( const State &amp;a ) const
+        { return a.aveTempF() &gt; 60; }
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The design guidelines 
+for STL predicates are identical to those for STL comparators with the 
+exception, of course, that they’re unary rather than binary functions. 
+Starting with our previous sorted <tt>State</tt> results, the appropriate predicate makes it trivial to find a warm place without too many dang people:</p>
+		
+<div class="docText">
+  <pre>State *warmandsparse = find_if( states, states+50, IsWarm() );
+</pre>
+</div>
+<br/>
+		
+
+
+</body>
+</html>

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>60.5. The inetd (Internet Superserver) Daemon</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">60.5. The <span class="docEmphasis">inetd</span> (Internet Superserver) Daemon</h3><p class="docText">If we look through the contents of <tt>/etc/services</tt>,
+ we see literally hundreds of different services listed. This implies 
+that a system could theoretically be running a large number of server 
+processes. However, most of these servers would usually be doing nothing
+ but waiting for infrequent connection requests or datagrams. All of 
+these server processes would nevertheless occupy slots in the kernel 
+process table, and consume some memory and swap space, thus placing a 
+load on the system.</p><p class="docText">The <span class="docEmphasis">inetd</span> daemon is designed to eliminate the need to run large numbers of infrequently used servers. Using <span class="docEmphasis">inetd</span> provides two main benefits:</p><ul><li><p class="docList">Instead of running a separate daemon for each service, a single process—the <span class="docEmphasis">inetd</span>
+ daemon—monitors a specified set of socket ports and starts other 
+servers as required. Thus, the number of processes running on the system
+ is reduced.</p></li><li><p class="docList">The programming of the servers started by <span class="docEmphasis">inetd</span> is simplified, because <span class="docEmphasis">inetd</span> performs several of the steps that are commonly required by all network servers on startup.</p></li></ul><p class="docText">Since it oversees a range of services, invoking other servers as required, <span class="docEmphasis">inetd</span> is sometimes known as the <span class="docEmphasis">Internet superserver</span>.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">An extended version of <span class="docEmphasis">inetd</span>, <span class="docEmphasis">xinetd</span>, is provided in some Linux distributions. Among other things, <span class="docEmphasis">xinetd</span> adds a number of security enhancements. Information about <span class="docEmphasis">xinetd</span> can be found at http://www.xinetd.org/.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0EJ1GM">60.5.1. </h4><h5 class="docSection3Title" id="title-ID0EN1GM">60.5.1.1. Operation of the <span class="docEmphasis">inetd</span> daemon</h5><p class="docText">The <span class="docEmphasis">inetd</span> daemon is normally started during system boot. After becoming a daemon process (Section 37.2), <span class="docEmphasis">inetd</span> performs the following steps:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">For each of the services specified in its configuration file, <tt>/etc/inetd.conf</tt>, <span class="docEmphasis">inetd</span>
+ creates a socket of the appropriate type (i.e., stream or datagram) and
+ binds it to the specified port. Each TCP socket is additionally marked 
+to permit incoming connections via a call to <span class="docEmphasis">listen()</span>.</p></div></li><li><div style="font-weight:normal"><p class="docList">Using the <span class="docEmphasis">select()</span> system call (Section 63.2.1), <span class="docEmphasis">inetd</span> monitors all of the sockets created in the preceding step for datagrams or incoming connection requests.</p></div></li><li><div style="font-weight:normal"><p class="docList">The <span class="docEmphasis">select()</span>
+ call blocks until either a UDP socket has a datagram available to read 
+or a connection request is received on a TCP socket. In the case of a 
+TCP connection, <span class="docEmphasis">inetd</span> performs an <span class="docEmphasis">accept()</span> for the connection before proceeding to the next step.</p></div></li><li><div style="font-weight:normal"><p class="docList">To start the server specified for this socket, <span class="docEmphasis">inetd()</span> calls <span class="docEmphasis">fork()</span> to create a new process that then does an <span class="docEmphasis">exec()</span> to start the server program. Before performing the <span class="docEmphasis">exec()</span>, the child process performs the following steps:</p><div style="font-weight:bold"><ol class="docList" type="a"><li><div style="font-weight:normal"><p class="docList">Close
+ all of the file descriptors inherited from its parent, except the one 
+for the socket on which the UDP datagram is available or the TCP 
+connection has been accepted.</p></div></li><li><div style="font-weight:normal"><p class="docList">Use the techniques described in Section 5.5
+ to duplicate the socket file descriptor on file descriptors 0, 1, and 
+2, and close the socket file descriptor itself (since it is no longer 
+required). After this step, the execed server is able to communicate on 
+the socket by using the three standard file descriptors.</p></div></li><li><div style="font-weight:normal"><p class="docList">Optionally, set the user and group IDs for the execed server to values specified in <tt>/etc/inetd.conf</tt>.</p></div></li></ol></div></div></li><li><div style="font-weight:normal"><p class="docList">If a connection was accepted on a TCP socket in step 3, <span class="docEmphasis">inetd</span> closes the connected socket (since it is needed only in the execed server).</p></div></li><li><div style="font-weight:normal"><p class="docList">The <span class="docEmphasis">inetd</span> server returns to step 2.</p></div></li></ol></div><h5 class="docSection3Title" id="title-ID0ER4GM">60.5.1.2. The <tt>/etc/inetd.conf</tt> file</h5><p class="docText">The operation of the <span class="docEmphasis">inetd</span> daemon is controlled by a configuration file, normally /<tt>etc/inetd.conf</tt>. Each line in this file describes one of the services to be handled by <span class="docEmphasis">inetd</span>. Example 60-5 shows some examples of entries in the <tt>/etc/inetd.conf</tt> file that comes with one Linux distribution.</p><h5 class="docExampleTitle" id="title-ID0EQ5GM">Example 60-5. Example lines from <tt>/etc/inetd.conf</tt></h5><p></p><div class="box"><pre># echo  stream  tcp  nowait  root    internal
+# echo  dgram   udp  wait    root    internal
+ftp     stream  tcp  nowait  root    /usr/sbin/tcpd   in.ftpd
+telnet  stream  tcp  nowait  root    /usr/sbin/tcpd   in.telnetd
+login   stream  tcp  nowait  root    /usr/sbin/tcpd   in.rlogind</pre><br/>
+</div><p></p><p class="docText">The first two lines of Example 60-5 are commented out by the initial <tt>#</tt> character; we show them now since we’ll refer to the <span class="docEmphasis">echo</span> service shortly.</p><p class="docText">Each line of <tt>/etc/inetd.conf</tt> consists of the following fields, delimited by white space:</p><ul><li><p class="docList"><span class="docEmphasis">Service name</span>: This specifies the name of a service from the <tt>/etc/services</tt> file. In conjunction with the <span class="docEmphasis">protocol</span> field, this is used to look up <tt>/etc/services</tt> to determine which port number <span class="docEmphasis">inetd</span> should monitor for this service.</p></li><li><p class="docList"><span class="docEmphasis">Socket type</span>: This specifies the type of socket used by this service—for example, <tt>stream</tt> or <tt>dgram</tt>.</p></li><li><p class="docList"><span class="docEmphasis">Protocol</span>:
+ This specifies the protocol to be used by this socket. This field can 
+contain any of the Internet protocols listed in the file <tt>/etc/protocols</tt> (documented in the <span class="docEmphasis">protocols(5)</span> manual page), but almost every service specifies either <tt>tcp</tt> (for TCP) or <tt>udp</tt> (for UDP).</p></li><li><p class="docList"><span class="docEmphasis">Flags</span>: This field contains either <tt>wait</tt> or <tt>nowait</tt>. This field specifies whether or not the server execed by <span class="docEmphasis">inetd</span>
+ (temporarily) takes over management of the socket for this service. If 
+the execed server manages the socket, then this field is specified as <tt>wait</tt>. This causes <span class="docEmphasis">inetd</span> to remove this socket from the file descriptor set that it monitors using <span class="docEmphasis">select()</span> until the execed server exits (<span class="docEmphasis">inetd</span> detects this via a handler for <tt>SIGCHLD</tt>). We say some more about this field below.</p></li><li><p class="docList"><span class="docEmphasis">Login name</span>: This field consists of a username from <tt>/etc/passwd</tt>, optionally followed by a period (<tt>.</tt>) and a group name from <tt>/etc/group</tt>. These determine the user and group IDs under which the execed server is run. (Since <span class="docEmphasis">inetd</span> runs with an effective user ID of <span class="docEmphasis">root</span>, its children are also privileged and can thus use calls to <span class="docEmphasis">setuid()</span> and <span class="docEmphasis">setgid()</span> to change process credentials if desired.)</p></li><li><p class="docList"><span class="docEmphasis">Server program</span>: This specifies the pathname of the server program to be execed.</p></li><li><p class="docList"><span class="docEmphasis">Server program arguments</span>:
+ This field specifies one or more arguments, separated by white space, 
+to be used as the argument list when execing the server program. The 
+first of these corresponds to <span class="docEmphasis">argv[0]</span> in the execed program and is thus usually the same as the basename part of the <span class="docEmphasis">server program</span> name. The next argument corresponds to <span class="docEmphasis">argv[1]</span>, and so on.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In the example lines shown in Example 60-5 for the <span class="docEmphasis">ftp</span>, <span class="docEmphasis">telnet</span>, and <span class="docEmphasis">login</span>
+ services, we see the server program and arguments are set up 
+differently than just described. All three of these services cause <span class="docEmphasis">inetd</span> to invoke the same program, <span class="docEmphasis">tcpd(8)</span>
+ (the TCP daemon wrapper), which performs some logging and 
+access-control checks before in turn execing the appropriate program, 
+based on the value specified as the first server program argument (which
+ is available to <span class="docEmphasis">tcpd</span> via <span class="docEmphasis">argv[0]</span>). Further information about <span class="docEmphasis">tcpd</span> can be found in the <span class="docEmphasis">tcpd(8)</span> manual page and in [Mann &amp; Mitchell, 2003].</p><hr noshade="noshade" size="1"/><p class="docText">Stream socket (TCP) servers invoked by <span class="docEmphasis">inetd</span> are normally designed to handle just a single client connection and then terminate, leaving <span class="docEmphasis">inetd</span> with the job of listening for further connections. For such servers, <span class="docEmphasis">flags</span> should be specified as <tt>nowait</tt>. (If, instead, the execed server is to accept connections, then <tt>wait</tt> should be specified, in which case <span class="docEmphasis">inetd</span> does not accept the connection, but instead passes the file descriptor for the <span class="docEmphasis">listening</span> socket to the execed server as descriptor 0.)</p><p class="docText">For most UDP servers, the <span class="docEmphasis">flags</span> field should be specified as <tt>wait</tt>. A UDP server invoked by <span class="docEmphasis">inetd</span>
+ is normally designed to read and process all outstanding datagrams on 
+the socket and then terminate. (This usually requires some sort of 
+timeout when reading the socket, so that the server terminates when no 
+new datagrams arrive within a specified interval.) By specifying <tt>wait</tt>, we prevent the <span class="docEmphasis">inetd</span> daemon from simultaneously trying to <span class="docEmphasis">select()</span> on the socket, which would have the unintended consequence that <span class="docEmphasis">inetd</span> would race the UDP server to check for datagrams and, if it won the race, start another instance of the UDP server.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Because the operation of <span class="docEmphasis">inetd</span>
+ and the format of its configuration file are not specified by SUSv3, 
+there are some (generally small) variations in the values that can be 
+specified in the fields of <tt>/etc/inetd.conf</tt>. Most versions of <span class="docEmphasis">inetd</span> provide at least the syntax that we describe in the main text. For further details, see the <span class="docEmphasis">inetd.conf(8)</span> manual page.</p><hr noshade="noshade" size="1"/><p class="docText">As an efficiency measure, <span class="docEmphasis">inetd</span> implements a few simple services itself, instead of execing separate servers to perform the task. The UDP and TCP <span class="docEmphasis">echo</span> services are examples of services that <span class="docEmphasis">inetd</span> implements. For such services, the <span class="docEmphasis">server program</span> field of the corresponding <tt>/etc/inetd.conf</tt> record is specified as <tt>internal</tt>, and the <span class="docEmphasis">server program arguments</span> are omitted. (In the example lines in Example 60-5, we saw that the <span class="docEmphasis">echo</span> service entries were commented out. To enable the <span class="docEmphasis">echo</span> service, we need to remove the <tt>#</tt> character at the start of these lines.)</p><p class="docText">Whenever we change the <tt>/etc/inetd.conf</tt> file, we need to send a <tt>SIGHUP</tt> signal to <span class="docEmphasis">inetd</span> to request it to reread the file:</p><pre># <b>killall -HUP inetd</b></pre><br/>
+<h5 class="docSection3Title" id="title-ID0EGGHM">60.5.1.3. Example: invoking a TCP <span class="docEmphasis">echo</span> service via <span class="docEmphasis">inetd</span></h5><p class="docText">We noted earlier that <span class="docEmphasis">inetd</span>
+ simplifies the programming of servers, especially concurrent (usually 
+TCP) servers. It does this by carrying out the following steps on behalf
+ of the servers it invokes:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Perform all socket-related initialization, calling <span class="docEmphasis">socket()</span>, <span class="docEmphasis">bind()</span>, and (for TCP servers) <span class="docEmphasis">listen()</span>.</p></div></li><li><div style="font-weight:normal"><p class="docList">For a TCP service, perform an <span class="docEmphasis">accept()</span> for the new connection.</p></div></li><li><div style="font-weight:normal"><p class="docList">Create
+ a new process to handle the incoming UDP datagram or TCP connection. 
+The process is automatically set up as a daemon. The <span class="docEmphasis">inetd</span> program handles all details of process creation via <span class="docEmphasis">fork()</span> and the reaping of dead children via a handler for <tt>SIGCHLD</tt>.</p></div></li><li><div style="font-weight:normal"><p class="docList">Duplicate
+ the file descriptor of the UDP socket or the connected TCP socket on 
+file descriptors 0, 1, and 2, and close all other file descriptors 
+(since they are unused in the execed server).</p></div></li><li><div style="font-weight:normal"><p class="docList">Exec the server program.</p></div></li></ol></div><p class="docText">(In the description of the above steps, we assume the usual cases that the <span class="docEmphasis">flags</span> field of the service entry in <tt>/etc/inetd.conf</tt> is specified as <tt>nowait</tt> for TCP services and <tt>wait</tt> for UDP services.)</p><p class="docText">As an example of how <span class="docEmphasis">inetd</span> simplifies the programming of a TCP service, in Example 60-6, we show the <span class="docEmphasis">inetd</span>-invoked equivalent of the TCP <span class="docEmphasis">echo</span> server from Example 60-4. Since <span class="docEmphasis">inetd</span>
+ performs all of the above steps, all that remains of the server is the 
+code executed by the child process to handle the client request, which 
+can be read from file descriptor 0 (<tt>STDIN_FILENO</tt>).</p><p class="docText">If the server resides in the directory <tt>/bin</tt> (for example), then we would need to create the following entry in <tt>/etc/inetd.conf</tt> in order to have <span class="docEmphasis">inetd</span> invoke the server:</p><pre>echo stream tcp nowait root /bin/is_echo_inetd_sv is_echo_inetd_sv</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EMJHM">Example 60-6. TCP <span class="docEmphasis">echo</span> server designed to be invoked via <span class="docEmphasis">inetd</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/is_echo_inetd_sv.c</b>
+#include &lt;syslog.h&gt;
+#include "tlpi_hdr.h"
+
+#define BUF_SIZE 4096
+
+int
+main(int argc, char *argv[])
+{
+    char buf[BUF_SIZE];
+    ssize_t numRead;
+
+    while ((numRead = read(STDIN_FILENO, buf, BUF_SIZE)) &gt; 0) {
+        if (write(STDOUT_FILENO, buf, numRead) != numRead) {
+            syslog(LOG_ERR, "write() failed: %s", strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    if (numRead == -1) {
+        syslog(LOG_ERR, "Error from read(): %s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    exit(EXIT_SUCCESS);
+}
+     <b>sockets/is_echo_inetd_sv.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

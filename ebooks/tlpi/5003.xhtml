@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>50.3. Determining Memory Residence: mincore()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">50.3. Determining Memory Residence: <span class="docEmphasis">mincore()</span></h3><p class="docText">The <span class="docEmphasis">mincore()</span>
+ system call is the complement of the memory locking system calls. It 
+reports which pages in a virtual address range are currently resident in
+ RAM, and thus won’t cause a page fault if accessed.</p><p class="docText">SUSv3 doesn’t specify <span class="docEmphasis">mincore()</span>. It is available on many, but not all, UNIX implementations. On Linux, <span class="docEmphasis">mincore()</span> has been available since kernel 2.4.</p><pre>#define _BSD_SOURCE           /* Or: #define _SVID_SOURCE */
+#include &lt;sys/mman.h&gt;
+
+int <b>mincore</b>(void *<span class="docEmphasis">addr</span>, size_t <span class="docEmphasis">length</span>, unsigned char *<span class="docEmphasis">vec</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">mincore()</span> system call returns memory-residence information about pages in the virtual address range starting at <span class="docEmphasis">addr</span> and running for <span class="docEmphasis">length</span> bytes. The address supplied in <span class="docEmphasis">addr</span> must be page-aligned, and, since information is returned about whole pages, <span class="docEmphasis">length</span> is effectively rounded up to the next multiple of the system page size.</p><p class="docText">Information about memory residency is returned in <span class="docEmphasis">vec</span>, which must be an array of <span class="docEmphasis">(length + PAGE_SIZE – 1) / PAGE_SIZE</span> bytes. (On Linux, <span class="docEmphasis">vec</span> has the type <span class="docEmphasis">unsigned char *</span>; on some other UNIX implementations, <span class="docEmphasis">vec</span> has the type <span class="docEmphasis">char *</span>.)
+ The least significant bit of each byte is set if the corresponding page
+ is memory-resident. The setting of the other bits is undefined on some 
+UNIX implementations, so portable applications should test only this 
+bit.</p><p class="docText">The information returned by <span class="docEmphasis">mincore()</span> can change between the time the call is made and the time the elements of <span class="docEmphasis">vec</span> are checked. The only pages guaranteed to remain memory-resident are those locked with <span class="docEmphasis">mlock()</span> or <span class="docEmphasis">mlockall()</span>.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Prior to Linux 2.6.21, various implementation problems meant that <span class="docEmphasis">mincore()</span> did not correctly report memory-residence information for <tt>MAP_PRIVATE</tt> mappings or for nonlinear mappings (established using <span class="docEmphasis">remap_file_pages()</span>).</p><hr noshade="noshade" size="1"/><p class="docText">Example 50-2 demonstrates the use of <span class="docEmphasis">mlock()</span> and <span class="docEmphasis">mincore()</span>. After allocating and mapping a region of memory using <span class="docEmphasis">mmap()</span>, this program uses <span class="docEmphasis">mlock()</span>
+ to lock either the entire region or otherwise groups of pages at 
+regular intervals. (Each of the command-line arguments to the program is
+ expressed in terms of pages; the program converts these to bytes, as 
+required for the calls to <span class="docEmphasis">mmap()</span>, <span class="docEmphasis">mlock()</span>, and <span class="docEmphasis">mincore()</span>.) Before and after the <span class="docEmphasis">mlock()</span> call, the program uses <span class="docEmphasis">mincore()</span> to retrieve information about the memory residency of pages in the region and displays this information graphically.</p><h5 class="docExampleTitle" id="title-ID0E2QDM">Example 50-2. Using <span class="docEmphasis">mlock()</span> and <span class="docEmphasis">mincore()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>vmem/memlock.c</b>
+#define _BSD_SOURCE     /* Get mincore() declaration and MAP_ANONYMOUS
+                           definition from &lt;sys/mman.h&gt; */
+#include &lt;sys/mman.h&gt;
+#include "tlpi_hdr.h"
+
+/* Display residency of pages in range [addr .. (addr + length - 1)] */
+
+static void
+displayMincore(char *addr, size_t length)
+{
+    unsigned char *vec;
+    long pageSize, numPages, j;
+
+    pageSize = sysconf(_SC_PAGESIZE);
+
+    numPages = (length + pageSize - 1) / pageSize;
+    vec = malloc(numPages);
+    if (vec == NULL)
+        errExit("malloc");
+
+    if (mincore(addr, length, vec) == -1)
+        errExit("mincore");
+
+    for (j = 0; j &lt; numPages; j++) {
+        if (j % 64 == 0)
+            printf("%s%10p: ", (j == 0) ? "" : "\n", addr + (j * pageSize));
+        printf("%c", (vec[j] &amp; 1) ? '*' : '.');
+    }
+    printf("\n");
+
+    free(vec);
+}
+
+int
+main(int argc, char *argv[])
+{
+    char *addr;
+    size_t len, lockLen;
+    long pageSize, stepSize, j;
+
+    if (argc != 4 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s num-pages lock-page-step lock-page-len\n", argv[0]);
+
+    pageSize = sysconf(_SC_PAGESIZE);
+    if (pageSize == -1)
+        errExit("sysconf(_SC_PAGESIZE)");
+
+    len =      getInt(argv[1], GN_GT_0, "num-pages") * pageSize;
+    stepSize = getInt(argv[2], GN_GT_0, "lock-page-step") * pageSize;
+    lockLen =  getInt(argv[3], GN_GT_0, "lock-page-len") * pageSize;
+
+    addr = mmap(NULL, len, PROT_READ, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (addr == MAP_FAILED)
+        errExit("mmap");
+
+    printf("Allocated %ld (%#lx) bytes starting at %p\n",
+            (long) len, (unsigned long) len, addr);
+
+    printf("Before mlock:\n");
+    displayMincore(addr, len);
+
+    /* Lock pages specified by command line arguments into memory */
+
+    for (j = 0; j + lockLen &lt;= len; j += stepSize)
+        if (mlock(addr + j, lockLen) == -1)
+            errExit("mlock");
+
+    printf("After mlock:\n");
+    displayMincore(addr, len);
+
+    exit(EXIT_SUCCESS);
+}
+      <b>vmem/memlock.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The following shell session shows a sample run of the program in Example 50-2. In this example, we allocate 32 pages, and in each group of 8 pages, we lock 3 consecutive pages:</p><pre>$ <b>su </b>                                        <i> Assume privilege</i>
+Password:
+# <b>./memlock 32 8 3 </b>
+Allocated 131072 (0x20000) bytes starting at 0x4014a000
+Before mlock:
+0x4014a000: ................................
+After mlock:
+0x4014a000: ***.....***.....***.....***.....</pre><br/>
+<p class="docText">In the program output, dots
+ represent pages that are not resident in memory, and asterisks 
+represent pages that are resident in memory. As we can see from the 
+final line of output, 3 out of each group of 8 pages are 
+memory-resident.</p><p class="docText">In this example, we assumed superuser privilege so that the program can use <span class="docEmphasis">mlock()</span>. This is not necessary in Linux 2.6.9 and later if the amount of memory to be locked falls within the <tt>RLIMIT_MEMLOCK</tt> soft resource limit.</p>
+</div>
+</body>
+</html>

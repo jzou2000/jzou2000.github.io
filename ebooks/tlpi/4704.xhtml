@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>47.4. Semaphore Associated Data Structure</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">47.4. Semaphore Associated Data Structure</h3><p class="docText">Each semaphore set has an associated <span class="docEmphasis">semid_ds</span> data structure of the following form:</p><pre>struct semid_ds {
+    struct ipc_perm sem_perm;       /* Ownership and permissions */
+    time_t          sem_otime;      /* Time of last semop() */
+    time_t          sem_ctime;      /* Time of last change */
+    unsigned long   sem_nsems;      /* Number of semaphores in set */
+};</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">SUSv3 requires all of the fields that we show in the <span class="docEmphasis">semid_ds</span> structure. Some other UNIX implementations include additional nonstandard fields. On Linux 2.4 and later, the <span class="docEmphasis">sem_nsems</span> field is typed as <span class="docEmphasis">unsigned long</span>. SUSv3 specifies the type of this field as <span class="docEmphasis">unsigned short</span>, and it is so defined in Linux 2.2 and on most other UNIX implementations.</p><hr noshade="noshade" size="1"/><p class="docText">The fields of the <span class="docEmphasis">semid_ds</span> structure are implicitly updated by various semaphore system calls, and certain subfields of the <span class="docEmphasis">sem_perm</span> field can be explicitly updated using the <span class="docEmphasis">semctl()</span> <tt>IPC_SET</tt> operation. The details are as follows:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docEmphasis">sem_perm</span></span></p></dt><dd><p class="docList">When the semaphore set is created, the fields of this substructure are initialized as described in Section 45.3. The <span class="docEmphasis">uid</span>, <span class="docEmphasis">gid</span>, and <span class="docEmphasis">mode</span> subfields can be updated via <tt>IPC_SET</tt>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docEmphasis">sem_otime</span></span></p></dt><dd><p class="docList">This field is set to 0 when the semaphore set is created, and then set to the current time on each successful <span class="docEmphasis">semop()</span>, or when the semaphore value is modified as a consequence of a <tt>SEM_UNDO</tt> operation (Section 47.8). This field and <span class="docEmphasis">sem_ctime</span> are typed as <span class="docEmphasis">time_t</span>, and store time in seconds since the Epoch.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docEmphasis">sem_ctime</span></span></p></dt><dd><p class="docList">This field is set to the current time when the semaphore set is created and on each successful <tt>IPC_SET</tt>, <tt>SETALL</tt>, or <tt>SETVAL</tt> operation. (On some UNIX implementations, the <tt>SETALL</tt> and <tt>SETVAL</tt> operations don’t modify <span class="docEmphasis">sem_ctime</span>.)</p></dd><dt><br/><p><span class="docPubcolor"><span class="docEmphasis">sem_nsems</span></span></p></dt><dd><p class="docList">When the set is created, this field is initialized to the number of semaphores in the set.</p></dd></dl><p class="docText">In the remainder of this section, we show two example programs that make use of the <span class="docEmphasis">semid_ds</span> data structure and some of the <span class="docEmphasis">semctl()</span> operations described in Section 47.3. We demonstrate the use of both of these programs in Section 47.6.</p><h4 class="docSection2Title" id="title-ID0E4CCM">47.4.1. </h4><h5 class="docSection3Title" id="title-ID0EBDCM">47.4.1.1. Monitoring a semaphore set</h5><p class="docText">The program in Example 47-3 makes use of various <span class="docEmphasis">semctl()</span>
+ operations to display information about the existing semaphore set 
+whose identifier is provided as its command-line argument. The program 
+first displays the time fields from the <span class="docEmphasis">semid_ds</span> data structure. Then, for each semaphore in the set, the program displays the semaphore’s current value, as well as its <span class="docEmphasis">sempid</span>, <span class="docEmphasis">semncnt</span>, and <span class="docEmphasis">semzcnt</span> values.</p><h5 class="docExampleTitle" id="title-ID0EAFCM">Example 47-3. A semaphore monitoring program</h5><p></p><div class="box"><pre class="preFixedHeight"><b>svsem/svsem_mon.c</b>
+#include &lt;sys/types.h&gt;
+#include &lt;sys/sem.h&gt;
+#include &lt;time.h&gt;
+#include "semun.h"                      /* Definition of semun union */
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    struct semid_ds ds;
+    union semun arg, dummy;             /* Fourth argument for semctl() */
+    int semid, j;
+
+    if (argc != 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s semid\n", argv[0]);
+
+    semid = getInt(argv[1], 0, "semid");
+
+    arg.buf = &ds;
+    if (semctl(semid, 0, IPC_STAT, arg) == -1)
+        errExit("semctl");
+
+    printf("Semaphore changed: %s", ctime(&amp;ds.sem_ctime));
+    printf("Last semop():      %s", ctime(&amp;ds.sem_otime));
+
+    /* Display per-semaphore information */
+
+    arg.array = calloc(ds.sem_nsems, sizeof(arg.array[0]));
+    if (arg.array == NULL)
+        errExit("calloc");
+    if (semctl(semid, 0, GETALL, arg) == -1)
+        errExit("semctl-GETALL");
+
+    printf("Sem #  Value  SEMPID  SEMNCNT  SEMZCNT\n");
+
+    for (j = 0; j &lt; ds.sem_nsems; j++)
+        printf("%3d   %5d   %5d  %5d    %5d\n", j, arg.array[j],
+                semctl(semid, j, GETPID, dummy),
+                semctl(semid, j, GETNCNT, dummy),
+                semctl(semid, j, GETZCNT, dummy));
+
+    exit(EXIT_SUCCESS);
+}
+      <b>svsem/svsem_mon.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0ELFCM">47.4.1.2. Initializing all semaphores in a set</h5><p class="docText">The program in Example 47-4
+ provides a command-line interface for initializing all of the 
+semaphores in an existing set. The first command-line argument is the 
+identifier of the semaphore set to be initialized. The remaining 
+command-line arguments specify the values to which the semaphores are to
+ be initialized (there must be as many of these arguments as there are 
+semaphores in the set).</p><h5 class="docExampleTitle" id="title-ID0EIICM">Example 47-4. Using the <tt>SETALL</tt> operation to initialize a System V semaphore set</h5><p></p><div class="box"><pre class="preFixedHeight"><b>svsem/svsem_setall.c</b>
+#include &lt;sys/types.h&gt;
+#include &lt;sys/sem.h&gt;
+#include "semun.h"                      /* Definition of semun union */
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    struct semid_ds ds;
+    union semun arg;                    /* Fourth argument for semctl() */
+    int j, semid;
+
+    if (argc &lt; 3 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s semid val...\n", argv[0]);
+
+    semid = getInt(argv[1], 0, "semid");
+
+    /* Obtain size of semaphore set */
+
+    arg.buf = &ds;
+    if (semctl(semid, 0, IPC_STAT, arg) == -1)
+        errExit("semctl");
+
+    if (ds.sem_nsems != argc - 2)
+        cmdLineErr("Set contains %ld semaphores, but %d values were supplied\n",
+                (long) ds.sem_nsems, argc - 2);
+
+    /* Set up array of values; perform semaphore initialization */
+
+    arg.array = calloc(ds.sem_nsems, sizeof(arg.array[0]));
+    if (arg.array == NULL)
+        errExit("calloc");
+
+    for (j = 2; j &lt; argc; j++)
+        arg.array[j - 2] = getInt(argv[j], 0, "val");
+
+    if (semctl(semid, 0, SETALL, arg) == -1)
+        errExit("semctl-SETALL");
+    printf("Semaphore values changed (PID=%ld)\n", (long) getpid());
+
+    exit(EXIT_SUCCESS);
+}
+     <b>svsem/svsem_setall.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

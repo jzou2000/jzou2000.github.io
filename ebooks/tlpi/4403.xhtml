@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>44.3. Pipes as a Method of Process Synchronization</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">44.3. Pipes as a Method of Process Synchronization</h3><p class="docText">In Section 24.5,
+ we looked at how signals could be used to synchronize the actions of 
+parent and child processes in order to avoid race conditions. Pipes can 
+be used to achieve a similar result, as shown by the skeleton program in
+ Example 44-3.
+ This program creates multiple child processes (one for each 
+command-line argument), each of which is intended to accomplish some 
+action, simulated in the example program by sleeping for some time. The 
+parent waits until all children have completed their actions.</p><p class="docText">To perform the synchronization, the parent builds a pipe <img alt="" border="0" id="" src="Images/getfile_003-36.png"/> before creating the child processes <img alt="" border="0" id="" src="Images/getfile_002-38.png"/>.
+ Each child inherits a file descriptor for the write end of the pipe and
+ closes this descriptor once it has completed its action <img alt="" border="0" id="" src="Images/getfile-76.png"/>. After all of the children have closed their file descriptors for the write end of the pipe, the parent’s <span class="docEmphasis">read()</span> <img alt="" border="0" id="" src="Images/getfile_005-30.png"/>
+ from the pipe will complete, returning end-of-file (0). At this point, 
+the parent is free to carry on to do other work. (Note that closing the 
+unused write end of the pipe in the parent <img alt="" border="0" id="" src="Images/getfile_004.png"/>
+ is essential to the correct operation of this technique; otherwise, the
+ parent would block forever when trying to read from the pipe.)</p><p class="docText">The following is an example of what we see when we use the program in Example 44-3 to create three children that sleep for 4, 2, and 6 seconds:</p><pre>$ <b>./pipe_sync 4 2 6</b>
+08:22:16  Parent started
+08:22:18  Child 2 (PID=2445) closing pipe
+08:22:20  Child 1 (PID=2444) closing pipe
+08:22:22  Child 3 (PID=2446) closing pipe
+08:22:22  Parent ready to go</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EGYAM">Example 44-3. Using a pipe to synchronize multiple processes</h5><p></p><div class="box"><pre class="preFixedHeight"><b>pipes/pipe_sync.c</b>
+    #include "curr_time.h"                      /* Declaration of currTime() */
+    #include "tlpi_hdr.h"
+
+    int
+    main(int argc, char *argv[])
+    {
+        int pfd[2];                             /* Process synchronization pipe */
+        int j, dummy;
+
+            if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+            usageErr("%s sleep-time...\n", argv[0]);
+
+        setbuf(stdout, NULL);                   /* Make stdout unbuffered, since we
+                                                   terminate child with _exit() */
+        printf("%s  Parent started\n", currTime("%T"));
+
+<img alt="" border="0" id="" src="Images/getfile_003-37.png"/>    if (pipe(pfd) == -1)
+            errExit("pipe");
+
+        for (j = 1; j &lt; argc; j++) {
+<img alt="" border="0" id="" src="Images/getfile_002-39.png"/>        switch (fork()) {
+            case -1:
+                errExit("fork %d", j);
+
+            case 0: /* Child */
+                if (close(pfd[0]) == -1)        /* Read end is unused */
+                    errExit("close");
+
+                /* Child does some work, and lets parent know it's done */
+
+                sleep(getInt(argv[j], GN_NONNEG, "sleep-time"));
+                                                /* Simulate processing */
+                printf("%s  Child %d (PID=%ld) closing pipe\n",
+                        currTime("%T"), j, (long) getpid());
+<img alt="" border="0" id="" src="Images/getfile-77.png"/>            if (close(pfd[1]) == -1)
+                    errExit("close");
+
+                /* Child now carries on to do other things... */
+
+                _exit(EXIT_SUCCESS);
+
+            default: /* Parent loops to create next child */
+                break;
+            }
+        }
+
+        /* Parent comes here; close write end of pipe so we can see EOF */
+
+<img alt="" border="0" id="" src="Images/getfile_004.png"/>    if (close(pfd[1]) == -1)                /* Write end is unused */
+            errExit("close");
+
+        /* Parent may do other work, then synchronizes with children */
+
+<img alt="" border="0" id="" src="Images/getfile_005-31.png"/>    if (read(pfd[0], &amp;dummy, 1) != 0)
+            fatal("parent didn't get EOF");
+        printf("%s  Parent ready to go\n", currTime("%T"));
+
+        /* Parent can now carry on to do other things... */
+
+        exit(EXIT_SUCCESS);
+    }
+          <b>pipes/pipe_sync.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Synchronization
+ using pipes has an advantage over the earlier example of 
+synchronization using signals: it can be used to coordinate the actions 
+of one process with multiple other (related) processes. The fact that 
+multiple (standard) signals can’t be queued makes signals unsuitable in 
+this case. (Conversely, signals have the advantage that they can be 
+broadcast by one process to all of the members of a process group.)</p><p class="docText">Other
+ synchronization topologies are possible (e.g., using multiple pipes). 
+Furthermore, this technique could be extended so that, instead of 
+closing the pipe, each child writes a message to the pipe containing its
+ process ID and some status information. Alternatively, each child might
+ write a single byte to the pipe. The parent process could then count 
+and analyze these messages. This approach guards against the possibility
+ of the child accidentally terminating, rather than explicitly closing 
+the pipe.</p>
+</div>
+</body>
+</html>

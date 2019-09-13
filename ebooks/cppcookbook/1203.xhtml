@@ -1,0 +1,480 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 12.2. Making a Resource Thread-Safe</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 12.2. Making a Resource Thread-Safe</h3>
+
+<h4 class="docSection2Title" id="title-ID0EHJAK">Problem</h4>
+<p class="docText">You are using multiple threads 
+
+
+
+
+in a program and you need
+to ensure a resource is not modified by more than one thread at a
+time. In general, this process is called making the resource
+<span class="docEmphasis">thread-safe</span>, or <span class="docEmphasis">serializing</span>
+access to it.</p>
+
+<h4 class="docSection2Title" id="title-ID0E1KAK">Solution</h4>
+<p class="docText">Use the class <tt>mutex</tt>, defined in
+<i>boost/thread/mutex.hpp</i>, to synchronize access
+among threads. Example 12-2 shows a simple use of a
+<tt>mutex</tt> object to control concurrent access to a
+queue.</p>
+<h5 class="docExampleTitle" id="title-ID0ENLAK">Example 12-2. Making a class thread-safe</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;iostream&gt;
+#include &lt;boost/thread/thread.hpp&gt;
+#include &lt;string&gt;
+
+// A simple queue class; don't do this, use std::queue
+template&lt;typename T&gt;
+class Queue {
+public:
+   Queue( ) {}
+  ~Queue( ) {}
+
+   void enqueue(const T&amp; x) {
+      // Lock the mutex for this queue
+      boost::mutex::scoped_lock lock(mutex_);
+      list_.push_back(x);
+      // A scoped_lock is automatically destroyed (and thus unlocked)
+      // when it goes out of scope
+   } 
+
+   T dequeue( ) {
+      boost::mutex::scoped_lock lock(mutex_);
+
+      if (list_.empty( ))
+         throw "empty!";     // This leaves the current scope, so the
+      T tmp = list_.front( ); // lock is released
+      list_.pop_front( );
+      return(tmp);
+   } // Again: when scope ends, mutex_ is unlocked
+
+private:
+   std::list&lt;T&gt; list_;
+   boost::mutex mutex_;
+};
+
+Queue&lt;std::string&gt; queueOfStrings;
+
+void sendSomething( ) {
+   std::string s;
+   for (int i = 0; i &lt; 10; ++i) {
+      queueOfStrings.enqueue("Cyrus");
+   }
+}
+
+void recvSomething( ) {
+   std::string s;
+
+   for (int i = 0; i &lt; 10; ++i) {
+      try {s = queueOfStrings.dequeue( );}
+      catch(...) {}
+   }
+}
+
+int main( ) {
+   boost::thread thr1(sendSomething);
+   boost::thread thr2(recvSomething);
+
+   thr1.join( );
+   thr2.join( );
+}
+
+					  </pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0EWLAK">Discussion</h4>
+<p class="docText">Making classes, functions, blocks of code, or other objects
+thread-safe is at the heart of multithreaded programming. If you are
+designing a piece of software to be multithreaded, chances are that
+each thread will have its own set of resources, such as stack and
+heap objects, operating system resources, and so on. But sooner or
+later you will need to share something among threads. It may be a
+shared queue of incoming work requests (as in a multithreaded web
+server) or something as simple as an output stream (as in a log file,
+or even <tt>cout</tt>). The standard way of coordinating
+the safe sharing of resources is with a
+<span class="docEmphasis">mutex</span>,
+which provides mutually exclusive access to something.</p>
+<p class="docText">The rest of this discussion describes what a mutex is in general and
+how to use <tt>boost::mutex</tt> in particular to serialize
+access to resources. I use the concept/model approach terminology
+that I mentioned briefly in the introduction to this chapter. A
+<span class="docEmphasis">concept</span>
+is an abstract (language-independent) description of something, and a
+<span class="docEmphasis">model</span>
+of a concept is its concrete representation in C++ class form. A
+<span class="docEmphasis">refinement</span>
+of a concept is a given concept with some additional or augmented
+behavior.</p>
+<p class="docText">
+Concurrent programming is a
+complicated subject though and there are many more techniques than
+can fit in a single recipe. There are lots of different patterns that
+can be used, and different strategies that should be used for
+different applications. If you plan to do a significant amount of
+multithreaded programming, or if you are designing
+performance-critical applications, you ought to pick up a good book
+on multithreaded patterns. Many of the problems that make debugging
+multithreaded programs so difficult can be successfully averted with
+careful, tedious design.</p>
+
+<h5 class="docSection3Title" id="title-ID0EDNAK">Using mutexes</h5>
+<p class="docText">The mutex concept is simple: a mutex is something that represents a
+resource and can be locked or unlocked by only one thread at a time.
+It is a flag used to coordinate access to a resource by multiple
+consumers. In the Boost Threads library, the mutex concept is modeled
+by the <tt>boost::mutex</tt> class. In Example 12-2, write access to the
+<tt>Queue</tt>
+
+class is maintained with a <tt>mutex</tt> member variable:</p>
+<pre>boost::mutex mutex_;</pre><br/>
+<p class="docText"><tt>mutex_</tt> must be locked by any member function that
+must change the state of the queue of items that is maintained. The
+<tt>mutex</tt> object itself has no knowledge of what
+it's representing. It's just a
+locked/unlocked flag that is shared by all consumers of some
+resource.</p>
+<p class="docText">In Example 12-2, when a <tt>Queue</tt>
+member function needs to change the state of the object, it must
+first lock <tt>mutex_</tt>. Only one thread at a time can
+lock it, which is what prevents multiple objects from modifying the
+state of a <tt>Queue</tt> object. Thus, a
+<tt>mutex</tt> is a simple signaling mechanism, but it is
+more than just a <tt>bool</tt> or <tt>int</tt>,
+because a <tt>mutex</tt>
+<span class="docEmphasis">requires</span>
+serialized access, which can only be guaranteed by the operating
+system kernel. If you try doing the same thing with a
+<tt>bool</tt>, it won't work because
+there's nothing that prevents multiple threads from
+modifying the state of a <tt>bool</tt> at the same time.
+(Different operating systems have different ways of doing this, which
+is why it is not easy to implement a portable threading library.)</p>
+<p class="docText"><tt>mutex</tt> objects are locked and unlocked using
+several different locking strategies, the simplest of which is the
+<tt>scoped_lock</tt>. A <tt>scoped_lock</tt> is a
+class that, when constructed using a <tt>mutex</tt>
+argument, locks it until the <tt>lock</tt> is destroyed.
+Look at the <tt>enqueue</tt> member function in Example 12-2 to see how <tt>scoped_lock</tt>
+works with a <tt>mutex</tt>:</p>
+<pre>void enqueue(const T&amp; x) {
+   boost::mutex::scoped_lock lock(mutex_);
+   list_.push_back(x);
+} // unlocked!</pre><br/>
+<p class="docText">When <tt>lock</tt> is destroyed, <tt>mutex_</tt>
+is unlocked. If the <tt>lock</tt> is constructed on a
+<tt>mutex</tt> that is already locked by another thread,
+the current thread goes into a wait state until the
+<tt>lock</tt> becomes available.</p>
+<p class="docText">This design may seem a little odd at first—why not have
+<tt>lock</tt> and <tt>unlock</tt> methods on
+<tt>mutex</tt>? The approach of using a
+<tt>scoped_lock</tt> class that locks on construction and
+unlocks on destruction is actually much more convenient and less
+error-prone. When you create a lock using the
+<tt>scoped_lock</tt> approach, it locks the object for its
+lifetime, which means that you don't have to unlock
+explicitly anything on every control path. On the other hand, if you
+have to unlock a locked mutex explicitly, you have to ensure that any
+exceptions that are thrown in your function (or anywhere above your
+function on the call stack) are caught and the
+<tt>mutex</tt> is unlocked. With a
+<tt>scoped_lock</tt>, if an exception is thrown or the
+function returns, the <tt>scoped_lock</tt> object is
+automatically destroyed and the <tt>mutex</tt> is unlocked.</p>
+<p class="docText">Using a mutex will get the job done, but it leaves a little to be
+desired. It makes no distinction between reading and writing, which
+is significant, because it is inefficient to force threads to wait in
+line to use a resource when many or all of them are doing a read-only
+operation, which should not require exclusive access. For this, the
+Boost Threads library provides <tt>read_write_mutex</tt>.
+Example 12-3 shows how you might implement Example 12-2 using a
+<tt>read_write_mutex</tt>
+with a <tt>front</tt> member function that allows the
+caller to retrieve a copy of the first item on the queue without
+popping it.</p>
+<h5 class="docExampleTitle" id="title-ID0EPRAK">Example 12-3. Using a read/write mutex</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;iostream&gt;
+#include &lt;boost/thread/thread.hpp&gt;
+#include &lt;boost/thread/read_write_mutex.hpp&gt;
+#include &lt;string&gt;
+
+template&lt;typename T&gt;
+class Queue {
+public:
+   Queue( ) :  // Use a read/write mutex and give writers priority
+      <b>rwMutex_(boost::read_write_scheduling_policy::writer_priority)</b> {}
+  ~Queue( ) {}
+
+   void enqueue(const T&amp; x) {
+      // Use a r/w lock since enqueue updates the state
+      boost::read_write_mutex::scoped_write_lock writeLock(rwMutex_);
+      list_.push_back(x);
+   } 
+
+   T dequeue( ) {
+      // Again, use a write lock
+      boost::read_write_mutex::scoped_write_lock writeLock(rwMutex_);
+
+      if (list_.empty( ))
+         throw "empty!";
+      T tmp = list_.front( );
+      list_.pop_front( );
+      return(tmp);
+   }
+
+   T getFront( ) {
+      // This is a read-only operation, so you only need a read lock
+      boost::read_write_mutex::scoped_read_lock readLock(rwMutex_);
+      if (list_.empty( ))
+         throw "empty!";
+      return(list_.front( ));
+   }
+
+private:
+   std::list&lt;T&gt; list_;
+   boost::read_write_mutex rwMutex_;
+};
+
+Queue&lt;std::string&gt; queueOfStrings;
+
+void sendSomething( ) {
+   std::string s;
+
+   for (int i = 0; i &lt; 10; ++i) {
+      queueOfStrings.enqueue("Cyrus");
+   }
+}
+
+void checkTheFront( ) {
+   std::string s;
+
+   for (int i = 0; i &lt; 10; ++i) {
+      try {s = queueOfStrings.getFront( );}
+      catch(...) {}
+   }
+}
+
+int main( ) {
+
+   boost::thread thr1(sendSomething);
+   boost::thread_group grp;
+
+   grp.create_thread(checkTheFront);
+   grp.create_thread(checkTheFront);
+   grp.create_thread(checkTheFront);
+   grp.create_thread(checkTheFront);
+
+   thr1.join( );
+   grp.join_all( );
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">There are a few things I should point out here. Notice that now I am
+using a <tt>read_write_mutex</tt>, like this:</p>
+<pre>boost::read_write_mutex rwMutex_;</pre><br/>
+<p class="docText">The locks are also different when you're using
+read/write mutexes. In Example 12-3, when I want to
+lock the <tt>Queue</tt> for writing, I create a
+<tt>scoped_write_lock</tt>:</p>
+<pre>boost::read_write_mutex::scoped_write_lock writeLock(rwMutex_);</pre><br/>
+<p class="docText">And when I just need to read the <tt>Queue</tt>, I use a
+<tt>scoped_read_lock</tt>:</p>
+<pre>boost::read_write_mutex::scoped_read_lock readLock(rwMutex_);</pre><br/>
+<p class="docText">Read/write locks are handy, but they don't prevent
+you from shooting yourself in the foot. There is no compile-time
+check on the resource represented by <tt>rwMutex_</tt> to
+make sure you're not changing it when you only have
+a read lock. Take extra care to ensure a thread only modifies the
+state of an object when it has a write lock because the compiler
+won't.</p>
+<p class="docText">Exactly how these
+locks
+ are
+scheduled is determined by the scheduling policy you chose when you
+constructed the <tt>mutex</tt>. There are four that are
+provided by the Boost Threads library:</p>
+<dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">reader_priority</span></span></span></p></dt>
+<dd>
+<p class="docList">Threads waiting for a read lock will be granted the lock before those
+waiting for a write lock.</p>
+</dd>
+<dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">writer_priority</span></span></span></p></dt>
+<dd>
+<p class="docList">Threads waiting for a write lock will be granted the lock before
+those waiting for a read lock.</p>
+</dd>
+<dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">alternating_single_read</span></span></span></p></dt>
+<dd>
+<p class="docList">Alternate between read and write locks. Grant a single reader a read
+lock when it is the readers'
+"turn." This policy gives writers
+priority in general. For example, if the mutex is write-locked, and
+there are several pending read locks and one pending write lock, one
+read lock will be granted, then the waiting write lock will be
+granted, then all remaining read locks will be granted. This assumes
+no new locks are requested during this period.</p>
+</dd>
+<dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">alternating_many_reads</span></span></span></p></dt>
+<dd>
+<p class="docList">Alternate between read and write locks. Grant all
+readers' locks when it is the
+readers' "turn."
+In other words, this policy empties the queue of all waiting read
+locks in between write locks.</p>
+</dd>
+</dl>
+<p class="docText">Each of these policies has different pros and cons, and they will
+perform differently depending on your application. Deciding which
+policy to use takes careful consideration, because simply going with
+reader or writer priority can result in starvation, which I describe
+in more detail below.</p>
+
+<h5 class="docSection3Title" id="title-ID0EEVAK">Dangers</h5>
+<p class="docText">There are three basic problems
+
+that occur when you are programming with multiple threads:
+deadlock,
+starvation, and
+race
+conditions. There are techniques for avoiding each of them, with
+varying degrees of sophistication that are beyond the scope of this
+recipe. I will describe what each of the problems is so you know how
+what to watch out for, but if you plan on doing multithreaded
+application development, you should do some homework on multithreaded
+patterns first.</p>
+<p class="docText">Deadlock is a situation that involves at least two threads and two
+resources. Consider two threads, A and B, and two resources, X and Y,
+where A has a lock on X and B has a lock on Y. A deadlock occurs when
+A tries to lock Y and B tries to lock X. If threads are not designed
+to break the deadlock somehow, then they will wait forever.</p>
+<p class="docText">The Boost Threads library lets you avoid deadlocks with refinements
+to the mutex and locking concepts. A <span class="docEmphasis">try</span> mutex
+is one that supports attempts at locking, using a
+<span class="docEmphasis">try</span> lock that either succeeds or fails, but does
+not block and wait for the lock to become available. Using models of
+these concepts in the form of <tt>try_mutex</tt> and
+<tt>scoped_try_lock</tt>, your code can go and do something
+else if the resource you need to access is locked. There is also yet
+another refinement to the concept of a try lock, and that is a timed
+lock. With a timed lock, a thread can give up after blocking for a
+specific amount of time. I do not discuss timed locks in detail here;
+have a look at the Boost Threads documentation for details.</p>
+<p class="docText">For example, in the <tt>Queue</tt> class in Example 12-2, you wanted to use a try mutex so
+<tt>dequeue</tt> returns a <tt>bool</tt>
+indicating whether or not it was able to <tt>dequeue</tt>
+the first item. This way, consumers of <tt>dequeue</tt>
+don't have to wait around if the queue is locked.
+Here's how you could rewrite
+<tt>dequeue</tt>:</p>
+<pre>bool dequeue(T&amp; x) {
+   <b>boost::try_mutex::scoped_try_lock</b> lock(tryMutex_);
+
+   if (!lock.locked( ))
+      return(false);
+   else {
+      if (list_.empty( ))
+         throw "empty!";
+      x = list_.front( );
+      list_.pop_front( );
+      return(true);
+   }
+}
+private:
+<span class="docEmphBold">boost::try_mutex tryMutex_;</span>
+// ...</pre><br/>
+<p class="docText">The mutex being used and the lock are different than those used in
+Example 12-2. Be sure to correctly qualify the names
+of the mutex and lock classes you are using, otherwise, you
+won't get the behavior you expect.</p>
+<p class="docText">When you serialize access to something, you tell consumers of it to
+line up and wait their turn. If each of them stays in the same
+position in line, everybody gets a chance to use the resource. But if
+you let some consumers cut in line, it is possible that those at the
+back of the line never get their turn. This is starvation.</p>
+<p class="docText">When using a <tt>mutex</tt>, consumers wait in a group and
+not a line. There is no guaranteed order among threads that are
+waiting for the lock. For read/write mutexes, the Boost Threads
+library uses the four scheduling policies described earlier.
+Therefore, when using read/write mutexes, be aware of what the
+different scheduling policies mean, and what your threads are doing.
+If you are using <tt>writer_priority</tt>, and you have
+lots of threads creating write locks, your readers will starve; the
+same goes for <tt>reader_priority</tt>, since these
+scheduling policies always prefer one type of lock over another.
+Through testing, if you recognize that one kind of thread
+isn't making as much progress as it should, consider
+switching to an <tt>alternating_many_reads</tt> or
+<tt>alternating_single_read</tt> policy. You specify the
+policy when constructing a read/write mutex.</p>
+<p class="docText">Finally, a race condition is a situation where your code has made an
+assumption about the order or atomicity of locks that has proven
+false. For example, consider a consumer of the
+<tt>Queue</tt> class that interrogates the element on the
+front and conditionally <tt>dequeues</tt> it:</p>
+<pre>if (q.getFront( ) == "Cyrus") {
+   str = q.dequeue( );
+   // ...</pre><br/>
+<p class="docText">This code works fine in a single-threaded environment, because
+<tt>q</tt> won't be modified between the
+first and second lines. However, when using multiple threads, you
+have to account for the situation where another thread modifies
+<tt>q</tt> at any moment—in fact, you should
+<span class="docEmphasis">assume</span> that shared objects are modified when a
+thread doesn't have them locked. After line 1,
+another thread can come along and <tt>dequeue</tt> the next
+item from <tt>q</tt>, which means that line 2 gets
+something unexpected or nothing at all. Both
+<tt>getFront</tt> and <tt>dequeue</tt> lock the
+single <tt>mutex</tt> used to modify <tt>q</tt>,
+but in between it is unlocked, and if another thread is waiting on
+the lock, it may snatch it up before line 2 has a chance.</p>
+<p class="docText">A solution, for this particular race condition, is to ensure that a
+lock is held for the duration of the operation. Create a member
+function called
+<tt>dequeueIfEquals</tt>
+
+
+that only <tt>dequeue</tt>s the next object if it equals
+the argument. <tt>dequeueIfEquals</tt> can use a lock like
+anything else:</p>
+<pre>T dequeueIfEquals(const T&amp; t) {
+   boost::mutex::scoped_lock lock(mutex_);
+   if (list_.front( ) == t)
+      // ...</pre><br/>
+<p class="docText">There are other kinds of race conditions, but this example should
+give you a general idea of what to watch out for. As the number of
+threads and shared resources you are using increases, the race
+conditions become more subtle and difficult to catch. Therefore, you
+should take special care to design to prevent them.</p>
+<p class="docText">Ensuring serialized access to resources is the most difficult thing
+about multithreading, because when you don't do it
+right, debugging it can be a nightmare. Since a multithreaded program
+is inherently nondeterministic (because threads can execute in
+different order and for different lengths of time each time the
+program is run), it is painful to try and pinpoint exactly where or
+how a thread modifies something it shouldn't. More
+so than with single-threaded programming, a
+
+
+
+
+ sound design will
+minimize debugging and rework.</p>
+</div>
+</body>
+</html>

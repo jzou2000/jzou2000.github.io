@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>5.4. Relationship Between File Descriptors and Open Files</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">5.4. Relationship Between File Descriptors and Open Files</h3><p class="docText">Up
+ until now, it may have appeared that there is a one-to-one 
+correspondence between a file descriptor and an open file. However, this
+ is not the case. It is possible—and useful—to have multiple descriptors
+ referring to the same open file. These file descriptors may be open in 
+the same process or in different processes.</p><p class="docText">To understand what is going on, we need to examine three data structures maintained by the kernel:</p><ul><li><p class="docList">the per-process file descriptor table;</p></li><li><p class="docList">the system-wide table of open file descriptions; and</p></li><li><p class="docList">the file system i-node table.</p></li></ul><p class="docText">For each process, the kernel maintains a table of <span class="docEmphasis">open file descriptors</span>. Each entry in this table records information about a single file descriptor, including:</p><ul><li><p class="docList">a
+ set of flags controlling the operation of the file descriptor (there is
+ just one such flag, the close-on-exec flag, which we describe in Section 27.4); and</p></li><li><p class="docList">a reference to the open file description.</p></li></ul><p class="docText">The kernel maintains a system-wide table of all <span class="docEmphasis">open file descriptions</span>. (This table is sometimes referred to as the <span class="docEmphasis">open file table</span>, and its entries are sometimes called <span class="docEmphasis">open file handles</span>.) An open file description stores all information relating to an open file, including:</p><ul><li><p class="docList">the current file offset (as updated by <span class="docEmphasis">read()</span> and <span class="docEmphasis">write()</span>, or explicitly modified using <span class="docEmphasis">lseek()</span>);</p></li><li><p class="docList">status flags specified when opening the file (i.e., the <span class="docEmphasis">flags</span> argument to <span class="docEmphasis">open()</span>);</p></li><li><p class="docList">the file access mode (read-only, write-only, or read-write, as specified in <span class="docEmphasis">open()</span>);</p></li><li><p class="docList">settings relating to signal-driven I/O (Section 63.3); and</p></li><li><p class="docList">a reference to the <span class="docEmphasis">i-node</span> object for this file.</p></li></ul><p class="docText">Each file system has a table of <span class="docEmphasis">i-nodes</span> for all files residing in the file system. The i-node structure, and file systems in general, are discussed in more detail in Chapter 14. For now, we note that the i-node for each file includes the following information:</p><ul><li><p class="docList">file type (e.g., regular file, socket, or FIFO) and permissions;</p></li><li><p class="docList">a pointer to a list of locks held on this file; and</p></li><li><p class="docList">various properties of the file, including its size and timestamps relating to different types of file operations.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Here,
+ we are overlooking the distinction between on-disk and in-memory 
+representations of an i-node. The on-disk i-node records the persistent 
+attributes of a file, such as its type, permissions, and timestamps. 
+When a file is accessed, an in-memory copy of the i-node is created, and
+ this version of the i-node records a count of the open file 
+descriptions referring to the i-node and the major and minor IDs of the 
+device from which the i-node was copied. The in-memory i-node also 
+records various ephemeral attributes that are associated with a file 
+while it is open, such as file locks.</p><hr noshade="noshade" size="1"/><p class="docText">Figure 5-2
+ illustrates the relationship between file descriptors, open file 
+descriptions, and i-nodes. In this diagram, two processes have a number 
+of open file descriptors.</p><p></p><center><h5 class="docFigureTitle">Figure 5-2. Relationship between file descriptors, open file descriptions, and i-nodes</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-6.png"/></p></center><p></p><br/><p class="docText">In
+ process A, descriptors 1 and 20 both refer to the same open file 
+description (labeled 23). This situation may arise as a result of a call
+ to <span class="docEmphasis">dup()</span>, <span class="docEmphasis">dup2()</span>, or <span class="docEmphasis">fcntl()</span> (see Section 5.5).</p><p class="docText">Descriptor
+ 2 of process A and descriptor 2 of process B refer to a single open 
+file description (73). This scenario could occur after a call to <span class="docEmphasis">fork()</span>
+ (i.e., process A is the parent of process B, or vice versa), or if one 
+process passed an open descriptor to another process using a UNIX domain
+ socket (Section 61.13.3).</p><p class="docText">Finally,
+ we see that descriptor 0 of process A and descriptor 3 of process B 
+refer to different open file descriptions, but that these descriptions 
+refer to the same i-node table entry (1976)—in other words, to the same 
+file. This occurs because each process independently called <span class="docEmphasis">open()</span> for the same file. A similar situation could occur if a single process opened the same file twice.</p><p class="docText">We can draw a number of implications from the preceding discussion:</p><ul><li><p class="docList">Two
+ different file descriptors that refer to the same open file description
+ share a file offset value. Therefore, if the file offset is changed via
+ one file descriptor (as a consequence of calls to <span class="docEmphasis">read()</span>, <span class="docEmphasis">write()</span>, or <span class="docEmphasis">lseek()</span>),
+ this change is visible through the other file descriptor. This applies 
+both when the two file descriptors belong to the same process and when 
+they belong to different processes.</p></li><li><p class="docList">Similar scope rules apply when retrieving and changing the open file status flags (e.g., <tt>O_APPEND</tt>, <tt>O_NONBLOCK</tt>, and <tt>O_ASYNC</tt>) using the <span class="docEmphasis">fcntl()</span> <tt>F_GETFL</tt> and <tt>F_SETFL</tt> operations.</p></li><li><p class="docList">By
+ contrast, the file descriptor flags (i.e., the close-on-exec flag) are 
+private to the process and file descriptor. Modifying these flags does 
+not affect other file descriptors in the same process or a different 
+process.</p></li></ul>
+</div>
+</body>
+</html>

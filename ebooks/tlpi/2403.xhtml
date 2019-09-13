@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>24.3. The vfork() System Call</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">24.3. The <span class="docEmphasis">vfork()</span> System Call</h3><p class="docText">Early BSD implementations were among those in which <span class="docEmphasis">fork()</span> performed a literal duplication of the parent’s data, heap, and stack. As noted earlier, this is wasteful, especially if the <span class="docEmphasis">fork()</span> is followed by an immediate <span class="docEmphasis">exec()</span>. For this reason, later versions of BSD introduced the <span class="docEmphasis">vfork()</span> system call, which was far more efficient than BSD’s <span class="docEmphasis">fork()</span>,
+ although it operated with slightly different (in fact, somewhat 
+strange) semantics. Modern UNIX implementations employing copy-on-write 
+for implementing <span class="docEmphasis">fork()</span> are much more efficient than older <span class="docEmphasis">fork()</span> implementations, thus largely eliminating the need for <span class="docEmphasis">vfork()</span>. Nevertheless, Linux (like many other UNIX implementations) provides a <span class="docEmphasis">vfork()</span> system call with BSD semantics for programs that require the fastest possible fork. However, because the unusual semantics of <span class="docEmphasis">vfork()</span>
+ can lead to some subtle program bugs, its use should normally be 
+avoided, except in the rare cases where it provides worthwhile 
+performance gains.</p><p class="docText">Like <span class="docEmphasis">fork()</span>, <span class="docEmphasis">vfork()</span> is used by the calling process to create a new child process. However, <span class="docEmphasis">vfork()</span> is expressly designed to be used in programs where the child performs an immediate <span class="docEmphasis">exec()</span> call.</p><pre>#include &lt;unistd.h&gt;
+pid_t <b>vfork</b>(void);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In parent: returns process ID of child on success, or -1 on error; in successfully created child: always returns 0</p><hr noshade="noshade" size="1"/><p class="docText">Two features distinguish the <span class="docEmphasis">vfork()</span> system call from <span class="docEmphasis">fork()</span> and make it more efficient:</p><ul><li><p class="docList">No
+ duplication of virtual memory pages or page tables is done for the 
+child process. Instead, the child shares the parent’s memory until it 
+either performs a successful <span class="docEmphasis">exec()</span> or calls <span class="docEmphasis">_exit()</span> to terminate.</p></li><li><p class="docList">Execution of the parent process is suspended until the child has performed an <span class="docEmphasis">exec()</span> or <span class="docEmphasis">_exit()</span>.</p></li></ul><p class="docText">These
+ points have some important implications. Since the child is using the 
+parent’s memory, any changes made by the child to the data, heap, or 
+stack segments will be visible to the parent once it resumes. 
+Furthermore, if the child performs a function return between the <span class="docEmphasis">vfork()</span> and a later <span class="docEmphasis">exec()</span> or <span class="docEmphasis">_exit()</span>, this will also affect the parent. This is similar to the example described in Section 6.8 of trying to <span class="docEmphasis">longjmp()</span> into a function from which a return has already been performed. Similar chaos—typically a segmentation fault (<tt>SIGSEGV</tt>)—is likely to result.</p><p class="docText">There are a few things that the child process can do between <span class="docEmphasis">vfork()</span> and <span class="docEmphasis">exec()</span> without affecting the parent. Among these are operations on open file descriptors (but not <span class="docEmphasis">stdio</span> file streams). Since the file descriptor table for each process is maintained in kernel space (Section 5.4) and is duplicated during <span class="docEmphasis">vfork()</span>, the child process can perform file descriptor operations without affecting the parent.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">SUSv3 says that the behavior of a program is undefined if it: a) modifies any data other than a variable of type <span class="docEmphasis">pid_t</span> used to store the return value of <span class="docEmphasis">vfork()</span>; b) returns from the function in which <span class="docEmphasis">vfork()</span> was called; or c) calls any other function before successfully calling <span class="docEmphasis">_exit()</span> or performing an <span class="docEmphasis">exec()</span>.</p><p class="docText">When we look at the <span class="docEmphasis">clone()</span> system call in Section 28.2, we’ll see that a child created using <span class="docEmphasis">fork()</span> or <span class="docEmphasis">vfork()</span> also obtains its own copies of a few other process attributes.</p><hr noshade="noshade" size="1"/><p class="docText">The semantics of <span class="docEmphasis">vfork()</span> mean that after the call, the child is guaranteed to be scheduled for the CPU before the parent. In Section 24.2, we noted that this is not a guarantee made by <span class="docEmphasis">fork()</span>, after which either the parent or the child may be scheduled first.</p><p class="docText">Example 24-4 shows the use of <span class="docEmphasis">vfork()</span>, demonstrating both of the semantic features that distinguish it from <span class="docEmphasis">fork()</span>: the child shares the parent’s memory, and the parent is suspended until the child terminates or calls <span class="docEmphasis">exec()</span>. When we run this program, we see the following output:</p><pre class="preFixedWidth">$ <b>./t_vfork </b>
+Child executing           <i> Even though child slept, parent was not scheduled</i>
+Parent executing
+istack=666
+
+					  </pre><br/>
+<p class="docText">From the last line of output, we can see that the change made by the child to the variable <span class="docEmphasis">istack</span> was performed on the parent’s variable.</p><h5 class="docExampleTitle" id="title-ID0EINCK">Example 24-4. Using <span class="docEmphasis">vfork()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>procexec/t_vfork.c</b>
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int istack = 222;
+
+    switch (vfork()) {
+    case -1:
+        errExit("vfork");
+
+    case 0:             /* Child executes first, in parent's memory space */
+        sleep(3);                   /* Even if we sleep for a while,
+                                       parent still is not scheduled */
+        write(STDOUT_FILENO, "Child executing\n", 16);
+        istack *= 3;                /* This change will be seen by parent */
+        _exit(EXIT_SUCCESS);
+
+    default:            /* Parent is blocked until child exits */
+        write(STDOUT_FILENO, "Parent executing\n", 17);
+        printf("istack=%d\n", istack);
+        exit(EXIT_SUCCESS);
+    }
+}
+      <b>procexec/t_vfork.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Except where speed is absolutely critical, new programs should avoid the use of <span class="docEmphasis">vfork()</span> in favor of <span class="docEmphasis">fork()</span>. This is because, when <span class="docEmphasis">fork()</span> is implemented using copy-on-write semantics (as is done on most modern UNIX implementations), it approaches the speed of <span class="docEmphasis">vfork()</span>, and we avoid the eccentric behaviors associated with <span class="docEmphasis">vfork()</span> described above. (We show some speed comparisons between <span class="docEmphasis">fork()</span> and <span class="docEmphasis">vfork()</span> in Section 28.3.)</p><p class="docText">SUSv3 marks <span class="docEmphasis">vfork()</span> as obsolete, and SUSv4 goes further, removing the specification of <span class="docEmphasis">vfork()</span>. SUSv3 leaves many details of the operation of <span class="docEmphasis">vfork()</span> unspecified, allowing the possibility that it is implemented as a call to <span class="docEmphasis">fork()</span>. When implemented in this manner, the BSD semantics for <span class="docEmphasis">vfork()</span> are not preserved. Some UNIX systems do indeed implement <span class="docEmphasis">vfork()</span> as a call to <span class="docEmphasis">fork()</span>, and Linux also did this in kernel 2.0 and earlier.</p><p class="docText">Where it is used, <span class="docEmphasis">vfork()</span> should generally be immediately followed by a call to <span class="docEmphasis">exec()</span>. If the <span class="docEmphasis">exec()</span> call fails, the child process should terminate using <span class="docEmphasis">_exit()</span>. (The child of a <span class="docEmphasis">vfork()</span> should not terminate by calling <span class="docEmphasis">exit()</span>, since that would cause the parent’s <span class="docEmphasis">stdio</span> buffers to be flushed and closed. We go into more detail on this point in Section 25.4.)</p><p class="docText">Other uses of <span class="docEmphasis">vfork()</span>—in
+ particular, those relying on its unusual semantics for memory sharing 
+and process scheduling—are likely to render a program nonportable, 
+especially to implementations where <span class="docEmphasis">vfork()</span> is implemented simply as a call to <span class="docEmphasis">fork()</span>.</p>
+</div>
+</body>
+</html>

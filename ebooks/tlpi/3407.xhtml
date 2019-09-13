@@ -1,0 +1,573 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>34.7. Job Control</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">34.7. Job Control</h3><p class="docText">Job
+ control is a feature that first appeared around 1980 in the C shell on 
+BSD. Job control permits a shell user to simultaneously execute multiple
+ commands (jobs), one in the foreground and the others in the 
+background. Jobs can be stopped and resumed, and moved between the 
+foreground and background, as described in the following paragraphs.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In the initial POSIX.1 standard, support for job control was optional. Later UNIX standards made support mandatory.</p><hr noshade="noshade" size="1"/><p class="docText">In
+ the days of character-based dumb terminals (physical terminal devices 
+that were limited to displaying ASCII characters), many shell users knew
+ how to use shell job-control commands. With the advent of bit-mapped 
+monitors running the X Window System, knowledge of shell job control is 
+less common. However, job control remains a useful feature. Using job 
+control to manage multiple simultaneous commands can be faster and 
+simpler than switching back and forth between multiple windows. For 
+those readers unfamiliar with job control, we begin with a short 
+tutorial on its use. We then go on to look at a few details of the 
+implementation of job control and consider the implications of job 
+control for application design.</p><h4 class="docSection2Title" id="title-ID0EDOFK">34.7.1. Using Job Control Within the Shell</h4><p class="docText">When we enter a command terminated by an ampersand (<tt>&amp;</tt>), it is run as a background job, as illustrated by the following examples:</p><pre class="preFixedWidth">[1] 18932                           <i> Job 1: process running</i> <span class="docEmphasis">grep</span> <i> has PID 18932</i>
+$ <b>sleep 60 &amp; </b>
+[2] 18934                           <i> Job 2: process running</i> <span class="docEmphasis">sleep</span> <i> has PID 18934</i>
+
+					  </pre><br/>
+<p class="docText">Each job that is placed 
+in the background is assigned a unique job number by the shell. This job
+ number is shown in square brackets after the job is started in the 
+background, and also when the job is manipulated or monitored by various
+ job-control commands. The number following the job number is the 
+process ID of the process created to execute the command, or, in the 
+case of a pipeline, the process ID of the last process in the pipeline. 
+In the commands described in the following paragraphs, jobs can be 
+referred to using the notation <span class="docEmphasis">%num</span>, where <span class="docEmphasis">num</span> is the number assigned to this job by the shell.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In many cases, the <span class="docEmphasis">%num</span> argument can be omitted, in which case the <span class="docEmphasis">current</span> job is used by default. The current job is the last job that was stopped in the foreground (using the <span class="docEmphasis">suspend</span>
+ character described below), or, if there is no such job, then the last 
+job that was started in the background. (There are some variations in 
+the details of how different shells determine which background job is 
+considered the current job.) In addition, the notation %% or %+ refers 
+to the current job, and the notation %- refers to the <span class="docEmphasis">previous current</span>
+ job. The current and previous current jobs are marked by a plus (+) and
+ a minus (-) sign, respectively, in the output produced by the <span class="docEmphasis">jobs</span> command, which we describe next.</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">jobs</span> shell built-in command lists all background jobs:</p><pre>$ <b>jobs</b>
+[1]- Running        grep -r SIGHUP /usr/src/linux &gt;x &amp;
+[2]+ Running        sleep 60 &amp;</pre><br/>
+<p class="docText">At this point, the shell is the
+ foreground process for the terminal. Since only a foreground process 
+can read input from the controlling terminal and receive 
+terminal-generated signals, sometimes it is necessary to move a 
+background job into the foreground. This is done using the <span class="docEmphasis">fg</span> shell built-in command:</p><pre>$ <b>fg %1</b>
+grep -r SIGHUP /usr/src/linux &gt;x</pre><br/>
+<p class="docText">As demonstrated in this example, 
+the shell redisplays a job’s command line whenever the job is moved 
+between the foreground and the background. Below, we’ll see that the 
+shell also does this whenever the job’s state changes in the background.</p><p class="docText">When a job is running in the foreground, we can suspend it using the terminal <span class="docEmphasis">suspend</span> character (normally <span class="docEmphasis">Control-Z</span>), which sends the <tt>SIGTSTP</tt> signal to the terminal’s foreground process group:</p><pre><i>Type Control-Z</i>
+[1]+ Stopped        grep -r SIGHUP /usr/src/linux &gt;x</pre><br/>
+<p class="docText">After we typed <span class="docEmphasis">Control-Z</span>, the shell displays the command that has been stopped in the background. If desired, we can use the <span class="docEmphasis">fg</span> command to resume the job in the foreground, or use the <span class="docEmphasis">bg</span> command to resume it in the background. In both cases, the shell resumes the stopped job by sending it a <tt>SIGCONT</tt> signal.</p><pre>$ <b>bg %1</b>
+[1]+ grep -r SIGHUP /usr/src/linux &gt;x &amp;</pre><br/>
+<p class="docText">We can stop a background job by sending it a <tt>SIGSTOP</tt> signal:</p><pre>$ <b>kill -STOP %1 </b>
+[1]+ Stopped        grep -r SIGHUP /usr/src/linux &gt;x
+$ <b>jobs </b>
+[1]+ Stopped        grep -r SIGHUP /usr/src/linux &gt;x
+[2]- Running        sleep 60 &amp;
+$ <b>bg %1 </b>                             <i> Restart job in background</i>
+[1]+ grep -r SIGHUP /usr/src/linux &gt;x &amp;</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The Korn and C shells provide the command <span class="docEmphasis">stop</span> as a shorthand for <span class="docEmphasis">kill -stop</span>.</p><hr noshade="noshade" size="1"/><p class="docText">When a background job eventually completes, the shell prints a message prior to displaying the next shell prompt:</p><pre><i>Press Enter to see a further shell prompt</i>
+[1]- Done           grep -r SIGHUP /usr/src/linux &gt;x
+[2]+ Done           sleep 60
+$</pre><br/>
+<p class="docText">Only processes in the 
+foreground job may read from the controlling terminal. This restriction 
+prevents multiple jobs from competing for terminal input. If a 
+background job tries to read from the terminal, it is sent a <tt>SIGTTIN</tt> signal. The default action of <tt>SIGTTIN</tt> is to stop the job:</p><pre>$ <b>cat &gt; x.txt &amp; </b>
+[1] 18947
+$
+<i> Press Enter once more in order to see</i>
+ <i> job state changes displayed prior to next shell prompt</i>
+[1]+ Stopped        cat &gt;x.txt
+$</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">It may not always be necessary to press the <span class="docEmphasis">Enter</span>
+ key to see the job state changes in the previous example and some of 
+the following examples. Depending on kernel scheduling decisions, the 
+shell may receive notification about changes in the state of the 
+background job before the next shell prompt is displayed.</p><hr noshade="noshade" size="1"/><p class="docText">At this point, we must bring the job into the foreground (<span class="docEmphasis">fg</span>),
+ and provide the required input. If desired, we can then continue 
+execution of the job in the background by first suspending it and then 
+resuming it in the background (<span class="docEmphasis">bg</span>). (Of course, in this particular example, <span class="docEmphasis">cat</span> would immediately be stopped again, since it would once more try to read from the terminal.)</p><p class="docText">By default, background jobs are allowed to perform output to the controlling terminal. However, if the <tt>TOSTOP</tt> flag (<span class="docEmphasis">terminal output stop</span>, Section 62.5) is set for the terminal, then attempts by background jobs to perform terminal output result in the generation of a <tt>SIGTTOU</tt> signal. (We can set the <tt>TOSTOP</tt> flag using the <span class="docEmphasis">stty</span> command, which is described in Section 62.3.) Like <tt>SIGTTIN</tt>, a <tt>SIGTTOU</tt> signal stops the job.</p><pre class="preFixedWidth">$ <b>stty tostop </b>                       <i> Enable</i> TOSTOP <i> flag for this terminal</i>
+$ <b>date &amp; </b>
+[1] 19023
+$
+<i> Press Enter once more to see job state changes displayed prior to next shell prompt</i>
+[1]+ Stopped        date
+
+					  </pre><br/>
+<p class="docText">We can then see the output of the job by bringing it into the foreground:</p><pre>$ <b>fg</b>
+date
+Tue Dec 28 16:20:51 CEST 2010</pre><br/>
+<p class="docText">The various states of a job
+ under job control, as well as the shell commands and terminal 
+characters (and the accompanying signals) used to move a job between 
+these states, are summarized in Figure 34-2. This figure also includes a notional <span class="docEmphasis">terminated</span> state for a job. This state can be reached by sending various signals to the job, including <tt>SIGINT</tt> and <tt>SIGQUIT</tt>, which can be generated from the keyboard.</p><p></p><center><h5 class="docFigureTitle">Figure 34-2. Job-control states</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_007-14.png"/></p></center><p></p><br/><h4 class="docSection2Title" id="title-ID0EAXFK">34.7.2. Implementing Job Control</h4><p class="docText">In
+ this section, we examine various aspects of the implementation of job 
+control, and conclude with an example program that makes the operation 
+of job control more transparent.</p><p class="docText">Although
+ optional in the original POSIX.1 standard, later standards, including 
+SUSv3, require that an implementation support job control. This support 
+requires the following:</p><ul><li><p class="docList">The implementation must provide certain job-control signals: <tt>SIGTSTP</tt>, <tt>SIGSTOP</tt>, <tt>SIGCONT</tt>, <tt>SIGTTOU</tt>, and <tt>SIGTTIN</tt>. In addition, the <tt>SIGCHLD</tt> signal (Section 26.3)
+ is also necessary, since it allows the shell (the parent of all jobs) 
+to find out when one of its children terminates or is stopped.</p></li><li><p class="docList">The
+ terminal driver must support generation of the job-control signals, so 
+that when certain characters are typed, or terminal I/O and certain 
+other terminal operations (described below) are performed from a 
+background job, an appropriate signal (as shown in Figure 34-2)
+ is sent to the relevant process group. In order to be able to carry out
+ these actions, the terminal driver must also record the session ID 
+(controlling process) and foreground process group ID associated with a 
+terminal (Figure 34-1).</p></li><li><p class="docList">The
+ shell must support job control (most modern shells do so). This support
+ is provided in the form of the commands described earlier to move a job
+ between the foreground and background and monitor the state of jobs. 
+Certain of these commands send signals to a job (as shown in Figure 34-2). In addition, when performing operations that move a job between the <span class="docEmphasis">running in foreground</span> and any of the other states, the shell uses calls to <span class="docEmphasis">tcsetpgrp()</span> to adjust the terminal driver’s record of the foreground process group.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In Section 20.5,
+ we saw that signals can generally be sent to a process only if the real
+ or effective user ID of the sending process matches the real user ID or
+ saved set-user-ID of the receiving process. However, <tt>SIGCONT</tt> is an exception to this rule. The kernel allows a process (e.g., the shell) to send <tt>SIGCONT</tt> to any process in the same session, regardless of process credentials. This relaxation of the rules for <tt>SIGCONT</tt>
+ is required so that if a user starts a set-user-ID program that changes
+ its credentials (in particular, its real user ID), it is still possible
+ to resume it with <tt>SIGCONT</tt> if it is stopped.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0E64FK">34.7.2.1. The <tt>SIGTTIN</tt> and <tt>SIGTTOU</tt> signals</h5><p class="docText">SUSv3 specifies (and Linux implements) some special cases that apply with respect to the generation of the <tt>SIGTTIN</tt> and <tt>SIGTTOU</tt> signals for background jobs:</p><ul><li><p class="docList"><tt>SIGTTIN</tt> is not sent if the process is currently blocking or ignoring this signal. Instead, a <span class="docEmphasis">read()</span> from the controlling terminal fails, setting <span class="docEmphasis">errno</span> to <tt>EIO</tt>. The rationale for this behavior is that the process would otherwise have no way of knowing that the <span class="docEmphasis">read()</span> was not permitted.</p></li><li><p class="docList">Even if the terminal <tt>TOSTOP</tt> flag is set, <tt>SIGTTOU</tt> is not sent if the process is currently blocking or ignoring this signal. Instead, a <span class="docEmphasis">write()</span> to the controlling terminal is permitted (i.e., the <tt>TOSTOP</tt> flag is ignored).</p></li><li><p class="docList">Regardless of the setting of the <tt>TOSTOP</tt> flag, certain functions that change terminal driver data structures result in the generation of <tt>SIGTTOU</tt> for a background process if it tries to apply them to its controlling terminal. These functions include <span class="docEmphasis">tcsetpgrp()</span>, <span class="docEmphasis">tcsetattr()</span>, <span class="docEmphasis">tcflush()</span>, <span class="docEmphasis">tcflow()</span>, <span class="docEmphasis">tcsendbreak()</span>, and <span class="docEmphasis">tcdrain()</span>. (These functions are described in Chapter 62.) If <tt>SIGTTOU</tt> is being blocked or ignored, these calls succeed.</p></li></ul><h5 class="docSection3Title" id="title-ID0EICGK">34.7.2.2. Example program: demonstrating the operation of job control</h5><p class="docText">The program in Example 34-5
+ allows us to see how the shell organizes the commands in a pipeline 
+into a job (process group). This program also allows us to monitor 
+certain of the signals sent and the changes made to the terminal’s 
+foreground process group setting under job control. The program is 
+designed so that multiple instances can be run in a pipeline, as in the 
+following example:</p><pre>$ <b>./job_mon | ./job_mon | ./job_mon</b></pre><br/>
+<p class="docText">The program in Example 34-5 performs the following steps:</p><ul><li><p class="docList">On startup, the program installs a single handler for <tt>SIGINT</tt>, <tt>SIGTSTP</tt>, and <tt>SIGCONT</tt> <img alt="" border="0" id="" src="Images/getfile_004.png"/>. The handler carries out the following steps:</p><ul><li><p class="docList">Display the foreground process group for the terminal <img alt="" border="0" id="" src="Images/getfile_006-14.png"/>. To avoid multiple identical lines of output, this is done only by the process group leader.</p></li><li><p class="docList">Display the ID of the process, the process’s position in the pipeline, and the signal received <img alt="" border="0" id="" src="Images/getfile_005-22.png"/>.</p></li><li><p class="docList">The handler must do some extra work if it catches <tt>SIGTSTP</tt>, since, when caught, this signal doesn’t stop a process. So, to actually stop the process, the handler raises the <tt>SIGSTOP</tt> signal <img alt="" border="0" id="" src="Images/getfile_003-28.png"/>, which always stops a process. (We refine this treatment of <tt>SIGTSTP</tt> in Section 34.7.3.)</p></li></ul></li><li><p class="docList">If the program is the initial process in the pipeline, it prints headings for the output produced by all of the processes <img alt="" border="0" id="" src="Images/getfile_013.png"/>. In order to test whether it is the initial (or final) process in the pipeline, the program uses the <span class="docEmphasis">isatty()</span> function (described in Section 62.10) to check whether its standard input (or output) is a terminal <img alt="" border="0" id="" src="Images/getfile_011-2.png"/>. If the specified file descriptor refers to a pipe, <span class="docEmphasis">isatty()</span> returns false (0).</p></li><li><p class="docList">The
+ program builds a message to be passed to its successor in the pipeline.
+ This message is an integer indicating the position of this process in 
+the pipeline. Thus, for the initial process, the message contains the 
+number 1. If the program is the initial process in the pipeline, the 
+message is initialized to 0. If it is not the initial process in the 
+pipeline, the program first reads this message from its predecessor <img alt="" border="0" id="" src="Images/getfile_008-9.png"/>. The program increments the message value before proceeding to the next steps <img alt="" border="0" id="" src="Images/getfile_010-6.png"/>.</p></li><li><p class="docList">Regardless
+ of its position in the pipeline, the program displays a line containing
+ its pipeline position, process ID, parent process ID, process group ID,
+ and session ID <img alt="" border="0" id="" src="Images/getfile_009-7.png"/>.</p></li><li><p class="docList">Unless it is the last command in the pipeline, the program writes an integer message for its successor in the pipeline <img alt="" border="0" id="" src="Images/getfile_012.png"/>.</p></li><li><p class="docList">Finally, the program loops forever, using <span class="docEmphasis">pause()</span> to wait for signals <img alt="" border="0" id="" src="Images/getfile-62.png"/>.</p></li></ul><h5 class="docExampleTitle" id="title-ID0EHJGK">Example 34-5. Observing the treatment of a process under job control</h5><p></p><div class="box"><pre class="preFixedHeight"><b>pgsjc/job_mon.c</b>
+    #define _GNU_SOURCE     /* Get declaration of strsignal() from &lt;string.h&gt; */
+    #include &lt;string.h&gt;
+    #include &lt;signal.h&gt;
+    #include &lt;fcntl.h&gt;
+    #include "tlpi_hdr.h"
+
+    static int cmdNum;              /* Our position in pipeline */
+
+    static void                     /* Handler for various signals */
+    handler(int sig)
+    {
+        /* UNSAFE: This handler uses non-async-signal-safe functions
+           (fprintf(), strsignal(); see Section 21.1.2) */
+    <img alt="" border="0" id="" src="Images/getfile_006-15.png"/>    if (getpid() == getpgrp())          /* If process group leader */
+          fprintf(stderr, "Terminal FG process group: %ld\n",
+                    (long) tcgetpgrp(STDERR_FILENO));
+<img alt="" border="0" id="" src="Images/getfile_005-23.png"/>    fprintf(stderr, "Process %ld (%d) received signal %d (%s)\n",
+                    (long) getpid(), cmdNum, sig, strsignal(sig));
+
+        /* If we catch SIGTSTP, it won't actually stop us. Therefore we
+           raise SIGSTOP so we actually get stopped. */
+
+<img alt="" border="0" id="" src="Images/getfile_003-29.png"/>    if (sig == SIGTSTP)
+            raise(SIGSTOP);
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        struct sigaction sa;
+
+        sigemptyset(&amp;sa.sa_mask);
+        sa.sa_flags = SA_RESTART;
+        sa.sa_handler = handler;
+<img alt="" border="0" id="" src="Images/getfile_004.png"/>    if (sigaction(SIGINT, &amp;sa, NULL) == -1)
+            errExit("sigaction");
+        if (sigaction(SIGTSTP, &amp;sa, NULL) == -1)
+            errExit("sigaction");
+        if (sigaction(SIGCONT, &amp;sa, NULL) == -1)
+            errExit("sigaction");
+
+        /* If stdin is a terminal, this is the first process in pipeline:
+           print a heading and initialize message to be sent down pipe */
+
+<img alt="" border="0" id="" src="Images/getfile_011-3.png"/>    if (isatty(STDIN_FILENO)) {
+            fprintf(stderr, "Terminal FG process group: %ld\n",
+                    (long) tcgetpgrp(STDIN_FILENO));
+<img alt="" border="0" id="" src="Images/getfile_013.png"/>        fprintf(stderr, "Command   PID  PPID  PGRP   SID\n");
+            cmdNum = 0;
+
+        } else {            /* Not first in pipeline, so read message from pipe */
+<img alt="" border="0" id="" src="Images/getfile_008-10.png"/>        if (read(STDIN_FILENO, &amp;cmdNum, sizeof(cmdNum)) &lt;= 0)
+                fatal("read got EOF or error");
+        }
+
+<img alt="" border="0" id="" src="Images/getfile_010-7.png"/>    cmdNum++;
+<img alt="" border="0" id="" src="Images/getfile_009-8.png"/>    fprintf(stderr, "%4d    %5ld %5ld %5ld %5ld\n", cmdNum,
+                (long) getpid(), (long) getppid(),
+                (long) getpgrp(), (long) getsid(0));
+
+        /* If not the last process, pass a message to the next process */
+
+        if (!isatty(STDOUT_FILENO))   /* If not tty, then should be pipe */0
+<img alt="" border="0" id="" src="Images/getfile_012.png"/>        if (write(STDOUT_FILENO, &amp;cmdNum, sizeof(cmdNum)) == -1)
+                errMsg("write");
+
+<img alt="" border="0" id="" src="Images/getfile-63.png"/>    for(;;)             /* Wait for signals */
+            pause();
+    }
+
+           <b>pgsjc/job_mon.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The following shell session demonstrates the use of the program in Example 34-5.
+ We begin by displaying the process ID of the shell (which is the 
+session leader, and the leader of a process group of which it is the 
+sole member), and then create a background job containing two processes:</p><pre class="preFixedWidth">$ <b>echo $$ </b>                       <i> Show PID of the shell</i>
+1204
+$ <b>./job_mon | ./job_mon &amp; </b>                   <i> Start a job containing 2 processes</i>
+[1] 1227
+Terminal FG process group: 1204
+Command   PID  PPID  PGRP   SID
+   1     1226  1204  1226  1204
+   2     1227  1204  1226  1204
+
+					  </pre><br/>
+<p class="docText">From the above output, we
+ can see that the shell remains the foreground process for the terminal.
+ We can also see that the new job is in the same session as the shell 
+and that all of the processes are in the same process group. Looking at 
+the process IDs, we can see that the processes in the job were created 
+in the same order as the commands were given on the command line. (Most 
+shells do things this way, but some shell implementations create the 
+processes in a different order.)</p><p class="docText">We continue, creating a second background job consisting of three processes:</p><pre>$ <b>./job_mon | ./job_mon | ./job_mon &amp;</b>
+[2] 1230
+Terminal FG process group: 1204
+Command   PID  PPID  PGRP   SID
+   1     1228  1204  1228  1204
+   2     1229  1204  1228  1204
+   3     1230  1204  1228  1204</pre><br/>
+<p class="docText">We see that the shell is
+ still the foreground process group for the terminal. We also see that 
+the processes for the new job are in the same session as the shell, but 
+are in a different process group from the first job. Now we bring the 
+second job into the foreground and send it a <tt>SIGINT</tt> signal:</p><pre>$ <b>fg </b>
+./job_mon | ./job_mon | ./job_mon
+<i> Type Control-C to generate</i> SIGINT <i> (signal2)</i>
+Process 1230 (3) received signal 2 (Interrupt)
+Process 1229 (2) received signal 2 (Interrupt)
+Terminal FG process group: 1228
+Process 1228 (1) received signal 2 (Interrupt)</pre><br/>
+<p class="docText">From the above output, we see that the <tt>SIGINT</tt>
+ signal was delivered to all of the processes in the foreground process 
+group. We also see that this job is now the foreground process group for
+ the terminal. Next, we send a <tt>SIGTSTP</tt> signal to the job:</p><pre><i>Type Control-Z to generate</i> SIGTSTP <i>(signal 20 on Linux/x86-32).</i>
+Process 1230 (3) received signal 20 (Stopped)
+Process 1229 (2) received signal 20 (Stopped)
+Terminal FG process group: 1228
+Process 1228 (1) received signal 20 (Stopped)
+
+[2]+  Stopped       ./job_mon | ./job_mon | ./job_mon</pre><br/>
+<p class="docText">Now all members of the process 
+group are stopped. The output indicates that process group 1228 was the 
+foreground job. However, after this job was stopped, the shell became 
+the foreground process group, although we can’t tell this from the 
+output.</p><p class="docText">We then proceed by restarting the job using the <span class="docEmphasis">bg</span> command, which delivers a <tt>SIGCONT</tt> signal to the processes in the job:</p><pre>$ <b>bg </b>                                        <i> Resume job in background</i>
+[2]+ ./job_mon | ./job_mon | ./job_mon &amp;
+Process 1230 (3) received signal 18 (Continued)
+Process 1229 (2) received signal 18 (Continued)
+Terminal FG process group: 1204             <i> The shell is in the foreground</i>
+Process 1228 (1) received signal 18 (Continued)
+$ <b>kill %1 %2 </b>                                <i> We’ve finished: clean up</i>
+[1]-  Terminated    ./job_mon | ./job_mon
+[2]+  Terminated    ./job_mon | ./job_mon | ./job_mon</pre><br/>
+<h4 class="docSection2Title" id="title-ID0ETOGK">34.7.3. Handling Job-Control Signals</h4><p class="docText">Because
+ the operation of job control is transparent to most applications, they 
+don’t need to take special action for dealing with job-control signals. 
+One exception is programs that perform screen handling, such as <span class="docEmphasis">vi</span> and <span class="docEmphasis">less</span>.
+ Such programs control the precise layout of text on a terminal and 
+change various terminal settings, including settings that allow terminal
+ input to be read a character (rather than a line) at a time. (We 
+describe the various terminal settings in Chapter 62.)</p><p class="docText">Screen-handling programs need to handle the terminal stop signal (<tt>SIGTSTP</tt>).
+ The signal handler should reset the terminal into canonical 
+(line-at-a-time) input mode and place the cursor at the bottom-left 
+corner of the terminal. When resumed, the program sets the terminal back
+ into the mode required by the program, checks the terminal window size 
+(which may have been changed by the user in the meantime), and redraws 
+the screen with the desired contents.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">When we suspend or exit a terminal-handling program, such as <span class="docEmphasis">vi</span> on an <span class="docEmphasis">xterm</span>
+ or other terminal emulator, we typically see that the terminal is 
+redrawn with the text that was visible before the program was started. 
+The terminal emulator achieves this effect by catching two character 
+sequences that programs employing the <span class="docEmphasis">terminfo</span> or <span class="docEmphasis">termcap</span> packages are required to output when assuming and releasing control of terminal layout. The first of these sequences, called <span class="docEmphasis">smcup</span> (normally <span class="docEmphasis">Escape</span> followed by <tt>[?1049h</tt>), causes the terminal emulator to switch to its “alternate” screen. The second sequence, called <span class="docEmphasis">rmcup</span> (normally <span class="docEmphasis">Escape</span> followed by <tt>[?1049l</tt>),
+ causes the terminal emulator to revert to its default screen, thus 
+resulting in the reappearance of the original text that was on display 
+before the screen-handling program took control of the terminal.</p><hr noshade="noshade" size="1"/><p class="docText">When handling <tt>SIGTSTP</tt>, we should be aware of some subtleties. We have already noted the first of these in Section 34.7.2: if <tt>SIGTSTP</tt> is caught, then it doesn’t perform its default action of stopping a process. We dealt with this issue in Example 34-5 by having the handler for <tt>SIGTSTP</tt> raise the <tt>SIGSTOP</tt> signal. Since <tt>SIGSTOP</tt>
+ can’t be caught, blocked, or ignored, it is guaranteed to immediately 
+stop the process. However, this approach is not quite correct. In Section 26.1.3, we saw that a parent process can use the wait status value returned by <span class="docEmphasis">wait()</span> or <span class="docEmphasis">waitpid()</span> to determine which signal caused one of its child to stop. If we raise the <tt>SIGSTOP</tt> signal in the handler for <tt>SIGTSTP</tt>, it will (misleadingly) appear to the parent that the child was stopped by <tt>SIGSTOP</tt>.</p><p class="docText">The proper approach in this situation is to have the <tt>SIGTSTP</tt> handler raise a further <tt>SIGTSTP</tt> signal to stop the process, as follows:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">The handler resets the disposition of <tt>SIGTSTP</tt> to its default (<tt>SIG_DFL</tt>).</p></div></li><li><div style="font-weight:normal"><p class="docList">The handler raises <tt>SIGTSTP</tt>.</p></div></li><li><div style="font-weight:normal"><p class="docList">Since <tt>SIGTSTP</tt> was blocked on entry to the handler (unless the <tt>SA_NODEFER</tt> flag was specified), the handler unblocks this signal. At this point, the pending <tt>SIGTSTP</tt> raised in the previous step performs its default action: the process is immediately suspended.</p></div></li><li><div style="font-weight:normal"><p class="docList">At some later time, the process will be resumed upon receipt of <tt>SIGCONT</tt>. At this point, execution of the handler continues.</p></div></li><li><div style="font-weight:normal"><p class="docList">Before returning, the handler reblocks the <tt>SIGTSTP</tt> signal and reestablishes itself to handle the next occurrence of the <tt>SIGTSTP</tt> signal.</p></div></li></ol></div><p class="docText">The step of reblocking the <tt>SIGTSTP</tt> signal is needed to prevent the handler from being recursively called if another <tt>SIGTSTP</tt> signal was delivered after the handler reestablished itself, but before the handler returned. As noted in Section 22.7,
+ recursive invocations of a signal handler could cause stack overflow if
+ a rapid stream of signals is delivered. Blocking the signal also avoids
+ problems if the signal handler needs to perform some other actions 
+(e.g., saving or restoring values from global variables) after 
+reestablishing the handler but before returning.</p><h5 class="docSection3Title" id="title-ID0E4TGK">34.7.3.1. Example program</h5><p class="docText">The handler in Example 34-6 implements the steps described above to correctly handle <tt>SIGTSTP</tt>. (We show another example of the handling of the <tt>SIGTSTP</tt> signal in Example 62-4, in Section 62.7.) After establishing the <tt>SIGTSTP</tt> handler, the <span class="docEmphasis">main()</span> function of this program sits in a loop waiting for signals. Here is an example of what we see when running this program:</p><pre class="preFixedWidth">$ <b>./handling_SIGTSTP </b>
+<i> Type Control-Z, sending</i> SIGTSTP
+Caught SIGTSTP                 <i> This message is printed by</i> SIGTSTP <i> handler</i>
+
+[1]+  Stopped       ./handling_SIGTSTP
+$ <b>fg </b>                           <i> Sends</i> SIGCONT
+./handling_SIGTSTP
+Exiting SIGTSTP handler        <i> Execution of handler continues; handler returns</i>
+Main                           <i> pause() call in main() was interrupted by handler</i>
+<i> Type Control-C to terminate the program</i>
+
+					  </pre><br/>
+<p class="docText">In a screen-handling program such as <span class="docEmphasis">vi</span>, the <span class="docEmphasis">printf()</span> calls inside the signal handler in Example 34-6
+ would be replaced by code that caused the program to modify the 
+terminal mode and redraw the terminal display, as outlined above. 
+(Because of the need to avoid calling non-async-signal-safe functions, 
+described in Section 21.1.2, the handler should do this by setting a flag to inform the main program to redraw the screen.)</p><p class="docText">Note that the <tt>SIGTSTP</tt> handler may interrupt certain blocking system calls (as described in Section 21.5). This point is illustrated in the above program output by the fact that, after the <span class="docEmphasis">pause()</span> call is interrupted, the main program prints the message <span class="docEmphasis">Main</span>.</p><h5 class="docExampleTitle" id="title-ID0EGXGK">Example 34-6. Handling <tt>SIGTSTP</tt></h5><p></p><div class="box"><pre class="preFixedHeight"><b>pgsjc/handling_SIGTSTP.c</b>
+#include &lt;signal.h&gt;
+#include "tlpi_hdr.h"
+
+static void                             /* Handler for SIGTSTP */
+tstpHandler(int sig)
+{
+    sigset_t tstpMask, prevMask;
+    int savedErrno;
+    struct sigaction sa;
+
+    savedErrno = errno;                 /* In case we change 'errno' here */
+
+    printf("Caught SIGTSTP\n");         /* UNSAFE (see Section 21.1.2) */
+
+    if (signal(SIGTSTP, SIG_DFL) == SIG_ERR)
+        errExit("signal");              /* Set handling to default */
+
+    raise(SIGTSTP);                     /* Generate a further SIGTSTP */
+
+    /* Unblock SIGTSTP; the pending SIGTSTP immediately suspends the program */
+
+    sigemptyset(&amp;tstpMask);
+    sigaddset(&amp;tstpMask, SIGTSTP);
+    if (sigprocmask(SIG_UNBLOCK, &amp;tstpMask, &amp;prevMask) == -1)
+        errExit("sigprocmask");
+
+    /* Execution resumes here after SIGCONT */
+
+    if (sigprocmask(SIG_SETMASK, &amp;prevMask, NULL) == -1)
+        errExit("sigprocmask");         /* Reblock SIGTSTP */
+
+    sigemptyset(&amp;sa.sa_mask);           /* Reestablish handler */
+    sa.sa_flags = SA_RESTART;
+    sa.sa_handler = tstpHandler;
+    if (sigaction(SIGTSTP, &amp;sa, NULL) == -1)
+        errExit("sigaction");
+
+    printf("Exiting SIGTSTP handler\n");
+    errno = savedErrno;
+}
+
+int
+main(int argc, char *argv[])
+{
+    struct sigaction sa;
+    /* Only establish handler for SIGTSTP if it is not being ignored */
+
+    if (sigaction(SIGTSTP, NULL, &amp;sa) == -1)
+        errExit("sigaction");
+
+    if (sa.sa_handler != SIG_IGN) {
+        sigemptyset(&amp;sa.sa_mask);
+        sa.sa_flags = SA_RESTART;
+        sa.sa_handler = tstpHandler;
+        if (sigaction(SIGTSTP, &amp;sa, NULL) == -1)
+            errExit("sigaction");
+    }
+
+    for (;;) {                          /* Wait for signals */
+        pause();
+        printf("Main\n");
+    }
+}
+      <b>pgsjc/handling_SIGTSTP.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0EUXGK">34.7.3.2. Dealing with ignored job-control and terminal-generated signals</h5><p class="docText">The program in Example 34-6 establishes a signal handler for <tt>SIGTSTP</tt>
+ only if that signal is not being ignored. This is an instance of the 
+more general rule that applications should handle job-control and 
+terminal-generated signals only if these signals were not previously 
+being ignored. In the case of job-control signals (<tt>SIGTSTP</tt>, <tt>SIGTTIN</tt>, and <tt>SIGTTOU</tt>),
+ this prevents an application from attempting to handle these signals if
+ it is started from a non-job-control shell (such as the traditional 
+Bourne shell). In a non-job-control shell, the dispositions of these 
+signals are set to <tt>SIG_IGN</tt>; only job-control shells set the dispositions of these signals to <tt>SIG_DFL</tt>.</p><p class="docText">A similar statement also applies to the other signals that can be generated from the terminal: <tt>SIGINT</tt>, <tt>SIGQUIT</tt>, and <tt>SIGHUP</tt>. In the case of <tt>SIGINT</tt> and <tt>SIGQUIT</tt>,
+ the reason is that when a command is executed in the background under 
+non-job-control shells, the resulting process is not placed in a 
+separate process group. Instead, the process stays in the same group as 
+the shell, and the shell sets the disposition of <tt>SIGINT</tt> and <tt>SIGQUIT</tt> to be ignored before execing the command. This ensures that the process is not killed if the user types the terminal <span class="docEmphasis">interrupt</span> or <span class="docEmphasis">quit</span>
+ characters (which should affect only the job that is notionally in the 
+foreground). If the process subsequently undoes the shell’s 
+manipulations of the dispositions of these signals, then it once more 
+becomes vulnerable to receiving them.</p><p class="docText">The <tt>SIGHUP</tt> signal is ignored if a command is executed via <span class="docEmphasis">nohup(1)</span>.
+ This prevents the command from being killed as a consequence of a 
+terminal hangup. Thus, an application should not attempt to change the 
+disposition if it is being ignored.</p><h4 class="docSection2Title" id="title-ID0EA2GK">34.7.4. Orphaned Process Groups (and <tt>SIGHUP</tt> Revisited)</h4><p class="docText">In Section 26.2, we saw that an orphaned process is one that has been adopted by <span class="docEmphasis">init</span> (process ID 1) after its parent terminated. Within a program, we can create an orphaned child using the following code:</p><pre>if (fork() != 0)                /* Exit if parent (or on error) */
+    exit(EXIT_SUCCESS);</pre><br/>
+<p class="docText">Suppose that we include this code in a program executed from the shell. Figure 34-3 shows the state of processes before and after the parent exits.</p><p class="docText">After the parent terminates, the child process in Figure 34-3 is not only an orphaned process, it is also part of an <span class="docEmphasis">orphaned process group</span>.
+ SUSv3 defines a process group as orphaned if “the parent of every 
+member is either itself a member of the group or is not a member of the 
+group’s session.” Put another way, a process group is not orphaned if at
+ least one of its members has a parent in the same session but in a 
+different process group. In Figure 34-3, the process group containing the child is orphaned because the child is in a process group on its own and its parent (<span class="docEmphasis">init</span>) is in a different session.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">By definition, a session leader is in an orphaned process group. This follows because <span class="docEmphasis">setsid()</span> creates a new process group in the new session, and the parent of the session leader is in a different session.</p><hr noshade="noshade" size="1"/><p></p><center><h5 class="docFigureTitle">Figure 34-3. Steps in the creation of an orphaned process group</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_002-32.png"/></p></center><p></p><br/><p class="docText">To
+ see why orphaned process groups are important, we need to view things 
+from the perspective of shell job control. Consider the following 
+scenario based on Figure 34-3:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Before the parent process exits, the child was stopped (perhaps because the parent sent it a stop signal).</p></div></li><li><div style="font-weight:normal"><p class="docList">When the parent process exits, the shell removes the parent’s process group from its list of jobs. The child is adopted by <span class="docEmphasis">init</span> and becomes a background process for the terminal. The process group containing the child is orphaned.</p></div></li><li><div style="font-weight:normal"><p class="docList">At this point, there is no process that monitors the state of the stopped child via <span class="docEmphasis">wait()</span>.</p></div></li></ol></div><p class="docText">Since
+ the shell did not create the child process, it is not aware of the 
+child’s existence or that the child is part of the same process group as
+ the deceased parent. Furthermore, the <span class="docEmphasis">init</span>
+ process checks only for a terminated child, and then reaps the 
+resulting zombie process. Consequently, the stopped child might languish
+ forever, since no other process knows to send it a <tt>SIGCONT</tt> signal in order to cause it to resume execution.</p><p class="docText">Even
+ if a stopped process in an orphaned process group has a still-living 
+parent in a different session, that parent is not guaranteed to be able 
+to send <tt>SIGCONT</tt> to the stopped child. A process may send <tt>SIGCONT</tt>
+ to any other process in the same session, but if the child is in a 
+different session, the normal rules for sending signals apply (Section 20.5),
+ so the parent may not be able to send a signal to the child if the 
+child is a privileged process that has changed its credentials.</p><p class="docText">To
+ prevent scenarios such as the one described above, SUSv3 specifies that
+ if a process group becomes orphaned and has any stopped members, then 
+all members of the group are sent a <tt>SIGHUP</tt> signal, to inform them that they have become disconnected from their session, followed by a <tt>SIGCONT</tt>
+ signal, to ensure that they resume execution. If the orphaned process 
+group doesn’t have any stopped members, no signals are sent.</p><p class="docText">A
+ process group may become orphaned either because the last parent in a 
+different process group in the same session terminated or because of the
+ termination of the last process within the group that had a parent in 
+another group. (The latter case is the one illustrated in Figure 34-3.) In either case, the treatment of a newly orphaned process group containing stopped children is the same.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Sending <tt>SIGHUP</tt> and <tt>SIGCONT</tt>
+ to a newly orphaned process group that contains stopped members is done
+ in order to eliminate a specific loophole in the job-control framework.
+ There is nothing to prevent the members of an already-orphaned process 
+group from later being stopped if another process (with suitable 
+privileges) sends them a stop signal. In this case, the processes will 
+remain stopped until some process (again with suitable privileges) sends
+ them a <tt>SIGCONT</tt> signal.</p><p class="docText">When called by a member of an orphaned process group, the <span class="docEmphasis">tcsetpgrp()</span> function (Section 34.5) fails with the error <tt>ENOTTY</tt>, and calls to the <span class="docEmphasis">tcsetattr()</span>, <span class="docEmphasis">tcflush()</span>, <span class="docEmphasis">tcflow()</span>, <span class="docEmphasis">tcsendbreak()</span>, and <span class="docEmphasis">tcdrain()</span> functions (all described in Chapter 62) fail with the error <tt>EIO</tt>.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EIBHK">34.7.4.1. Example program</h5><p class="docText">The program in Example 34-7 demonstrates the treatment of orphaned processes that we have just described. After establishing handlers for <tt>SIGHUP</tt> and <tt>SIGCONT</tt> <img alt="" border="0" id="" src="Images/getfile_005-24.png"/>, this program creates one child process for each command-line argument <img alt="" border="0" id="" src="Images/getfile_003-30.png"/>. Each child then stops itself (by raising <tt>SIGSTOP</tt>) <img alt="" border="0" id="" src="Images/getfile_004.png"/>, or waits for signals (using <span class="docEmphasis">pause()</span>) <img alt="" border="0" id="" src="Images/getfile_011-4.png"/>.
+ The choice of action by the child is determined by whether or not the 
+corresponding command-line argument starts with the letter <span class="docEmphasis">s</span> (for <span class="docEmphasis">stop</span>). (We use a command-line argument starting with the letter <span class="docEmphasis">p</span> to specify the converse action of calling <span class="docEmphasis">pause()</span>, although any character other than the letter <span class="docEmphasis">s</span> can be used.)</p><p class="docText">After creating all of the children, the parent sleeps for a few seconds to allow the children time to get set up <img alt="" border="0" id="" src="Images/getfile_013.png"/>. (As noted in Section 24.2, using <span class="docEmphasis">sleep()</span> in this way is an imperfect, but sometimes viable method of accomplishing this result.) The parent then exits <img alt="" border="0" id="" src="Images/getfile_008-11.png"/>,
+ at which point the process group containing the children becomes 
+orphaned. If any of the children receives a signal as a consequence of 
+the process group becoming orphaned, the signal handler is invoked, and 
+it displays the child’s process ID and the signal number <img alt="" border="0" id="" src="Images/getfile_006-16.png"/>.</p><h5 class="docExampleTitle" id="title-ID0EXFHK">Example 34-7. <tt>SIGHUP</tt> and orphaned process groups</h5><p></p><div class="box"><pre class="preFixedHeight"><b>pgsjc/orphaned_pgrp_SIGHUP.c</b>
+    #define _GNU_SOURCE     /* Get declaration of strsignal() from &lt;string.h&gt; */
+    #include &lt;string.h&gt;
+    #include &lt;signal.h&gt;
+    #include "tlpi_hdr.h"
+
+    static void             /* Signal handler */
+    handler(int sig)
+    {
+<img alt="" border="0" id="" src="Images/getfile_006-17.png"/>    printf("PID=%ld: caught signal %d (%s)\n", (long) getpid(),
+                sig, strsignal(sig));     /* UNSAFE (see Section 21.1.2) */
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        int j;
+        struct sigaction sa;
+
+        if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+            usageErr("%s {s|p} ...\n", argv[0]);
+
+        setbuf(stdout, NULL);               /* Make stdout unbuffered */
+
+        sigemptyset(&amp;sa.sa_mask);
+        sa.sa_flags = 0;
+        sa.sa_handler = handler;
+<img alt="" border="0" id="" src="Images/getfile_005-25.png"/>    if (sigaction(SIGHUP, &amp;sa, NULL) == -1)
+            errExit("sigaction");
+        if (sigaction(SIGCONT, &amp;sa, NULL) == -1)
+            errExit("sigaction");
+
+        printf("parent: PID=%ld, PPID=%ld, PGID=%ld, SID=%ld\n",
+                (long) getpid(), (long) getppid(),
+                (long) getpgrp(), (long) getsid(0));
+
+        /* Create one child for each command-line argument */
+
+<img alt="" border="0" id="" src="Images/getfile_003-31.png"/>    for (j = 1; j &lt; argc; j++) {
+            switch (fork()) {
+            case -1:
+                errExit("fork");
+
+            case 0:         /* Child */
+                printf("child:  PID=%ld, PPID=%ld, PGID=%ld, SID=%ld\n",
+                        (long) getpid(), (long) getppid(),
+                        (long) getpgrp(), (long) getsid(0));
+
+                if (argv[j][0] == 's') {    /* Stop via signal */
+                    printf("PID=%ld stopping\n", (long) getpid());
+    <img alt="" border="0" id="" src="Images/getfile_004.png"/>                raise(SIGSTOP);
+                } else {                    /* Wait for signal */
+                    alarm(60);              /* So we die if not SIGHUPed */
+                    printf("PID=%ld pausing\n", (long) getpid());
+<img alt="" border="0" id="" src="Images/getfile_011-5.png"/>                pause();
+                }
+
+                _exit(EXIT_SUCCESS);
+
+            default:        /* Parent carries on round loop */
+                break;
+            }
+        }
+
+        /* Parent falls through to here after creating all children */
+
+<img alt="" border="0" id="" src="Images/getfile_013.png"/>    sleep(3);                           /* Give children a chance to start */
+        printf("parent exiting\n");
+<img alt="" border="0" id="" src="Images/getfile_008-12.png"/>    exit(EXIT_SUCCESS);                 /* And orphan them and their group */
+    }
+
+         <b>pgsjc/orphaned_pgrp_SIGHUP.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The following shell session log shows the results of two different runs of the program in Example 34-7:</p><pre class="preFixedWidth">$ <b>echo $$ </b>                     <i> Display PID of shell, which is also the session ID</i>
+4785
+$ <b>./orphaned_pgrp_SIGHUP s p </b>
+parent: PID=4827, PPID=4785, PGID=4827, SID=4785
+child:  PID=4828, PPID=4827, PGID=4827, SID=4785
+PID=4828 stopping
+child:  PID=4829, PPID=4827, PGID=4827, SID=4785
+PID=4829 pausing
+parent exiting
+$ PID=4828: caught signal 18 (Continued)
+PID=4828: caught signal 1 (Hangup)
+PID=4829: caught signal 18 (Continued)
+PID=4829: caught signal 1 (Hangup)
+<i> Press Enter to get another shell prompt</i>
+$ <b>./orphaned_pgrp_SIGHUP p p </b>
+parent: PID=4830, PPID=4785, PGID=4830, SID=4785
+child:  PID=4831, PPID=4830, PGID=4830, SID=4785
+PID=4831 pausing
+child:  PID=4832, PPID=4830, PGID=4830, SID=4785
+PID=4832 pausing
+parent exiting
+
+					  </pre><br/>
+<p class="docText">The first run creates two 
+children in the to-be-orphaned process group: one stops itself and the 
+other pauses. (In this run, the shell prompt appears in the middle of 
+the children’s output because the shell notices that the parent has 
+already exited.) As can be seen, both children receive <tt>SIGCONT</tt> and <tt>SIGHUP</tt>
+ after the parent exits. In the second run, two children are created, 
+neither stops itself, and consequently no signals are sent when the 
+parent exits.</p><h5 class="docSection3Title" id="title-ID0EVIHK">34.7.4.2. Orphaned process groups and the <tt>SIGTSTP</tt>, <tt>SIGTTIN</tt>, and <tt>SIGTTOU</tt> signals</h5><p class="docText">Orphaned process groups also affect the semantics for delivery of the <tt>SIGTSTP</tt>, <tt>SIGTTIN</tt>, and <tt>SIGTTOU</tt> signals.</p><p class="docText">In Section 34.7.1, we saw that <tt>SIGTTIN</tt> is sent to a background process if it tries to <span class="docEmphasis">read()</span> from the controlling terminal, and <tt>SIGTTOU</tt> is sent to a background process that tries to <span class="docEmphasis">write()</span> to the controlling terminal if the terminal’s <tt>TOSTOP</tt>
+ flag is set. However, it makes no sense to send these signals to an 
+orphaned process group since, once stopped, it will never be resumed 
+again. For this reason, instead of sending <tt>SIGTTIN</tt> or <tt>SIGTTOU</tt>, the kernel causes <span class="docEmphasis">read()</span> or <span class="docEmphasis">write()</span> to fail with the error <tt>EIO</tt>.</p><p class="docText">For similar reasons, if delivery of <tt>SIGTSTP</tt>, <tt>SIGTTIN</tt>, or <tt>SIGTTOU</tt>
+ would stop a member of an orphaned process group, then the signal is 
+silently discarded. (If the signal is being handled, then it is 
+delivered to the process.) This behavior occurs no matter how the signal
+ is sent—for example, whether the signal is generated by the terminal 
+driver or sent by an explicit call to <span class="docEmphasis">kill()</span>.</p>
+</div>
+</body>
+</html>

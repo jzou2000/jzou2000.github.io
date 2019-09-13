@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 52. Specializing for Type Information</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 52. Specializing for Type Information</h2>
+		
+<p class="docText">Class
+ template explicit specialization and partial specialization are 
+commonly used to produce versions of a primary class template that are 
+customized to specific template arguments or classes of template 
+arguments (see <span class="docEmphasis">Class Template Explicit Specialization</span> [46, 155] and <span class="docEmphasis">Template Partial Specialization</span> [47, 161]).</p>
+		
+<p class="docText">However, these language 
+features are also commonly used in an inverse fashion: Rather than 
+produce a specialization based on the properties of a type, the 
+properties of a type are deduced from a specialization. Let’s look at a 
+simple example:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+struct IsInt // T is not an int...
+    { enum { result = false }; };
+template &lt;&gt;
+struct IsInt&lt;int&gt; // unless it's an int!
+    { enum { result = true }; };
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Before we go on, I’d like to 
+point out how simple the above code is, once you get past its convoluted
+ syntax. This is a simple example of what’s known as template 
+metaprogramming, that is, performing some portion of a computation at 
+compile time rather than runtime through the use of template 
+instantiation. It sounds high falutin’, but it still boils down to an 
+observation that might have come from one of my plainspoken, 
+cranberry-farming neighbors: “It’s an <tt>int</tt> if it’s an <tt>int</tt>.” Most advanced C++ template programming is no more difficult than this, just more involved.</p>
+		
+<p class="docText">With the primary template and
+ complete specialization above, we can ask (at compile time) whether an 
+unknown type is actually an <tt>int</tt>:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename X&gt;
+void aFunc( X &amp;arg ) {
+    //...
+
+    ...IsInt&lt;X&gt;::result...
+    //...
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The
+ ability to ask such questions about types at compile time is the basis 
+of a number of important optimization and error-checking techniques. Of 
+course, knowing whether a particular type is precisely an <tt>int</tt>
+ is of limited utility. Knowing whether a type is a pointer is probably 
+more generally useful, since implementations often take different forms 
+depending on whether they are dealing with pointers to objects or with 
+objects directly:</p>
+		
+<div class="docText">
+  <pre>struct Yes {}; // a type analog to true
+struct No {}; // a type analog to false
+
+
+template &lt;typename T&gt;
+struct IsPtr // T is not a ptr...
+    { enum { result = false }; typedef No Result; };
+template &lt;typename T&gt;
+struct IsPtr&lt;T *&gt; // unless it's an unqualified ptr,
+    { enum { result = true }; typedef Yes Result; };
+template &lt;typename T&gt;
+struct IsPtr&lt;T *const&gt; // or a const ptr,
+    { enum { result = true }; typedef Yes Result; };
+template &lt;typename T&gt;
+struct IsPtr&lt;T *volatile&gt; // or a volatile ptr,
+    { enum { result = true }; typedef Yes Result; };
+template &lt;typename T&gt;
+struct IsPtr&lt;T *const volatile&gt; // or a const volatile ptr.
+    { enum { result = true }; typedef Yes Result; };
+</pre>
+</div>
+<br/>
+		
+<p class="docText">We’re asking a more general question with <tt>IsPtr</tt> than we did with <tt>IsInt</tt>,
+ so we’re employing partial specialization to “capture” the variously 
+qualified versions of the pointer modifier. As advertised above, this <tt>IsPtr</tt> facility is really no more difficult to understand than the <tt>IsInt</tt> facility; it’s just more syntactically challenging. (See also <span class="docEmphasis">SFINAE</span> [59, 217] for a similar metaprogramming technique.)</p>
+		
+<p class="docText">To
+ see the utility of the ability to ask questions about a type at compile
+ time, consider this implementation of a simple stack template:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+class Stack {
+  public:
+    ~Stack();
+    void push( const T &amp;val );
+    T &amp;top();
+    void pop();
+    bool empty() const;
+  private:
+    //...
+    typedef std::deque&lt;T&gt; C;
+    typedef typename C::iterator I;
+    C s_;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Our stack is simply a pleasant interface wrapped around a standard <tt>deque</tt>, similar to what we could have achieved with a standard <tt>stack</tt> container adapter. Most of the operations are straightforward and can be implemented directly with the <tt>deque</tt>.</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+void Stack&lt;T&gt;::push( const T &amp;val )
+    { s_.push_back( val ); }
+</pre>
+</div>
+<br/>
+		
+<p class="docText">However, we may have a problem with the <tt>Stack</tt>’s destructor. When the <tt>Stack</tt> is destroyed, its <tt>deque</tt> data member will be destroyed as well, which in turn will destroy any elements left in the <tt>deque</tt>.
+ If these elements are pointers, however, the objects to which they 
+point will not be deleted; that’s just the way the standard <tt>deque</tt> container behaves. Therefore, we have to decide on a pointer element deletion policy for our <tt>Stack</tt>, which I will imperiously declare is to delete! (But see <span class="docEmphasis">Policies</span> [56, 205] for a more flexible approach.) We can’t simply have the destructor delete the <tt>deque</tt> elements, however, because that would cause an error in those cases where the elements are not pointers.</p>
+		
+<p class="docText">One solution would be to use partial specialization of the <tt>Stack</tt> (primary) template to handle stacks of pointers (see <span class="docEmphasis">Template Partial Specialization</span>[47, 161]). However, that seems like an overreaction when only a small portion of the <tt>Stack</tt>’s
+ behavior must change. A different approach simply asks the obvious 
+question (at compile time) and acts accordingly: “If the element type of
+ the <tt>Stack</tt> is a pointer, then delete any remaining elements. Otherwise don’t delete.”</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+class Stack {
+  public:
+    ~Stack()
+        { cleanup( typename IsPtr&lt;T&gt;::Result() ); }
+    //...
+  private:
+    void cleanup( Yes ) {
+        for( I i( s_.begin() ); i != s_.end(); ++i )
+            delete *i;
+    }
+    void cleanup( No )
+        {}
+    typedef std::deque&lt;T&gt; C;
+    typedef typename C::iterator I;
+    C s_;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Here we have two different <tt>cleanup</tt> member functions, one of which takes an argument of type <tt>Yes</tt>, while the other takes an argument of type <tt>No</tt>. The <tt>Yes</tt> version deletes; the <tt>No</tt> version does not. The destructor asks the question “Is <tt>T</tt> a pointer type?” by instantiating <tt>IsPtr</tt> with <tt>T</tt> and accessing the nested type name <tt>Result</tt> (see <span class="docEmphasis">Disambiguating with Typename</span> [49, 169]), which will be either <tt>Yes</tt> or <tt>No</tt>, and passing an object of that type to <tt>cleanup</tt>. Only one of the two versions of <tt>cleanup</tt> will be instantiated and called, and the other will not (see <span class="docEmphasis">You Instantiate What You Use</span> [61, 225]).</p>
+		
+<div class="docText">
+  <pre>Stack&lt;Shape *&gt; shapes; // will delete
+Stack&lt;std::string&gt; names; // won't delete
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Class
+ template specializations can be used to extract arbitrarily complex 
+information from types. For instance, we may want to know not only 
+whether a particular type is an array but, if it is an array, what it’s 
+an array of and what its bound is:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+struct IsArray { // T is not an array...
+    enum { result = false };
+    typedef No Result;
+};
+template &lt;typename E, int b&gt;
+struct IsArray&lt;E [b]&gt; { // ...unless it's an array!
+    enum { result = true };
+    typedef Yes Result;
+    enum { bound = b }; // array bound
+    typedef E Etype; // array element type
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">We may want to know not 
+only whether a particular type is a pointer to data member, but, if it 
+is, what its class and member types are:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+struct IsPCM { // T is not a pointer to data member
+    enum { result = false };
+    typedef No Result;
+};
+template &lt;class C, typename T&gt;
+struct IsPCM&lt;T C::*&gt; { // ...unless it is!
+    enum { result = true };
+    typedef Yes Result;
+    typedef C ClassType; // the class type
+    typedef T MemberType; // the type of class member
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">These techniques are employed in a number of popular toolkits that provide the ability to access type traits (see <span class="docEmphasis">Traits</span> [54, 193]) for compile-time code customization.</p>
+		
+
+
+</body>
+</html>

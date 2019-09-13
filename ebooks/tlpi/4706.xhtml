@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>47.6. Semaphore Operations</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">47.6. Semaphore Operations</h3><p class="docText">The <span class="docEmphasis">semop()</span> system call performs one or more operations on the semaphores in the semaphore set identified by <span class="docEmphasis">semid</span>.</p><pre>#include &lt;sys/types.h&gt;        /* For portability */
+#include &lt;sys/sem.h&gt;
+
+int <b>semop</b>(int <span class="docEmphasis">semid</span>, struct sembuf *<span class="docEmphasis">sops</span>, unsigned int <span class="docEmphasis">nsops</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">sops</span> argument is a pointer to an array that contains the operations to be performed, and <span class="docEmphasis">nsops</span>
+ gives the size of this array (which must contain at least one element).
+ The operations are performed atomically and in array order. The 
+elements of the <span class="docEmphasis">sops</span> array are structures of the following form:</p><pre class="preFixedWidth">struct sembuf {
+    unsigned short sem_num;     /* Semaphore number */
+    short          sem_op;      /* Operation to be performed */
+    short          sem_flg;     /* Operation flags (IPC_NOWAIT and SEM_UNDO) */
+};
+
+					  </pre><br/>
+<p class="docText">The <span class="docEmphasis">sem_num</span> field identifies the semaphore within the set upon which the operation is to be performed. The <span class="docEmphasis">sem_op</span> field specifies the operation to be performed:</p><ul><li><p class="docList">If <span class="docEmphasis">sem_op</span> is greater than 0, the value of <span class="docEmphasis">sem_op</span>
+ is added to the semaphore value. As a result, other processes waiting 
+to decrease the semaphore value may be awakened and perform their 
+operations. The calling process must have alter (write) permission on 
+the semaphore.</p></li><li><p class="docList">If <span class="docEmphasis">sem_op</span>
+ equals 0, the value of the semaphore is checked to see whether it 
+currently equals 0. If it does, the operation completes immediately; 
+otherwise, <span class="docEmphasis">semop()</span> blocks until the semaphore value becomes 0. The calling process must have read permission on the semaphore.</p></li><li><p class="docList">If <span class="docEmphasis">sem_op</span> is less than 0, decrease the value of the semaphore by the amount specified in <span class="docEmphasis">sem_op</span>. If the current value of the semaphore is greater than or equal to the absolute value of <span class="docEmphasis">sem_op</span>, the operation completes immediately. Otherwise, <span class="docEmphasis">semop()</span>
+ blocks until the semaphore value has been increased to a level that 
+permits the operation to be performed without resulting in a negative 
+value. The calling process must have alter permission on the semaphore.</p></li></ul><p class="docText">Semantically,
+ increasing the value of a semaphore corresponds to making a resource 
+available so that others can use it, while decreasing the value of a 
+semaphore corresponds to reserving a resource for (exclusive) use by 
+this process. When decreasing the value of a semaphore, the operation is
+ blocked if the semaphore value is too low—that is, if some other 
+process has already reserved the resource.</p><p class="docText">When a <span class="docEmphasis">semop()</span> call blocks, the process remains blocked until one of the following occurs:</p><ul><li><p class="docList">Another process modifies the value of the semaphore such that the requested operation can proceed.</p></li><li><p class="docList">A signal interrupts the <span class="docEmphasis">semop()</span> call. In this case, the error <tt>EINTR</tt> results. (As noted in Section 21.5, <span class="docEmphasis">semop()</span> is never automatically restarted after being interrupted by a signal handler.)</p></li><li><p class="docList">Another process deletes the semaphore referred to by <span class="docEmphasis">semid</span>. In this case, <span class="docEmphasis">semop()</span> fails with the error <tt>EIDRM</tt>.</p></li></ul><p class="docText">We can prevent <span class="docEmphasis">semop()</span> from blocking when performing an operation on a particular semaphore by specifying the <tt>IPC_NOWAIT</tt> flag in the corresponding <span class="docEmphasis">sem_flg</span> field. In this case, if <span class="docEmphasis">semop()</span> would have blocked, it instead fails with the error <tt>EAGAIN</tt>.</p><p class="docText">While it is usual to operate on a single semaphore at a time, it is possible to make a <span class="docEmphasis">semop()</span>
+ call that performs operations on multiple semaphores in a set. The key 
+point to note is that this group of operations is performed atomically; 
+that is, <span class="docEmphasis">semop()</span>
+ either performs all of the operations immediately, if possible, or 
+blocks until it would be possible to perform all of the operations 
+simultaneously.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Few systems document the fact that <span class="docEmphasis">semop()</span>
+ performs operations in array order, although all systems known to the 
+author do so, and a few applications depend on this behavior. SUSv4 adds
+ text that explicitly requires this behavior.</p><hr noshade="noshade" size="1"/><p class="docText">Example 47-7 demonstrates the use of <span class="docEmphasis">semop()</span>
+ to perform operations on three semaphores in a set. The operations on 
+semaphores 0 and 2 may not be able to proceed immediately, depending on 
+the current values of the semaphores. If the operation on semaphore 0 
+can’t be performed immediately, then none of the requested operations is
+ performed, and <span class="docEmphasis">semop()</span>
+ blocks. On the other hand, if the operation on semaphore 0 could be 
+performed immediately, but the operation on semaphore 2 could not, 
+then—because the <tt>IPC_NOWAIT</tt> flag was specified—none of the requested operations is performed, and <span class="docEmphasis">semop()</span> returns immediately with the error <tt>EAGAIN</tt>.</p><p class="docText">The <span class="docEmphasis">semtimedop()</span> system call performs the same task as <span class="docEmphasis">semop()</span>, except that the <span class="docEmphasis">timeout</span> argument specifies an upper limit on the time for which the call will block.</p><pre>#define _GNU_SOURCE
+#include &lt;sys/types.h&gt;        /* For portability */
+#include &lt;sys/sem.h&gt;
+
+int <b>semtimedop</b>(int <span class="docEmphasis">semid</span>, struct sembuf *<span class="docEmphasis">sops</span>, unsigned int <span class="docEmphasis">nsops</span>,
+               struct timespec *<span class="docEmphasis">timeout</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">timeout</span> argument is a pointer to a <span class="docEmphasis">timespec</span> structure (Section 23.4.2),
+ which allows a time interval to be expressed as a number of seconds and
+ nanoseconds. If the specified time interval expires before it is 
+possible to complete the semaphore operation, <span class="docEmphasis">semtimedop()</span> fails with the error <tt>EAGAIN</tt>. If <span class="docEmphasis">timeout</span> is specified as <tt>NULL</tt>, <span class="docEmphasis">semtimedop()</span> is exactly the same as <span class="docEmphasis">semop()</span>.</p><p class="docText">The <span class="docEmphasis">semtimedop()</span> system call is provided as a more efficient method of setting a timeout on a semaphore operation than using <span class="docEmphasis">setitimer()</span> plus <span class="docEmphasis">semop()</span>.
+ The small performance benefit that this confers is significant for 
+certain applications (notably, some database systems) that need to 
+frequently perform such operations. However, <span class="docEmphasis">semtimedop()</span> is not specified in SUSv3 and is present on only a few other UNIX implementations.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">semtimedop()</span>
+ system call appeared as a new feature in Linux 2.6 and was subsequently
+ back-ported into Linux 2.4, starting with kernel 2.4.22.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0EBMCM">Example 47-7. Using <span class="docEmphasis">semop()</span> to perform operations on multiple System V semaphores</h5><p></p><div class="box"><pre class="preFixedWidth">struct sembuf sops[3];
+
+   sops[0].sem_num = 0;                 /* Subtract 1 from semaphore 0 */
+   sops[0].sem_op = -1;
+   sops[0].sem_flg = 0;
+
+   sops[1].sem_num = 1;                 /* Add 2 to semaphore 1 */
+   sops[1].sem_op = 2;
+   sops[1].sem_flg = 0;
+
+   sops[2].sem_num = 2;                 /* Wait for semaphore 2 to equal 0 */
+   sops[2].sem_op = 0;
+   sops[2].sem_flg = IPC_NOWAIT;        /* But don't block if operation
+                                           can't be performed immediately */
+   if (semop(semid, sops, 3) == -1) {
+       if (errno == EAGAIN)             /* Semaphore 2 would have blocked */
+           printf("Operation would have blocked\n");
+       else
+           errExit("semop");            /* Some other error */
+   }
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0EKMCM">47.6.1. </h4><h5 class="docSection3Title" id="title-ID0EOMCM">47.6.1.1. Example program</h5><p class="docText">The program in Example 47-8 provides a command-line interface to the <span class="docEmphasis">semop()</span>
+ system call. The first argument to this program is the identifier of 
+the semaphore set upon which operations are to be performed.</p><p class="docText">Each of the remaining command-line arguments specifies a group of semaphore operations to be performed in a single <span class="docEmphasis">semop()</span>
+ call. The operations within a single command-line argument are 
+delimited by commas. Each operation has one of the following forms:</p><ul><li><p class="docList"><span class="docEmphasis">semnum</span><tt>+</tt><span class="docEmphasis">value</span>: add <span class="docEmphasis">value</span> to semaphore <span class="docEmphasis">semnum</span>.</p></li><li><p class="docList"><span class="docEmphasis">semnum</span><tt>-</tt><span class="docEmphasis">value</span>: subtract <span class="docEmphasis">value</span> from semaphore <span class="docEmphasis">semnum</span>.</p></li><li><p class="docList"><span class="docEmphasis">semnum</span><tt>=0</tt>: test semaphore <span class="docEmphasis">semnum</span> to see if it equals 0.</p></li></ul><p class="docText">At the end of each operation, we can optionally include an <span class="docEmphasis">n</span>, a <span class="docEmphasis">u</span>, or both. The letter <span class="docEmphasis">n</span> means include <tt>IPC_NOWAIT</tt> in the <span class="docEmphasis">sem_flg</span> value for this operation. The letter <span class="docEmphasis">u</span> means include <tt>SEM_UNDO</tt> in <span class="docEmphasis">sem_flg</span>. (We describe the <tt>SEM_UNDO</tt> flag in Section 47.8.)</p><p class="docText">The following command line specifies two <span class="docEmphasis">semop()</span> calls on the semaphore set whose identifier is 0:</p><pre>$ <b>./svsem_op 0 0=0 0-1,1-2n</b></pre><br/>
+<p class="docText">The first command-line argument specifies a <span class="docEmphasis">semop()</span> call that waits until semaphore zero equals 0. The second argument specifies a <span class="docEmphasis">semop()</span> call that subtracts 1 from semaphore 0, and subtracts 2 from semaphore 1. For the operation on semaphore 0, <span class="docEmphasis">sem_flg</span> is 0; for the operation on semaphore 1, <span class="docEmphasis">sem_flg</span> is <tt>IPC_NOWAIT</tt>.</p><h5 class="docExampleTitle" id="title-ID0EZQCM">Example 47-8. Performing System V semaphore operations with <span class="docEmphasis">semop()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>svsem/svsem_op.c</b>
+#include &lt;sys/types.h&gt;
+#include &lt;sys/sem.h&gt;
+#include &lt;ctype.h&gt;
+#include "curr_time.h"          /* Declaration of currTime() */
+#include "tlpi_hdr.h"
+
+#define MAX_SEMOPS 1000         /* Maximum operations that we permit for
+                                   a single semop() */
+
+static void
+usageError(const char *progName)
+{
+    fprintf(stderr, "Usage: %s semid op[,op...] ...\n\n", progName);
+    fprintf(stderr, "'op' is either: &lt;sem#&gt;{+|-}&lt;value&gt;[n][u]\n");
+    fprintf(stderr, "            or: &lt;sem#&gt;=0[n]\n");
+    fprintf(stderr, "       \"n\" means include IPC_NOWAIT in 'op'\n");
+    fprintf(stderr, "       \"u\" means include SEM_UNDO in 'op'\n\n");
+    fprintf(stderr, "The operations in each argument are "
+                    "performed in a single semop() call\n\n");
+    fprintf(stderr, "e.g.: %s 12345 0+1,1-2un\n", progName);
+    fprintf(stderr, "      %s 12345 0=0n 1+1,2-1u 1=0\n", progName);
+    exit(EXIT_FAILURE);
+}
+
+/* Parse comma-delimited operations in 'arg', returning them in the
+   array 'sops'. Return number of operations as function result. */
+
+static int
+parseOps(char *arg, struct sembuf sops[])
+{
+    char *comma, *sign, *remaining, *flags;
+    int numOps;                 /* Number of operations in 'arg' */
+
+    for (numOps = 0, remaining = arg; ; numOps++) {
+        if (numOps &gt;= MAX_SEMOPS)
+            cmdLineErr("Too many operations (maximum=%d): \"%s\"\n",
+                        MAX_SEMOPS, arg);
+
+        if (*remaining == '\0')
+            fatal("Trailing comma or empty argument: \"%s\"", arg);
+        if (!isdigit((unsigned char) *remaining))
+            cmdLineErr("Expected initial digit: \"%s\"\n", arg);
+
+        sops[numOps].sem_num = strtol(remaining, &amp;sign, 10);
+
+        if (*sign == '\0' || strchr("+-=", *sign) == NULL)
+            cmdLineErr("Expected '+', '-', or '=' in \"%s\"\n", arg);
+        if (!isdigit((unsigned char) *(sign + 1)))
+            cmdLineErr("Expected digit after '%c' in \"%s\"\n", *sign, arg);
+
+        sops[numOps].sem_op = strtol(sign + 1, &amp;flags, 10);
+
+        if (*sign == '-')                       /* Reverse sign of operation */
+            sops[numOps].sem_op = - sops[numOps].sem_op;
+        else if (*sign == '=')                  /* Should be '=0' */
+            if (sops[numOps].sem_op != 0)
+                cmdLineErr("Expected \"=0\" in \"%s\"\n", arg);
+
+        sops[numOps].sem_flg = 0;
+        for (;; flags++) {
+            if (*flags == 'n')
+                sops[numOps].sem_flg |= IPC_NOWAIT;
+            else if (*flags == 'u')
+                sops[numOps].sem_flg |= SEM_UNDO;
+            else
+                break;
+        }
+
+        if (*flags != ',' &amp;&amp; *flags != '\0')
+            cmdLineErr("Bad trailing character (%c) in \"%s\"\n", *flags, arg);
+
+        comma = strchr(remaining, ',');
+        if (comma == NULL)
+            break;                              /* No comma --&gt; no more ops */
+        else
+            remaining = comma + 1;
+    }
+
+    return numOps + 1;
+}
+
+int
+main(int argc, char *argv[])
+{
+    struct sembuf sops[MAX_SEMOPS];
+    int ind, nsops;
+
+    if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+        usageError(argv[0]);
+
+    for (ind = 2; argv[ind] != NULL; ind++) {
+        nsops = parseOps(argv[ind], sops);
+
+        printf("%5ld, %s: about to semop()  [%s]\n", (long) getpid(),
+                currTime("%T"), argv[ind]);
+
+        if (semop(getInt(argv[1], 0, "semid"), sops, nsops) == -1)
+            errExit("semop (PID=%ld)", (long) getpid());
+
+        printf("%5ld, %s: semop() completed [%s]\n", (long) getpid(),
+                currTime("%T"), argv[ind]);
+    }
+
+    exit(EXIT_SUCCESS);
+}
+      <b>svsem/svsem_op.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Using the program in Example 47-8,
+ along with various others shown in this chapter, we can study the 
+operation of System V semaphores, as demonstrated in the following shell
+ session. We begin by using a program that creates a semaphore set 
+containing two semaphores, which we initialize to 1 and 0:</p><pre>$ <b>./svsem_create -p 2 </b>
+32769                                               <i> ID of semaphore set</i>
+$ <b>./svsem_setall 32769 1 0 </b>
+Semaphore values changed (PID=3658)</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">We don’t show the code of the <tt>svsem/svsem_create.c</tt>
+ program in this chapter, but it is provided in the source code 
+distribution for this book. This program performs the same function for 
+semaphores as the program in Example 46-1 (in Section 46.1) performs for message queues; that is, it creates a semaphore set. The only notable difference is that <tt>svsem_create.c</tt> takes an additional argument specifying the size of the semaphore set to be created.</p><hr noshade="noshade" size="1"/><p class="docText">Next, we start three background instances of the program in Example 47-8 to perform <span class="docEmphasis">semop()</span>
+ operations on the semaphore set. The program prints messages before and
+ after each semaphore operation. These messages include the time, so 
+that we can see when each operation starts and when it completes, and 
+the process ID, so that we can track the operation of multiple instances
+ of the program. The first command makes a request to decrease both 
+semaphores by 1:</p><pre>$ <b>./svsem_op 32769 0-1,1-1 &amp; </b>                        <i> Operation 1</i>
+ 3659, 16:02:05: about to semop()  [0-1,1-1]
+[1] 3659</pre><br/>
+<p class="docText">In the above output, we see that the program printed a message saying that the <span class="docEmphasis">semop()</span> operation is about to be performed, but did not print any further messages, because the <span class="docEmphasis">semop()</span> call blocks. The call blocks because semaphore 1 has the value 0.</p><p class="docText">Next, we execute a command that makes a request to decrease semaphore 1 by 1:</p><pre>$ <b>./svsem_op 32769 1-1 &amp; </b>                            <i> Operation 2</i>
+ 3660, 16:02:22: about to semop()  [1-1]
+[2] 3660</pre><br/>
+<p class="docText">This command also blocks. Next, we execute a command that waits for the value of semaphore 0 to equal 0:</p><pre>$ <b>./svsem_op 32769 0=0 &amp; </b>                            <i> Operation 3</i>
+ 3661, 16:02:27: about to semop()  [0=0]
+[3] 3661</pre><br/>
+<p class="docText">Again, this command blocks, in this case because the value of semaphore 0 is currently 1.</p><p class="docText">Now, we use the program in Example 47-3 to inspect the semaphore set:</p><pre>$ <b>./svsem_mon 32769</b>
+Semaphore changed: Sun Jul 25 16:01:53 2010
+Last semop():      Thu Jan  1 01:00:00 1970
+Sem #  Value  SEMPID  SEMNCNT  SEMZCNT
+  0       1       0      1        1
+  1       0       0      2        0</pre><br/>
+<p class="docText">When a semaphore set is created, the <span class="docEmphasis">sem_otime</span> field of the associated <span class="docEmphasis">semid_ds</span> data structure is initialized to 0. A calendar time value of 0 corresponds to the Epoch (Section 10.1), and <span class="docEmphasis">ctime()</span> displays this as 1 AM, 1 January 1970, since the local timezone is Central Europe, one hour ahead of UTC.</p><p class="docText">Examining the output further, we can see that, for semaphore 0, the <span class="docEmphasis">semncnt</span> value is 1 because operation 1 is waiting to decrease the semaphore value, and <span class="docEmphasis">semzcnt</span>
+ is 1 because operation 3 is waiting for this semaphore to equal 0. For 
+semaphore 1, the semncnt value of 2 reflects the fact that operation 1 
+and operation 2 are waiting to decrease the semaphore value.</p><p class="docText">Next,
+ we try a nonblocking operation on the semaphore set. This operation 
+waits for semaphore 0 to equal 0. Since this operation can’t be 
+immediately performed, <span class="docEmphasis">semop()</span> fails with the error <tt>EAGAIN</tt>:</p><pre class="preFixedWidth">$ <b>./svsem_op 32769 0=0n </b>                             <i> Operation 4</i>
+ 3673, 16:03:13: about to semop()  [0=0n]
+ERROR [EAGAIN/EWOULDBLOCK Resource temporarily unavailable] semop (PID=3673)
+
+					  </pre><br/>
+<p class="docText">Now we add 1 to semaphore 1. This causes two of the earlier blocked operations (1 and 3) to unblock:</p><pre>$ <b>./svsem_op 32769 1+1 </b>                              <i> Operation 5</i>
+ 3674, 16:03:29: about to semop()  [1+1]
+ 3659, 16:03:29: semop() completed [0-1,1-1]        <i> Operation 1 completes</i>
+ 3661, 16:03:29: semop() completed [0=0]            <i> Operation 3 completes</i>
+ 3674, 16:03:29: semop() completed [1+1]            <i> Operation 5 completes</i>
+[1]   Done              ./svsem_op 32769 0-1,1-1
+[3]+  Done              ./svsem_op 32769 0=0</pre><br/>
+<p class="docText">When we use our monitoring program to inspect the state of the semaphore set, we see that the <span class="docEmphasis">sem_otime</span> field of the associated <span class="docEmphasis">semid_ds</span> data structure has been updated, and the <span class="docEmphasis">sempid</span> values of both semaphores have been updated. We also see that the <span class="docEmphasis">semncnt</span> value for semaphore 1 is 1, since operation 2 is still blocked, waiting to decrease the value of this semaphore:</p><pre>$ <b>./svsem_mon 32769</b>
+Semaphore changed: Sun Jul 25 16:01:53 2010
+Last semop():      Sun Jul 25 16:03:29 2010
+Sem #  Value  SEMPID  SEMNCNT  SEMZCNT
+  0       0    3661      0        0
+  1       0    3659      1        0</pre><br/>
+<p class="docText">From the above output, we see that the <span class="docEmphasis">sem_otime</span>
+ value has been updated. We also see that semaphore 0 was last operated 
+on by process ID 3661 (operation 3) and semaphore 1 was last operated on
+ by process ID 3659 (operation 1).</p><p class="docText">Finally, we remove the semaphore set. This causes the still blocked operation 2 to fail with the error <tt>EIDRM</tt>:</p><pre>$ <b>./svsem_rm 32769</b>
+ERROR [EIDRM Identifier removed] semop (PID=3660)</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">We don’t show the source code for the <tt>svsem/svsem_rm.c</tt>
+ program in this chapter, but it is provided in the source code 
+distribution for this book. This program removes the semaphore set 
+identified by its command-line argument.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

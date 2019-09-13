@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>52.7. Linux-Specific Features</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">52.7. Linux-Specific Features</h3><p class="docText">The Linux implementation of POSIX message queues provides a number of features that are unstandardized but nevertheless useful.</p><h4 class="docSection2Title" id="title-ID0E14DM">52.7.1. </h4><h5 class="docSection3Title" id="title-ID0E54DM">52.7.1.1. Displaying and deleting message queue objects via the command line</h5><p class="docText">In Chapter 51,
+ we mentioned that POSIX IPC objects are implemented as files in virtual
+ file systems, and that these files can be listed and removed with <span class="docEmphasis">ls</span> and <span class="docEmphasis">rm</span>.
+ In order to do this with POSIX message queues, we must mount the 
+message queue file system using a command of the following form:</p><pre># <b>mount -t mqueue </b> <b><tt><i>source</i></tt> </b> <i>target </i></pre><br/>
+<p class="docText">The <span class="docEmphasis">source</span> can be any name at all (specifying the string <span class="docEmphasis">none</span> is typical). Its only significance is that it appears in <tt>/proc/mounts</tt> and is displayed by the <span class="docEmphasis">mount</span> and <span class="docEmphasis">df</span> commands. The <span class="docEmphasis">target</span> is the mount point for the message queue file system.</p><p class="docText">The
+ following shell session shows how to mount the message queue file 
+system and display its contents. We begin by creating a mount point for 
+the file system and mounting it:</p><pre>$ <b>su </b> <i> Privilege is required for</i> <span class="docEmphasis">mount</span>
+Password:
+# <b>mkdir /dev/mqueue </b>
+# <b>mount -t mqueue none /dev/mqueue </b>
+$ <b>exit </b>                                <i> Terminate</i><span class="docEmphasis">root</span> <i> shell session</i></pre><br/>
+<p class="docText">Next, we display the record in <tt>/proc/mounts</tt> for the new mount, and then display the permissions for the mount directory:</p><pre>$ <b>cat /proc/mounts | grep mqueue</b>
+none /dev/mqueue mqueue rw 0 0
+$ <b>ls -ld /dev/mqueue</b>
+drwxrwxrwt  2 root root 40 Jul 26 12:09 /dev/mqueue</pre><br/>
+<p class="docText">One point to note from the output of the <span class="docEmphasis">ls</span>
+ command is that the message queue file system is automatically mounted 
+with the sticky bit set for the mount directory. (We see this from the 
+fact that there is a <span class="docEmphasis">t</span> in the other-execute permission field displayed by <span class="docEmphasis">ls</span>.) This means that an unprivileged process can unlink only message queues that it owns.</p><p class="docText">Next, we create a message queue, use <span class="docEmphasis">ls</span> to show that it is visible in the file system, and then delete the message queue:</p><pre>$ <b>./pmsg_create -c /newq</b>
+$ <b>ls /dev/mqueue</b>
+newq
+$ <b>rm /dev/mqueue/newq</b></pre><br/>
+<h5 class="docSection3Title" id="title-ID0EIBEM">52.7.1.2. Obtaining information about a message queue</h5><p class="docText">We
+ can display the contents of the files in the message queue file system.
+ Each of these virtual files contains information about the associated 
+message queue:</p><pre>$ <b>./pmsg_create -c /mq </b> <i> Create a queue</i>
+$ <b>./pmsg_send /mq abcdefg </b> <i> Write 7 bytes to the queue</i>
+$ <b>cat /dev/mqueue/mq </b>
+QSIZE:7       NOTIFY:0    SIGNO:0    NOTIFY_PID:0</pre><br/>
+<p class="docText">The <tt>QSIZE</tt> field is a count of the total number of bytes of data in the queue. The remaining fields relate to message notification. If <tt>NOTIFY_PID</tt>
+ is nonzero, then the process with the specified process ID has 
+registered for message notification from this queue, and the remaining 
+fields provide information about the kind of notification:</p><ul><li><p class="docList"><tt>NOTIFY</tt> is a value corresponding to one of the <span class="docEmphasis">sigev_notify</span> constants: 0 for <tt>SIGEV_SIGNAL</tt>, 1 for <tt>SIGEV_NONE</tt>, or 2 for <tt>SIGEV_THREAD</tt>.</p></li><li><p class="docList">If the notification method is <tt>SIGEV_SIGNAL</tt>, the <tt>SIGNO</tt> field indicates which signal is delivered for message notification.</p></li></ul><p class="docText">The following shell session illustrates the information that appears in these fields:</p><pre>$ <b>./mq_notify_sig /mq &amp; </b> <i> Notify using</i> SIGUSR1 <i> (signal 10 on x86)</i>
+[1] 18158
+$ <b>cat /dev/mqueue/mq </b>
+QSIZE:7       NOTIFY:0    SIGNO:10   NOTIFY_PID:18158
+$ <b>kill %1 </b>
+[1]   Terminated    ./mq_notify_sig /mq
+$ <b>./mq_notify_thread /mq &amp; </b> <i> Notify using a thread</i>
+[2] 18160
+$ <b>cat /dev/mqueue/mq </b>
+QSIZE:7       NOTIFY:2    SIGNO:0    NOTIFY_PID:18160</pre><br/>
+<h5 class="docSection3Title" id="title-ID0E1DEM">52.7.1.3. Using message queues with alternative I/O models</h5><p class="docText">In
+ the Linux implementation, a message queue descriptor is really a file 
+descriptor. We can monitor this file descriptor using I/O multiplexing 
+system calls (<span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>) or the <span class="docEmphasis">epoll</span> API. (See Chapter 63
+ for further details of these APIs.) This allows us to avoid the 
+difficulty that we encounter with System V messages queues when trying 
+to wait for input on both a message queue and a file descriptor (refer 
+to Section 46.9).
+ However, this feature is nonstandard; SUSv3 doesn’t require that 
+message queue descriptors are implemented as file descriptors.</p>
+</div>
+</body>
+</html>

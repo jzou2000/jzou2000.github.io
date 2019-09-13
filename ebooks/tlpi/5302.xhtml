@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>53.2. Named Semaphores</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">53.2. Named Semaphores</h3><p class="docText">To work with a named semaphore, we employ the following functions:</p><ul><li><p class="docList">The <span class="docEmphasis">sem_open()</span>
+ function opens or creates a semaphore, initializes the semaphore if it 
+is created by the call, and returns a handle for use in later calls.</p></li><li><p class="docList">The <span class="docEmphasis">sem_post(sem)</span> and <span class="docEmphasis">sem_wait(sem)</span> functions respectively increment and decrement a semaphore’s value.</p></li><li><p class="docList">The <span class="docEmphasis">sem_getvalue()</span> function retrieves a semaphore’s current value.</p></li><li><p class="docList">The <span class="docEmphasis">sem_close()</span> function removes the calling process’s association with a semaphore that it previously opened.</p></li><li><p class="docList">The <span class="docEmphasis">sem_unlink()</span> function removes a semaphore name and marks the semaphore for deletion when all processes have closed it.</p></li></ul><p class="docText">SUSv3
+ doesn’t specify how named semaphores are to be implemented. Some UNIX 
+implementations create them as files in a special location in the 
+standard file system. On Linux, they are created as small POSIX shared 
+memory objects with names of the form <tt>sem.</tt><span class="docEmphasis">name</span>, in a dedicated <span class="docEmphasis">tmpfs</span> file system (Section 14.10) mounted under the directory <tt>/dev/shm</tt>.
+ This file system has kernel persistence--the semaphore objects that it 
+contains will persist, even if no process currently has them open, but 
+they will be lost if the system is shut down.</p><p class="docText">Named semaphores are supported on Linux since kernel 2.6.</p><h4 class="docSection2Title" id="title-ID0EVFEM">53.2.1. Opening a Named Semaphore</h4><p class="docText">The <span class="docEmphasis">sem_open()</span> function creates and opens a new named semaphore or opens an existing semaphore.</p><pre>#include &lt;fcntl.h&gt;            /* Defines O_* constants */
+#include &lt;sys/stat.h&gt;         /* Defines mode constants */
+#include &lt;semaphore.h&gt;
+
+sem_t *<b>sem_open</b>(const char *<span class="docEmphasis">name</span>, int <span class="docEmphasis">oflag</span>, ...
+                /* mode_t <span class="docEmphasis">mode</span>, unsigned int <span class="docEmphasis">value</span> */ );</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns pointer to semaphore on success, or <tt>SEM_FAILED</tt> on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">name</span> argument identifies the semaphore. It is specified according to the rules given in Section 51.1.</p><p class="docText">The <span class="docEmphasis">oflag</span>
+ argument is a bit mask that determines whether we are opening an 
+existing semaphore or creating and opening a new semaphore. If <span class="docEmphasis">oflag</span> is 0, we are accessing an existing semaphore. If <tt>O_CREAT</tt> is specified in <span class="docEmphasis">oflag</span>, then a new semaphore is created if one with the given <span class="docEmphasis">name</span> doesn’t already exist. If <span class="docEmphasis">oflag</span> specifies both <tt>O_CREAT</tt> and <tt>O_EXCL</tt>, and a semaphore with the given <span class="docEmphasis">name</span> already exists, then <span class="docEmphasis">sem_open()</span> fails.</p><p class="docText">If <span class="docEmphasis">sem_open()</span> is being used to open an existing semaphore, the call requires only two arguments. However, if <tt>O_CREAT</tt> is specified in <span class="docEmphasis">flags</span>, then two further arguments are required: <span class="docEmphasis">mode</span> and <span class="docEmphasis">value</span>. (If the semaphore specified by <span class="docEmphasis">name</span> already exists, then these two arguments are ignored.) These arguments are as follows:</p><ul><li><p class="docList">The <span class="docEmphasis">mode</span>
+ argument is a bit mask that specifies the permissions to be placed on 
+the new semaphore. The bit values are the same as for files (Table 15-4, in Section 15.4.1), and, as with <span class="docEmphasis">open()</span>, the value in <span class="docEmphasis">mode</span> is masked against the process umask (Section 15.4.6). SUSv3 doesn’t specify any access mode flags (<tt>O_RDONLY</tt>, <tt>O_WRONLY</tt>, and <tt>O_RDWR</tt>) for <span class="docEmphasis">oflag</span>. Many implementations, including Linux, assume an access mode of <tt>O_RDWR</tt> when opening a semaphore, since most applications using semaphores must employ both <span class="docEmphasis">sem_post()</span> and <span class="docEmphasis">sem_wait()</span>,
+ which involve reading and modifying a semaphore’s value. This means 
+that we should ensure that both read and write permissions are granted 
+to each category of user—owner, group, and other—that needs to access 
+the semaphore.</p></li><li><p class="docList">The <span class="docEmphasis">value</span>
+ argument is an unsigned integer that specifies the initial value to be 
+assigned to the new semaphore. The creation and initialization of the 
+semaphore are performed atomically. This avoids the complexities 
+required for the initialization of System V semaphores (Section 47.5).</p></li></ul><p class="docText">Regardless of whether we are creating a new semaphore or opening an existing semaphore, <span class="docEmphasis">sem_open()</span> returns a pointer to a <span class="docEmphasis">sem_t</span> value, and we employ this pointer in subsequent calls to functions that operate on the semaphore. On error, <span class="docEmphasis">sem_open()</span> returns the value <tt>SEM_FAILED</tt>. (On most implementations, <tt>SEM_FAILED</tt> is defined as either <span class="docEmphasis">((sem_t *) 0)</span> or <span class="docEmphasis">((sem_t *) -1)</span>; Linux defines it as the former.)</p><p class="docText">SUSv3 states that the results are undefined if we attempt to perform operations (<span class="docEmphasis">sem_post()</span>, <span class="docEmphasis">sem_wait()</span>, and so on) on a <span class="docEmphasis">copy</span> of the <span class="docEmphasis">sem_t</span> variable pointed to by the return value of <span class="docEmphasis">sem_open()</span>. In other words, the following use of <span class="docEmphasis">sem2</span> is not permissible:</p><pre>sem_t *sp, sem2
+sp = sem_open(...);
+sem2 = *sp;
+sem_wait(&amp;sem2);</pre><br/>
+<p class="docText">When a child is created via <span class="docEmphasis">fork()</span>, it inherits references to all of the named semaphores that are open in its parent. After the <span class="docEmphasis">fork()</span>, the parent and child can use these semaphores to synchronize their actions.</p><h5 class="docSection3Title" id="title-ID0EDLEM">53.2.1.1. Example program</h5><p class="docText">The program in Example 53-1 provides a simple command-line interface to the <span class="docEmphasis">sem_open()</span> function. The command format for this program is shown in the <span class="docEmphasis">usageError()</span> function.</p><p class="docText">The following shell session log demonstrates the use of this program. We first use the <span class="docEmphasis">umask</span>
+ command to deny all permissions to users in the class other. We then 
+exclusively create a semaphore and examine the contents of the 
+Linux-specific virtual directory that contains named semaphores.</p><pre class="preFixedWidth">$ <b>umask 007 </b>
+$ <b>./psem_create -cx /demo 666 </b>             <i> 666 means read+write for all users</i>
+$ <b>ls -l /dev/shm/sem.* </b>
+-rw-rw----  1 mtk users 16 Jul  6 12:09 /dev/shm/sem.demo
+
+					  </pre><br/>
+<p class="docText">The output of the <span class="docEmphasis">ls</span> command shows that the process umask overrode the specified permissions of read plus write for the user class other.</p><p class="docText">If we try once more to exclusively create a semaphore with the same name, the operation fails, because the name already exists.</p><pre>$ <b>./psem_create -cx /demo 666 </b>
+ERROR [EEXIST File exists] sem_open       <i> Failed because of</i> O_EXCL</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EPNEM">Example 53-1. Using <span class="docEmphasis">sem_open()</span> to open or create a POSIX named semaphore</h5><p></p><div class="box"><pre class="preFixedHeight"><b>psem/psem_create.c</b>
+#include &lt;semaphore.h&gt;
+#include &lt;sys/stat.h&gt;
+#include &lt;fcntl.h&gt;
+#include "tlpi_hdr.h"
+
+static void
+usageError(const char *progName)
+{
+    fprintf(stderr, "Usage: %s [-cx] name [octal-perms [value]]\n", progName);
+    fprintf(stderr, "    -c   Create semaphore (O_CREAT)\n");
+    fprintf(stderr, "    -x   Create exclusively (O_EXCL)\n");
+    exit(EXIT_FAILURE);
+}
+
+int
+main(int argc, char *argv[])
+{
+    int flags, opt;
+    mode_t perms;
+    unsigned int value;
+    sem_t *sem;
+
+    flags = 0;
+    while ((opt = getopt(argc, argv, "cx")) != -1) {
+        switch (opt) {
+        case 'c':   flags |= O_CREAT;           break;
+        case 'x':   flags |= O_EXCL;            break;
+        default:    usageError(argv[0]);
+        }
+    }
+
+    if (optind &gt;= argc)
+        usageError(argv[0]);
+
+    /* Default permissions are rw-------; default semaphore initialization
+       value is 0 */
+
+    perms = (argc &lt;= optind + 1) ? (S_IRUSR | S_IWUSR) :
+                getInt(argv[optind + 1], GN_BASE_8, "octal-perms");
+    value = (argc &lt;= optind + 2) ? 0 : getInt(argv[optind + 2], 0, "value");
+
+    sem = sem_open(argv[optind], flags, perms, value);
+    if (sem == SEM_FAILED)
+        errExit("sem_open");
+
+    exit(EXIT_SUCCESS);
+}
+    <b>psem/psem_create.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0E4NEM">53.2.2. Closing a Semaphore</h4><p class="docText">When a process opens a named semaphore, the system records the association between the process and the semaphore. The <span class="docEmphasis">sem_close()</span>
+ function terminates this association (i.e., closes the semaphore), 
+releases any resources that the system has associated with the semaphore
+ for this process, and decreases the count of processes referencing the 
+semaphore.</p><pre>#include &lt;semaphore.h&gt;
+
+int <b>sem_close</b>(sem_t *<span class="docEmphasis">sem</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">Open named semaphores are also automatically closed on process termination or if the process performs an <span class="docEmphasis">exec()</span>.</p><p class="docText">Closing a semaphore does not delete it. For that purpose, we need to use <span class="docEmphasis">sem_unlink()</span>.</p><h4 class="docSection2Title" id="title-ID0ELQEM">53.2.3. Removing a Named Semaphore</h4><p class="docText">The <span class="docEmphasis">sem_unlink()</span> function removes the semaphore identified by <span class="docEmphasis">name</span>
+ and marks the semaphore to be destroyed once all processes cease using 
+it (this may mean immediately, if all processes that had the semaphore 
+open have already closed it).</p><pre>#include &lt;semaphore.h&gt;
+
+int <b>sem_unlink</b>(const char *<span class="docEmphasis">name</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">Example 53-2 demonstrates the use of <span class="docEmphasis">sem_unlink()</span>.</p><h5 class="docExampleTitle" id="title-ID0EJREM">Example 53-2. Using <span class="docEmphasis">sem_unlink()</span> to unlink a POSIX named semaphore</h5><p></p><div class="box"><pre><b>psem/psem_unlink.c</b>
+#include &lt;semaphore.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    if (argc != 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s sem-name\n", argv[0]);
+
+    if (sem_unlink(argv[1]) == -1)
+        errExit("sem_unlink");
+    exit(EXIT_SUCCESS);
+}
+    <b>psem/psem_unlink.c</b></pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

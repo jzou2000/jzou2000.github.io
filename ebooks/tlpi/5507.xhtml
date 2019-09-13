@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>55.7. Older Locking Techniques</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">55.7. Older Locking Techniques</h3><p class="docText">In older UNIX implementations that lacked file locking, a number of <span class="docEmphasis">ad hoc</span> locking techniques were employed. Although all of these have been superseded by <span class="docEmphasis">fcntl()</span>
+ record locking, we describe them here since they still appear in some 
+older programs. All of these techniques are advisory in nature.</p><h4 class="docSection2Title" id="title-ID0EF6EM">55.7.1. </h4><h5 class="docSection3Title" id="title-ID0EJ6EM">55.7.1.1. <tt>open(file, O_CREAT | O_EXCL,...)</tt> <span class="docEmphStrong">plus</span> <tt>unlink(file)</tt></h5><p class="docText">SUSv3 requires that an <span class="docEmphasis">open()</span> call with the flags <tt>O_CREAT</tt> and <tt>O_EXCL</tt> perform the steps of checking for the existence of a file and creating it atomically (Section 5.1).
+ This means that if two processes attempt to create a file specifying 
+these flags, it is guaranteed that only one of them will succeed. (The 
+other process will receive the error <tt>EEXIST</tt> from <span class="docEmphasis">open()</span>.) Used in conjunction with the <span class="docEmphasis">unlink()</span>
+ system call, this provides the basis for a locking mechanism. Acquiring
+ the lock is performed by successfully opening the file with the <tt>O_CREAT</tt> and <tt>O_EXCL</tt> flags, followed by an immediate <span class="docEmphasis">close()</span>. Releasing the lock is performed using <span class="docEmphasis">unlink()</span>. Although workable, this technique has several limitations:</p><ul><li><p class="docList">If the <span class="docEmphasis">open()</span> fails, indicating that some other process has the lock, then we must retry the <span class="docEmphasis">open()</span>
+ in some kind of loop, either polling continuously (which wastes CPU 
+time) or with a delay between each attempt (which means that there may 
+be some delay between the time the lock becomes available and when we 
+actually acquire it). With <span class="docEmphasis">fcntl()</span>, we can use <tt>F_SETLKW</tt> to block until the lock becomes free.</p></li><li><p class="docList">Acquiring and releasing locks using <span class="docEmphasis">open()</span> and <span class="docEmphasis">unlink()</span>
+ involves file-system operations that are rather slower than the use of 
+record locks. (On one of the author’s x86-32 systems running Linux 
+2.6.31, acquiring and releasing 1 million locks on an <span class="docEmphasis">ext3</span>
+ file using the technique described here required 44 seconds. Acquiring 
+and releasing 1 million record locks on the same byte of a file required
+ 2.5 seconds.)</p></li><li><p class="docList">If a process accidentally exits without deleting the lock file, the lock is not released. There are <span class="docEmphasis">ad hoc</span>
+ techniques for handling this problem, including checking the last 
+modification time of the file and having the lock holder write its 
+process ID to the file so that we can check if the process still exists,
+ but none of these techniques is foolproof. By comparison, record locks 
+are released automatically when a process terminates.</p></li><li><p class="docList">If
+ we are placing multiple locks (i.e., using multiple lock files), 
+deadlocks are not detected. If a deadlock arises, the processes involved
+ in the deadlock will remain blocked indefinitely. (Each process will be
+ spinning, checking to see if it can obtain the lock it requires.) By 
+contrast, the kernel provides deadlock detection for <span class="docEmphasis">fcntl()</span> record locks.</p></li><li><p class="docList">NFS version 2 doesn’t support <tt>O_EXCL</tt> semantics. Linux 2.4 NFS clients also fail to implement <tt>O_EXCL</tt> correctly, even for NFS version 3 and later.</p></li></ul><h5 class="docSection3Title" id="title-ID0EICFM">55.7.1.2. <tt>link(file, lockfile)</tt> <span class="docEmphStrong">plus</span> <tt>unlink(lockfile)</tt></h5><p class="docText">The fact that the <span class="docEmphasis">link()</span> system call fails if the new link already exists has also been used as a locking mechanism, again employing <span class="docEmphasis">unlink()</span>
+ to perform the unlock function. The usual approach is to have each 
+process that needs to acquire the lock create a unique temporary 
+filename, typically one including the process ID (and possibly the 
+hostname, if the lock file is created on a network file system). To 
+acquire the lock, this temporary file is linked to some agreed-upon 
+standard pathname. (The semantics of hard links require that the two 
+pathnames reside in the same file system.) If the <span class="docEmphasis">link()</span> call succeeds, we have obtained the lock. If it fails (<tt>EEXIST</tt>), then another process has the lock and we must try again later. This technique suffers the same limitations as the <span class="docEmphasis">open(file</span>, <span class="docEmphasis">O_CREAT</span> | <span class="docEmphasis">O_EXCL</span>,...) technique described above.</p><h5 class="docSection3Title" id="title-ID0EYDFM">55.7.1.3. <tt>open(file, O_CREAT | O_TRUNC | O_WRONLY, 0)</tt> plus <tt>unlink(file)</tt></h5><p class="docText">The fact that calling <span class="docEmphasis">open()</span> on an existing file fails if <tt>O_TRUNC</tt>
+ is specified and write permission is denied on the file can be used as 
+the basis of a locking technique. To obtain a lock, we use the following
+ code (which omits error checking) to create a new file:</p><pre>fd = open(file, O_CREAT | O_TRUNC | O_WRONLY, (mode_t) 0);
+close(fd);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">For an explanation of why we use the <span class="docEmphasis">(mode_t)</span> cast in the <span class="docEmphasis">open()</span> call above, see Appendix C.</p><hr noshade="noshade" size="1"/><p class="docText">If the <span class="docEmphasis">open()</span> call succeeds (i.e., the file didn’t previously exist), we have the lock. If it fails with <tt>EACCES</tt>
+ (i.e., the file exists and has no permissions for anyone), then another
+ process has the lock, and we must try again later. This technique 
+suffers the same limitations as the previous techniques, with the added 
+caveat that we can’t employ it in a program with superuser privileges, 
+since the <span class="docEmphasis">open()</span> call will always succeed, regardless of the permissions that are set on the file.</p>
+</div>
+</body>
+</html>

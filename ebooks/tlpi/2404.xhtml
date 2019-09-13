@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>24.4. Race Conditions After fork()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">24.4. Race Conditions After <span class="docEmphasis">fork()</span></h3><p class="docText">After a <span class="docEmphasis">fork()</span>,
+ it is indeterminate which process—the parent or the child—next has 
+access to the CPU. (On a multiprocessor system, they may both 
+simultaneously get access to a CPU.) Applications that implicitly or 
+explicitly rely on a particular sequence of execution in order to 
+achieve correct results are open to failure due to <span class="docEmphasis">race conditions</span>,
+ which we described in Section 5.1. Such bugs can be hard to find, as 
+their occurrence depends on scheduling decisions that the kernel makes 
+according to system load.</p><p class="docText">We can use the program in Example 24-5 to demonstrate this indeterminacy. This program loops, using <span class="docEmphasis">fork()</span> to create multiple children. After each <span class="docEmphasis">fork()</span>,
+ both parent and child print a message containing the loop counter value
+ and a string indicating whether the process is the parent or child. For
+ example, if we asked the program to produce just one child, we might 
+see the following:</p><pre>$ <b>./fork_whos_on_first 1</b>
+0 parent
+0 child</pre><br/>
+<p class="docText">We can use this program to 
+create a large number of children, and then analyze the output to see 
+whether the parent or the child is the first to print its message each 
+time. Analyzing the results when using this program to create 1 million 
+children on a Linux/x86-32 2.2.19 system showed that the parent printed 
+its message first in all but 332 cases (i.e., in 99.97% of the cases).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The results from running the program in Example 24-5 were analyzed using the script <tt>procexec/fork_whos_on_first.count.awk</tt>, which is provided in the source code distribution for this book.</p><hr noshade="noshade" size="1"/><p class="docText">From these results, we may surmise that, on Linux 2.2.19, execution always continues with the parent process after a <span class="docEmphasis">fork()</span>.
+ The reason that the child occasionally printed its message first was 
+that, in 0.03% of cases, the parent’s CPU time slice ran out before it 
+had time to print its message. In other words, if this example 
+represented a case where we were relying on the parent to always be 
+scheduled first after <span class="docEmphasis">fork()</span>,
+ then things would usually go right, but one time out of every 3000, 
+things would go wrong. Of course, if the application expected that the 
+parent should be able to carry out a larger piece of work before the 
+child was scheduled, the possibility of things going wrong would be 
+greater. Trying to debug such errors in a complex program can be 
+difficult.</p><h5 class="docExampleTitle" id="title-ID0EGKCK">Example 24-5. Parent and child race to write a message after <span class="docEmphasis">fork()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>procexec/fork_whos_on_first.c</b>
+#include &lt;sys/wait.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int numChildren, j;
+    pid_t childPid;
+
+    if (argc &gt; 1 &amp;&amp; strcmp(argv[1], "--help") == 0)
+        usageErr("%s [num-children]\n", argv[0]);
+
+    numChildren = (argc &gt; 1) ? getInt(argv[1], GN_GT_0, "num-children") : 1;
+
+    setbuf(stdout, NULL);                /* Make stdout unbuffered */
+
+    for (j = 0; j &lt; numChildren; j++) {
+        switch (childPid = fork()) {
+        case -1:
+            errExit("fork");
+
+        case 0:
+            printf("%d child\n", j);
+            _exit(EXIT_SUCCESS);
+
+        default:
+            printf("%d parent\n", j);
+            wait(NULL);                   /* Wait for child to terminate */
+            break;
+        }
+    }
+
+    exit(EXIT_SUCCESS);
+}
+     <b>procexec/fork_whos_on_first.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Although Linux 2.2.19 always continues execution with the parent after a <span class="docEmphasis">fork()</span>,
+ we can’t rely on this being the case on other UNIX implementations, or 
+even across different versions of the Linux kernel. During the 2.4 
+stable kernel series, experiments were briefly made with a “child first 
+after <span class="docEmphasis">fork()</span>”
+ patch, which completely reverses the results obtained from 2.2.19. 
+Although this change was later dropped from the 2.4 kernel series, it 
+was subsequently adopted in Linux 2.6. Thus, programs that assume the 
+2.2.19 behavior would be broken by the 2.6 kernel.</p><p class="docText">Some
+ more recent experiments reversed the kernel developers’ assessment of 
+whether it was better to run the child or the parent first after <span class="docEmphasis">fork()</span>, and, since Linux 2.6.32, it is once more the parent that is, by default, run first after a <span class="docEmphasis">fork()</span>. This default can be changed by assigning a nonzero value to the Linux-specific /<tt>proc/sys/kernel/sched_child_runs_first</tt> file.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">To see the argument for the “children first after <span class="docEmphasis">fork()</span>” behavior, consider what happens with copy-on-write semantics when the child of a <span class="docEmphasis">fork()</span> performs an immediate <span class="docEmphasis">exec()</span>. In this case, as the parent carries on after the <span class="docEmphasis">fork()</span> to modify data and stack pages, the kernel duplicates the to-be-modified pages for the child. Since the child performs an <span class="docEmphasis">exec()</span>
+ as soon as it is scheduled to run, this duplication is wasted. 
+According to this argument, it is better to schedule the child first, so
+ that by the time the parent is next scheduled, no page copying is 
+required. Using the program in Example 24-5
+ to create 1 million child processes on one busy Linux/x86-32 system 
+running kernel 2.6.30 showed that, in 99.98% of cases, the child process
+ displayed its message first. (The precise percentage depends on factors
+ such as system load.) Testing this program on other UNIX 
+implementations showed wide variation in the rules that govern which 
+process runs first after <span class="docEmphasis">fork()</span>.</p><p class="docText">The argument for switching back to “parent first after <span class="docEmphasis">fork()</span>” in Linux 2.6.32 was based on the observation that, after a <span class="docEmphasis">fork()</span>,
+ the parent’s state is already active in the CPU and its 
+memory-management information is already cached in the hardware memory 
+management unit’s translation look-aside buffer (TLB). Therefore, 
+running the parent first should result in better performance. This was 
+informally verified by measuring the time required for kernel builds 
+under the two behaviors.</p><p class="docText">In
+ conclusion, it is worth noting that the performance differences between
+ the two behaviors are rather small, and won’t affect most applications.</p><hr noshade="noshade" size="1"/><p class="docText">From
+ the preceding discussion, it is clear that we can’t assume a particular
+ order of execution for the parent and child after a <span class="docEmphasis">fork()</span>.
+ If we need to guarantee a particular order, we must use some kind of 
+synchronization technique. We describe several synchronization 
+techniques in later chapters, including semaphores, file locks, and 
+sending messages between processes using pipes. One other method, which 
+we describe next, is to use signals.</p>
+</div>
+</body>
+</html>

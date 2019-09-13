@@ -1,0 +1,716 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 32. Managing Resources</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 32. Managing Resources"><div class="titlepage"><div><h1><span class="partLabel">32</span> Managing Resources</h1></div></div><p id="N16F50" style="text-indent: 0">
+In our implementation of Boolean arrays in the previous chapter,
+we did not need to worry about <a class="indexterm" id="N16F52"/>managing resources.
+Those arrays need only memory.
+Each userdata representing an array has its own memory,
+which is managed by Lua.
+When an array becomes garbage
+(that is, inaccessible by the program),
+Lua eventually collects it and frees its memory.
+</p><p id="N16F56" style="text-indent: 0">
+Life is not always that easy.
+Sometimes, an object needs other resources besides raw memory,
+such as file descriptors, window handles, and the like.
+(Often these resources are just memory too,
+but managed by some other part of the system.)
+In such cases, when the object becomes garbage and is collected,
+somehow these other resources must be released too.
+</p><p id="N16F58" style="text-indent: 0">
+As we saw in <a class="xref" href="ch23.html#tab-finalizer" title="Finalizers">the section called “Finalizers”</a>,
+Lua provides <a class="indexterm" id="N16F5D"/>finalizers in the form of the <a class="indexterm" id="N16F61"/><code class="literal">__gc</code> metamethod.
+To illustrate the use of this metamethod in C and of the API as a whole,
+in this chapter we will develop
+two Lua bindings for external facilities.
+The first example is another implementation
+for a function to traverse a directory.
+The second (and more substantial)
+example is a binding to <em>Expat</em>,
+an open source <a class="indexterm" id="N16F6E"/>XML parser.
+</p><div class="sect1" title="A Directory Iterator"><div class="titlepage"><div><div><h2 class="title"><a id="L302"/>A Directory Iterator</h2></div></div></div><p id="N16F76" style="text-indent: 0">
+<a class="indexterm" id="N16F78"></a>
+In <a class="xref" href="ch29.html#c-functions" title="C Functions">the section called “C Functions”</a>,
+we implemented a function <code class="literal">dir</code> to traverse directories
+that returned a table with all files from a given directory.
+Our new implementation will return an iterator that returns
+a new entry each time it is called.
+With this new implementation,
+we will be able to traverse a directory with a loop like this:
+</p><pre class="programlisting" id="N16F82">      for fname in dir.open(".") do
+        print(fname)
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N16F85" style="text-indent: 0">
+To iterate over a directory, in C,
+we need a <code class="literal">DIR</code> structure.
+Instances of <code class="literal">DIR</code> are created by <code class="literal">opendir</code>
+and must be explicitly released with a call to <code class="literal">closedir</code>.
+Our previous implementation kept its <code class="literal">DIR</code> instance
+as a local variable
+and closed this instance after retrieving the last file name.
+Our new implementation cannot keep this
+<code class="literal">DIR</code> instance in a local variable,
+because it must query this value over several calls.
+Moreover,
+it cannot close the directory only after retrieving the last name;
+if the program breaks the loop,
+the iterator will never retrieve this last name.
+Therefore,
+to make sure that the <code class="literal">DIR</code> instance is always released,
+we will store its address in a userdata
+and use the <a class="indexterm" id="N16F9C"/><code class="literal">__gc</code> metamethod of this userdata
+to release the directory structure.
+</p><p id="N16FA5" style="text-indent: 0">
+Despite its central role in our implementation,
+this userdata representing a directory
+does not need to be visible to Lua.
+The function <code class="literal">dir.open</code> returns an iterator function,
+and this function is what Lua sees.
+The directory can be an upvalue of the iterator function.
+As such, the iterator function has direct access to this structure,
+but Lua code does not (and does not need to).
+</p><p id="N16FAA" style="text-indent: 0">
+In all, we need three C functions.
+First, we need the function <code class="literal">dir.open</code>,
+a <a class="indexterm" id="N16FAF"/>factory function that Lua calls to create iterators;
+it must open a <code class="literal">DIR</code> structure and
+create a closure of the iterator function
+with this structure as an upvalue.
+Second, we need the <a class="indexterm" id="N16FB6"/>iterator function.
+Third, we need the <a class="indexterm" id="N16FBA"/><code class="literal">__gc</code> metamethod,
+which closes a <code class="literal">DIR</code> structure.
+As usual,
+we also need an extra function to make initial arrangements,
+such as to create and initialize a metatable for directories.
+</p><p id="N16FC6" style="text-indent: 0">
+Let us start our code with the function <code class="literal">dir.open</code>,
+shown in <a class="xref" href="ch32.html#dir" title="Figure 32.1. The dir.open factory function">Figure 32.1, “The <code class="literal">dir.open</code> factory function”</a>.
+</p><div class="figure-float"><div class="figure"><a id="dir"/><p class="title" style="text-indent: 0"><strong>Figure 32.1. The <code class="literal">dir.open</code> factory function</strong></p><div class="figure-contents"><pre class="programlisting" id="N16FD6">      #include &lt;dirent.h&gt;
+      #include &lt;errno.h&gt;
+      #include &lt;string.h&gt;
+      
+      #include "lua.h"
+      #include "lauxlib.h"
+      
+      /* forward declaration for the iterator function */
+      static int dir_iter (lua_State *L);
+      
+      static int l_dir (lua_State *L) {
+        const char *path = luaL_checkstring(L, 1);
+      
+        /* create a userdata to store a DIR address */
+        DIR **d = (DIR **)lua_newuserdata(L, sizeof(DIR *));
+      
+        /* pre-initialize it */
+        *d = NULL;
+      
+        /* set its metatable */
+        luaL_getmetatable(L, "LuaBook.dir");
+        lua_setmetatable(L, -2);
+      
+        /* try to open the given directory */
+        *d = opendir(path);
+        if (*d == NULL)  /* error opening the directory? */
+          luaL_error(L, "cannot open %s: %s", path, strerror(errno));
+      
+        /* creates and returns the iterator function;
+           its sole upvalue, the directory userdata,
+           is already on the top of the stack */
+        lua_pushcclosure(L, dir_iter, 1);
+        return 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+A subtle point in this function is that it must create the userdata
+before opening the directory.
+If it first opens the directory,
+and then the call to <a class="indexterm" id="N16FD9"></a><code class="function">lua_newuserdata</code> raises a memory error,
+the function loses and leaks the <code class="literal">DIR</code> structure.
+With the correct order,
+the <code class="literal">DIR</code> structure, once created,
+is immediately associated with the userdata;
+whatever happens after that,
+the <a class="indexterm" id="N16FE7"></a><code class="literal">__gc</code> metamethod will eventually release the structure.
+</p><p id="N16FF0" style="text-indent: 0">
+Another subtle point is
+the consistency of the userdata.
+Once we set its <a class="indexterm" id="N16FF2"/>metatable,
+the <a class="indexterm" id="N16FF6"/><code class="literal">__gc</code> metamethod will be called no matter what.
+So, before setting the metatable,
+we pre-initialize the userdata with <code class="literal">NULL</code>
+to ensure that it has some well-defined value.
+</p><p id="N17002" style="text-indent: 0">
+The next function is <code class="literal">dir_iter</code> (in <a class="xref" href="ch32.html#dir_iter" title="Figure 32.2. Other functions for the dir library">Figure 32.2, “Other functions for the <code class="literal">dir</code> library”</a>),
+the iterator itself.
+</p><div class="figure-float"><div class="figure"><a id="dir_iter"/><p class="title" style="text-indent: 0"><strong>Figure 32.2. Other functions for the <code class="literal">dir</code> library</strong></p><div class="figure-contents"><pre class="programlisting" id="N17012">      static int dir_iter (lua_State *L) {
+        DIR *d = *(DIR **)lua_touserdata(L, lua_upvalueindex(1));
+        struct dirent *entry = readdir(d);
+        if (entry != NULL) {
+          lua_pushstring(L, entry-&gt;d_name);
+          return 1;
+        }
+        else return 0;  /* no more values to return */
+      }
+      
+      static int dir_gc (lua_State *L) {
+        DIR *d = *(DIR **)lua_touserdata(L, 1);
+        if (d) closedir(d);
+        return 0;
+      }
+      
+      static const struct luaL_Reg dirlib [] = {
+        {"open", l_dir},
+        {NULL, NULL}
+      };
+      
+      int luaopen_dir (lua_State *L) {
+        luaL_newmetatable(L, "LuaBook.dir");
+      
+        /* set its __gc field */
+        lua_pushcfunction(L, dir_gc);
+        lua_setfield(L, -2, "__gc");
+      
+        /* create the library */
+        luaL_newlib(L, dirlib);
+        return 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+Its code is straightforward.
+It gets the <code class="literal">DIR</code> structure’s address from its upvalue and
+calls <code class="literal">readdir</code> to read the next entry.
+</p><p id="N1701B" style="text-indent: 0">
+The function <code class="literal">dir_gc</code> (also in <a class="xref" href="ch32.html#dir_iter" title="Figure 32.2. Other functions for the dir library">Figure 32.2, “Other functions for the <code class="literal">dir</code> library”</a>)
+is the <a class="indexterm" id="N17023"/><code class="literal">__gc</code> metamethod.
+This metamethod closes a directory.
+As we mentioned before,
+it must take one precaution:
+in case of errors in the initialization,
+the directory can be <code class="literal">NULL</code>.
+</p><p id="N1702F" style="text-indent: 0">
+The last function in <a class="xref" href="ch32.html#dir_iter" title="Figure 32.2. Other functions for the dir library">Figure 32.2, “Other functions for the <code class="literal">dir</code> library”</a>,
+<code class="literal">luaopen_dir</code>,
+is the function that opens this one-function library.
+</p><p id="N17037" style="text-indent: 0">
+This complete example has an interesting subtlety.
+At first, it may seem that <code class="literal">dir_gc</code> should check
+whether its argument is a directory
+and whether it has not been closed already.
+Otherwise,
+a malicious user could call it with another kind of userdata
+(a file, for instance) or finalize a directory twice,
+with disastrous consequences.
+However, there is no way for a Lua program to access this function:
+it is stored only in the metatable of directories,
+which in turn are stored as upvalues of the iteration functions.
+Lua programs cannot access these directories.
+</p></div><div class="sect1" title="An XML Parser"><div class="titlepage"><div><div><h2 class="title"><a id="L303"/>An XML Parser</h2></div></div></div><p id="N17040" style="text-indent: 0">
+Now we will look at a simplified implementation of
+a Lua binding for Expat,
+which we will call <code class="literal">lxp</code>.
+<a class="indexterm" id="N17045"/>Expat is an open source <a class="indexterm" id="N17049"/>XML 1.0 parser written in C.
+It implements <a class="indexterm" id="N1704D"/>SAX, the <em>Simple API for <a class="indexterm" id="N17053"/>XML</em>.
+SAX is an event-based API.
+This means that a SAX parser reads an <a class="indexterm" id="N17058"/>XML document and,
+as it goes,
+reports to the application what it finds, through callbacks.
+For instance,
+if we instruct Expat to parse a string like <code class="literal">"&lt;tag cap="5"&gt;hi&lt;/tag&gt;"</code>,
+it will generate three events:
+a <em>start-element</em> event,
+when it reads the substring <code class="literal">"&lt;tag cap="5"&gt;"</code>;
+a <em>text</em> event (also called a <em>character data</em> event),
+when it reads <code class="literal">"hi"</code>;
+and an <em>end-element</em> event, when it reads <code class="literal">"&lt;/tag&gt;"</code>.
+Each of these events calls an appropriate
+<em>callback handler</em> in the application.
+</p><p id="N17077" style="text-indent: 0">
+Here we will not cover the entire Expat library.
+We will concentrate only on those parts that illustrate
+new techniques for interacting with Lua.
+Although Expat handles more than a dozen different events,
+we will consider only the three events that we saw
+in the previous example (start elements, end elements, and text).<sup>[<a href="#ftn.N17079" id="N17079" class="footnote">33</a>]</sup>
+</p><p id="N17083" style="text-indent: 0">
+The part of the Expat API that we need for this example is small.
+First, we need the functions to create and destroy an Expat parser:
+</p><pre class="programlisting" id="N17085">      XML_Parser XML_ParserCreate (const char *encoding);
+      void XML_ParserFree (XML_Parser p);
+</pre><p style="text-indent: 0">
+The <code class="literal">encoding</code> argument is optional;
+we will use <code class="literal">NULL</code> in our binding.
+</p><p id="N1708E" style="text-indent: 0">
+After we have a parser,
+we must register its callback handlers:
+</p><pre class="programlisting" id="N17090">      void XML_SetElementHandler(XML_Parser p,
+                                 XML_StartElementHandler start,
+                                 XML_EndElementHandler end);
+      
+      void XML_SetCharacterDataHandler(XML_Parser p,
+                                       XML_CharacterDataHandler hndl);
+</pre><p style="text-indent: 0">
+The first function registers handlers for start and end elements.
+The second function registers handlers for text
+(<em>character data</em>, in <a class="indexterm" id="N17096"></a>XML parlance).
+</p><p id="N1709A" style="text-indent: 0">
+All callback handlers take a user data as their first parameter.
+The start-element handler receives also the tag name
+and its attributes:
+</p><pre class="programlisting" id="N1709C">      typedef void (*XML_StartElementHandler)(void *uData,
+                                              const char *name,
+                                              const char **atts);
+</pre><p style="text-indent: 0">
+The attributes come as a NULL-terminated array of strings,
+where each pair of consecutive strings holds an attribute name
+and its value.
+The end-element handler has only one extra parameter, the tag name:
+</p><pre class="programlisting" id="N1709F">      typedef void (*XML_EndElementHandler)(void *uData,
+                                            const char *name);
+</pre><p style="text-indent: 0">
+Finally,
+a text handler receives only the text as an extra parameter.
+This text string is not null-terminated;
+instead, it has an explicit length:
+</p><pre class="programlisting" id="N170A2">      typedef void (*XML_CharacterDataHandler)(void *uData,
+                                               const char *s,
+                                               int len);
+</pre><p style="text-indent: 0">
+</p><p id="N170A5" style="text-indent: 0">
+To feed text to Expat, we use the following function:
+</p><pre class="programlisting" id="N170A7">      int XML_Parse (XML_Parser p, const char *s, int len, int isLast);
+</pre><p style="text-indent: 0">
+Expat receives the document to be parsed in pieces,
+through successive calls to the function <code class="literal">XML_Parse</code>.
+The last argument to <code class="literal">XML_Parse</code>, the Boolean <code class="literal">isLast</code>,
+informs Expat whether that piece is the last one of a document.
+This function returns zero if it detects a parse error.
+(Expat also provides functions to retrieve error information,
+but we will ignore them here, for the sake of simplicity.)
+</p><p id="N170B3" style="text-indent: 0">
+The last function we need from Expat allows us to set
+the user data that will be passed to the handlers:
+</p><pre class="programlisting" id="N170B5">      void XML_SetUserData (XML_Parser p, void *uData);
+</pre><p style="text-indent: 0">
+</p><p id="N170B8" style="text-indent: 0">
+Now let us have a look at how we can use this library in Lua.
+A first approach is a direct approach:
+simply export all those functions to Lua.
+A better approach is to adapt the functionality to Lua.
+For instance, because Lua is untyped, we do not need different
+functions to set each kind of callback.
+Better yet,
+we can avoid the callback registering functions altogether.
+Instead, when we create a parser,
+we give a callback table that contains all callback handlers,
+each with an appropriate key related to its corresponding event.
+For instance, if we want to print a layout of a document,
+we could use the following callback table:
+</p><pre class="programlisting" id="N170BA">      local count = 0
+      
+      callbacks = {
+        StartElement = function (parser, tagname)
+          io.write("+ ", string.rep("  ", count), tagname, "\n")
+          count = count + 1
+        end,
+      
+        EndElement = function (parser, tagname)
+          count = count - 1
+          io.write("- ", string.rep("  ", count), tagname, "\n")
+        end,
+      }
+</pre><p style="text-indent: 0">
+Fed with the input <code class="literal">"&lt;to&gt; &lt;yes/&gt; &lt;/to&gt;"</code>,
+these handlers would print this output:
+</p><pre class="programlisting" id="N170C0">      + to
+      +   yes
+      -   yes
+      - to
+</pre><p style="text-indent: 0">
+</p><p id="N170C3" style="text-indent: 0">
+With this API, we do not need functions to manipulate callbacks.
+We manipulate them directly in the callback table.
+Thus, the whole API needs only three functions:
+one to create parsers, one to parse a piece of text,
+and one to close a parser.
+Actually, we will implement the last two functions as
+methods of parser objects.
+A typical use of the API could be like this:
+</p><pre class="programlisting" id="N170C5">      local lxp = require "lxp"
+      
+      p = lxp.new(callbacks)       -- create new parser
+      
+      for l in io.lines() do       -- iterate over input lines
+        assert(p:parse(l))         -- parse the line
+        assert(p:parse("\n"))      -- add newline
+      end
+      
+      assert(p:parse())            -- finish document
+      p:close()                    -- close parser
+</pre><p style="text-indent: 0">
+</p><p id="N170C8" style="text-indent: 0">
+Now let us turn our attention to the implementation.
+The first decision is how to represent a parser in Lua.
+It is quite natural to use a userdata containing a C structure,
+but what do we need to put in it?
+We need at least the actual Expat parser
+and the callback table.
+We must also store a <a class="indexterm" id="N170CA"></a>Lua state,
+because these parser objects are all that an Expat callback receives,
+and the callbacks need to call Lua.
+We can store the Expat parser and the Lua state (which are C values)
+directly in a C structure.
+For the callback table, which is a Lua value,
+one option is to create a reference
+to it in the registry and store that reference.
+(We will explore this option in <a class="link" href="ch32.html#ex_expat-ref">Exercise 32.2</a>).
+Another option is to use a <a class="indexterm" id="N170D2"></a><em class="firstterm">user value</em>.
+Each userdata can have one single Lua value directly
+associated with it;
+this value is called a user value.<sup>[<a href="#ftn.N170D9" id="N170D9" class="footnote">34</a>]</sup>
+With this option,
+the definition for a parser object is as follows:
+</p><pre class="programlisting" id="N170DD">      #include &lt;stdlib.h&gt;
+      #include "expat.h"
+      #include "lua.h"
+      #include "lauxlib.h"
+      
+      typedef struct lxp_userdata {
+        XML_Parser parser;          /* associated expat parser */
+        lua_State *L;
+      } lxp_userdata;
+</pre><p style="text-indent: 0">
+</p><p id="N170E0" style="text-indent: 0">
+The next step is the function that creates parser objects,
+<code class="literal">lxp_make_parser</code>.
+<a class="xref" href="ch32.html#lxp_make_parser" title="Figure 32.3. Function to create XML parser objects">Figure 32.3, “Function to create XML parser objects”</a> shows its code.
+</p><div class="figure-float"><div class="figure"><a id="lxp_make_parser"/><p class="title" style="text-indent: 0"><strong>Figure 32.3. Function to create XML parser objects</strong></p><div class="figure-contents"><pre class="programlisting" id="N170ED">      /* forward declarations for callback functions */
+      static void f_StartElement (void *ud,
+                                  const char *name,
+                                  const char **atts);
+      static void f_CharData (void *ud, const char *s, int len);
+      static void f_EndElement (void *ud, const char *name);
+      
+      static int lxp_make_parser (lua_State *L) {
+        XML_Parser p;
+      
+        /* (1) create a parser object */
+        lxp_userdata *xpu = (lxp_userdata *)lua_newuserdata(L,
+                                              sizeof(lxp_userdata));
+      
+        /* pre-initialize it, in case of error */
+        xpu-&gt;parser = NULL;
+      
+        /* set its metatable */
+        luaL_getmetatable(L, "Expat");
+        lua_setmetatable(L, -2);
+      
+        /* (2) create the Expat parser */
+        p = xpu-&gt;parser = XML_ParserCreate(NULL);
+        if (!p)
+          luaL_error(L, "XML_ParserCreate failed");
+      
+        /* (3) check and store the callback table */
+        luaL_checktype(L, 1, LUA_TTABLE);
+        lua_pushvalue(L, 1);  /* push table */
+        lua_setuservalue(L, -2);   /* set it as the user value */
+      
+        /* (4) configure Expat parser */
+        XML_SetUserData(p, xpu);
+        XML_SetElementHandler(p, f_StartElement, f_EndElement);
+        XML_SetCharacterDataHandler(p, f_CharData);
+        return 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+This function has four main steps:
+</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem"><p id="N170F2" style="text-indent: 0">
+Its first step follows a common pattern:
+it first creates a userdata;
+then it pre-initializes the userdata with consistent values;
+and finally it sets its metatable.
+(The pre-initialization ensures that
+if there is any error during the initialization,
+the <a class="indexterm" id="N170F4"/>finalizer will find the userdata in a consistent state.)
+</p></li><li class="listitem"><p id="N170F9" style="text-indent: 0">
+In step 2, the function creates an Expat parser,
+stores it in the userdata, and checks for errors.
+</p></li><li class="listitem"><p id="N170FC" style="text-indent: 0">
+Step 3 ensures that the first argument to the function
+is actually a table (the callback table),
+and sets it as the <a class="indexterm" id="N170FE"/>user value for the new userdata.
+</p></li><li class="listitem"><p id="N17103" style="text-indent: 0">
+The last step initializes the Expat parser.
+It sets the userdata as the object
+to be passed to the callback functions
+and it sets the callback functions.
+Notice that these callback functions are the same for all parsers;
+after all,
+it is impossible to dynamically create new functions in C.
+Instead, those fixed C functions will use the callback table to
+decide which Lua functions they should call each time.
+</p></li></ul></div><p style="text-indent: 0">
+</p><p id="N17106" style="text-indent: 0">
+The next step is the parse method
+<code class="literal">lxp_parse</code> (<a class="xref" href="ch32.html#lxp_parse" title="Figure 32.4. Function to parse an XML fragment">Figure 32.4, “Function to parse an XML fragment”</a>),
+which parses a piece of <a class="indexterm" id="N1710E"></a>XML data.
+</p><div class="figure-float"><div class="figure"><a id="lxp_parse"/><p class="title" style="text-indent: 0"><strong>Figure 32.4. Function to parse an XML fragment</strong></p><div class="figure-contents"><pre class="programlisting" id="N17117">      static int lxp_parse (lua_State *L) {
+        int status;
+        size_t len;
+        const char *s;
+        lxp_userdata *xpu;
+      
+        /* get and check first argument (should be a parser) */
+        xpu = (lxp_userdata *)luaL_checkudata(L, 1, "Expat");
+      
+        /* check if it is not closed */
+        luaL_argcheck(L, xpu-&gt;parser != NULL, 1, "parser is closed");
+      
+        /* get second argument (a string) */
+        s = luaL_optlstring(L, 2, NULL, &amp;len);
+      
+        /* put callback table at stack index 3 */
+        lua_settop(L, 2);
+        lua_getuservalue(L, 1);
+      
+        xpu-&gt;L = L;  /* set Lua state */
+      
+        /* call Expat to parse string */
+        status = XML_Parse(xpu-&gt;parser, s, (int)len, s == NULL);
+      
+        /* return error code */
+        lua_pushboolean(L, status);
+        return 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+It gets two arguments:
+the parser object (the <em>self</em> of the method)
+and an optional piece of <a class="indexterm" id="N1711D"></a>XML data.
+When called without any data,
+it informs Expat that the document has no more parts.
+</p><p id="N17121" style="text-indent: 0">
+When <code class="literal">lxp_parse</code> calls <code class="literal">XML_Parse</code>,
+the latter function will call the handlers for each relevant
+element that it finds in the given piece of document.
+These handlers will need to access the callback table,
+so <code class="literal">lxp_parse</code> puts this table at stack index three
+(right after the parameters).
+There is one more detail in the call to <code class="literal">XML_Parse</code>:
+remember that the last argument to this function
+tells Expat whether the given piece of text is the last one.
+When we call <code class="literal">parse</code> without an argument,
+<code class="literal">s</code> will be <code class="literal">NULL</code>,
+so this last argument will be true.
+</p><p id="N17138" style="text-indent: 0">
+Now let us turn our attention to the functions
+<code class="literal">f_CharData</code>, <code class="literal">f_StartElement</code>, and <code class="literal">f_EndElement</code>,
+which handle the callbacks.
+All these three functions have a similar structure:
+each checks whether the callback table defines a Lua
+handler for its specific event and, if so, prepares the
+arguments and then calls this Lua handler.
+</p><p id="N17143" style="text-indent: 0">
+Let us see first the <code class="literal">f_CharData</code> handler,
+in <a class="xref" href="ch32.html#f_CharData" title="Figure 32.5. Handler for character data">Figure 32.5, “Handler for character data”</a>.
+</p><div class="figure-float"><div class="figure"><a id="f_CharData"/><p class="title" style="text-indent: 0"><strong>Figure 32.5. Handler for character data</strong></p><div class="figure-contents"><pre class="programlisting" id="N17150">      static void f_CharData (void *ud, const char *s, int len) {
+        lxp_userdata *xpu = (lxp_userdata *)ud;
+        lua_State *L = xpu-&gt;L;
+      
+        /* get handler from callback table */
+        lua_getfield(L, 3, "CharacterData");
+        if (lua_isnil(L, -1)) {  /* no handler? */
+          lua_pop(L, 1);
+          return;
+        }
+      
+        lua_pushvalue(L, 1);  /* push the parser ('self') */
+        lua_pushlstring(L, s, len);  /* push Char data */
+        lua_call(L, 2, 0);  /* call the handler */
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+Its code is quite simple.
+The handler receives a
+<code class="literal">lxp_userdata</code> structure as its first argument,
+due to our call to <code class="literal">XML_SetUserData</code> when
+we created the parser.
+After retrieving the <a class="indexterm" id="N17159"></a>Lua state,
+the handler can access the callback table at stack index 3,
+as set by <code class="literal">lxp_parse</code>,
+and the parser itself at stack index 1.
+Then it calls its corresponding handler in Lua (when present),
+with two arguments:
+the parser and the character data (a string).
+</p><p id="N17160" style="text-indent: 0">
+The <code class="literal">f_EndElement</code> handler is quite similar to <code class="literal">f_CharData</code>;
+see <a class="xref" href="ch32.html#f_EndElement" title="Figure 32.6. Handler for end elements">Figure 32.6, “Handler for end elements”</a>.
+</p><div class="figure-float"><div class="figure"><a id="f_EndElement"/><p class="title" style="text-indent: 0"><strong>Figure 32.6. Handler for end elements</strong></p><div class="figure-contents"><pre class="programlisting" id="N17170">      static void f_EndElement (void *ud, const char *name) {
+        lxp_userdata *xpu = (lxp_userdata *)ud;
+        lua_State *L = xpu-&gt;L;
+      
+        lua_getfield(L, 3, "EndElement");
+        if (lua_isnil(L, -1)) {  /* no handler? */
+          lua_pop(L, 1);
+          return;
+        }
+      
+        lua_pushvalue(L, 1);  /* push the parser ('self') */
+        lua_pushstring(L, name);  /* push tag name */
+        lua_call(L, 2, 0);  /* call the handler */
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+It also calls its corresponding Lua handler with two arguments
+—the parser and the tag name
+(again a string, but now null-terminated).
+</p><p id="N17173" style="text-indent: 0">
+<a class="xref" href="ch32.html#f_StartElement" title="Figure 32.7. Handler for start elements">Figure 32.7, “Handler for start elements”</a> shows
+the last handler, <code class="literal">f_StartElement</code>.
+</p><div class="figure-float"><div class="figure"><a id="f_StartElement"/><p class="title" style="text-indent: 0"><strong>Figure 32.7. Handler for start elements</strong></p><div class="figure-contents"><pre class="programlisting" id="N17180">      static void f_StartElement (void *ud,
+                                  const char *name,
+                                  const char **atts) {
+        lxp_userdata *xpu = (lxp_userdata *)ud;
+        lua_State *L = xpu-&gt;L;
+      
+        lua_getfield(L, 3, "StartElement");
+        if (lua_isnil(L, -1)) {  /* no handler? */
+          lua_pop(L, 1);
+          return;
+        }
+      
+        lua_pushvalue(L, 1);  /* push the parser ('self') */
+        lua_pushstring(L, name);  /* push tag name */
+      
+        /* create and fill the attribute table */
+        lua_newtable(L);
+        for (; *atts; atts += 2) {
+          lua_pushstring(L, *(atts + 1));
+          lua_setfield(L, -2, *atts);  /* table[*atts] = *(atts+1) */
+        }
+      
+        lua_call(L, 3, 0);  /* call the handler */
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+It calls the Lua handler with three arguments:
+the parser, the tag name, and a list of attributes.
+This handler is a little more complex than the others,
+because it needs to translate the tag’s list of attributes into Lua.
+It uses a quite natural translation,
+building a table that maps attribute names to their values.
+For instance, a start tag like
+</p><pre class="programlisting" id="N17183">      &lt;to method="post" priority="high"&gt;
+</pre><p style="text-indent: 0">
+generates the following table of attributes:
+</p><pre class="programlisting" id="N17186">      {method = "post", priority = "high"}
+</pre><p style="text-indent: 0">
+</p><p id="N17189" style="text-indent: 0">
+The last method for parsers is <code class="literal">close</code>,
+in <a class="xref" href="ch32.html#lxp_close" title="Figure 32.8. Method to close an XML parser">Figure 32.8, “Method to close an XML parser”</a>.
+</p><div class="figure-float"><div class="figure"><a id="lxp_close"/><p class="title" style="text-indent: 0"><strong>Figure 32.8. Method to close an XML parser</strong></p><div class="figure-contents"><pre class="programlisting" id="N17196">      static int lxp_close (lua_State *L) {
+        lxp_userdata *xpu =
+                      (lxp_userdata *)luaL_checkudata(L, 1, "Expat");
+      
+        /* free Expat parser (if there is one) */
+        if (xpu-&gt;parser)
+          XML_ParserFree(xpu-&gt;parser);
+        xpu-&gt;parser = NULL;  /* avoids closing it again */
+        return 0;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+When we close a parser, we have to free its resources,
+namely the Expat structure.
+Remember that, due to occasional errors during its creation,
+a parser may not have this resource.
+Notice how we keep the parser in a consistent
+state as we close it,
+so there is no problem if we try to close it again
+or when the garbage collector finalizes it.
+Actually, we will use exactly this function as the <a class="indexterm" id="N17199"></a>finalizer.
+This ensures that every parser eventually frees its resources,
+even if the programmer does not close it.
+</p><p id="N1719D" style="text-indent: 0">
+<a class="xref" href="ch32.html#luaopen_lxp" title="Figure 32.9. Initialization code for the lxp library">Figure 32.9, “Initialization code for the <code class="literal">lxp</code> library”</a> is the final step:
+it shows <code class="literal">luaopen_lxp</code>,
+which opens the library,
+putting all previous parts together.
+</p><div class="figure-float"><div class="figure"><a id="luaopen_lxp"/><p class="title" style="text-indent: 0"><strong>Figure 32.9. Initialization code for the <code class="literal">lxp</code> library</strong></p><div class="figure-contents"><pre class="programlisting" id="N171AD">      static const struct luaL_Reg lxp_meths[] = {
+        {"parse", lxp_parse},
+        {"close", lxp_close},
+        {"__gc", lxp_close},
+        {NULL, NULL}
+      };
+      
+      static const struct luaL_Reg lxp_funcs[] = {
+        {"new", lxp_make_parser},
+        {NULL, NULL}
+      };
+      
+      int luaopen_lxp (lua_State *L) {
+        /* create metatable */
+        luaL_newmetatable(L, "Expat");
+      
+        /* metatable.__index = metatable */
+        lua_pushvalue(L, -1);
+        lua_setfield(L, -2, "__index");
+      
+        /* register methods */
+        luaL_setfuncs(L, lxp_meths, 0);
+      
+        /* register functions (only lxp.new) */
+        luaL_newlib(L, lxp_funcs);
+        return 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+We use here the same scheme that we used in the
+object-oriented Boolean-array example from <a class="xref" href="ch31.html#oo-array" title="Object-Oriented Access">the section called “Object-Oriented Access”</a>:
+we create a <a class="indexterm" id="N171B3"></a>metatable,
+make its <a class="indexterm" id="N171B7"></a><code class="literal">__index</code> field point to itself,
+and put all the methods inside it.
+For that, we need a list with the parser methods
+(<code class="literal">lxp_meths</code>).
+We also need a list with the functions of this library
+(<code class="literal">lxp_funcs</code>).
+As is common with object-oriented libraries,
+this list has a single function,
+which creates new parsers.
+</p></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L304"/>Exercises</h2></div></div></div><p id="N171CA" style="text-indent: 0">
+Exercise 32.1:<a id="L305"/> 
+Modify the function <code class="literal">dir_iter</code> in the directory example
+so that it closes the <code class="literal">DIR</code> structure as soon as it reaches
+the end of the traversal.
+With this change,
+the program does not need to wait for a garbage collection
+to release a resource that it knows it will not need anymore.
+</p><p id="N171D5" style="text-indent: 0">
+(When you close the directory,
+you should set the address stored in the userdata to <code class="literal">NULL</code>,
+to signal to the finalizer that the directory is already closed.
+Also, <code class="literal">dir_iter</code> will have to check whether the directory
+is closed before using it.)
+
+
+</p><p id="N171DD" style="text-indent: 0">
+Exercise 32.2:<a id="ex_expat-ref"/> 
+In the <code class="literal">lxp</code> example,
+we used <a class="indexterm" id="N171E5"/>user values to associate the callback table
+with the userdata that represents a parser.
+This choice created a small problem,
+because what the C callbacks receive
+is the <code class="literal">lxp_userdata</code> structure,
+and that structure does not offer direct access to the table.
+We solved this problem by storing the callback table at
+a fixed stack index during the parse of each fragment.
+</p><p id="N171EC" style="text-indent: 0">
+An alternative design would be to associate the callback table
+with the userdata through references (<a class="xref" href="ch30.html#sec_registry" title="The registry">the section called “The registry”</a>):
+we create a reference to the callback table and
+store the reference (an integer) in the <code class="literal">lxp_userdata</code> structure.
+Implement this alternative.
+Do not forget to release the reference when closing the parser.
+
+
+</p></div><div class="footnotes"><br/><hr/><div class="footnote"><p id="N1707A" style="text-indent: 0"><sup>[<a href="#N17079" id="ftn.N17079" class="para">33</a>] </sup>The package <a class="indexterm" id="N1707C"/><code class="literal">LuaExpat</code>
+offers a quite complete interface to Expat.</p></div><div class="footnote"><p id="N170DA" style="text-indent: 0"><sup>[<a href="#N170D9" id="ftn.N170D9" class="para">34</a>] </sup>In Lua 5.2, this user value must be table.</p></div></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

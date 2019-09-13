@@ -1,0 +1,557 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 18. Iterators and the Generic for</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 18. Iterators and the Generic for"><div class="titlepage"><div><h1><span class="partLabel">18</span> Iterators and the Generic for</h1></div></div><p id="N13BEB" style="text-indent: 0">
+We have been using the generic <a class="indexterm" id="N13BED"/><strong>for</strong>
+for several tasks through the book,
+such as reading the lines of a file
+or traversing the matches of a pattern over a subject.
+However, we still do not know how to create our own iterators.
+In this chapter, we will fill this gap.
+Starting with simple iterators,
+we will learn how to use all the power of the generic <a class="indexterm" id="N13BF6"/><strong>for</strong>
+to write all kinds of iterators.
+</p><div class="sect1" title="Iterators and Closures"><div class="titlepage"><div><div><h2 class="title"><a id="iter-closure"/>Iterators and Closures</h2></div></div></div><p id="N13C03" style="text-indent: 0">
+An <a class="indexterm" id="N13C05"/><em class="firstterm">iterator</em> is any construction that allows us to
+iterate over the elements of a collection.
+In Lua, we typically represent iterators by functions:
+each time we call the function,
+it returns the <span class="quote">“<span class="quote">next</span>”</span> element from the collection.
+A typical example is <a class="indexterm" id="N13C0F"/><code class="function">io.read</code>:
+each time we call it,
+it returns the next line of the standard input file,
+returning nil when there are no more lines to be read.
+</p><p id="N13C17" style="text-indent: 0">
+Any iterator needs to keep some state between
+successive calls,
+so that it knows where it is and how to proceed from there.
+For <a class="indexterm" id="N13C19"/><code class="function">io.read</code>, C keeps that state in its stream structure.
+For our own iterators,
+closures provide an excellent mechanism for keeping state.
+Remember that a <a class="indexterm" id="N13C21"/>closure is a function that accesses one or
+more local variables from its enclosing environment.
+These variables keep their values across successive calls
+to the closure,
+allowing the closure to remember where it is along a traversal.
+Of course, to create a new closure we must also create its
+<a class="indexterm" id="N13C25"/>non-local variables.
+Therefore, a closure construction typically involves two functions:
+the closure itself
+and a <a class="indexterm" id="N13C29"/><em class="firstterm">factory</em>,
+the function that creates the closure plus its enclosing variables.
+</p><p id="N13C30" style="text-indent: 0">
+As an example,
+let us write a simple iterator for a list.
+Unlike <a class="indexterm" id="N13C32"></a><code class="function">ipairs</code>,
+this iterator does not return the index of each element,
+only its value:
+</p><pre class="programlisting" id="N13C38">      function values (t)
+        local i = 0
+        return function ()  i = i + 1; return t[i]  end
+      end
+</pre><p style="text-indent: 0">
+In this example, <code class="literal">values</code> is the factory.
+Each time we call this factory,
+it creates a new closure (the iterator itself).
+This closure keeps its state in its external variables
+<code class="literal">t</code> and <code class="literal">i</code>,
+which are also created by <code class="literal">values</code>.
+Each time we call the iterator,
+it returns a next value from the list <code class="literal">t</code>.
+After the last element the iterator returns nil,
+which signals the end of the iteration.
+</p><p id="N13C4A" style="text-indent: 0">
+We can use this iterator in a <a class="indexterm" id="N13C4C"></a><strong>while</strong> loop:
+</p><pre class="programlisting" id="N13C55">      t = {10, 20, 30}
+      iter = values(t)           -- creates the iterator
+      while true do
+        local element = iter()   -- calls the iterator
+        if element == nil then break end
+        print(element)
+      end
+</pre><p style="text-indent: 0">
+However, it is easier to use the generic <a class="indexterm" id="N13C58"></a><strong>for</strong>.
+After all, it was designed for this kind of iteration:
+</p><pre class="programlisting" id="N13C61">      t = {10, 20, 30}
+      for element in values(t) do
+        print(element)
+      end
+</pre><p style="text-indent: 0">
+The generic <a class="indexterm" id="N13C64"></a><strong>for</strong> does all the bookkeeping for an
+iteration loop:
+it keeps the iterator function internally,
+so that we do not need the <code class="literal">iter</code> variable;
+it calls the iterator for each new iteration;
+and it stops the loop when the iterator returns nil.
+(In the next section,
+we will see that the generic <a class="indexterm" id="N13C70"></a><strong>for</strong> does
+even more than that.)
+</p><p id="N13C79" style="text-indent: 0">
+As a more advanced example,
+<a class="xref" href="ch18.html#allwords" title="Figure 18.1. Iterator to traverse all words from the standard input">Figure 18.1, “Iterator to traverse all words from the standard input”</a> shows an iterator to traverse all
+the words from the standard input.
+</p><div class="figure-float"><div class="figure"><a id="allwords"/><p class="title" style="text-indent: 0"><strong>Figure 18.1. Iterator to traverse all words from the standard input</strong></p><div class="figure-contents"><pre class="programlisting" id="N13C83">      function allwords ()
+        local line = io.read()  -- current line
+        local pos = 1           -- current position in the line
+        return function ()      -- iterator function
+          while line do         -- repeat while there are lines
+            local w, e = string.match(line, "(%w+)()", pos)
+            if w then           -- found a word?
+              pos = e           -- next position is after this word
+              return w          -- return the word
+            else
+              line = io.read()  -- word not found; try next line
+              pos = 1           -- restart from first position
+            end
+          end
+          return nil            -- no more lines: end of traversal
+        end
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+To do this traversal, we keep two values:
+the contents of the current line (variable <code class="literal">line</code>),
+and where we are on this line (variable <code class="literal">pos</code>).
+With this data, we can always generate the next word.
+The main part of the iterator function
+is the call to <a class="indexterm" id="N13C8C"></a><code class="function">string.match</code>,
+which searches for a word in the current line
+starting at the current position.
+It describes a <span class="quote">“<span class="quote">word</span>”</span> using the pattern ’<code class="literal">%w+</code>’,
+which matches one or more alphanumeric characters.
+If it finds a word,
+it captures and returns the word
+and the position of the first character after it
+(with an empty capture).
+The function then updates the current position
+and returns this word.
+Otherwise, the iterator reads a new line and repeats the search.
+If there are no more lines,
+it returns nil to signal the end of the iteration.
+</p><p id="N13C9A" style="text-indent: 0">
+Despite its complexity, the use of <code class="literal">allwords</code> is straightforward:
+</p><pre class="programlisting" id="N13C9F">      for word in allwords() do
+        print(word)
+      end
+</pre><p style="text-indent: 0">
+This is a common situation with iterators:
+they may not be easy to write, but they are easy to use.
+This is not a big problem;
+more often than not,
+end users programming in Lua do not define iterators,
+but just use those provided by the application.
+</p></div><div class="sect1" title="The Semantics of the Generic for"><div class="titlepage"><div><div><h2 class="title"><a id="L179"/>The Semantics of the Generic <strong>for</strong></h2></div></div></div><p id="N13CA9" style="text-indent: 0">
+One drawback of those previous iterators is that we need
+to create a new closure to initialize each new loop.
+For many situations, this is not a real problem.
+For instance, in the <code class="literal">allwords</code> iterator,
+the cost of creating one single closure is negligible compared
+to the cost of reading a whole file.
+However, in some situations this overhead can be inconvenient.
+In such cases, we can use the generic <a class="indexterm" id="N13CAE"/><strong>for</strong> itself
+to keep the iteration state.
+In this section,
+we will see the facilities that the
+generic <a class="indexterm" id="N13CB7"/><strong>for</strong> offers to hold state.
+</p><p id="N13CC0" style="text-indent: 0">
+We saw that the generic <a class="indexterm" id="N13CC2"/><strong>for</strong> keeps the iterator
+function internally, during the loop.
+Actually, it keeps three values:
+the iterator function, an <em>invariant state</em>,
+and a <em>control variable</em>.
+Let us see the details now.
+</p><p id="N13CD1" style="text-indent: 0">
+The syntax for the generic <a class="indexterm" id="N13CD3"></a><strong>for</strong> is as follows:
+</p><pre class="programlisting" id="N13CDC">      for <em class="replaceable"><code>var-list</code></em> in <em class="replaceable"><code>exp-list</code></em> do
+        <em class="replaceable"><code>body</code></em>
+      end
+</pre><p style="text-indent: 0">
+Here, <em class="replaceable"><code>var-list</code></em> is a list of one or more variable names,
+separated by commas,
+and <em class="replaceable"><code>exp-list</code></em> is a list of one or more expressions,
+also separated by commas.
+Usually the expression list has only one element,
+a call to an iterator <a class="indexterm" id="N13CEE"></a>factory.
+In the next code,
+for instance,
+the list of variables is <code class="literal">k,v</code>
+and the list of expressions has the single element <code class="literal">pairs(t)</code>:
+</p><pre class="programlisting" id="N13CF8">      for k, v in pairs(t) do print(k, v) end
+</pre><p style="text-indent: 0">
+We call the first (or only) variable in the list
+the <em>control variable</em>.
+Its value is never nil during the loop,
+because when it becomes nil the loop ends.
+</p><p id="N13CFE" style="text-indent: 0">
+The first thing the <a class="indexterm" id="N13D00"/><strong>for</strong> does is to evaluate the
+expressions after the <a class="indexterm" id="N13D09"/><strong>in</strong>.
+These expressions should result in the three values
+kept by the <a class="indexterm" id="N13D12"/><strong>for</strong>:
+the iterator function, the invariant state,
+and the initial value for the control variable.
+Like in a multiple assignment,
+only the last (or the only) element of the list
+can result in more than one value;
+and the number of values is adjusted to three,
+extra values being discarded or nils added as needed.
+For instance,
+when we use simple iterators,
+the <a class="indexterm" id="N13D1B"/>factory returns only the iterator function,
+so the invariant state and the control variable get nil.
+</p><p id="N13D1F" style="text-indent: 0">
+After this initialization step,
+the <a class="indexterm" id="N13D21"/><strong>for</strong> calls the iterator function with two arguments:
+the invariant state and the control variable.
+From the standpoint of the <a class="indexterm" id="N13D2A"/><strong>for</strong> construct,
+the invariant state has no meaning at all.
+The <a class="indexterm" id="N13D33"/><strong>for</strong> only passes the state value
+from the initialization step to all calls
+to the iterator function.
+Then the <a class="indexterm" id="N13D3C"/><strong>for</strong> assigns the values returned by the iterator
+function to the variables declared by its variable list.
+If the first returned value
+(the one assigned to the control variable) is nil,
+the loop terminates.
+Otherwise, the <a class="indexterm" id="N13D45"/><strong>for</strong> executes its body
+and calls the iteration function again,
+repeating the process.
+</p><p id="N13D4E" style="text-indent: 0">
+More precisely,
+a construction like
+</p><pre class="programlisting" id="N13D50">      for var_1, ..., var_n in <em class="replaceable"><code>explist</code></em> do <em class="replaceable"><code>block</code></em> end
+</pre><p style="text-indent: 0">
+is equivalent to the following code:
+</p><pre class="programlisting" id="N13D59">      do
+        local _f, _s, _var = <em class="replaceable"><code>explist</code></em>
+        while true do
+          local var_1, ... , var_n = _f(_s, _var)
+          _var = var_1
+          if _var == nil then break end
+          <em class="replaceable"><code>block</code></em>
+        end
+      end
+</pre><p style="text-indent: 0">
+So,
+if our iterator function is <em>f</em>,
+the invariant state is <em>s</em>,
+and the initial value for the control variable is <em>a<sub>0</sub></em>,
+the control variable will loop over the values
+<em>a<sub>1</sub> = f(s, a<sub>0</sub>)</em>,
+<em>a<sub>2</sub> = f(s, a<sub>1</sub>)</em>,
+and so on, until <em>a<sub>i</sub></em> is nil.
+If the <a class="indexterm" id="N13D84"></a><strong>for</strong> has other variables,
+they simply get the extra values returned
+by each call to <em>f</em>.
+</p></div><div class="sect1" title="Stateless Iterators"><div class="titlepage"><div><div><h2 class="title"><a id="L180"/>Stateless Iterators</h2></div></div></div><p id="N13D94" style="text-indent: 0">
+As the name implies,
+a <a class="indexterm" id="N13D96"/>stateless iterator is an iterator that
+does not keep any state by itself.
+Therefore, we can use the same stateless iterator in multiple loops,
+avoiding the cost of creating new closures.
+</p><p id="N13D9A" style="text-indent: 0">
+As we just saw,
+the <a class="indexterm" id="N13D9C"></a><strong>for</strong> loop calls its iterator function with two arguments:
+the invariant state and the control variable.
+A <a class="indexterm" id="N13DA5"></a>stateless iterator generates the next element for
+the iteration using only these two values.
+A typical example of this kind of iterator is <a class="indexterm" id="N13DA9"></a><code class="function">ipairs</code>,
+which iterates over all elements of a sequence:
+</p><pre class="programlisting" id="N13DAF">      a = {"one", "two", "three"}
+      for i, v in ipairs(a) do
+        print(i, v)
+      end
+</pre><p style="text-indent: 0">
+The whole state of the iteration comprises the table being traversed
+(the invariant state,
+which does not change during the loop),
+plus the current index (the control variable).
+Both <a class="indexterm" id="N13DB2"></a><code class="function">ipairs</code> (the <a class="indexterm" id="N13DB8"></a>factory) and the iterator are quite simple;
+we could write them in Lua as follows:
+</p><pre class="programlisting" id="N13DBC">      local function iter (t, i)
+        i = i + 1
+        local v = t[i]
+        if v then
+          return i, v
+        end
+      end
+      
+      function ipairs (t)
+        return iter, t, 0
+      end
+</pre><p style="text-indent: 0">
+When Lua calls <code class="literal">ipairs(t)</code> in a <a class="indexterm" id="N13DC2"></a><strong>for</strong> loop,
+it gets three values:
+the function <code class="literal">iter</code> as the iterator,
+the table <code class="literal">t</code> as the invariant state,
+and zero as the initial value for the control variable.
+Then, Lua calls <code class="literal">iter(t, 0)</code>,
+which results in <code class="literal">1,t[1]</code>
+(unless <code class="literal">t[1]</code> is already nil).
+In the second iteration, Lua calls <code class="literal">iter(t, 1)</code>,
+which results in <code class="literal">2,t[2]</code>, and so on,
+until the first nil element.
+</p><p id="N13DE0" style="text-indent: 0">
+The function <a class="indexterm" id="N13DE2"></a><code class="function">pairs</code>,
+which iterates over all elements of a table, is similar,
+except that its iterator function is <a class="indexterm" id="N13DE8"></a><code class="function">next</code>,
+which is a primitive function in Lua:
+</p><pre class="programlisting" id="N13DEE">      function pairs (t)
+        return next, t, nil
+      end
+</pre><p style="text-indent: 0">
+The call <code class="literal">next(t, k)</code>,
+where <code class="literal">k</code> is a key of the table <code class="literal">t</code>,
+returns a next key in the table,
+in an arbitrary order,
+plus the value associated with this key
+as a second return value.
+The call <code class="literal">next(t, nil)</code> returns a first pair.
+When there are no more pairs, <a class="indexterm" id="N13DFD"></a><code class="function">next</code> returns nil.
+</p><p id="N13E03" style="text-indent: 0">
+We might use <a class="indexterm" id="N13E05"></a><code class="function">next</code> directly,
+without calling <a class="indexterm" id="N13E0B"></a><code class="function">pairs</code>:
+</p><pre class="programlisting" id="N13E11">      for k, v in next, t do
+        <em class="replaceable"><code>loop body</code></em>
+      end
+</pre><p style="text-indent: 0">
+Remember that the <a class="indexterm" id="N13E17"></a><strong>for</strong> loop adjusts its
+expression list to three results,
+so that it gets <code class="literal">next</code>, <code class="literal">t</code>, and nil;
+this is exactly what it gets when it calls <code class="literal">pairs(t)</code>.
+</p><p id="N13E29" style="text-indent: 0">
+Another interesting example of a <a class="indexterm" id="N13E2B"></a>stateless iterator
+is one to traverse a <a class="indexterm" id="N13E2F"></a>linked list.
+(Linked lists are not frequent in Lua,
+but sometimes we need them.)
+A first thought could be to use only the current node as
+the control variable,
+so that the iterator function could return its next node:
+</p><pre class="programlisting" id="N13E33">      local function getnext (node)
+          return node.next
+      end
+      
+      function traverse (list)
+        return getnext, nil, list
+      end
+</pre><p style="text-indent: 0">
+However,
+this implementation would skip the first node.
+Instead, we can use the following code:
+</p><pre class="programlisting" id="N13E36">      local function getnext (list, node)
+        if not node then
+          return list
+        else
+          return node.next
+        end
+      end
+      
+      function traverse (list)
+        return getnext, list, nil
+      end
+</pre><p style="text-indent: 0">
+The trick here is to use the first node as the invariant state
+(the second value returned by <code class="literal">traverse</code>),
+besides the current node as the control variable.
+The first time the iterator function <code class="literal">getnext</code> is called,
+<code class="literal">node</code> will be nil,
+and so the function will return <code class="literal">list</code> as the first node.
+In subsequent calls, <code class="literal">node</code> will not be nil,
+and so the iterator will return <code class="literal">node.next</code>,
+as expected.
+</p></div><div class="sect1" title="Traversing Tables in Order"><div class="titlepage"><div><div><h2 class="title"><a id="L181"/>Traversing Tables in Order</h2></div></div></div><p id="N13E4F" style="text-indent: 0">
+A common confusion happens when
+programmers try to order the entries of a table.
+In a table, the entries form a set, and have no order whatsoever.
+If we want to order them, we have to copy the keys to an array
+and then sort the array.
+</p><p id="N13E51" style="text-indent: 0">
+We saw an example of this technique
+in the <span class="quote">“<span class="quote">Most Frequent Words</span>”</span> program,
+in <a class="xref" href="ch11.html" title="Chapter 11. Interlude: Most Frequent Words">Chapter 11, <em>Interlude: Most Frequent Words</em></a>.
+Let us see here another example.
+Suppose that we read a source file
+and build a table that gives, for each function name,
+the line where this function is defined;
+something like this:
+</p><pre class="programlisting" id="N13E59">      lines = {
+        ["luaH_set"] = 10,
+        ["luaH_get"] = 24,
+        ["luaH_present"] = 48,
+      }
+</pre><p style="text-indent: 0">
+Now we want to print these function names in alphabetical order.
+If we traverse this table with <a class="indexterm" id="N13E5C"></a><code class="function">pairs</code>,
+the names appear in an arbitrary order.
+We cannot sort them directly,
+because these names are keys of the table.
+However, when we put them into an array,
+then we can sort them.
+First, we must create an array with these names, then sort it,
+and finally print the result:
+</p><pre class="programlisting" id="N13E62">      a = {}
+      for n in pairs(lines) do a[#a + 1] = n end
+      table.sort(a)
+      for _, n in ipairs(a) do print(n) end
+</pre><p style="text-indent: 0">
+</p><p id="N13E65" style="text-indent: 0">
+Some people get confused here.
+After all, for Lua, arrays also have no order
+(they are tables, after all).
+But we know how to count!
+So, we impose the order,
+when we access the array with ordered indices.
+That is why we should always traverse arrays
+with <a class="indexterm" id="N13E67"/><code class="function">ipairs</code>, rather than <a class="indexterm" id="N13E6D"/><code class="function">pairs</code>.
+The first function imposes the key order 1, 2, etc.,
+whereas the latter uses the natural arbitrary order of the table
+(which may not be what we need,
+even though usually it is).
+</p><p id="N13E73" style="text-indent: 0">
+Now we are ready to write
+an <a class="indexterm" id="N13E75"></a>iterator that traverses a table
+following the order of its keys:
+</p><pre class="programlisting" id="N13E79">      function pairsByKeys (t, f)
+        local a = {}
+        for n in pairs(t) do   -- create a list with all keys
+          a[#a + 1] = n
+        end
+        table.sort(a, f)       -- sort the list
+        local i = 0            -- iterator variable
+        return function ()     -- iterator function
+          i = i + 1
+          return a[i], t[a[i]]   -- return key, value
+        end
+      end
+</pre><p style="text-indent: 0">
+The factory function <code class="literal">pairsByKeys</code>
+first collects the keys into an array,
+then it sorts the array,
+and finally it returns the iterator function.
+At each step, the iterator returns
+the next key and value from the original table,
+following the order in the array <code class="literal">a</code>.
+An optional parameter <code class="literal">f</code> allows the specification of an
+alternative order.
+</p><p id="N13E85" style="text-indent: 0">
+With this function,
+it is easy to solve our initial problem of
+traversing a table in order:
+</p><pre class="programlisting" id="N13E87">      for name, line in pairsByKeys(lines) do
+        print(name, line)
+      end
+</pre><p style="text-indent: 0">
+As usual,
+all the complexity is hidden
+inside the iterator.
+</p></div><div class="sect1" title="True Iterators"><div class="titlepage"><div><div><h2 class="title"><a id="L182"/>True Iterators</h2></div></div></div><p id="N13E8E" style="text-indent: 0">
+The name <span class="quote">“<span class="quote">iterator</span>”</span> is a little misleading,
+because our iterators do not iterate:
+what iterates is the <a class="indexterm" id="N13E93"/><strong>for</strong> loop.
+Iterators only provide the successive values for the iteration.
+Maybe a better name would be <span class="quote">“<span class="quote"><a class="indexterm" id="N13E9D"/>generator</span>”</span>
+—which <em>generates</em> elements for the iteration—
+but <span class="quote">“<span class="quote">iterator</span>”</span> is already well established in other languages,
+such as <a class="indexterm" id="N13EA8"/>Java.
+</p><p id="N13EAC" style="text-indent: 0">
+However, there is another way to build iterators
+wherein iterators actually do the iteration.
+When we use such iterators, we do not write a loop;
+instead, we simply call the iterator with an argument
+that describes what the iterator must do at each iteration.
+More specifically,
+the iterator receives as argument
+a function that it calls inside its loop.
+</p><p id="N13EAE" style="text-indent: 0">
+As a concrete example,
+let us rewrite once more the <code class="literal">allwords</code>
+iterator using this style:
+</p><pre class="programlisting" id="N13EB3">      function allwords (f)
+        for line in io.lines() do
+          for word in string.gmatch(line, "%w+") do
+            f(word)    -- call the function
+          end
+        end
+      end
+</pre><p style="text-indent: 0">
+To use this iterator, we must supply the loop body as a function.
+If we want only to print each word,
+we simply use <a class="indexterm" id="N13EB6"></a><code class="function">print</code>:
+</p><pre class="programlisting" id="N13EBC">      allwords(print)
+</pre><p style="text-indent: 0">
+Often, we use an anonymous function as the body.
+For instance, the next code fragment counts how many times
+the word <span class="quote">“<span class="quote">hello</span>”</span> appears in the input file:
+</p><pre class="programlisting" id="N13EC2">      local count = 0
+      allwords(function (w)
+        if w == "hello" then count = count + 1 end
+      end)
+      print(count)
+</pre><p style="text-indent: 0">
+The same task, written with the previous iterator style,
+is not very different:
+</p><pre class="programlisting" id="N13EC5">      local count = 0
+      for w in allwords() do
+        if w == "hello" then count = count + 1 end
+      end
+      print(count)
+</pre><p style="text-indent: 0">
+</p><p id="N13EC8" style="text-indent: 0">
+True iterators were popular in older versions of Lua,
+when the language did not have the <a class="indexterm" id="N13ECA"/><strong>for</strong> statement.
+How do they compare with generator-style iterators?
+Both styles have approximately the same overhead:
+one function call per iteration.
+On the one hand,
+it is easier to write the iterator with true iterators
+(although we can recover this easiness with <a class="indexterm" id="N13ED3"/>coroutines,
+as we will see in <a class="xref" href="ch24.html#coro-iter" title="Coroutines as Iterators">the section called “Coroutines as Iterators”</a>).
+On the other hand,
+the generator style is more flexible.
+First, it allows two or more parallel iterations.
+(For instance, consider the problem of iterating over two files
+comparing them word by word.)
+Second, it allows the use of <a class="indexterm" id="N13EDA"/><strong>break</strong> and <a class="indexterm" id="N13EE3"/><strong>return</strong>
+inside the iterator body.
+With a true iterator,
+a <a class="indexterm" id="N13EEC"/><strong>return</strong> returns from the anonymous function,
+not from the function doing the iteration.
+For these reasons,
+overall I usually prefer generators.
+</p></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L183"/>Exercises</h2></div></div></div><p id="N13EF9" style="text-indent: 0">
+Exercise 18.1:<a id="L184"></a> 
+Write an iterator <code class="literal">fromto</code> such that
+the next loop becomes equivalent to a numeric <a class="indexterm" id="N13F01"></a><strong>for</strong>:
+</p><pre class="programlisting" id="N13F0A">      for i in fromto(n, m) do
+        <em class="replaceable"><code>body</code></em>
+      end
+</pre><p style="text-indent: 0">
+Can you implement it as a stateless iterator?
+
+
+</p><p id="N13F10" style="text-indent: 0">
+Exercise 18.2:<a id="L185"/> 
+Add a step parameter to the iterator from the previous exercise.
+Can you still implement it as a stateless iterator?
+
+
+</p><p id="N13F15" style="text-indent: 0">
+Exercise 18.3:<a id="L186"/> 
+Write an iterator <code class="literal">uniquewords</code> that returns
+all words from a given file without repetitions.
+(Hint: start with the <code class="literal">allwords</code> code in <a class="xref" href="ch18.html#allwords" title="Figure 18.1. Iterator to traverse all words from the standard input">Figure 18.1, “Iterator to traverse all words from the standard input”</a>;
+use a table to keep all words already reported.)
+
+
+</p><p id="N13F23" style="text-indent: 0">
+Exercise 18.4:<a id="L187"/> 
+Write an iterator that returns all non-empty substrings
+of a given string.
+
+
+</p><p id="N13F28" style="text-indent: 0">
+Exercise 18.5:<a id="L188"/> 
+Write a true iterator that traverses all subsets of a given set.
+(Instead of creating a new table for each subset,
+it can use the same table for all its results,
+only changing its contents between iterations.)
+
+
+</p></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

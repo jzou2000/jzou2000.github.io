@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 49. Disambiguating with Typename</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 49. Disambiguating with Typename</h2>
+		
+<p class="docText">Even
+ experienced C++ programmers are often put off by the rather complex 
+syntax required to program with templates. Of all the syntactic 
+gyrations one has to undertake, none is more initially confusing than 
+the occasional need to help the compiler disambiguate a parse.</p>
+		
+<p class="docText">As an example, let’s look at a portion of an implementation of a simple, nonstandard container template.</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+class PtrList {
+  public:
+    //...
+    typedef T *ElemT;
+    void insert( ElemT );
+    //...
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">It’s common practice for 
+class templates to embed information about themselves as nested type 
+names. This allows us to access information about the instantiated 
+template through the appropriate nested name (see <span class="docEmphasis">Embedded Type Information</span> [53, 189] and <span class="docEmphasis">Traits</span> [54, 193]).</p>
+		
+<div class="docText">
+  <pre>typedef PtrList&lt;State&gt; StateList;
+//...
+StateList::ElemT currentState = 0;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The nested name <tt>ElemT</tt> allows us easy access to what the <tt>PtrList</tt> template considers to be its element type. Even though we instantiated <tt>PtrList</tt> with the type name <tt>State</tt>, the element type is <tt>State *</tt>. In other circumstances, <tt>PtrList</tt> could be implemented with a smart pointer element type, or a very sophisticated implementation of <tt>PtrList</tt> might vary its implementation based on the properties of the type used to instantiate it (see <span class="docEmphasis">Specializing for Type Information</span> [52, 183]). Use of the nested type name helps to insulate users of <tt>PtrList</tt> from these internal implementation decisions.</p>
+		
+<p class="docText">Here’s another nonstandard container:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename Etype&gt;
+class SCollection {
+  public:
+    //...
+    typedef Etype ElemT;
+    void insert( const Etype &amp; );
+    //...
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">It appears that <tt>SCollection</tt> is designed according to the same set of naming standards as <tt>PtrList</tt>, in that it also defines a nested <tt>ElemT</tt>
+ type name. Adherence to an established convention is useful, because 
+(among other advantages) it allows us to write generic algorithms that 
+work with a range of different container types. For example, we could 
+write a simple utility algorithm that fills a conforming container with 
+the content of an array of the appropriate element type:</p>
+		
+<div class="docText">
+  <pre>template &lt;class Cont&gt;
+<span class="docEmphMark">void fill( Cont &amp;c, Cont::ElemT a[], int len ) { // error!   </span>
+    for( int i = 0; i &lt; len; ++i )
+        c.insert( a[i] );
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Unfortunately, we have a syntax error. The nested name <tt>Cont::ElemT</tt> is not recognized as a type name! The trouble is that, in the context of the <tt>fill</tt> template, the compiler does not have enough information to determine whether the nested name <tt>ElemT</tt> is a type name or a nontype name. The standard says that in such situations, the nested name is assumed to be a nontype name.</p>
+		
+<p class="docText">If at first this makes no 
+sense to you, you’re not alone. However, let’s see what information is 
+available to the compiler in different contexts. First, let’s consider 
+the situation in which we have a nontemplate class:</p>
+		
+<div class="docText">
+  <pre>class MyContainer {
+  public:
+    typedef State ElemT;
+    //...
+};
+//...
+MyContainer::ElemT *anElemPtr = 0;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">There’s clearly no problem here, since the compiler can examine the content of the <tt>MyContainer</tt> class, verify that it has a member named <tt>ElemT</tt>, and note that <tt>MyContainer::ElemT</tt> is indeed a type name. Things are just as simple for a class that is generated from a class template.</p>
+		
+<div class="docText">
+  <pre>typedef PtrList&lt;State&gt; StateList;
+//...
+StateList::ElemT aState = 0;
+PtrList&lt;State&gt;::ElemT anotherState = 0;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">To the compiler, an 
+instantiated class template is just a class, and there is no difference 
+in the access of a nested name from the class type <tt>PtrList&lt;State&gt;</tt> than there is from <tt>MyContainer</tt>. In either case, the compiler just examines the content of the class to determine whether <tt>ElemT</tt> is a type name.</p>
+		
+<p class="docText">However, once we 
+enter the context of a template, things are different because there is 
+less precise information available. Consider the following fragment:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+void aFuncTemplate( T &amp;arg ) {
+    ...T::ElemT...
+</pre>
+</div>
+<br/>
+		
+<p class="docText">When the compiler encounters the qualified name <tt>T::ElemT</tt>, what does it know? From the template parameter list it knows that <tt>T</tt> is a type name of some sort. It can also determine that <tt>T</tt> is a class name because we’ve employed the scope operator (<tt>::</tt>) to access a nested name of <tt>T</tt>. But that’s all the compiler knows, because there is no information available about the content of <tt>T</tt>. For instance, we could call <tt>aFuncTemplate</tt> with a <tt>PtrList</tt>, in which case <tt>T::ElemT</tt> would be a type name.</p>
+		
+<div class="docText">
+  <pre>PtrList&lt;State&gt; states;
+//...
+aFuncTemplate( states ); // T::ElemT is PtrList&lt;State&gt;::ElemT
+</pre>
+</div>
+<br/>
+		
+<p class="docText">But what if we were to instantiate <tt>aFuncTemplate</tt> with a different type?</p>
+		
+<div class="docText">
+  <pre>struct X {
+    enum Types { typeA, typeB, typeC } ElemT;
+    //...
+};
+X anX;
+//...
+
+aFuncTemplate( anX ); // T::ElemT is X::ElemT
+</pre>
+</div>
+<br/>
+		
+<p class="docText">In this case, <tt>T::ElemT</tt>
+ is the name of a data member—a nontype name. What’s a compiler to do? 
+The standard tossed a coin, and in cases where it can’t determine the 
+type of a nested name, the compiler will assume the nested name is a 
+nontype name. That is the cause of the syntax error in the <tt>fill</tt> function template above.</p>
+		
+<p class="docText">To deal with this situation, we must sometimes explicitly inform the compiler when a nested name is a type name.</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+void aFuncTemplate( T &amp;arg ) {
+    ...typename T::ElemT...
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Here we’ve used the <tt>typename</tt>
+ keyword to tell the compiler explicitly that the following qualified 
+name is a type name. This allows the compiler to parse the template 
+correctly. Note that we are telling the compiler that <tt>ElemT</tt> is a type name, not <tt>T</tt>. The compiler can already determine that <tt>T</tt> is a type name. Similarly, if we were to write</p>
+		
+<div class="docText">
+  <pre>typename A::B::C::D::E
+</pre>
+</div>
+<br/>
+		
+<p class="docText">we’d be telling the compiler that the (very) nested name <tt>E</tt> is a type name.</p>
+		
+<p class="docText">Of course, if <tt>aFuncTemplate</tt>
+ is instantiated with a type that does not satisfy the requirements of 
+the parsed template, it will result in a compile-time error.</p>
+		
+<div class="docText">
+  <pre>struct Z {
+    // no member named ElemT...
+};
+Z aZ;
+//...
+<span class="docEmphMark">aFuncTemplate( aZ ); // error! no member Z::ElemT            </span>
+				<span class="docEmphMark">aFuncTemplate( anX ); // error! X::ElemT is not a type name  </span>
+aFuncTemplate( states ); // OK. nested ElemT is a type
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Now we can rewrite the <tt>fill</tt> function template to parse correctly:</p>
+		
+<div class="docText">
+  <pre>template &lt;class Cont&gt;
+void fill( Cont &amp;c, typename Cont::ElemT a[], int len ) { // OK
+    for( int i = 0; i &lt; len; ++i )
+        c.insert( a[i] );
+}
+</pre>
+</div>
+<br/>
+		
+
+
+</body>
+</html>

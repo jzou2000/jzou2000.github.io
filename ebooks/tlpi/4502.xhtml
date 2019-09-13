@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>45.2. IPC Keys</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">45.2. IPC Keys</h3><p class="docText">System V IPC keys are integer values represented using the data type <span class="docEmphasis">key_t</span>. The IPC <span class="docEmphasis">get</span>
+ calls translate a key into the corresponding integer IPC identifier. 
+These calls guarantee that if we create a new IPC object, then that 
+object will have a unique identifier, and that if we specify the key of 
+an existing object, then we’ll always obtain the (same) identifier for 
+that object. (Internally, the kernel maintains data structures mapping 
+keys to identifiers for each IPC mechanism, as described in Section 
+45.5.)</p><p class="docText">So,
+ how do we provide a unique key—one that guarantees that we won’t 
+accidentally obtain the identifier of an existing IPC object used by 
+some other application? There are three possibilities:</p><ul><li><p class="docList">Randomly
+ choose some integer key value, which is typically placed in a header 
+file included by all programs using the IPC object. The difficulty with 
+this approach is that we may accidentally choose a value used by another
+ application.</p></li><li><p class="docList">Specify the <tt>IPC_PRIVATE</tt> constant as the <span class="docEmphasis">key</span> value to the <span class="docEmphasis">get</span>
+ call when creating the IPC object, which always results in the creation
+ of a new IPC object that is guaranteed to have a unique key.</p></li><li><p class="docList">Employ the <span class="docEmphasis">ftok()</span> function to generate a (likely unique) key.</p></li></ul><p class="docText">Using either <tt>IPC_PRIVATE</tt> or <span class="docEmphasis">ftok()</span> is the usual technique.</p><h4 class="docSection2Title" id="title-ID0EBGBM">45.2.1. </h4><h5 class="docSection3Title" id="title-ID0EFGBM">45.2.1.1. Generating a unique key with <tt>IPC_PRIVATE</tt></h5><p class="docText">When creating a new IPC object, the key may be specified as <tt>IPC_PRIVATE</tt>, as follows:</p><pre>id = msgget(IPC_PRIVATE, S_IRUSR | S_IWUSR);</pre><br/>
+<p class="docText">In this case, it is not necessary to specify the <tt>IPC_CREAT</tt> or <tt>IPC_EXCL</tt> flags.</p><p class="docText">This
+ technique is especially useful in multiprocess applications where the 
+parent process creates the IPC object prior to performing a <span class="docEmphasis">fork()</span>,
+ with the result that the child inherits the identifier of the IPC 
+object. We can also use this technique in client-server applications 
+(i.e., those involving unrelated processes), but the clients must have a
+ means of obtaining the identifiers of the IPC objects created by the 
+server (and vice versa). For example, after creating an IPC object, the 
+server could then write its identifier to a file that can be read by the
+ clients.</p><h5 class="docSection3Title" id="title-ID0E2HBM">45.2.1.2. Generating a unique key with <span class="docEmphasis">ftok()</span></h5><p class="docText">The <span class="docEmphasis">ftok()</span> (<span class="docEmphasis">file to key</span>) function returns a key value suitable for use in a subsequent call to one of the System V IPC <span class="docEmphasis">get</span> system calls.</p><pre>#include &lt;sys/ipc.h&gt;
+
+key_t <b>ftok</b>(char *<span class="docEmphasis">pathname</span>, int <span class="docEmphasis">proj</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns integer key on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">This key value is generated from the supplied <span class="docEmphasis">pathname</span> and <span class="docEmphasis">proj</span> value using an implementation-defined algorithm. SUSv3 makes the following requirements:</p><ul><li><p class="docList">Only the least significant 8 bits of <span class="docEmphasis">proj</span> are employed by the algorithm.</p></li><li><p class="docList">The application must ensure that the <span class="docEmphasis">pathname</span> refers to an existing file to which <span class="docEmphasis">stat()</span> can be applied (otherwise, <span class="docEmphasis">ftok()</span> returns -1).</p></li><li><p class="docList">If different pathnames (links) referring to the same file (i.e., i-node) are supplied to <span class="docEmphasis">ftok()</span> with the same <span class="docEmphasis">proj</span> value, the same key value must be returned.</p></li></ul><p class="docText">To put things another way, <span class="docEmphasis">ftok()</span> uses the i-node number rather than the name of the file to generate the key value. (Because the <span class="docEmphasis">ftok()</span>
+ algorithm depends on the i-node number, the file should not be removed 
+and re-created during the life of the application, since it is likely 
+that the file will be re-created with a different i-node number.) The 
+purpose of the <span class="docEmphasis">proj</span>
+ value is simply to allow us to generate multiple keys from the same 
+file, which is useful when an application needs to create multiple IPC 
+objects of the same type. Historically, the <span class="docEmphasis">proj</span> argument was of type <span class="docEmphasis">char</span>, and it is often specified as such in calls to <span class="docEmphasis">ftok()</span>.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">SUSv3 leaves the behavior of <span class="docEmphasis">ftok()</span> unspecified if <span class="docEmphasis">proj</span> is 0. Under AIX 5.1, <span class="docEmphasis">ftok()</span> returns -1 if <span class="docEmphasis">proj</span> is specified as 0. On Linux, this value has no special meaning. Nevertheless, portable applications should avoid specifying <span class="docEmphasis">proj</span> as 0; this still leaves a choice of 255 other values.</p><hr noshade="noshade" size="1"/><p class="docText">Normally, the <span class="docEmphasis">pathname</span> given to <span class="docEmphasis">ftok()</span>
+ refers to one of the files or directories that forms part of, or is 
+created by, the application, and cooperating processes pass the same <span class="docEmphasis">pathname</span> to <span class="docEmphasis">ftok()</span>.</p><p class="docText">On Linux, the key returned by <span class="docEmphasis">ftok()</span> is a 32-bit value, created by taking the least significant 8 bits from the <span class="docEmphasis">proj</span>
+ argument, the least significant 8 bits of the device number (i.e., the 
+minor device number) of the device containing the file system in which 
+the file resides, and the least significant 16 bits of the i-node number
+ of the file referred to by <span class="docEmphasis">pathname</span>. (The last two pieces of information are obtained by calling <span class="docEmphasis">stat()</span> on <span class="docEmphasis">pathname</span>.)</p><p class="docText">The <span class="docEmphasis">glibc ftok()</span>
+ algorithm is similar to that employed on other UNIX implementations, 
+and suffers a similar limitation: there is a (very small) possibility 
+that two different files could yield the same key value. This can occur 
+because there is a chance that the least significant bits of an i-node 
+number could be the same for two files on different file systems, 
+coupled with the possibility that two different disk devices (on a 
+system with multiple disk controllers) could have the same minor device 
+number. However, in practice, the possibility of colliding key values 
+for different applications is small enough that the use of <span class="docEmphasis">ftok()</span> for key generation is a viable technique.</p><p class="docText">A typical usage of <span class="docEmphasis">ftok()</span> is the following:</p><pre>key_t key;
+int id;
+
+key = ftok("/mydir/myfile", 'x');
+if (key == -1)
+    errExit("ftok");
+id = msgget(key, IPC_CREAT | S_IRUSR | S_IWUSR);
+if (id == -1)
+    errExit("msgget");</pre><br/>
+</div>
+</body>
+</html>

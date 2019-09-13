@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Inheritance and Dynamic Memory Allocation</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Inheritance and Dynamic Memory Allocation</h3>
+<p class="docText">How does inheritance interact with dynamic memory allocation (the use of <tt>new</tt> and <tt>delete</tt>)?
+ For example, if a base class uses dynamic memory allocation and 
+redefines assignment and a copy constructor, how does that affect the 
+implementation of the derived class? The answer depends on the nature of
+ the derived class. If the derived class does not itself use dynamic 
+memory allocation, you needn’t take any special steps. If the derived 
+class does also use dynamic memory allocation, then there are a couple 
+new tricks to learn. Let’s look at these two cases.</p>
+
+<h4 class="docSection2Title" id="title-ID0E6HDK">Case 1: Derived Class Doesn’t Use <tt>new</tt></h4>
+<p class="docText">Suppose you begin with the following base class that uses dynamic memory allocation:</p>
+<div class="docText"><pre>//  Base Class Using DMA
+class baseDMA
+{
+private:
+    char * label;
+    int rating;
+
+public:
+    baseDMA(const char * l = "null", int r = 0);
+    baseDMA(const baseDMA &amp; rs);
+    virtual ~baseDMA();
+    baseDMA &amp; operator=(const baseDMA &amp; rs);
+...
+};</pre></div><br/>
+<p class="docText">The declaration contains the special methods that are required when constructors use <tt>new</tt>: a destructor, a copy constructor, and an overloaded assignment operator.</p>
+<p class="docText">Now suppose you derive a <tt>lackDMA</tt> class from <tt>baseDMA</tt> and that <tt>lackDMA</tt> does not use <tt>new</tt> or have other unusual design features that require special treatment:</p>
+<div class="docText"><pre>// derived class without DMA
+class lacksDMA :public baseDMA
+{
+private:
+    char color[40];
+public:
+...
+};</pre></div><br/>
+<p class="docText">Do you now have to define an explicit destructor, copy constructor, and assignment operator for the <tt>lackDMA</tt> class? The answer is no.</p>
+<p class="docText">First, consider the need 
+for a destructor. If you don’t define one, the compiler defines a 
+default destructor that does nothing. Actually, the default destructor 
+for a derived class always does something; it calls the base-class 
+destructor after executing its own code. Because the <tt>lackDMA</tt> members, we assume, don’t require any special action, the default destructor is fine.</p>
+<p class="docText">Next, consider the copy constructor. As you saw in Chapter 12,
+ the default copy constructor does memberwise copying, which is 
+inappropriate for dynamic memory allocation. However, memberwise copying
+ is fine for the new <tt>lacksDMA</tt> member. That leaves the matter of the inherited <tt>baseDMA</tt>
+ object. What you need to know is that memberwise copying uses the form 
+of copying that is defined for the data type in question. So copying a <tt>long</tt> to a <tt>long</tt>
+ is done using ordinary assignment. But copying a class member or an 
+inherited class component is done using the copy constructor for that 
+class. Thus, the default copy constructor for the <tt>lacksDMA</tt> class uses the explicit <tt>baseDMA</tt> copy constructor to copy the <tt>baseDMA</tt> portion of a <tt>lacksDMA</tt> object. So the default copy constructor is fine for the new <tt>lacksDMA</tt> member, and it’s also fine for the inherited <tt>baseDMA</tt> object.</p>
+<p class="docText">Essentially the same
+ situation holds for assignment. The default assignment operator for a 
+class automatically uses the base-class assignment operator for the 
+base-class component. So it, too, is fine.</p>
+<p class="docText">These properties of inherited objects also hold true for class members that are themselves objects. For example, Chapter 10, “Objects and Classes,” implements the <tt>Stock</tt> class by using a <tt>string</tt> object to represent the company name. The standard <tt>string</tt> class, like our <tt>String</tt> example, uses dynamic memory allocation. Now you see why this wouldn’t create problems. The default <tt>Stock</tt> copy constructor would use the <tt>string</tt> copy constructor to copy the <tt>company</tt> member of an object, the default <tt>Stock</tt> assignment operator would use the <tt>string</tt> assignment operator to assign the <tt>company</tt> member of an object, and the <tt>Stock</tt> destructor (default or otherwise) would automatically call the <tt>string</tt> destructor.</p>
+
+<h4 class="docSection2Title" id="title-ID0ENNDK">Case 2: Derived Class Does Use <tt>new</tt></h4>
+<p class="docText">Suppose that the derived class uses <tt>new</tt>:</p>
+<div class="docText"><pre>// derived class with DMA
+class hasDMA :public baseDMA
+{
+private:
+    char * style;  // use new in constructors
+public:
+...
+};</pre></div><br/>
+<p class="docText">In this case, of 
+course, you do have to define an explicit destructor, copy constructor, 
+and assignment operator for the derived class. Let’s consider these 
+methods in turn.</p>
+<p class="docText">A derived class destructor 
+automatically calls the base-class destructor, so its own responsibility
+ is to clean up after what the derived-class constructors do. Thus, the <tt>hasDMA</tt> destructor has to free the memory managed by the <tt>style</tt> pointer and can rely on the <tt>baseDMA</tt> destructor to free the memory managed by the <tt>label</tt> pointer:</p>
+<div class="docText"><pre>baseDMA::~baseDMA()  // takes care of baseDMA stuff
+{
+   delete [] label;
+}
+
+hasDMA::~hasDMA()      // takes care of hasDMA stuff
+{
+    delete [] style;
+}</pre></div><br/>
+<p class="docText">Next, consider copy constructors. The <tt>baseDMA</tt> copy constructor follows the usual pattern for arrays of <tt>char</tt>. That is, they use <tt>strlen()</tt>
+ to find the length needed to hold the C-style string, allocate 
+sufficient memory (the number of characters plus one byte for the null 
+character), and use the <tt>strcpy()</tt> function to copy the original string to the target:</p>
+<div class="docText"><pre>baseDMA::baseDMA(const baseDMA &amp; rs)
+{
+    label = new char[std::strlen(rs.label) + 1];
+    std::strcpy(label, rs.label);
+    rating = rs.rating;
+}</pre></div><br/>
+<p class="docText">The <tt>hasDMA</tt> copy constructor only has access to <tt>hasDMA</tt> data, so it must invoke the <tt>baseDMA</tt> copy constructor to handle the <tt>baseDMA</tt> share of the data:</p>
+<div class="docText"><pre>hasDMA::hasDMA(const hasDMA &amp; hs)
+         : baseDMA(hs)
+{
+    style = new char[std::strlen(hs.style) + 1];
+    std::strcpy(style, hs.style);
+}</pre></div><br/>
+<p class="docText">The point to note is that the member initializer list passes a <tt>hasDMA</tt> reference to a <tt>baseDMA</tt> constructor. There is no <tt>baseDMA</tt> constructor with a type <tt>hasDMA</tt> reference parameter, but none is needed. That’s because the <tt>baseDMA</tt> copy constructor has a <tt>baseDMA</tt> reference parameter, and a base class reference can refer to a derived type. Thus, the <tt>baseDMA</tt> copy constructor uses the <tt>baseDMA</tt> portion of the <tt>hasDMA</tt> argument to construct the <tt>baseDMA</tt> portion of the new object.</p>
+<p class="docText">Next, consider assignment operators. The <tt>baseDMA</tt> assignment operator follows the usual pattern:</p>
+<div class="docText"><pre>baseDMA &amp; baseDMA::operator=(const baseDMA &amp; rs)
+{
+    if (this == &amp;rs)
+        return *this;
+    delete [] label;
+    label = new char[std::strlen(rs.label) + 1];
+    std::strcpy(label, rs.label);
+    rating = rs.rating;
+    return *this;
+}</pre></div><br/>
+<p class="docText">Because <tt>hasDMA</tt> also uses dynamic memory allocation, it, too, needs an explicit assignment operator. Being a <tt>hasDMA</tt> method, it only has direct access to <tt>hasDMA</tt>
+ data. Nonetheless, an explicit assignment operator for a derived class 
+also has to take care of assignment for the inherited base class <tt>baseDMA</tt> object. You can accomplish this by explicitly calling the base class assignment operator, as shown here:</p>
+<div class="docText"><pre>hasDMA &amp; hasDMA::operator=(const hasDMA &amp; hs)
+{
+    if (this == &amp;hs)
+        return *this;
+    baseDMA::operator=(hs);  // copy base portion
+    delete [] style;         // prepare for new style
+    style = new char[std::strlen(hs.style) + 1];
+    std::strcpy(style, hs.style);
+    return *this;
+}</pre></div><br/>
+<p class="docText">The following statement might look a little odd:</p>
+<div class="docText"><pre>baseDMA::operator=(hs);  // copy base portion</pre></div><br/>
+<p class="docText">But using function 
+notation instead of operator notation lets you use the scope-resolution 
+operator. In effect, the statement means the following:</p>
+<div class="docText"><pre>*this = hs;  // use baseDMA::operator=()</pre></div><br/>
+<p class="docText">But, of course, the compiler ignores comments, so if you used the latter code, the compiler would use <tt>hasDMA::operator=()</tt> instead and create a recursive call. Using function notation gets the correct assignment operator called.</p>
+<p class="docText">In summary, when both the 
+base class and the derived class use dynamic memory allocation, the 
+derived-class destructor, copy constructor, and assignment operator all 
+must use their base-class counterparts to handle the base-class 
+component. This common requirement is accomplished three different ways.
+ For a destructor, it is done automatically. For a constructor, it is 
+accomplished by invoking the base-class copy constructor in the member 
+initialization list, or else the default constructor is invoked 
+automatically. For the assignment operator, it is accomplished by using 
+the scope-resolution operator in an explicit call of the base-class 
+assignment operator.</p>
+
+<h4 class="docSection2Title" id="title-ID0EKSDK">An Inheritance Example with Dynamic Memory Allocation and Friends</h4>
+<p class="docText">To illustrate these ideas of inheritance and dynamic memory allocation, let’s integrate the <tt>baseDMA</tt>, <tt>lacksDMA</tt>, and <tt>hasDMA</tt> classes just discussed into a single example. Listing 13.14
+ is a header file for these classes. To what we’ve already discussed, it
+ adds a friend function that illustrates how derived classes can access 
+friends to a base class.</p>
+<h5 class="docExampleTitle" id="title-ID0E6VDK">Listing 13.14. <tt>dma.h</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// dma.h  -- inheritance and dynamic memory allocation
+#ifndef DMA_H_
+#define DMA_H_
+#include &lt;iostream&gt;
+
+//  Base Class Using DMA
+class baseDMA
+{
+private:
+    char * label;
+    int rating;
+
+public:
+    baseDMA(const char * l = "null", int r = 0);
+    baseDMA(const baseDMA &amp; rs);
+    virtual ~baseDMA();
+    baseDMA &amp; operator=(const baseDMA &amp; rs);
+    friend std::ostream &amp; operator&lt;&lt;(std::ostream &amp; os,
+                                     const baseDMA &amp; rs);
+};
+
+// derived class without DMA
+// no destructor needed
+// uses implicit copy constructor
+// uses implicit assignment operator
+class lacksDMA :public baseDMA
+{
+private:
+    enum { COL_LEN = 40};
+    char color[COL_LEN];
+public:
+    lacksDMA(const char * c = "blank", const char * l = "null",
+              int r = 0);
+    lacksDMA(const char * c, const baseDMA &amp; rs);
+    friend std::ostream &amp; operator&lt;&lt;(std::ostream &amp; os,
+                                     const lacksDMA &amp; rs);
+};
+
+// derived class with DMA
+class hasDMA :public baseDMA
+{
+private:
+    char * style;
+public:
+    hasDMA(const char * s = "none", const char * l = "null",
+              int r = 0);
+    hasDMA(const char * s, const baseDMA &amp; rs);
+    hasDMA(const hasDMA &amp; hs);
+    ~hasDMA();
+    hasDMA &amp; operator=(const hasDMA &amp; rs);
+    friend std::ostream &amp; operator&lt;&lt;(std::ostream &amp; os,
+                                     const hasDMA &amp; rs);
+};
+
+#endif
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Listing 13.15 provides the method definitions for the <tt>baseDMA</tt>, <tt>lacksDMA</tt>, and <tt>hasDMA</tt> classes.</p>
+<h5 class="docExampleTitle" id="title-ID0EAYDK">Listing 13.15. <tt>dma.cpp</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// dma.cpp --dma class methods
+
+#include "dma.h"
+#include &lt;cstring&gt;
+
+// baseDMA methods
+baseDMA::baseDMA(const char * l, int r)
+{
+    label = new char[std::strlen(l) + 1];
+    std::strcpy(label, l);
+    rating = r;
+}
+
+baseDMA::baseDMA(const baseDMA &amp; rs)
+{
+    label = new char[std::strlen(rs.label) + 1];
+    std::strcpy(label, rs.label);
+    rating = rs.rating;
+}
+
+baseDMA::~baseDMA()
+{
+    delete [] label;
+}
+
+baseDMA &amp; baseDMA::operator=(const baseDMA &amp; rs)
+{
+    if (this == &amp;rs)
+        return *this;
+    delete [] label;
+    label = new char[std::strlen(rs.label) + 1];
+    std::strcpy(label, rs.label);
+    rating = rs.rating;
+    return *this;
+}
+
+std::ostream &amp; operator&lt;&lt;(std::ostream &amp; os, const baseDMA &amp; rs)
+{
+    os &lt;&lt; "Label: " &lt;&lt; rs.label &lt;&lt; std::endl;
+    os &lt;&lt; "Rating: " &lt;&lt; rs.rating &lt;&lt; std::endl;
+    return os;
+}
+
+// lacksDMA methods
+lacksDMA::lacksDMA(const char * c, const char * l, int r)
+    : baseDMA(l, r)
+{
+    std::strncpy(color, c, 39);
+    color[39] = '\0';
+}
+
+lacksDMA::lacksDMA(const char * c, const baseDMA &amp; rs)
+    : baseDMA(rs)
+{
+    std::strncpy(color, c, COL_LEN - 1);
+    color[COL_LEN - 1] = '\0';
+}
+
+std::ostream &amp; operator&lt;&lt;(std::ostream &amp; os, const lacksDMA &amp; ls)
+{
+    os &lt;&lt; (const baseDMA &amp;) ls;
+    os &lt;&lt; "Color: " &lt;&lt; ls.color &lt;&lt; std::endl;
+    return os;
+}
+
+// hasDMA methods
+hasDMA::hasDMA(const char * s, const char * l, int r)
+         : baseDMA(l, r)
+{
+    style = new char[std::strlen(s) + 1];
+    std::strcpy(style, s);
+}
+
+hasDMA::hasDMA(const char * s, const baseDMA &amp; rs)
+         : baseDMA(rs)
+{
+    style = new char[std::strlen(s) + 1];
+    std::strcpy(style, s);
+}
+
+hasDMA::hasDMA(const hasDMA &amp; hs)
+         : baseDMA(hs)  // invoke base class copy constructor
+{
+    style = new char[std::strlen(hs.style) + 1];
+    std::strcpy(style, hs.style);
+}
+
+hasDMA::~hasDMA()
+{
+    delete [] style;
+}
+
+hasDMA &amp; hasDMA::operator=(const hasDMA &amp; hs)
+{
+    if (this == &amp;hs)
+        return *this;
+    baseDMA::operator=(hs);  // copy base portion
+    delete [] style;         // prepare for new style
+    style = new char[std::strlen(hs.style) + 1];
+    std::strcpy(style, hs.style);
+    return *this;
+}
+
+std::ostream &amp; operator&lt;&lt;(std::ostream &amp; os, const hasDMA &amp; hs)
+{
+    os &lt;&lt; (const baseDMA &amp;) hs;
+    os &lt;&lt; "Style: " &lt;&lt; hs.style &lt;&lt; std::endl;
+    return os;
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">The new feature to note in Listings 13.14 and 13.15 is how derived classes can make use of a friend to a base class. Consider, for example, the following friend to the <tt>hasDMA</tt> class:</p>
+<div class="docText"><pre>friend std::ostream &amp; operator&lt;&lt;(std::ostream &amp; os,
+                                 const hasDMA &amp; rs);</pre></div><br/>
+<p class="docText">Being a friend to the <tt>hasDMA</tt> class gives this function access to the <tt>style</tt> member. But there’s a problem: This function is not a friend to the <tt>baseDMA</tt> class, so how can it access the <tt>label</tt> and <tt>rating</tt> members? The solution is to use the <tt>operator&lt;&lt;()</tt> function that is a friend to the <tt>baseDMA</tt>
+ class. The next problem is that because friends are not member 
+functions, you can’t use the scope-resolution operator to indicate which
+ function to use. The solution to this problem is to use a type cast so 
+that prototype matching will select the correct function. Thus, the code
+ type casts the type <tt>const hasDMA &amp;</tt> parameter to a type <tt>const baseDMA &amp;</tt> argument:</p>
+<div class="docText"><pre>std::ostream &amp; operator&lt;&lt;(std::ostream &amp; os, const hasDMA &amp; hs)
+{
+//  type cast to match operator&lt;&lt;(ostream &amp; , const baseDMA &amp;)
+    os &lt;&lt; (const baseDMA &amp;) hs;
+    os &lt;&lt; "Style: " &lt;&lt; hs.style &lt;&lt; endl;
+    return os;
+}</pre></div><br/>
+<p class="docText">Listing 13.16 tests the <tt>baseDMA</tt>, <tt>lacksDMA</tt>, and <tt>hasDMA</tt> classes in a short program.</p>
+<h5 class="docExampleTitle" id="title-ID0EU2DK">Listing 13.16. <tt>usedma.cpp</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// usedma.cpp -- inheritance, friends, and DMA
+// compile with dma.cpp
+#include &lt;iostream&gt;
+#include "dma.h"
+int main()
+{
+    using std::cout;
+    using std::endl;
+
+    baseDMA shirt("Portabelly", 8);
+    lacksDMA balloon("red", "Blimpo", 4);
+    hasDMA map("Mercator", "Buffalo Keys", 5);
+    cout &lt;&lt; "Displaying baseDMA object:\n";
+    cout &lt;&lt; shirt &lt;&lt; endl;
+    cout &lt;&lt; "Displaying lacksDMA object:\n";
+    cout &lt;&lt; balloon &lt;&lt; endl;
+    cout &lt;&lt; "Displaying hasDMA object:\n";
+    cout &lt;&lt; map &lt;&lt; endl;
+    lacksDMA balloon2(balloon);
+    cout &lt;&lt; "Result of lacksDMA copy:\n";
+    cout &lt;&lt; balloon2 &lt;&lt; endl;
+    hasDMA map2;
+    map2 = map;
+    cout &lt;&lt; "Result of hasDMA assignment:\n";
+    cout &lt;&lt; map2 &lt;&lt; endl;
+    return 0;
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Here’s the output of the program in Listings 13.14, 13.15, and 13.16:</p>
+<div class="docText"><pre>Displaying baseDMA object:
+Label: Portabelly
+Rating: 8
+
+Displaying lacksDMA object:
+Label: Blimpo
+Rating: 4
+Color: red
+
+Displaying hasDMA object:
+Label: Buffalo Keys
+Rating: 5
+Style: Mercator
+
+Result of lacksDMA copy:
+Label: Blimpo
+Rating: 4
+Color: red
+
+Result of hasDMA assignment:
+Label: Buffalo Keys
+Rating: 5
+Style: Mercator</pre></div><br/>
+</div>
+</body>
+</html>

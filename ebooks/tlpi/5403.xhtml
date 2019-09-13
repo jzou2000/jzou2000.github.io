@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>54.3. Using Shared Memory Objects</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">54.3. Using Shared Memory Objects</h3><p class="docText">Example 54-2 and Example 54-3 demonstrate the use of a shared memory object to transfer data from one process to another. The program in Example 54-2
+ copies the string contained in its second command-line argument into 
+the existing shared memory object named in its first command-line 
+argument. Before mapping the object and performing the copy, the program
+ uses <span class="docEmphasis">ftruncate()</span> to resize the shared memory object to be the same length as the string that is to be copied.</p><h5 class="docExampleTitle" id="title-ID0EOQEM">Example 54-2. Copying data into a POSIX shared memory object</h5><p></p><div class="box"><pre class="preFixedHeight"><b>pshm/pshm_write.c</b>
+#include &lt;fcntl.h&gt;
+#include &lt;sys/mman.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int fd;
+    size_t len;                 /* Size of shared memory object */
+    char *addr;
+
+    if (argc != 3 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s shm-name string\n", argv[0]);
+
+    fd = shm_open(argv[1], O_RDWR, 0);      /* Open existing object */
+    if (fd == -1)
+        errExit("shm_open");
+
+    len = strlen(argv[2]);
+    if (ftruncate(fd, len) == -1)           /* Resize object to hold string */
+        errExit("ftruncate");
+    printf("Resized to %ld bytes\n", (long) len);
+
+    addr = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (addr == MAP_FAILED)
+        errExit("mmap");
+
+    if (close(fd) == -1)
+        errExit("close");                   /* 'fd' is no longer needed */
+
+    printf("copying %ld bytes\n", (long) len);
+    memcpy(addr, argv[2], len);             /* Copy string to shared memory */
+    exit(EXIT_SUCCESS);
+}
+    <b>pshm/pshm_write.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The program in Example 54-3 displays the string in the existing shared memory object named in its command-line argument on standard output. After calling <span class="docEmphasis">shm_open()</span>, the program uses <span class="docEmphasis">fstat()</span> to determine the size of the shared memory and uses that size in the call to <span class="docEmphasis">mmap()</span> that maps the object and in the <span class="docEmphasis">write()</span> call that prints the string.</p><h5 class="docExampleTitle" id="title-ID0EHREM">Example 54-3. Copying data from a POSIX shared memory object</h5><p></p><div class="box"><pre class="preFixedHeight"><b>pshm/pshm_read.c</b>
+#include &lt;fcntl.h&gt;
+#include &lt;sys/mman.h&gt;
+#include &lt;sys/stat.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int fd;
+    char *addr;
+    struct stat sb;
+
+    if (argc != 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s shm-name\n", argv[0]);
+
+    fd = shm_open(argv[1], O_RDONLY, 0);    /* Open existing object */
+    if (fd == -1)
+        errExit("shm_open");
+
+    /* Use shared memory object size as length argument for mmap()
+       and as number of bytes to write() */
+
+    if (fstat(fd, &amp;sb) == -1)
+        errExit("fstat");
+
+    addr = mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
+    if (addr == MAP_FAILED)
+        errExit("mmap");
+
+    if (close(fd) == -1);                   /* 'fd' is no longer needed */
+        errExit("close");
+
+    write(STDOUT_FILENO, addr, sb.st_size);
+    printf("\n");
+    exit(EXIT_SUCCESS);
+}
+    <b>pshm/pshm_read.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The following shell session demonstrates the use of the programs in Example 54-2 and Example 54-3. We first create a zero-length shared memory object using the program in Example 54-1.</p><pre>$ <b>./pshm_create -c /demo_shm 0 </b>
+$ <b>ls -l /dev/shm </b>                        <i> Check the size of object</i>
+total 4
+-rw-------    1 mtk    users    0 Jun 21 13:33 demo_shm</pre><br/>
+<p class="docText">We then use the program in Example 54-2 to copy a string into the shared memory object:</p><pre class="preFixedWidth">$ <b>./pshm_write /demo_shm 'hello' </b>
+$ <b>ls -l /dev/shm </b>                        <i> Check that object has changed in size</i>
+total 4
+-rw-------    1 mtk    users    5 Jun 21 13:33 demo_shm
+
+					  </pre><br/>
+<p class="docText">From the output, we can see 
+that the program resized the shared memory object so that it is large 
+enough to hold the specified string.</p><p class="docText">Finally, we use the program in Example 54-3 to display the string in the shared memory object:</p><pre>$ <b>./pshm_read /demo_shm</b>
+hello</pre><br/>
+<p class="docText">Applications must 
+typically use some synchronization technique to allow processes to 
+coordinate their access to shared memory. In the example shell session 
+shown here, the coordination was provided by the user running the 
+programs one after the other. Typically, applications would instead use a
+ synchronization primitive (e.g., semaphores) to coordinate access to a 
+shared memory object.</p>
+</div>
+</body>
+</html>

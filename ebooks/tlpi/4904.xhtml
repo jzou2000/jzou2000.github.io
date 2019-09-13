@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>49.4. File Mappings</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">49.4. File Mappings</h3><p class="docText">To create a file mapping, we perform the following steps:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Obtain a descriptor for the file, typically via a call to <span class="docEmphasis">open()</span>.</p></div></li><li><div style="font-weight:normal"><p class="docList">Pass that file descriptor as the <span class="docEmphasis">fd</span> argument in a call to <span class="docEmphasis">mmap()</span>.</p></div></li></ol></div><p class="docText">As a result of these steps, <span class="docEmphasis">mmap()</span> maps the contents of the open file into the address space of the calling process. Once <span class="docEmphasis">mmap()</span>
+ has been called, we can close the file descriptor without affecting the
+ mapping. However, in some cases it may be useful to keep this file 
+descriptor open—see, for example, Example 49-1 and also Chapter 54.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">As well as normal disk files, it is possible to use <span class="docEmphasis">mmap()</span> to map the contents of various real and virtual devices, such as hard disks, optical disks, and <tt>/dev/mem</tt>.</p><hr noshade="noshade" size="1"/><p class="docText">The file referred to by the descriptor <span class="docEmphasis">fd</span> must have been opened with permissions appropriate for the values specified in <span class="docEmphasis">prot</span> and <span class="docEmphasis">flags</span>. In particular, the file must always be opened for reading, and, if <tt>PROT_WRITE</tt> and <tt>MAP_SHARED</tt> are specified in <span class="docEmphasis">flags</span>, then the file must be opened for both reading and writing.</p><p class="docText">The <span class="docEmphasis">offset</span>
+ argument specifies the starting byte of the region to be mapped from 
+the file, and must be a multiple of the system page size. Specifying <span class="docEmphasis">offset</span> as 0 causes the file to be mapped from the beginning. The <span class="docEmphasis">length</span> argument specifies the number of bytes to be mapped. Together, the <span class="docEmphasis">offset</span> and <span class="docEmphasis">length</span> arguments determine which region of the file is to be mapped into memory, as shown in Figure 49-1.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On
+ Linux, the pages of a file mapping are mapped in on the first access. 
+This means that if changes are made to a file region after the <span class="docEmphasis">mmap()</span>
+ call, but before the corresponding part (i.e., page) of the mapping is 
+accessed, then the changes may be visible to the process, if the page 
+has not otherwise already been loaded into memory. This behavior is 
+implementation-dependent; portable applications should avoid relying on a
+ particular kernel behavior in this scenario.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0ED6CM">49.4.1. Private File Mappings</h4><p class="docText">The two most common uses of private file mappings are the following:</p><ul><li><p class="docList">To
+ allow multiple processes executing the same program or using the same 
+shared library to share the same (read-only) text segment, which is 
+mapped from the corresponding part of the underlying executable or 
+library file.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Although the executable text segment is normally protected to allow only read and execute access (<tt>PROT_READ | PROT_EXEC</tt>), it is mapped using <tt>MAP_PRIVATE</tt> rather than <tt>MAP_SHARED</tt>,
+ because a debugger or a self-modifying program can modify the program 
+text (after first changing the protection on the memory), and such 
+changes should not be carried through to the underlying file or affect 
+other processes.</p><hr noshade="noshade" size="1"/></li><li><p class="docList">To
+ map the initialized data segment of an executable or shared library. 
+Such mappings are made private so that modifications to the contents of 
+the mapped data segment are not carried through to the underlying file.</p></li></ul><p class="docText">Both of these uses of <span class="docEmphasis">mmap()</span>
+ are normally invisible to a program, because these mappings are created
+ by the program loader and dynamic linker. Examples of both kinds of 
+mappings can be seen in the <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/maps</tt> output shown in Section 48.5.</p><p class="docText">One
+ other, less frequent, use of a private file mapping is to simplify the 
+file-input logic of a program. This is similar to the use of shared file
+ mappings for memory-mapped I/O (described in the next section), but 
+allows only for file input.</p><p></p><center><h5 class="docFigureTitle">Figure 49-1. Overview of memory-mapped file</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_002-56.png"/></p></center><p></p><br/><h4 class="docSection2Title" id="title-ID0EFBDM">49.4.2. Shared File Mappings</h4><p class="docText">When
+ multiple processes create shared mappings of the same file region, they
+ all share the same physical pages of memory. In addition, modifications
+ to the contents of the mapping are carried through to the file. In 
+effect, the file is being treated as the paging store for this region of
+ memory, as shown in Figure 49-2.
+ (We simplify things in this diagram by omitting to show that the mapped
+ pages are typically not contiguous in physical memory.)</p><p class="docText">Shared file mappings serve two purposes: memory-mapped I/O and IPC. We consider each of these uses below.</p><p></p><center><h5 class="docFigureTitle">Figure 49-2. Two processes with a shared mapping of the same region of a file</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_004-26.png"/></p></center><p></p><br/><h5 class="docSection3Title" id="title-ID0ERCDM">49.4.2.1. Memory-mapped I/O</h5><p class="docText">Since
+ the contents of the shared file mapping are initialized from the file, 
+and any modifications to the contents of the mapping are automatically 
+carried through to the file, we can perform file I/O simply by accessing
+ bytes of memory, relying on the kernel to ensure that the changes to 
+memory are propagated to the mapped file. (Typically, a program would 
+define a structured data type that corresponds to the contents of the 
+disk file, and then use that data type to cast the contents of the 
+mapping.) This technique is referred to as <span class="docEmphasis">memory-mapped I/O</span>, and is an alternative to using <span class="docEmphasis">read()</span> and <span class="docEmphasis">write()</span> to access the contents of a file.</p><p class="docText">Memory-mapped I/O has two potential advantages:</p><ul><li><p class="docList">By replacing <span class="docEmphasis">read()</span> and <span class="docEmphasis">write()</span> system calls with memory accesses, it can simplify the logic of some applications.</p></li><li><p class="docList">It can, in some circumstances, provide better performance than file I/O carried out using the conventional I/O system calls.</p></li></ul><p class="docText">The reasons that memory-mapped I/O can provide performance benefits are as follows:</p><ul><li><p class="docList">A normal <span class="docEmphasis">read()</span> or <span class="docEmphasis">write()</span>
+ involves two transfers: one between the file and the kernel buffer 
+cache, and the other between the buffer cache and a user-space buffer. 
+Using <span class="docEmphasis">mmap()</span> 
+eliminates the second of these transfers. For input, the data is 
+available to the user process as soon as the kernel has mapped the 
+corresponding file blocks into memory. For output, the user process 
+merely needs to modify the contents of the memory, and can then rely on 
+the kernel memory manager to automatically update the underlying file.</p></li><li><p class="docList">In addition to saving a transfer between kernel space and user space, <span class="docEmphasis">mmap()</span> can also improve performance by lowering memory requirements. When using <span class="docEmphasis">read()</span> or <span class="docEmphasis">write()</span>, the data is maintained in two buffers: one in user space and the other in kernel space. When using <span class="docEmphasis">mmap()</span>,
+ a single buffer is shared between the kernel space and user space. 
+Furthermore, if multiple processes are performing I/O on the same file, 
+then, using <span class="docEmphasis">mmap()</span>, they can all share the same kernel buffer, resulting in an additional memory saving.</p></li></ul><p class="docText">Performance
+ benefits from memory-mapped I/O are most likely to be realized when 
+performing repeated random accesses in a large file. If we are 
+performing sequential access of a file, then <span class="docEmphasis">mmap()</span> will probably provide little or no gain over <span class="docEmphasis">read()</span> and <span class="docEmphasis">write()</span>,
+ assuming that we perform I/O using buffer sizes big enough to avoid 
+making a large number of I/O system calls. The reason that there is 
+little performance benefit is that, regardless of which technique we 
+use, the entire contents of the file will be transferred between disk 
+and memory exactly once, and the efficiency gains of eliminating a data 
+transfer between user space and kernel space and reducing memory usage 
+are typically negligible compared to the time required for disk I/O.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Memory-mapped
+ I/O can also have disadvantages. For small I/Os, the cost of 
+memory-mapped I/O (i.e., mapping, page faulting, unmapping, and updating
+ the hardware memory management unit’s translation look-aside buffer) 
+can actually be higher than for a simple <span class="docEmphasis">read()</span> or <span class="docEmphasis">write()</span>. In addition, it can sometimes be difficult for the kernel to efficiently handle write-back for writable mappings (the use of <span class="docEmphasis">msync()</span> or <span class="docEmphasis">sync_file_range()</span> can help improve efficiency in this case).</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EOFDM">49.4.2.2. IPC using a shared file mapping</h5><p class="docText">Since
+ all processes with a shared mapping of the same file region share the 
+same physical pages of memory, the second use of a shared file mapping 
+is as a method of (fast) IPC. The feature that distinguishes this type 
+of shared memory region from a System V shared memory object (Chapter 48)
+ is that modifications to the contents of the region are carried through
+ to the underlying mapped file. This feature is useful in an application
+ that requires the shared memory contents to persist across application 
+or system restarts.</p><h5 class="docSection3Title" id="title-ID0EZFDM">49.4.2.3. Example program</h5><p class="docText">Example 49-2 provides a simple example of the use of <span class="docEmphasis">mmap()</span>
+ to create a shared file mapping. This program begins by mapping the 
+file named in its first command-line argument. It then prints the value 
+of the string lying at the start of the mapped region. Finally, if a 
+second command-line argument is supplied, that string is copied into the
+ shared memory region.</p><p class="docText">The
+ following shell session log demonstrates the use of this program. We 
+begin by creating a 1024-byte file that is populated with zeros:</p><pre>$ <b>dd if=/dev/zero of=s.txt bs=1 count=1024</b>
+1024+0 records in
+1024+0 records out</pre><br/>
+<p class="docText">We then use our program to map the file and copy a string into the mapped region:</p><pre>$ <b>./t_mmap s.txt hello</b>
+Current string=
+Copied "hello" to shared memory</pre><br/>
+<p class="docText">The program displayed 
+nothing for the current string because the initial value of the mapped 
+files began with a null byte (i.e., zero-length string).</p><p class="docText">Next, we use our program to again map the file and copy a new string into the mapped region:</p><pre>$ <b>./t_mmap s.txt goodbye</b>
+Current string=hello
+Copied "goodbye" to shared memory</pre><br/>
+<p class="docText">Finally, we dump the contents of the file, 8 characters per line, to verify its contents:</p><pre>$ <b>od -c -w8 s.txt</b>
+0000000   g   o   o   d   b   y   e nul
+0000010 nul nul nul nul nul nul nul nul
+*
+0002000</pre><br/>
+<p class="docText">Our trivial program 
+doesn’t use any mechanism to synchronize access by multiple processes to
+ the mapped file. However, real-world applications typically need to 
+synchronize access to shared mappings. This can be done using a variety 
+of techniques, including semaphores (Chapter 47 and Chapter 53) and file locking (Chapter 55).</p><p class="docText">We explain the <span class="docEmphasis">msync()</span> system call used in Example 49-2 in Section 49.5.</p><h5 class="docExampleTitle" id="title-ID0EEIDM">Example 49-2. Using <span class="docEmphasis">mmap()</span> to create a shared file mapping</h5><p></p><div class="box"><pre class="preFixedHeight"><b>mmap/t_mmap.c</b>
+#include &lt;sys/mman.h&gt;
+#include &lt;fcntl.h&gt;
+#include "tlpi_hdr.h"
+
+#define MEM_SIZE 10
+
+int
+main(int argc, char *argv[])
+{
+    char *addr;
+    int fd;
+
+    if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s file [new-value]\n", argv[0]);
+
+    fd = open(argv[1], O_RDWR);
+    if (fd == -1)
+        errExit("open");
+
+    addr = mmap(NULL, MEM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (addr == MAP_FAILED)
+        errExit("mmap");
+
+    if (close(fd) == -1)                /* No longer need 'fd' */
+        errExit("close");
+
+    printf("Current string=%.*s\n", MEM_SIZE, addr);
+                /* Secure practice: output at most MEM_SIZE bytes */
+
+    if (argc &gt; 2) {                     /* Update contents of region */
+        if (strlen(argv[2]) &gt;= MEM_SIZE)
+            cmdLineErr("'new-value' too large\n");
+
+        memset(addr, 0, MEM_SIZE);      /* Zero out region */
+        strncpy(addr, argv[2], MEM_SIZE - 1);
+        if (msync(addr, MEM_SIZE, MS_SYNC) == -1)
+            errExit("msync");
+
+        printf("Copied \"%s\" to shared memory\n", argv[2]);
+    }
+
+    exit(EXIT_SUCCESS);
+}
+     <b>mmap/t_mmap.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0ESIDM">49.4.3. Boundary Cases</h4><p class="docText">In
+ many cases, the size of a mapping is a multiple of the system page 
+size, and the mapping falls entirely within the bounds of the mapped 
+file. However, this is not necessarily so, and we now look at what 
+happens when these conditions don’t hold.</p><p class="docText">Figure 49-3
+ portrays the case where the mapping falls entirely within the bounds of
+ the mapped file, but the size of the region is not a multiple of the 
+system page size (which we assume is 4096 bytes for the purposes of this
+ discussion).</p><p></p><center><h5 class="docFigureTitle">Figure 49-3. Memory mapping whose <span class="docEmphasis">length</span> is not a multiple of the system page size</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_003-54.png"/></p></center><p></p><br/><p class="docText">Since
+ the size of the mapping is not a multiple of the system page size, it 
+is rounded up to the next multiple of the system page size. Because the 
+file is larger than this rounded-up size, the corresponding bytes of the
+ file are mapped as shown in Figure 49-3.</p><p class="docText">Attempts to access bytes beyond the end of the mapping result in the generation of a <tt>SIGSEGV</tt>
+ signal (assuming that there is no other mapping at that location). The 
+default action for this signal is to terminate the process with a core 
+dump.</p><p class="docText">When the mapping extends beyond the end of the underlying file (see Figure 49-4),
+ the situation is more complex. As before, because the size of the 
+mapping is not a multiple of the system page size, it is rounded up. 
+However, in this case, while the bytes in the rounded-up region (i.e., 
+bytes 2200 to 4095 in the diagram) are accessible, they are not mapped 
+to the underlying file (since no corresponding bytes exist in the file).
+ Instead, they are initialized to 0 (SUSv3 requires this). These bytes 
+will nevertheless be shared with other processes mapping the file, if 
+they specify a sufficiently large <span class="docEmphasis">length</span> argument. Changes to these bytes are not written to the file.</p><p class="docText">If the mapping includes pages beyond the rounded-up region (i.e., bytes 4096 and beyond in Figure 49-4), then attempts to access addresses in these pages result in the generation of a <tt>SIGBUS</tt>
+ signal, which warns the process that there is no region of the file 
+corresponding to these addresses. As before, attempts to access 
+addresses beyond the end of the mapping result in the generation of a <tt>SIGSEGV</tt> signal.</p><p class="docText">From
+ the above description, it may appear pointless to create a mapping 
+whose size exceeds that of the underlying file. However, by extending 
+the size of the file (e.g., using <span class="docEmphasis">ftruncate()</span> or <span class="docEmphasis">write()</span>), we can render previously inaccessible parts of such a mapping usable.</p><p></p><center><h5 class="docFigureTitle">Figure 49-4. Memory mapping extending beyond end of mapped file</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-99.png"/></p></center><p></p><br/><h4 class="docSection2Title" id="title-ID0EJNDM">49.4.4. Memory Protection and File Access Mode Interactions</h4><p class="docText">One point that we have not so far explained in detail is the interaction between the memory protection specified in the <span class="docEmphasis">mmap() prot</span> argument and the mode in which the mapped file is opened. As a general principle, we can say that the <tt>PROT_READ</tt> and <tt>PROT_EXEC</tt> protections require that the mapped file is opened <tt>O_RDONLY</tt> or <tt>O_RDWR</tt>, and that the <tt>PROT_WRITE</tt> protection requires that the mapped file is opened <tt>O_WRONLY</tt> or <tt>O_RDWR</tt>.</p><p class="docText">However, the situation is complicated by the limited granularity of memory protections provided by some hardware architectures (Section 49.2). For such architectures, we make the following observations:</p><ul><li><p class="docList">All combinations of memory protection are compatible with opening the file with the <tt>O_RDWR</tt> flag.</p></li><li><p class="docList">No combination of memory protections—not even just <tt>PROT_WRITE</tt>—is compatible with a file opened <tt>O_WRONLY</tt> (the error <tt>EACCES</tt>
+ results). This is consistent with the fact that some hardware 
+architectures don’t allow us write-only access to a page. As noted in Section 49.2, <tt>PROT_WRITE</tt> implies <tt>PROT_READ</tt>
+ on those architectures, which means that if the page can be written, 
+then it can also be read. A read operation is incompatible with <tt>O_WRONLY</tt>, which must not reveal the original contents of the file.</p></li><li><p class="docList">The results when a file is opened with the <tt>O_RDONLY</tt> flag depend on whether we specify <tt>MAP_PRIVATE</tt> or <tt>MAP_SHARED</tt> when calling <span class="docEmphasis">mmap()</span>. For a <tt>MAP_PRIVATE</tt> mapping, we can specify any combination of memory protection in <span class="docEmphasis">mmap()</span>—because modifications to the contents of a <tt>MAP_PRIVATE</tt> page are never written to the file, the inability to write to the file is not a problem. For a <tt>MAP_SHARED</tt> mapping, the only memory protections that are compatible with <tt>O_RDONLY</tt> are <tt>PROT_READ</tt> and <tt>(PROT_READ | PROT_EXEC)</tt>. This is logical, since a <tt>PROT_WRITE</tt>, <tt>MAP_SHARED</tt> mapping allows updates to the mapped file.</p></li></ul>
+</div>
+</body>
+</html>

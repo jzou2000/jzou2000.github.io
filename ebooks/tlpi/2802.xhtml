@@ -1,0 +1,265 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>28.2. The clone() System Call</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">28.2. The <span class="docEmphasis">clone()</span> System Call</h3><p class="docText">Like <span class="docEmphasis">fork()</span> and <span class="docEmphasis">vfork()</span>, the Linux-specific <span class="docEmphasis">clone()</span>
+ system call creates a new process. It differs from the other two calls 
+in allowing finer control over the steps that occur during process 
+creation. The main use of <span class="docEmphasis">clone()</span> is in the implementation of threading libraries. Because <span class="docEmphasis">clone()</span>
+ is not portable, its direct use in application programs should normally
+ be avoided. We describe it here because it is useful background for the
+ discussion of POSIX threads in Chapter 29 to Chapter 33, and also because it further illuminates the operation of <span class="docEmphasis">fork()</span> and <span class="docEmphasis">vfork()</span>.</p><pre>#define _GNU_SOURCE
+#include &lt;sched.h&gt;
+
+int <b>clone</b>(int (*<span class="docEmphasis">func</span>) (void *), void *<span class="docEmphasis">child_stack</span>, int
+ <span class="docEmphasis">flags</span>, void *<span class="docEmphasis">func_arg</span>, ...
+          /* pid_t *<span class="docEmphasis">ptid</span>, struct user_desc *<span class="docEmphasis">tls</span>, pid_t *<span class="docEmphasis">ctid</span> */ );</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns process ID of child on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">Like <span class="docEmphasis">fork()</span>, a new process created with <span class="docEmphasis">clone()</span> is an almost exact duplicate of the parent.</p><p class="docText">Unlike <span class="docEmphasis">fork()</span>, the cloned child doesn’t continue from the point of the call, but instead commences by calling the function specified in the <span class="docEmphasis">func</span> argument; we’ll refer to this as the <span class="docEmphasis">child function</span>. When called, the child function is passed the value specified in <span class="docEmphasis">func_arg</span>.
+ Using appropriate casting, the child function can freely interpret this
+ argument; for example, as an int or as a pointer to a structure. 
+(Interpreting it as a pointer is possible because the cloned child 
+either obtains a copy of or shares the calling process’s memory.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Within the kernel, <span class="docEmphasis">fork()</span>, <span class="docEmphasis">vfork()</span>, and <span class="docEmphasis">clone()</span> are ultimately implemented by the same function (<span class="docEmphasis">do_fork()</span> in <tt>kernel/fork.c</tt>). At this level, cloning is much closer to forking: <span class="docEmphasis">sys_clone()</span> doesn’t have the <span class="docEmphasis">func</span> and <span class="docEmphasis">func_arg</span> arguments, and after the call, <span class="docEmphasis">sys_clone()</span> returns in the child in the same manner as <span class="docEmphasis">fork()</span>. The main text describes the <span class="docEmphasis">clone()</span> wrapper function that <span class="docEmphasis">glibc</span> provides for <span class="docEmphasis">sys_clone()</span>. (This function is defined in architecture-specific <span class="docEmphasis">glibc</span> assembler sources, such as in <tt>sysdeps/unix/sysv/linux/i386/clone.S</tt>.) This wrapper function invokes <span class="docEmphasis">func</span> after <span class="docEmphasis">sys_clone()</span> returns in the child.</p><hr noshade="noshade" size="1"/><p class="docText">The cloned child process terminates either when <span class="docEmphasis">func</span> returns (in which case its return value is the exit status of the process) or when the process makes a call to <span class="docEmphasis">exit()</span> (or _<span class="docEmphasis">exit()</span>). The parent process can wait for the cloned child in the usual manner using <span class="docEmphasis">wait()</span> or similar.</p><p class="docText">Since a cloned child may (like <span class="docEmphasis">vfork()</span>)
+ share the parent’s memory, it can’t use the parent’s stack. Instead, 
+the caller must allocate a suitably sized block of memory for use as the
+ child’s stack and pass a pointer to that block in the argument <span class="docEmphasis">child_stack</span>. On most hardware architectures, the stack grows downward, so the <span class="docEmphasis">child_stack</span> argument should point to the high end of the allocated block.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The architecture-dependence on the direction of stack growth is a defect in the design of <span class="docEmphasis">clone()</span>. On the Intel IA-64 architecture, an improved clone API is provided, in the form of <span class="docEmphasis">clone2()</span>.
+ This system call defines the range of the stack of the child in a way 
+that doesn’t depend on the direction of stack growth, by supplying both 
+the start address and size of the stack. See the manual page for 
+details.</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">clone() flags</span> argument serves two purposes. First, its lower byte specifies the child’s <span class="docEmphasis">termination signal</span>, which is the signal to be sent to the parent when the child terminates. (If a cloned child is <span class="docEmphasis">stopped</span> by a signal, the parent still receives <tt>SIGCHLD</tt>.) This byte may be 0, in which case no signal is generated. (Using the Linux-specific /<tt>proc/</tt><span class="docEmphasis">PID</span><tt>/stat</tt> file, we can determine the termination signal of any process; see the <span class="docEmphasis">proc(5)</span> manual page for further details.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">With <span class="docEmphasis">fork()</span> and <span class="docEmphasis">vfork()</span>, we have no way to select the termination signal; it is always <tt>SIGCHLD</tt>.</p><hr noshade="noshade" size="1"/><p class="docText">The remaining bytes of the <span class="docEmphasis">flags</span> argument hold a bit mask that controls the operation of <span class="docEmphasis">clone()</span>. We summarize these bit-mask values in Table 28-2, and describe them in more detail in Section 28.2.1.</p><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 28-2. The <span class="docEmphasis">clone() flags</span> bit-mask values</h5></caption><colgroup span="2"><col></col><col></col></colgroup><thead><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Flag</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Effect if present</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_CHILD_CLEARTID</tt></td><td align="left" class="docTableCell" valign="top">Clear <span class="docEmphasis">ctid</span> when child calls <span class="docEmphasis">exec()</span> or <span class="docEmphasis">_exit()</span> (2.6 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_CHILD_SETTID</tt></td><td align="left" class="docTableCell" valign="top">Write thread ID of child into <span class="docEmphasis">ctid</span> (2.6 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_FILES</tt></td><td align="left" class="docTableCell" valign="top">Parent and child share table of open file descriptors</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_FS</tt></td><td align="left" class="docTableCell" valign="top">Parent and child share attributes related to file system</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_IO</tt></td><td align="left" class="docTableCell" valign="top">Child shares parent’s I/O context (2.6.25 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_NEWIPC</tt></td><td align="left" class="docTableCell" valign="top">Child gets new System V IPC namespace (2.6.19 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_NEWNET</tt></td><td align="left" class="docTableCell" valign="top">Child gets new network namespace (2.4.24 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_NEWNS</tt></td><td align="left" class="docTableCell" valign="top">Child gets copy of parent’s mount namespace (2.4.19 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_NEWPID</tt></td><td align="left" class="docTableCell" valign="top">Child gets new process-ID namespace (2.6.19 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_NEWUSER</tt></td><td align="left" class="docTableCell" valign="top">Child gets new user-ID namespace (2.6.23 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_NEWUTS</tt></td><td align="left" class="docTableCell" valign="top">Child gets new UTS (<span class="docEmphasis">utsname()</span>) namespace (2.6.19 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_PARENT</tt></td><td align="left" class="docTableCell" valign="top">Make child’s parent same as caller’s parent (2.4 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_PARENT_SETTID</tt></td><td align="left" class="docTableCell" valign="top">Write thread ID of child into <span class="docEmphasis">ptid</span> (2.6 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_PID</tt></td><td align="left" class="docTableCell" valign="top">Obsolete flag used only by system boot process (up to 2.4)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_PTRACE</tt></td><td align="left" class="docTableCell" valign="top">If parent is being traced, then trace child also</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_SETTLS</tt></td><td align="left" class="docTableCell" valign="top"><span class="docEmphasis">tls</span> describes thread-local storage for child (2.6 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_SIGHAND</tt></td><td align="left" class="docTableCell" valign="top">Parent and child share signal dispositions</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_SYSVSEM</tt></td><td align="left" class="docTableCell" valign="top">Parent and child share semaphore undo values (2.6 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_THREAD</tt></td><td align="left" class="docTableCell" valign="top">Place child in same thread group as parent (2.4 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_UNTRACED</tt></td><td align="left" class="docTableCell" valign="top">Can’t force <tt>CLONE_PTRACE</tt> on child (2.6 onward)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_VFORK</tt></td><td align="left" class="docTableCell" valign="top">Parent is suspended until child calls <span class="docEmphasis">exec()</span> or <span class="docEmphasis">_exit()</span></td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>CLONE_VM</tt></td><td align="left" class="docTableCell" valign="top">Parent and child share virtual memory</td></tr></tbody></table><p></p><br/><p class="docText">The remaining arguments to <span class="docEmphasis">clone()</span> are <span class="docEmphasis">ptid</span>, <span class="docEmphasis">tls</span>, and <span class="docEmphasis">ctid</span>.
+ These arguments relate to the implementation of threads, in particular 
+the use of thread IDs and thread-local storage. We cover the use of 
+these arguments when describing the <span class="docEmphasis">flags</span> bit-mask values in Section 28.2.1. (In Linux 2.4 and earlier, these three arguments are not provided by <span class="docEmphasis">clone()</span>. They were specifically added in Linux 2.6 to support the NPTL POSIX threads implementation.)</p><h4 class="docSection2Title" id="title-ID0EX6DK">28.2.1. </h4><h5 class="docSection3Title" id="title-ID0E26DK">28.2.1.1. Example program</h5><p class="docText">Example 28-3 shows a simple example of the use of <span class="docEmphasis">clone()</span> to create a child process. The main program does the following:</p><ul><li><p class="docList">Open a file descriptor (for <tt>/dev/null</tt>) that will be closed by the child <img alt="" border="0" id="" src="Images/getfile_002-20.png"/>.</p></li><li><p class="docList">Set the value for the <span class="docEmphasis">clone() flags</span> argument to <tt>CLONE_FILES</tt> <img alt="" border="0" id="" src="Images/getfile-51.png"/>
+ if a command-line argument was supplied, so that the parent and child 
+will share a single file descriptor table. If no command-line argument 
+was supplied, <span class="docEmphasis">flags</span> is set to 0.</p></li><li><p class="docList">Allocate a stack for use by the child <img alt="" border="0" id="" src="Images/getfile_004.png"/>.</p></li><li><p class="docList">If <tt>CHILD_SIG</tt> is nonzero and is not equal to <tt>SIGCHLD</tt>, ignore it, in case it is a signal that would terminate the process. We don’t ignore <tt>SIGCHLD</tt>, because doing so would prevent waiting on the child to collect its status.</p></li><li><p class="docList">Call <span class="docEmphasis">clone()</span> to create the child <img alt="" border="0" id="" src="Images/getfile_006.png"/>. The third (bit-mask) argument includes the termination signal. The fourth argument (<span class="docEmphasis">func_arg</span>) specifies the file descriptor opened earlier (at <img alt="" border="0" id="" src="Images/getfile_002-21.png"/>).</p></li><li><p class="docList">Wait for the child to terminate <img alt="" border="0" id="" src="Images/getfile_005-14.png"/>.</p></li><li><p class="docList">Check whether the file descriptor (opened at <img alt="" border="0" id="" src="Images/getfile_002-22.png"/>) is still open by trying to <span class="docEmphasis">write()</span> to it <img alt="" border="0" id="" src="Images/getfile_003-19.png"/>. The program reports whether the <span class="docEmphasis">write()</span> succeeds or fails.</p></li></ul><p class="docText">Execution of the cloned child begins in <span class="docEmphasis">childFunc()</span>, which receives (in the argument <span class="docEmphasis">arg</span>) the file descriptor opened by the main program (at <img alt="" border="0" id="" src="Images/getfile_002-23.png"/>). The child closes this file descriptor and then terminates by performing a <tt>return</tt> <img alt="" border="0" id="" src="Images/getfile_007-9.png"/>.</p><h5 class="docExampleTitle" id="title-ID0EKKEK">Example 28-3. Using <span class="docEmphasis">clone()</span> to create a child process</h5><p></p><div class="box"><pre class="preFixedHeight"><b>procexec/t_clone.c</b>
+    #define _GNU_SOURCE
+    #include &lt;signal.h&gt;
+    #include &lt;sys/wait.h&gt;
+    #include &lt;fcntl.h&gt;
+    #include &lt;sched.h&gt;
+    #include "tlpi_hdr.h"
+
+    #ifndef CHILD_SIG
+    #define CHILD_SIG SIGUSR1       /* Signal to be generated on termination
+                                       of cloned child */
+    #endif
+
+    static int                      /* Startup function for cloned child */
+    childFunc(void *arg)
+    {
+<img alt="" border="0" id="" src="Images/getfile_007-10.png"/>   if (close(*((int *) arg)) == -1)
+            errExit("close");
+
+        return 0;                           /* Child terminates now */
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        const int STACK_SIZE = 65536;       /* Stack size for cloned child */
+        char *stack;                        /* Start of stack buffer */
+        char *stackTop;                     /* End of stack buffer */
+        int s, fd, flags;
+
+<img alt="" border="0" id="" src="Images/getfile_002-24.png"/>   fd = open("/dev/null", O_RDWR);     /* Child will close this fd */
+        if (fd == -1)
+            errExit("open");
+
+          /* If argc &gt; 1, child shares file descriptor table with parent */
+
+
+<img alt="" border="0" id="" src="Images/getfile-52.png"/>    flags = (argc &gt; 1) ? CLONE_FILES : 0;
+
+        /* Allocate stack for child */
+
+<img alt="" border="0" id="" src="Images/getfile_004.png"/>    stack = malloc(STACK_SIZE);
+        if (stack == NULL)
+            errExit("malloc");
+        stackTop = stack + STACK_SIZE;      /* Assume stack grows downward */
+
+        /* Ignore CHILD_SIG, in case it is a signal whose default is to
+           terminate the process; but don't ignore SIGCHLD (which is ignored
+           by default), since that would prevent the creation of a zombie. */
+
+<img alt="" border="0" id="" src="Images/getfile_008-5.png"/>    if (CHILD_SIG != 0 &amp;&amp; CHILD_SIG != SIGCHLD)
+            if (signal(CHILD_SIG, SIG_IGN) == SIG_ERR)
+                errExit("signal");
+
+        /* Create child; child commences execution in childFunc() */
+
+
+<img alt="" border="0" id="" src="Images/getfile_006.png"/>    if (clone(childFunc, stackTop, flags | CHILD_SIG, (void *) &amp;fd) == -1)
+            errExit("clone");
+
+        /* Parent falls through to here. Wait for child; __WCLONE is
+           needed for child notifying with signal other than SIGCHLD. */
+
+
+<img alt="" border="0" id="" src="Images/getfile_005-15.png"/>    if (waitpid(-1, NULL, (CHILD_SIG != SIGCHLD) ? __WCLONE : 0) == -1)
+            errExit("waitpid");
+        printf("child has terminated\n");
+
+        /* Did close() of file descriptor in child affect parent? */
+
+
+<img alt="" border="0" id="" src="Images/getfile_003-20.png"/>    s = write(fd, "x", 1);
+        if (s == -1 &amp;&amp; errno == EBADF)
+            printf("file descriptor %d has been closed\n", fd);
+        else if (s == -1)
+            printf("write() on file descriptor %d failed "
+                    "unexpectedly (%s)\n", fd, strerror(errno));
+        else
+            printf("write() on file descriptor %d succeeded\n", fd);
+
+        exit(EXIT_SUCCESS);
+    }
+         <b>procexec/t_clone.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">When we run the program in Example 28-3 without a command-line argument, we see the following:</p><pre class="preFixedWidth">$ <b>./t_clone </b>                               <i> Doesn’t use</i> CLONE_FILES
+child has terminated
+write() on file descriptor 3 succeeded    <i> Child’s close() did not affect parent</i>
+
+					  </pre><br/>
+<p class="docText">When we run the program with a command-line argument, we can see that the two processes share the file descriptor table:</p><pre>$ <b>./t_clone x </b>                             <i> Uses</i> CLONE_FILES
+child has terminated
+file descriptor 3 has been closed         <i> Child’s close() affected parent</i></pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">We show a more complex example of the use of <span class="docEmphasis">clone()</span> in the file <tt>procexec/demo_clone.c</tt> in the source code distribution for this book.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0E1NEK">28.2.2. The <span class="docEmphasis">clone() flags</span> Argument</h4><p class="docText">The <span class="docEmphasis">clone() flags</span>
+ argument is a combination (ORing) of the bit-mask values described in 
+the following pages. Rather than presenting these flags in alphabetical 
+order, we present them in an order that eases explanation, and begin 
+with those flags that are used in the implementation of POSIX threads. 
+From the point of view of implementing threads, many uses of the word <span class="docEmphasis">process</span> below can be replaced by <span class="docEmphasis">thread</span>.</p><p class="docText">At
+ this point, it is worth remarking that, to some extent, we are playing 
+with words when trying to draw a distinction between the terms <span class="docEmphasis">thread</span> and <span class="docEmphasis">process</span>. It helps a little to introduce the term <span class="docEmphasis">kernel scheduling entity</span>
+ (KSE), which is used in some texts to refer to the objects that are 
+dealt with by the kernel scheduler. Really, threads and processes are 
+simply KSEs that provide for greater and lesser degrees of sharing of 
+attributes (virtual memory, open file descriptors, signal dispositions, 
+process ID, and so on) with other KSEs. The POSIX threads specification 
+provides just one out of various possible definitions of which 
+attributes should be shared between threads.</p><p class="docText">In
+ the course of the following descriptions, we’ll sometimes mention the 
+two main implementations of POSIX threads available on Linux: the older 
+LinuxThreads implementation and the more recent NPTL implementation. 
+Further information about these two implementations can be found in 
+Section 33.5.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Starting in kernel 2.6.16, Linux provides a new system call, <span class="docEmphasis">unshare()</span>, which allows a child created using <span class="docEmphasis">clone()</span> (or <span class="docEmphasis">fork()</span> or <span class="docEmphasis">vfork()</span>) to undo some of the attribute sharing (i.e., reverse the effects of some of the <span class="docEmphasis">clone() flags</span> bits) that was established when the child was created. For details, see the <span class="docEmphasis">unshare(2)</span> manual page.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EGQEK">28.2.2.1. Sharing file descriptor tables: <tt>CLONE_FILES</tt></h5><p class="docText">If the <tt>CLONE_FILES</tt>
+ flag is specified, the parent and the child share the same table of 
+open file descriptors. This means that file descriptor allocation or 
+deallocation (<span class="docEmphasis">open()</span>, <span class="docEmphasis">close()</span>, <span class="docEmphasis">dup()</span>, <span class="docEmphasis">pipe()</span>, <span class="docEmphasis">socket()</span>, and so on) in either process will be visible in the other process. If the <tt>CLONE_FILES</tt>
+ flag is not set, then the file descriptor table is not shared, and the 
+child gets a copy of the parent’s table at the time of the <span class="docEmphasis">clone()</span>
+ call. These copied descriptors refer to the same open file descriptions
+ as the corresponding descriptors in the parent (as with <span class="docEmphasis">fork()</span> and <span class="docEmphasis">vfork()</span>).</p><p class="docText">The specification of POSIX threads requires that all of the threads in a process share the same open file descriptors.</p><h5 class="docSection3Title" id="title-ID0EGREK">28.2.2.2. Sharing file system-related information: <tt>CLONE_FS</tt></h5><p class="docText">If the <tt>CLONE_FS</tt>
+ flag is specified, then the parent and the child share file 
+system-related information—umask, root directory, and current working 
+directory. This means that calls to <span class="docEmphasis">umask()</span>, <span class="docEmphasis">chdir()</span>, or <span class="docEmphasis">chroot()</span> in either process will affect the other process. If the <tt>CLONE_FS</tt> flag is not set, then the parent and child have separate copies of this information (as with <span class="docEmphasis">fork()</span> and <span class="docEmphasis">vfork()</span>).</p><p class="docText">The attribute sharing provided by <tt>CLONE_FS</tt> is required by POSIX threads.</p><h5 class="docSection3Title" id="title-ID0EGTEK">28.2.2.3. Sharing signal dispositions: <tt>CLONE_SIGHAND</tt></h5><p class="docText">If the <tt>CLONE_SIGHAND</tt> flag is set, then the parent and child share the same table of signal dispositions. Using <span class="docEmphasis">sigaction()</span> or <span class="docEmphasis">signal()</span> to change a signal’s disposition in either process will affect that signal’s disposition in the other process. If the <tt>CLONE_SIGHAND</tt>
+ flag is not set, then signal dispositions are not shared; instead, the 
+child gets a copy of the parent’s signal disposition table (as with <span class="docEmphasis">fork()</span> and <span class="docEmphasis">vfork()</span>). The <tt>CLONE_SIGHAND</tt>
+ flag doesn’t affect the process signal mask and the set of pending 
+signals, which are always distinct for the two processes. From Linux 2.6
+ onward, <tt>CLONE_VM</tt> must also be included in <span class="docEmphasis">flags</span> if <tt>CLONE_SIGHAND</tt> is specified.</p><p class="docText">Sharing of signal dispositions is required by POSIX threads.</p><h5 class="docSection3Title" id="title-ID0EIWEK">28.2.2.4. Sharing the parent’s virtual memory: <tt>CLONE_VM</tt></h5><p class="docText">If the <tt>CLONE_VM</tt> flag is set, then the parent and child share the same virtual memory pages (as with <span class="docEmphasis">vfork()</span>). Updates to memory or calls to <span class="docEmphasis">mmap()</span> or <span class="docEmphasis">munmap()</span> by either process will be visible to the other process. If the <tt>CLONE_VM</tt> flag is not set, then the child receives a copy of the parent’s virtual memory (as with <span class="docEmphasis">fork()</span>).</p><p class="docText">Sharing the same virtual memory is one of the defining attributes of threads, and is required by POSIX threads.</p><h5 class="docSection3Title" id="title-ID0EAXEK">28.2.2.5. Thread groups: <tt>CLONE_THREAD</tt></h5><p class="docText">If the <tt>CLONE_THREAD</tt>
+ flag is set, then the child is placed in the same thread group as the 
+parent. If this flag not set, the child is placed in its own new thread 
+group.</p><p class="docText"><span class="docEmphasis">Threads groups</span>
+ were introduced in Linux 2.4 to allow threading libraries to support 
+the POSIX threads requirement that all of the threads in a process share
+ a single process ID (i.e., <span class="docEmphasis">getpid()</span> in each of the threads should return the same value). A thread group is a group of KSEs that share the same <span class="docEmphasis">thread group identifier</span> (TGID), as shown in Figure 28-1. For the remainder of the discussion of <tt>CLONE_THREAD</tt>, we’ll refer to these KSEs as <span class="docEmphasis">threads</span>.</p><p class="docText">Since Linux 2.4, <span class="docEmphasis">getpid()</span> returns the calling thread’s TGID. In other words, a TGID is the same thing as a process ID.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">clone()</span> implementation in Linux 2.2 and earlier did not provide <tt>CLONE_THREAD</tt>.
+ Instead, LinuxThreads implemented POSIX threads as processes that 
+shared various attributes (e.g., virtual memory) but had distinct 
+process IDs. For compatibility reasons, even on modern Linux kernels, 
+the LinuxThreads implementation doesn’t use the <tt>CLONE_THREAD</tt> flag, so that threads in that implementation continue to have distinct process IDs.</p><hr noshade="noshade" size="1"/><p></p><center><h5 class="docFigureTitle">Figure 28-1. A thread group containing four threads</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_009-2.png"/></p></center><p></p><br/><p class="docText">Each thread within a thread group is distinguished by a unique <span class="docEmphasis">thread identifier</span> (TID). Linux 2.4 introduced a new system call, <span class="docEmphasis">gettid()</span>, to allow a thread to obtain its own thread ID (this is the same value as is returned to the thread that calls <span class="docEmphasis">clone()</span>). A thread ID is represented using the same data type that is used for a process ID, <span class="docEmphasis">pid_t</span>.
+ Thread IDs are unique system-wide, and the kernel guarantees that no 
+thread ID will be the same as any process ID on the system, except when a
+ thread is the thread group leader for a process.</p><p class="docText">The
+ first thread in a new thread group has a thread ID that is the same as 
+its thread group ID. This thread is referred to as the <span class="docEmphasis">thread group leader</span>.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The thread IDs that we are discussing here are not the same as the thread IDs (the <span class="docEmphasis">pthread_t</span>
+ data type) used by POSIX threads. The latter identifiers are generated 
+and maintained internally (in user space) by a POSIX threads 
+implementation.</p><hr noshade="noshade" size="1"/><p class="docText">All
+ of the threads in a thread group have the same parent process ID—that 
+of the thread group leader. Only after all of the threads in a thread 
+group have terminated is a <tt>SIGCHLD</tt> signal
+ (or other termination signal) sent to that parent process. These 
+semantics correspond to the requirements of POSIX threads.</p><p class="docText">When a <tt>CLONE_THREAD</tt> thread terminates, no signal is sent to the thread that created it using <span class="docEmphasis">clone()</span>. Correspondingly, it is not possible to use <span class="docEmphasis">wait()</span> (or similar) to wait for a thread created using <tt>CLONE_THREAD</tt>. This accords with POSIX requirements. A POSIX thread is not the same thing as a process, and can’t be waited for using <span class="docEmphasis">wait()</span>; instead, it must be joined using <span class="docEmphasis">pthread_join()</span>. To detect the termination of a thread created using <tt>CLONE_THREAD</tt>, a special synchronization primitive, called a <span class="docEmphasis">futex</span>, is used (see the discussion of the <tt>CLONE_PARENT_SETTID</tt> flag below).</p><p class="docText">If any of the threads in a thread group performs an <span class="docEmphasis">exec()</span>,
+ then all threads other than the thread group leader are terminated 
+(this behavior corresponds to the semantics required for POSIX threads),
+ and the new program is execed in the thread group leader. In other 
+words, in the new program, <span class="docEmphasis">gettid()</span> will return the thread ID of the thread group leader. During an <span class="docEmphasis">exec()</span>, the termination signal that this process should send to its parent is reset to <tt>SIGCHLD</tt>.</p><p class="docText">If one of the threads in a thread group creates a child using <span class="docEmphasis">fork()</span> or <span class="docEmphasis">vfork()</span>, then any thread in the group can monitor that child using <span class="docEmphasis">wait()</span> or similar.</p><p class="docText">From Linux 2.6 onward, <tt>CLONE_SIGHAND</tt> must also be included in <span class="docEmphasis">flags</span> if <tt>CLONE_THREAD</tt>
+ is specified. This corresponds to further POSIX threads requirements; 
+for details, see the description of how POSIX threads and signals 
+interact in Section 33.2. (The kernel handling of signals for <tt>CLONE_THREAD</tt> thread groups mirrors the POSIX requirements for how the threads in a process should react to signals.)</p><h5 class="docSection3Title" id="title-ID0EE5EK">28.2.2.6. Threading library support: <tt>CLONE_PARENT_SETTID</tt>, <tt>CLONE_CHILD_SETTID</tt>, and <tt>CLONE_CHILD_CLEARTID</tt></h5><p class="docText">The <tt>CLONE_PARENT_SETTID</tt>, <tt>CLONE_CHILD_SETTID</tt>, and <tt>CLONE_CHILD_CLEARTID</tt> flags were added in Linux 2.6 to support the implementation of POSIX threads. These flags affect how <span class="docEmphasis">clone()</span> treats its <span class="docEmphasis">ptid</span> and <span class="docEmphasis">ctid</span> arguments. <tt>CLONE_PARENT_SETTID</tt> and <tt>CLONE_CHILD_CLEARTID</tt> are used in the NPTL threading implementation.</p><p class="docText">If the <tt>CLONE_PARENT_SETTID</tt> flag is set, then the kernel writes the thread ID of the child thread into the location pointed to by <span class="docEmphasis">ptid</span>. The thread ID is copied into <span class="docEmphasis">ptid</span> before the memory of the parent is duplicated. This means that, even if the <tt>CLONE_VM</tt> flag is not specified, both the parent and the child can see the child’s thread ID in this location. (As noted above, the <tt>CLONE_VM</tt> flag is specified when creating POSIX threads.)</p><p class="docText">The <tt>CLONE_PARENT_SETTID</tt>
+ flag exists in order to provide a reliable means for a threading 
+implementation to obtain the ID of the new thread. Note that it isn’t 
+sufficient to obtain the thread ID of the new thread via the return 
+value of <span class="docEmphasis">clone()</span>, like so:</p><pre>tid = clone(...);</pre><br/>
+<p class="docText">The problem is that this code can lead to various race conditions, because the assignment occurs only after <span class="docEmphasis">clone()</span>
+ returns. For example, suppose that the new thread terminates, and the 
+handler for its termination signal is invoked before the assignment to <span class="docEmphasis">tid</span> completes. In this case, the handler can’t usefully access <span class="docEmphasis">tid</span>. (Within a threading library, <span class="docEmphasis">tid</span> might be an item in a global bookkeeping structure used to track the status of all threads.) Programs that invoke <span class="docEmphasis">clone()</span>
+ directly often can be designed to work around this race condition. 
+However, a threading library can’t control the actions of the program 
+that calls it. Using <tt>CLONE_PARENT_SETTID</tt> to ensure that the new thread ID is placed in the location pointed to by <span class="docEmphasis">ptid</span> before <span class="docEmphasis">clone()</span> returns allows a threading library to avoid such race conditions.</p><p class="docText">If the <tt>CLONE_CHILD_SETTID</tt> flag is set, then <span class="docEmphasis">clone()</span> writes the thread ID of the child thread into the location pointed to by <span class="docEmphasis">ctid</span>. The setting of <span class="docEmphasis">ctid</span> is done only in the child’s memory, but this will affect the parent if <tt>CLONE_VM</tt> is also specified. Although NPTL doesn’t need <tt>CLONE_CHILD_SETTID</tt>, this flag is provided to allow flexibility for other possible threading library implementations.</p><p class="docText">If the <tt>CLONE_CHILD_CLEARTID</tt> flag is set, then <span class="docEmphasis">clone()</span> zeros the memory location pointed to by <span class="docEmphasis">ctid</span> when the child terminates.</p><p class="docText">The <span class="docEmphasis">ctid</span>
+ argument is the mechanism (described in a moment) by which the NPTL 
+threading implementation obtains notification of the termination of a 
+thread. Such notification is required by the <span class="docEmphasis">pthread_join()</span> function, which is the POSIX threads mechanism by which one thread can wait for the termination of another thread.</p><p class="docText">When a thread is created using <span class="docEmphasis">pthread_create()</span>, NPTL makes a <span class="docEmphasis">clone()</span> call in which <span class="docEmphasis">ptid</span> and <span class="docEmphasis">ctid</span> point to the same location. (This is why <tt>CLONE_CHILD_SETTID</tt> is not required by NPTL.) The <tt>CLONE_PARENT_SETTID</tt> flag causes that location to be initialized with the new thread’s ID. When the child terminates and <span class="docEmphasis">ctid</span> is cleared, that change is visible to all threads in the process (since the <tt>CLONE_VM</tt> flag is also specified).</p><p class="docText">The kernel treats the location pointed to by <span class="docEmphasis">ctid</span> as a <span class="docEmphasis">futex</span>, an efficient synchronization mechanism. (See the <span class="docEmphasis">futex(2)</span> manual page for further details of futexes.) Notification of thread termination can be obtained by performing a <span class="docEmphasis">futex()</span> system call that blocks waiting for a change in the value at the location pointed to by <span class="docEmphasis">ctid</span>. (Behind the scenes, this is what <span class="docEmphasis">pthread_join()</span> does.) At the same time that the kernel clears <span class="docEmphasis">ctid</span>,
+ it also wakes up any kernel scheduling entity (i.e., thread) that is 
+blocked performing a futex wait on that address. (At the POSIX threads 
+level, this causes the <span class="docEmphasis">pthread_join()</span> call to unblock.)</p><h5 class="docSection3Title" id="title-ID0E5DFK">28.2.2.7. Thread-local storage: <tt>CLONE_SETTLS</tt></h5><p class="docText">If the <tt>CLONE_SETTLS</tt> flag is set, then the <span class="docEmphasis">tls</span> argument points to a <span class="docEmphasis">user_desc</span>
+ structure describing the thread-local storage buffer to be used for 
+this thread. This flag was added in Linux 2.6 to support the NPTL 
+implementation of thread-local storage (Section 31.4). For details of the <span class="docEmphasis">user_desc</span> structure, see the definition and use of this structure in the 2.6 kernel sources and the <span class="docEmphasis">set_thread_area(2)</span> manual page.</p><h5 class="docSection3Title" id="title-ID0E3GFK">28.2.2.8. Sharing System V semaphore undo values: <tt>CLONE_SYSVSEM</tt></h5><p class="docText">If the <tt>CLONE_SYSVSEM</tt> flag is set, then the parent and child share a single list of System V semaphore undo values (Section 47.8). If this flag is not set, then the parent and child have separate undo lists, and the child’s undo list is initially empty.</p><p class="docText">The <tt>CLONE_SYSVSEM</tt> flag is available from kernel 2.6 onward, and provides the sharing semantics required by POSIX threads.</p><h5 class="docSection3Title" id="title-ID0ESHFK">28.2.2.9. Per-process mount namespaces: <tt>CLONE_NEWNS</tt></h5><p class="docText">From kernel 2.4.19 onward, Linux supports the notion of per-process <span class="docEmphasis">mount namespaces</span>. A mount namespace is the set of mount points maintained by calls to <span class="docEmphasis">mount()</span> and <span class="docEmphasis">umount()</span>. The mount namespace affects how pathnames are resolved to actual files, as well as the operation of system calls such as <span class="docEmphasis">chdir()</span> and <span class="docEmphasis">chroot()</span>.</p><p class="docText">By default, the parent and the child share a mount namespace, which means that changes to the namespace by one process using <span class="docEmphasis">mount()</span> and <span class="docEmphasis">umount()</span> are visible in the other process (as with <span class="docEmphasis">fork()</span> and <span class="docEmphasis">vfork()</span>). A privileged (<tt>CAP_SYS_ADMIN</tt>) process may specify the <tt>CLONE_NEWNS</tt>
+ flag so that the child obtains a copy of the parent’s mount namespace. 
+Thereafter, changes to the namespace by one process are not visible in 
+the other process. (In earlier 2.4.<span class="docEmphasis">x</span>
+ kernels, as well as in older kernels, we can consider all processes on 
+the system as sharing a single system-wide mount namespace.)</p><p class="docText">Per-process mount namespaces can be used to create environments that are similar to <span class="docEmphasis">chroot()</span>
+ jails, but which are more secure and flexible; for example, a jailed 
+process can be provided with a mount point that is not visible to other 
+processes on the system. Mount namespaces are also useful in setting up 
+virtual server environments.</p><p class="docText">Specifying both <tt>CLONE_NEWNS</tt> and <tt>CLONE_FS</tt> in the same call to <span class="docEmphasis">clone()</span> is nonsensical and is not permitted.</p><h5 class="docSection3Title" id="title-ID0ECKFK">28.2.2.10. Making the child’s parent the same as the caller’s: <tt>CLONE_PARENT</tt></h5><p class="docText">By default, when we create a new process with <span class="docEmphasis">clone()</span>, the parent of that process (as returned by <span class="docEmphasis">getppid()</span>) is the process that calls <span class="docEmphasis">clone()</span> (as with <span class="docEmphasis">fork()</span> and <span class="docEmphasis">vfork()</span>). If the <tt>CLONE_PARENT</tt> flag is set, then the parent of the child will be the caller’s parent. In other words, <tt>CLONE_PARENT</tt> is the equivalent of setting <span class="docEmphasis">child.PPID = caller.PPID</span>. (In the default case, without <tt>CLONE_PARENT</tt>, it would be <span class="docEmphasis">child.PPID = caller.PID</span>.) The parent process (<span class="docEmphasis">child.PPID</span>) is the process that is signaled when the child terminates.</p><p class="docText">The <tt>CLONE_PARENT</tt>
+ flag is available in Linux 2.4 and later. Originally, it was designed 
+to be useful for POSIX threads implementations, but the 2.6 kernel 
+pursued an approach to supporting threads (the use of <tt>CLONE_THREAD</tt>, described above) that removed the need for this flag.</p><h5 class="docSection3Title" id="title-ID0ERLFK">28.2.2.11. Making the child’s PID the same as the parent’s PID: <tt>CLONE_PID</tt> (obsolete)</h5><p class="docText">If the <tt>CLONE_PID</tt>
+ flag is set, then the child has the same process ID as the parent. If 
+this flag is not set, then the parent and child have different process 
+IDs (as with <span class="docEmphasis">fork()</span> and <span class="docEmphasis">vfork()</span>). Only the system boot process (process ID 0) may specify this flag; it is used when initializing a multiprocessor system.</p><p class="docText">The <tt>CLONE_PID</tt> flag is not intended for use in user applications. In Linux 2.6, it has been removed, and is superseded by <tt>CLONE_IDLETASK</tt>, which causes the process ID of the new process to be set to 0. <tt>CLONE_IDLETASK</tt> is available only for internal use within the kernel (if specified in the <span class="docEmphasis">flags</span> argument of <span class="docEmphasis">clone()</span>, it is ignored). It is used to create the invisible per-CPU <span class="docEmphasis">idle process</span>, of which multiple instances may exist on multiprocessor systems.</p><h5 class="docSection3Title" id="title-ID0EJQFK">28.2.2.12. Process tracing: <tt>CLONE_PTRACE</tt> and <tt>CLONE_UNTRACED</tt></h5><p class="docText">If the <tt>CLONE_PTRACE</tt>
+ flag is set and the calling process is being traced, then the child is 
+also traced. For details on process tracing (used by debuggers and the <span class="docEmphasis">strace</span> command), refer to the <span class="docEmphasis">ptrace(2)</span> manual page.</p><p class="docText">From kernel 2.6 onward, the <tt>CLONE_UNTRACED</tt> flag can be set, meaning that a tracing process can’t force <tt>CLONE_PTRACE</tt> on this child. The <tt>CLONE_UNTRACED</tt> flag is used internally by the kernel in the creation of kernel threads.</p><h5 class="docSection3Title" id="title-ID0EHRFK">28.2.2.13. Suspending the parent until the child exits or execs: <tt>CLONE_VFORK</tt></h5><p class="docText">If the <tt>CLONE_VFORK</tt> flag is set, then the execution of the parent is suspended until the child releases its virtual memory resources via a call to <span class="docEmphasis">exec()</span> or _<span class="docEmphasis">exit()</span> (as with <span class="docEmphasis">vfork()</span>).</p><h5 class="docSection3Title" id="title-ID0EZRFK">28.2.2.14. New <span class="docEmphasis">clone()</span> flags to support containers</h5><p class="docText">A number of new <span class="docEmphasis">clone() flags</span> values were added in Linux 2.6.19 and later: <tt>CLONE_IO</tt>, <tt>CLONE_NEWIPC</tt>, <tt>CLONE_NEWNET</tt>, <tt>CLONE_NEWPID</tt>, <tt>CLONE_NEWUSER</tt>, and <tt>CLONE_NEWUTS</tt>. (See the <span class="docEmphasis">clone(2)</span> manual page for the details of these flags.)</p><p class="docText">Most of these flags are provided to support the implementation of <span class="docEmphasis">containers</span>
+ ([Bhattiprolu et al., 2008]). A container is a form of lightweight 
+virtualization, whereby groups of processes running on the same kernel 
+can be isolated from one another in environments that appear to be 
+separate machines. Containers can also be nested, one inside the other. 
+The containers approach contrasts with full virtualization, where each 
+virtualized environment is running a distinct kernel.</p><p class="docText">To
+ implement containers, the kernel developers had to provide a layer of 
+indirection within the kernel around each of the global system 
+resources—such as process IDs, the networking stack, the identifiers 
+returned by <span class="docEmphasis">uname()</span>, System V IPC objects, and user and group ID namespaces—so that each container can provide its own instance of these resources.</p><p class="docText">There are various possible uses for containers, including the following:</p><ul><li><p class="docList">controlling
+ allocation of resources on the system, such as network bandwidth or CPU
+ time (e.g., one container might be granted 75% of the CPU time, while 
+the other gets 25%);</p></li><li><p class="docList">providing multiple lightweight virtual servers on a single host machine;</p></li><li><p class="docList">freezing
+ a container, so that execution of all processes in the container is 
+suspended, later to be restarted, possibly after migrating to a 
+different machine; and</p></li><li><p class="docList">allowing
+ an application’s state to be dumped (checkpointed) and then later 
+restored (perhaps after an application crash, or a planned or unplanned 
+system shutdown) to continue computation from the time of the 
+checkpoint.</p></li></ul><h5 class="docSection3Title" id="title-ID0ESTFK">28.2.2.15. Use of <span class="docEmphasis">clone() flags</span></h5><p class="docText">Roughly, we can say that a <span class="docEmphasis">fork()</span> corresponds to a <span class="docEmphasis">clone()</span> call with <span class="docEmphasis">flags</span> specified as just <tt>SIGCHLD</tt>, while a <span class="docEmphasis">vfork()</span> corresponds to a <span class="docEmphasis">clone()</span> call specifying <span class="docEmphasis">flags</span> as follows:</p><pre>CLONE_VM | CLONE_VFORK | SIGCHLD</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Since version 2.3.3, the <span class="docEmphasis">glibc</span> wrapper <span class="docEmphasis">fork()</span> provided as part of the NPTL threading implementation bypasses the kernel’s <span class="docEmphasis">fork()</span> system call and invokes <span class="docEmphasis">clone()</span>. This wrapper function invokes any fork handlers that have been established by the caller using <span class="docEmphasis">pthread_atfork()</span> (see Section 33.3).</p><hr noshade="noshade" size="1"/><p class="docText">The LinuxThreads threading implementation uses <span class="docEmphasis">clone()</span> (with just the first four arguments) to create threads by specifying <span class="docEmphasis">flags</span> as follows:</p><pre>CLONE_VM | CLONE_FILES | CLONE_FS | CLONE_SIGHAND</pre><br/>
+<p class="docText">The NPTL threading implementation uses <span class="docEmphasis">clone()</span> (with all seven arguments) to create threads by specifying <span class="docEmphasis">flags</span> as follows:</p><pre>CLONE_VM | CLONE_FILES | CLONE_FS | CLONE_SIGHAND | CLONE_THREAD |
+CLONE_SETTLS | CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID | CLONE_SYSVSEM</pre><br/>
+<h4 class="docSection2Title" id="title-ID0EIXFK">28.2.3. Extensions to <span class="docEmphasis">waitpid()</span> for Cloned Children</h4><p class="docText">To wait for children produced by <span class="docEmphasis">clone()</span>, the following additional (Linux-specific) values can be included in the <span class="docEmphasis">options</span> bit-mask argument for <span class="docEmphasis">waitpid()</span>, <span class="docEmphasis">wait3()</span>, and <span class="docEmphasis">wait4()</span>:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">__WCLONE</span></span></span></p></dt><dd><p class="docList">If set, then wait for <span class="docEmphasis">clone</span> children only. If not set, then wait for <span class="docEmphasis">nonclone</span> children only. In this context, a <span class="docEmphasis">clone</span> child is one that delivers a signal other than <tt>SIGCHLD</tt> to its parent on termination. This bit is ignored if <tt>__WALL</tt> is also specified.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">__WALL</span></span> (since Linux 2.4)</span></p></dt><dd><p class="docList">Wait for all children, regardless of type (<span class="docEmphasis">clone</span> or <span class="docEmphasis">nonclone</span>).</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">__WNOTHREAD</span></span> (since Linux 2.4)</span></p></dt><dd><p class="docList">By
+ default, the wait calls wait not only for children of the calling 
+process, but also for children of any other processes in the same thread
+ group as the caller. Specifying the <tt>__WNOTHREAD</tt> flag limits the wait to children of the calling process.</p></dd></dl><p class="docText">These flags can’t be used with <span class="docEmphasis">waitid()</span>.</p>
+</div>
+</body>
+</html>

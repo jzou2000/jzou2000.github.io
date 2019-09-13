@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>64.2. UNIX 98 Pseudoterminals</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">64.2. UNIX 98 Pseudoterminals</h3><p class="docText">Bit by bit, we’ll work toward the development of a function, <span class="docEmphasis">ptyFork()</span>, that does most of the work to create the setup shown in Figure 64-2. We’ll then use this function to implement the <span class="docEmphasis">script(1)</span> program. Before doing this though, we look at the various library functions used with UNIX 98 pseudoterminals:</p><ul><li><p class="docList">The <span class="docEmphasis">posix_openpt()</span>
+ function opens an unused pseudoterminal master device, returning a file
+ descriptor that is used to refer to the device in later calls.</p></li><li><p class="docList">The <span class="docEmphasis">grantpt()</span> function changes the ownership and permissions of the slave device corresponding to a pseudoterminal master device.</p></li><li><p class="docList">The <span class="docEmphasis">unlockpt()</span> function unlocks the slave device corresponding to a pseudoterminal master device, so that the slave device can be opened.</p></li><li><p class="docList">The <span class="docEmphasis">ptsname()</span>
+ function returns the name of the slave device corresponding to a 
+pseudoterminal master device. The slave device can then be opened using <span class="docEmphasis">open()</span>.</p></li></ul><h4 class="docSection2Title" id="title-ID0EG3IM">64.2.1. Opening an Unused Master: <span class="docEmphasis">posix_openpt()</span></h4><p class="docText">The <span class="docEmphasis">posix_openpt()</span>
+ function finds and opens an unused pseudoterminal master device, and 
+returns a file descriptor that can later be used to refer to this 
+device.</p><pre>#define _XOPEN_SOURCE 600
+#include &lt;stdlib.h&gt;
+#include &lt;fcntl.h&gt;
+
+int <b>posix_openpt</b>(int <span class="docEmphasis">flags</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns file descriptor on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">flags</span> argument is constructed by ORing zero or more of the following constants together:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">O_RDWR</span></span></span></p></dt><dd><p class="docList">Open the device for both reading and writing. Normally, we would always include this constant in <span class="docEmphasis">flags</span>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">O_NOCTTY</span></span></span></p></dt><dd><p class="docList">Don’t
+ make this terminal the controlling terminal for the process. On Linux, a
+ pseudoterminal master can’t become a controlling terminal for a 
+process, regardless of whether the <tt>O_NOCTTY</tt> flag is specified when calling <span class="docEmphasis">posix_openpt()</span>.
+ (This makes sense because the pseudoterminal master isn’t really a 
+terminal; it is the other side of a terminal to which the slave is 
+connected.) However, on some implementations, <tt>O_NOCTTY</tt>
+ is required if we want to prevent a process from acquiring a 
+controlling terminal as a consequence of opening a pseudoterminal master
+ device.</p></dd></dl><p class="docText">Like <span class="docEmphasis">open()</span>, <span class="docEmphasis">posix_openpt()</span> uses the lowest available file descriptor to open the pseudoterminal master.</p><p class="docText">Calling <span class="docEmphasis">posix_openpt()</span> also results in the creation of a corresponding pseudoterminal slave device file in the <tt>/dev/pts</tt> directory. We say more about this file when we describe the <span class="docEmphasis">ptsname()</span> function below.</p><p class="docText">The <span class="docEmphasis">posix_openpt()</span>
+ function is new in SUSv3, and was an invention of the POSIX committee. 
+In the original System V pseudoterminal implementation, obtaining an 
+available pseudoterminal master was accomplished by opening the <span class="docEmphasis">pseudoterminal master clone device</span>, <tt>/dev/ptmx</tt>.
+ Opening this virtual device automatically locates and opens the next 
+unused pseudoterminal master, and returns a file descriptor for it. This
+ device is provided on Linux, where <span class="docEmphasis">posix_openpt()</span> is implemented as follows:</p><pre>int
+posix_openpt(int flags)
+{
+    return open("/dev/ptmx", flags);
+}</pre><br/>
+<h5 class="docSection3Title" id="title-ID0ECAJM">64.2.1.1. Limits on the number of UNIX 98 pseudoterminals</h5><p class="docText">Because
+ each pseudoterminal pair in use consumes a small amount of nonswappable
+ kernel memory, the kernel imposes a limit on the number of UNIX 98 
+pseudoterminal pairs on the system. In kernels up to 2.6.3, this limit 
+is controlled by a kernel configuration option (<tt>CONFIG_UNIX98_PTYS</tt>). The default value for this option is 256, but we can change the limit to any value in the range 0 to 2048.</p><p class="docText">From Linux 2.6.4 onward, the <tt>CONFIG_UNIX98_PTYS</tt>
+ kernel configuration option is discarded in favor of a more flexible 
+approach. Instead, the limit on the number of pseudoterminals is defined
+ by the value in the Linux-specific <tt>/proc/sys/kernel/pty/max</tt> file. The default value for this file is 4096, and it can be set to any value up to 1,048,576. A related read-only file, <tt>/proc/sys/kernel/pty/nr</tt>, shows how many UNIX 98 pseudoterminals are currently in use.</p><h4 class="docSection2Title" id="title-ID0EFCJM">64.2.2. Changing Slave Ownership and Permissions: <span class="docEmphasis">grantpt()</span></h4><p class="docText">SUSv3 specifies the use of <span class="docEmphasis">grantpt()</span>
+ to change the ownership and permissions of the slave device that 
+corresponds to the pseudoterminal master referred to by the file 
+descriptor <span class="docEmphasis">mfd</span>. On Linux, calling <span class="docEmphasis">grantpt()</span> is not actually necessary. However, the use of <span class="docEmphasis">grantpt()</span> is required on some implementations, and portable applications should call it after calling <span class="docEmphasis">posix_openpt()</span>.</p><pre>#define _XOPEN_SOURCE 500
+#include &lt;stdlib.h&gt;
+
+int <b>grantpt</b>(int <span class="docEmphasis">mfd</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">On systems where <span class="docEmphasis">grantpt()</span> is required, this function creates a child process that executes a set-user-ID-<span class="docEmphasis">root</span> program. This program, usually called <span class="docEmphasis">pt_chown</span>, performs the following operations on the pseudoterminal slave device:</p><ul><li><p class="docList">change the ownership of the slave to be the same as the effective user ID of the calling process;</p></li><li><p class="docList">change the group of the slave to <span class="docEmphasis">tty</span>; and</p></li><li><p class="docList">change the permissions on the slave so that the owner has read and write permissions, and group has write permission.</p></li></ul><p class="docText">The reason for changing the group of the terminal to <span class="docEmphasis">tty</span> and enabling group write permission is that the <span class="docEmphasis">wall(1)</span> and <span class="docEmphasis">write(1)</span> programs are set-group-ID programs owned by the <span class="docEmphasis">tty</span> group.</p><p class="docText">On Linux, a pseudoterminal slave is automatically configured in the above manner, which is why calling <span class="docEmphasis">grantpt()</span> isn’t needed (but still should be done).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Because it may create a child process, SUSv3 says that the behavior of <span class="docEmphasis">grantpt()</span> is unspecified if the calling program has installed a handler for <tt>SIGCHLD</tt>.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0EOEJM">64.2.3. Unlocking the Slave: <span class="docEmphasis">unlockpt()</span></h4><p class="docText">The <span class="docEmphasis">unlockpt()</span> function removes an internal lock on the slave corresponding to the pseudoterminal master referred to by the file descriptor <span class="docEmphasis">mfd</span>.
+ The purpose of this locking mechanism is to allow the calling process 
+to perform whatever initialization is required for the pseudoterminal 
+slave (e.g., calling <span class="docEmphasis">grantpt()</span>) before another process is allowed to open it.</p><pre>#define _XOPEN_SOURCE
+#include &lt;stdlib.h&gt;
+
+int <b>unlockpt</b>(int <span class="docEmphasis">mfd</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">An attempt to open a pseudoterminal slave before it has been unlocked with <span class="docEmphasis">unlockpt()</span> fails with the error <tt>EIO</tt>.</p><h4 class="docSection2Title" id="title-ID0E4GJM">64.2.4. Obtaining the Name of the Slave: <span class="docEmphasis">ptsname()</span></h4><p class="docText">The <span class="docEmphasis">ptsname()</span>
+ function returns the name of the pseudoterminal slave corresponding to 
+the pseudoterminal master referred to by the file descriptor <span class="docEmphasis">mfd</span>.</p><pre>#define _XOPEN_SOURCE
+#include &lt;stdlib.h&gt;
+
+char *<b>ptsname</b>(int <span class="docEmphasis">mfd</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns pointer to (possibly statically allocated) string on success, or NULL on error</p><hr noshade="noshade" size="1"/><p class="docText">On Linux (as on most implementations), <span class="docEmphasis">ptsname()</span> returns a name of the form /<tt>dev/pts/</tt><span class="docEmphasis">nn</span>, where <span class="docEmphasis">nn</span> is replaced by a number that uniquely identifies this pseudoterminal slave.</p><p class="docText">The buffer used to return the slave name is normally statically allocated. It is thus overwritten by subsequent calls to <span class="docEmphasis">ptsname()</span>.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The GNU C library provides a reentrant analog of <span class="docEmphasis">ptsname()</span> in the form of <span class="docEmphasis">ptsname_r(mfd, strbuf, buflen)</span>. However, this function is nonstandard and is available on few other UNIX implementations. The <tt>_GNU_SOURCE</tt> feature test macro must be defined in order to obtain the declaration of <span class="docEmphasis">ptsname_r()</span> from <tt>&lt;stdlib.h&gt;</tt>.</p><hr noshade="noshade" size="1"/><p class="docText">Once we have unlocked the slave device with <span class="docEmphasis">unlockpt()</span>, we can open it using the traditional <span class="docEmphasis">open()</span> system call.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On
+ System V derivatives that employ STREAMS, it may be necessary to 
+perform some further steps (pushing STREAMS modules onto the slave 
+device after opening it). An example of how to perform these steps can 
+be found in [Stevens &amp; Rago, 2005].</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

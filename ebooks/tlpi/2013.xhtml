@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>20.13. Changing Signal Dispositions: sigaction()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">20.13. Changing Signal Dispositions: <span class="docEmphasis">sigaction()</span></h3><p class="docText">The <span class="docEmphasis">sigaction()</span> system call is an alternative to <span class="docEmphasis">signal()</span> for setting the disposition of a signal. Although <span class="docEmphasis">sigaction()</span> is somewhat more complex to use than <span class="docEmphasis">signal()</span>, in return it provides greater flexibility. In particular, <span class="docEmphasis">sigaction()</span>
+ allows us to retrieve the disposition of a signal without changing it, 
+and to set various attributes controlling precisely what happens when a 
+signal handler is invoked. Additionally, as we’ll elaborate in Section 22.7, <span class="docEmphasis">sigaction()</span> is more portable than <span class="docEmphasis">signal()</span> when establishing a signal handler.</p><pre class="preFixedWidth">#include &lt;signal.h&gt;
+
+int <b>sigaction</b>(int <span class="docEmphasis">sig</span>, const struct sigaction *<span class="docEmphasis">act</span>, struct sigaction *<span class="docEmphasis">oldact</span>);
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">sig</span> argument identifies the signal whose disposition we want to retrieve or change. This argument can be any signal except <tt>SIGKILL</tt> or <tt>SIGSTOP</tt>.</p><p class="docText">The <span class="docEmphasis">act</span>
+ argument is a pointer to a structure specifying a new disposition for 
+the signal. If we are interested only in finding the existing 
+disposition of the signal, then we can specify <tt>NULL</tt> for this argument. The <span class="docEmphasis">oldact</span>
+ argument is a pointer to a structure of the same type, and is used to 
+return information about the signal’s previous disposition. If we are 
+not interested in this information, then we can specify <tt>NULL</tt> for this argument. The structures pointed to by <span class="docEmphasis">act</span> and <span class="docEmphasis">oldact</span> are of the following type:</p><pre class="preFixedWidth">struct sigaction {
+    void   (*sa_handler)(int);    /* Address of handler */
+    sigset_t sa_mask;             /* Signals blocked during handler
+                                     invocation */
+    int      sa_flags;            /* Flags controlling handler invocation */
+    void   (*sa_restorer)(void);  /* Not for application use */
+};
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">sigaction</span> structure is actually somewhat more complex than shown here. We consider further details in Section 21.4.</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">sa_handler</span> field corresponds to the <span class="docEmphasis">handler</span> argument given to <span class="docEmphasis">signal()</span>. It specifies the address of a signal handler, or one of the constants <tt>SIG_IGN</tt> or <tt>SIG_DFL</tt>. The <span class="docEmphasis">sa_mask</span> and <span class="docEmphasis">sa_flags</span> fields, which we discuss in a moment, are interpreted only if <span class="docEmphasis">sa_handler</span> is the address of a signal handler—that is, a value other than <tt>SIG_IGN</tt> or <tt>SIG_DFL</tt>. The remaining field, <span class="docEmphasis">sa_restorer</span>, is not intended for use in applications (and is not specified by SUSv3).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">sa_restorer</span> field is used internally to ensure that on completion of a signal handler, a call is made to the special-purpose <span class="docEmphasis">sigreturn()</span>
+ system call, which restores the process’s execution context so that it 
+can continue execution at the point where it was interrupted by the 
+signal handler. An example of this usage can be found in the <span class="docEmphasis">glibc</span> source file <tt>sysdeps/unix/sysv/linux/i386/sigaction.c</tt>.</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">sa_mask</span> field defines a set of signals that are to be blocked during invocation of the handler defined by <span class="docEmphasis">sa_handler</span>.
+ When the signal handler is invoked, any signals in this set that are 
+not currently part of the process signal mask are automatically added to
+ the mask before the handler is called. These signals remain in the 
+process signal mask until the signal handler returns, at which time they
+ are automatically removed. The <span class="docEmphasis">sa_mask</span>
+ field allows us to specify a set of signals that aren’t permitted to 
+interrupt execution of this handler. In addition, the signal that caused
+ the handler to be invoked is automatically added to the process signal 
+mask. This means that a signal handler won’t recursively interrupt 
+itself if a second instance of the same signal arrives while the handler
+ is executing. Because blocked signals are not queued, if any of these 
+signals are repeatedly generated during the execution of the handler, 
+they are (later) delivered only once.</p><p class="docText">The <span class="docEmphasis">sa_flags</span> field is a bit mask specifying various options controlling how the signal is handled. The following bits may be ORed (<tt>|</tt>) together in this field:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SA_NOCLDSTOP</span></span></span></p></dt><dd><p class="docList">If <span class="docEmphasis">sig</span> is <tt>SIGCHLD</tt>, don’t generate this signal when a child process is stopped or resumed as a consequence of receiving a signal. Refer to Section 26.3.2.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SA_NOCLDWAIT</span></span></span></p></dt><dd><p class="docList">(since Linux 2.6) If <span class="docEmphasis">sig</span> is <tt>SIGCHLD</tt>, don’t transform children into zombies when they terminate. For further details, see Section 26.3.3.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SA_NODEFER</span></span></span></p></dt><dd><p class="docList">When this signal is caught, don’t automatically add it to the process signal mask while the handler is executing. The name <tt>SA_NOMASK</tt> is provided as a historical synonym for <tt>SA_NODEFER</tt>, but the latter name is preferable because it is standardized in SUSv3.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SA_ONSTACK</span></span></span></p></dt><dd><p class="docList">Invoke the handler for this signal using an alternate stack installed by <span class="docEmphasis">sigaltstack()</span>. Refer to Section 21.3.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SA_RESETHAND</span></span></span></p></dt><dd><p class="docList">When this signal is caught, reset its disposition to the default (i.e., <tt>SIG_DFL</tt>)
+ before invoking the handler. (By default, a signal handler remains 
+established until it is explicitly disestablished by a further call to <span class="docEmphasis">sigaction()</span>.) The name <tt>SA_ONESHOT</tt> is provided as a historical synonym for <tt>SA_RESETHAND</tt>, but the latter name is preferable because it is standardized in SUSv3.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SA_RESTART</span></span></span></p></dt><dd><p class="docList">Automatically restart system calls interrupted by this signal handler. See Section 21.5.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SA_SIGINFO</span></span></span></p></dt><dd><p class="docList">Invoke
+ the signal handler with additional arguments providing further 
+information about the signal. We describe this flag in Section 21.4.</p></dd></dl><p class="docText">All of the above options are specified in SUSv3.</p><p class="docText">An example of the use of <span class="docEmphasis">sigaction()</span> is shown in Example 21-1.</p>
+</div>
+</body>
+</html>

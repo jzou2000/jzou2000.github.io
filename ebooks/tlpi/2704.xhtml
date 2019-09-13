@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>27.4. File Descriptors and exec()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">27.4. File Descriptors and <span class="docEmphasis">exec()</span></h3><p class="docText">By default, all file descriptors opened by a program that calls <span class="docEmphasis">exec()</span> remain open across the <span class="docEmphasis">exec()</span>
+ and are available for use by the new program. This is frequently 
+useful, because the calling program may open files on particular 
+descriptors, and these files are automatically available to the new 
+program, without it needing to know the names of, or open, the files.</p><p class="docText">The
+ shell takes advantage of this feature to handle I/O redirection for the
+ programs that it executes. For example, suppose we enter the following 
+shell command:</p><pre>$ <b>ls /tmp &gt; dir.txt</b></pre><br/>
+<p class="docText">The shell performs the following steps to execute this command:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">A <span class="docEmphasis">fork()</span> is performed to create a child process that is also running a copy of the shell (and thus has a copy of the command).</p></div></li><li><div style="font-weight:normal"><p class="docList">The child shell opens <tt>dir.txt</tt> for output using file descriptor 1 (standard output). This can be done in either of the following ways:</p><div style="font-weight:bold"><ol class="docList" type="a"><li><div style="font-weight:normal"><p class="docList">The child shell closes descriptor 1 (<tt>STDOUT_FILENO</tt>) and then opens the file <tt>dir.txt</tt>. Since <span class="docEmphasis">open()</span>
+ always uses the lowest available file descriptor, and standard input 
+(descriptor 0) remains open, the file will be opened on descriptor 1.</p></div></li><li><div style="font-weight:normal"><p class="docList">The shell opens <tt>dir.txt</tt>, obtaining a new file descriptor. Then, if that file descriptor is not standard output, the shell uses <span class="docEmphasis">dup2()</span>
+ to force standard output to be a duplicate of the new descriptor and 
+closes the new descriptor, since it is no longer required. (This method 
+is safer than the preceding method, since it doesn’t rely on 
+lower-numbered descriptors being open.) The code sequence is something 
+like the following:</p><pre>fd = open("dir.txt", O_WRONLY | O_CREAT,
+            S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP |
+ S_IROTH | S_IWOTH);                     /* rw-rw-rw- */
+if (fd != STDOUT_FILENO) {
+    dup2(fd, STDOUT_FILENO);
+    close(fd);
+}</pre><br/>
+</div></li></ol></div></div></li><li><div style="font-weight:normal"><p class="docList">The child shell execs the <span class="docEmphasis">ls</span> program. The <span class="docEmphasis">ls</span> program writes its output to standard output, which is the file <tt>dir.txt</tt>.</p></div></li></ol></div><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The
+ explanation given here of how the shell performs I/O redirections 
+simplifies some points. In particular, certain commands—so-called shell <span class="docEmphasis">built-in</span> commands—are executed directly by the shell, without performing a <span class="docEmphasis">fork()</span> or an <span class="docEmphasis">exec()</span>. Such commands must be treated somewhat differently for the purposes of I/O redirection.</p><p class="docText">A
+ shell command is implemented as a built-in for either of two reasons: 
+efficiency and to obtain side effects within the shell. Some frequently 
+used commands—such as <span class="docEmphasis">pwd</span>, <span class="docEmphasis">echo</span>, and <span class="docEmphasis">test</span>—are
+ sufficiently simple that it is a worthwhile efficiency to implement 
+them inside the shell. Other commands are implemented within the shell 
+so that they have side effects on the shell itself—that is, they change 
+information stored by the shell, or modify attributes of or affect the 
+execution of the shell process. For example, the <span class="docEmphasis">cd</span>
+ command must change the working directory of the shell itself, and so 
+can’t be executed within a separate process. Other examples of commands 
+that are built in for their side effects include <span class="docEmphasis">exec</span>, <span class="docEmphasis">exit</span>, <span class="docEmphasis">read</span>, <span class="docEmphasis">set</span>, <span class="docEmphasis">source</span>, <span class="docEmphasis">ulimit</span>, <span class="docEmphasis">umask</span>, <span class="docEmphasis">wait</span>, and the shell job-control commands (<span class="docEmphasis">jobs</span>, <span class="docEmphasis">fg</span>, and <span class="docEmphasis">bg</span>). The full set of built-in commands understood by a shell is documented in the shell’s manual page.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0E4FDK">27.4.1. </h4><h5 class="docSection3Title" id="title-ID0EBGDK">27.4.1.1. The close-on-exec flag (<tt>FD_CLOEXEC</tt>)</h5><p class="docText">Sometimes, it may be desirable to ensure that certain file descriptors are closed before an <span class="docEmphasis">exec()</span>. In particular, if we <span class="docEmphasis">exec()</span>
+ an unknown program (i.e., one that we did not write) from a privileged 
+process, or a program that doesn’t need descriptors for files we have 
+already opened, then it is secure programming practice to ensure that 
+all unnecessary file descriptors are closed before the new program is 
+loaded. We could do this by calling <span class="docEmphasis">close()</span> on all such descriptors, but this suffers the following limitations:</p><ul><li><p class="docList">The
+ file descriptor may have been opened by a library function. This 
+function has no mechanism to force the main program to close the file 
+descriptor before the <span class="docEmphasis">exec()</span>
+ is performed. (As a general principle, library functions should always 
+set the close-on-exec flag, using the technique described below, for any
+ files that they open.)</p></li><li><p class="docList">If the <span class="docEmphasis">exec()</span>
+ call fails for some reason, we may want to keep the file descriptors 
+open. If they are already closed, it may be difficult, or impossible, to
+ reopen them so that they refer to the same files.</p></li></ul><p class="docText">For
+ these reasons, the kernel provides a close-on-exec flag for each file 
+descriptor. If this flag is set, then the file descriptor is 
+automatically closed during a successful <span class="docEmphasis">exec()</span>, but left open if the <span class="docEmphasis">exec()</span> fails. The close-on-exec flag for a file descriptor can be accessed using the <span class="docEmphasis">fcntl()</span> system call (Section 5.2). The <span class="docEmphasis">fcntl()</span> <tt>F_GETFD</tt> operation retrieves a copy of the file descriptor flags:</p><pre>int flags;
+
+flags = fcntl(fd, F_GETFD);
+if (flags == -1)
+    errExit("fcntl");</pre><br/>
+<p class="docText">After retrieving these flags, we can modify the <tt>FD_CLOEXEC</tt> bit and use a second <span class="docEmphasis">fcntl()</span> call specifying <tt>F_SETFD</tt> to update the flags:</p><pre>flags |= FD_CLOEXEC;
+if (fcntl(fd, F_SETFD, flags) == -1)
+    errExit("fcntl");</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText"><tt>FD_CLOEXEC</tt>
+ is actually the only bit used in the file descriptor flags. This bit 
+corresponds to the value 1. In older programs, we may sometimes see the 
+close-on-exec flag set using just the call <span class="docEmphasis">fcntl(fd, F_SETFD, 1)</span>,
+ relying on the fact that there are no other bits that can be affected 
+by this operation. Theoretically, this may not always be so (in the 
+future, some UNIX system might implement additional flag bits), so we 
+should use the technique shown in the main text.</p><p class="docText">Many UNIX implementations, including Linux, also allow the close-on-exec flag to be modified using two unstandardized <span class="docEmphasis">ioctl()</span> calls: <span class="docEmphasis">ioctl(fd, FIOCLEX)</span> to set the close-on-exec flag for <span class="docEmphasis">fd</span>, and <span class="docEmphasis">ioctl(fd, FIONCLEX)</span> to clear the flag.</p><hr noshade="noshade" size="1"/><p class="docText">When <span class="docEmphasis">dup()</span>, <span class="docEmphasis">dup2()</span>, or <span class="docEmphasis">fcntl()</span>
+ is used to create a duplicate of a file descriptor, the close-on-exec 
+flag is always cleared for the duplicate descriptor. (This behavior is 
+historical and an SUSv3 requirement.)</p><p class="docText">Example 27-6
+ demonstrates the manipulation of the close-on-exec flag. Depending on 
+the presence of a command-line argument (any string), this program first
+ sets the close-on-exec flag for standard output and then execs the <span class="docEmphasis">ls</span> program. Here is what we see when we run the program:</p><pre class="preFixedWidth">$ <b>./closeonexec </b>                     <i> Exec ls without closing standard output</i>
+-rwxr-xr-x   1 mtk    users    28098 Jun 15 13:59 closeonexec
+$ <b>./closeonexec n </b>                   <i> Sets close-on-exec flag for standard output</i>
+ls: write error: Bad file descriptor
+
+					  </pre><br/>
+<p class="docText">In the second run shown above, <span class="docEmphasis">ls</span> detects that its standard output is closed and prints an error message on standard error.</p><h5 class="docExampleTitle" id="title-ID0EDLDK">Example 27-6. Setting the close-on-exec flag for a file descriptor</h5><p></p><div class="box"><pre class="preFixedWidth"><b>procexec/closeonexec.c</b>
+#include &lt;fcntl.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int flags;
+
+    if (argc &gt; 1) {
+        flags = fcntl(STDOUT_FILENO, F_GETFD);              /* Fetch flags */
+        if (flags == -1)
+            errExit("fcntl - F_GETFD");
+
+        flags |= FD_CLOEXEC;                    /* Turn on FD_CLOEXEC */
+
+        if (fcntl(STDOUT_FILENO, F_SETFD, flags) == -1)     /* Update flags */
+            errExit("fcntl - F_SETFD");
+    }
+
+    execlp("ls", "ls", "-l", argv[0], (char *) NULL);
+    errExit("execlp");
+}
+     <b>procexec/closeonexec.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>23.7. Timers That Notify via File Descriptors: The timerfd API</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">23.7. Timers That Notify via File Descriptors: The <span class="docEmphasis">timerfd</span> API</h3><p class="docText">Starting with kernel 2.6.25, Linux provides another API for creating timers. The Linux-specific <span class="docEmphasis">timerfd</span>
+ API creates a timer whose expiration notifications can be read from a 
+file descriptor. This is useful because the file descriptor can be 
+monitored along with other descriptors using <span class="docEmphasis">select()</span>, <span class="docEmphasis">poll()</span>, and <span class="docEmphasis">epoll</span> (described in Chapter 63).
+ (With the other timer APIs discussed in this chapter, it requires some 
+effort to be able to simultaneously monitor one or more timers along 
+with a set of file descriptors.)</p><p class="docText">The operation of the three new system calls in this API is analogous to the operation of the <span class="docEmphasis">timer_create()</span>, <span class="docEmphasis">timer_settime()</span>, and <span class="docEmphasis">timer_gettime()</span> system calls described in Section 23.6.</p><p class="docText">The first of the new system calls is <span class="docEmphasis">timerfd_create()</span>, which creates a new timer object and returns a file descriptor referring to that object.</p><pre>#include &lt;sys/timerfd.h&gt;
+
+int <b>timerfd_create</b>(int <span class="docEmphasis">clockid</span>, int <span class="docEmphasis">flags</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns file descriptor on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The value of <span class="docEmphasis">clockid</span> can be either <tt>CLOCK_REALTIME</tt> or <tt>CLOCK_MONOTONIC</tt> (see Table 23-1).</p><p class="docText">In the initial implementation of <span class="docEmphasis">timerfd_create()</span>, the <span class="docEmphasis">flags</span> argument was reserved for future use and had to be specified as 0. However, since Linux 2.6.27, two flags are supported:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">TFD_CLOEXEC</span></span></span></p></dt><dd><p class="docList">Set the close-on-exec flag (<tt>FD_CLOEXEC</tt>) for the new file descriptor. This flag is useful for the same reasons as the <span class="docEmphasis">open()</span> <tt>O_CLOEXEC</tt> flag described in Section 4.3.1.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">TFD_NONBLOCK</span></span></span></p></dt><dd><p class="docList">Set the <tt>O_NONBLOCK</tt> flag on the underlying open file description, so that future reads will be nonblocking. This saves additional calls to <span class="docEmphasis">fcntl()</span> to achieve the same result.</p></dd></dl><p class="docText">When we have finished using a timer created by <span class="docEmphasis">timerfd_create()</span>, we should <span class="docEmphasis">close()</span> the associated file descriptor, so that the kernel can free the resources associated with the timer.</p><p class="docText">The <span class="docEmphasis">timerfd_settime()</span> system call arms (starts) or disarms (stops) the timer referred to by the file descriptor <span class="docEmphasis">fd</span>.</p><pre>#include &lt;sys/timerfd.h&gt;
+
+int <b>timerfd_settime</b>(int <span class="docEmphasis">fd</span>, int <span class="docEmphasis">flags</span>, const struct itimerspec *<span class="docEmphasis">new_value</span>,
+                    struct itimerspec *<span class="docEmphasis">old_value</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">new_value</span> argument specifies the new settings for the timer. The <span class="docEmphasis">old_value</span> argument can be used to return the previous settings of the timer (see the description of <span class="docEmphasis">timerfd_gettime()</span> below for details). If we are not interested in the previous settings, we can specify <span class="docEmphasis">old_value</span> as <tt>NULL</tt>. Both of these arguments are <span class="docEmphasis">itimerspec</span> structures that are used in the same way as for <span class="docEmphasis">timer_settime()</span> (see Section 23.6.2).</p><p class="docText">The <span class="docEmphasis">flags</span> argument is similar to the corresponding argument for <span class="docEmphasis">timer_settime()</span>. It may either be 0, meaning that <span class="docEmphasis">new_value.it_value</span> is interpreted relative to the time of the call to <span class="docEmphasis">timerfd_settime()</span>, or it can be <tt>TFD_TIMER_ABSTIME</tt>, meaning that <span class="docEmphasis">new_value.it_value</span> is interpreted as an absolute time (i.e., measured from the clock’s zero point).</p><p class="docText">The <span class="docEmphasis">timerfd_gettime()</span> system call returns the interval and remaining time for the timer identified by the file descriptor <span class="docEmphasis">fd</span>.</p><pre>#include &lt;sys/timerfd.h&gt;
+
+int <b>timerfd_gettime</b>(int <span class="docEmphasis">fd</span>, struct itimerspec *<span class="docEmphasis">curr_value</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">As with <span class="docEmphasis">timer_gettime()</span>, the interval and the time until the next expiration of the timer are returned in the <span class="docEmphasis">itimerspec</span> structure pointed to by <span class="docEmphasis">curr_value</span>. The <span class="docEmphasis">curr_value.it_value</span> field returns the time until the next timer expiration, even if this timer was established as an absolute timer using <tt>TFD_TIMER_ABSTIME</tt>. If both fields of the returned <span class="docEmphasis">curr_value.it_value</span> structure are 0, then the timer is currently disarmed. If both fields of the returned <span class="docEmphasis">curr_value.it_interval</span> structure are 0, then the timer expires just once, at the time given in <span class="docEmphasis">curr_value.it_value</span>.</p><h4 class="docSection2Title" id="title-ID0E6ICK">23.7.1. </h4><h5 class="docSection3Title" id="title-ID0EDJCK">23.7.1.1. Interactions of <span class="docEmphasis">timerfd</span> with <span class="docEmphasis">fork()</span> and <span class="docEmphasis">exec()</span></h5><p class="docText">During a <span class="docEmphasis">fork()</span>, a child process inherits copies of file descriptors created by <span class="docEmphasis">timerfd_create()</span>.
+ These file descriptors refer to the same timer objects as the 
+corresponding descriptors in the parent, and timer expirations can be 
+read in either process.</p><p class="docText">File descriptors created by <span class="docEmphasis">timerfd_create()</span> are preserved across an <span class="docEmphasis">exec()</span> (unless the descriptors are marked close-on-exec, as described in Section 27.4), and armed timers will continue to generate timer expirations after the <span class="docEmphasis">exec()</span>.</p><h5 class="docSection3Title" id="title-ID0EOKCK">23.7.1.2. Reading from the <span class="docEmphasis">timerfd</span> file descriptor</h5><p class="docText">Once we have armed a timer with <span class="docEmphasis">timerfd_settime()</span>, we can use <span class="docEmphasis">read()</span> to read information about timer expirations from the associated file descriptor. For this purpose, the buffer given to <span class="docEmphasis">read()</span> must be large enough to hold an unsigned 8-byte integer (<span class="docEmphasis">uint64_t</span>).</p><p class="docText">If one or more expirations have occurred since the timer settings were last modified using <span class="docEmphasis">timerfd_settime()</span> or the last <span class="docEmphasis">read()</span> was performed, then <span class="docEmphasis">read()</span>
+ returns immediately, and the returned buffer contains the number of 
+expirations that have occurred. If no timer expirations have occurred, 
+then <span class="docEmphasis">read()</span> blocks until the next expiration occurs. It is also possible to use the <span class="docEmphasis">fcntl()</span> <tt>F_SETFL</tt> operation (Section 5.3) to set the <tt>O_NONBLOCK</tt> flag for the file descriptor, so that reads are nonblocking, and will fail with the error <tt>EAGAIN</tt> if no timer expirations have occurred.</p><p class="docText">As stated earlier, a <span class="docEmphasis">timerfd</span> file descriptor can be monitored using <span class="docEmphasis">select()</span>, <span class="docEmphasis">poll()</span>, and <span class="docEmphasis">epoll</span>. If the timer has expired, then the file descriptor indicates as being readable.</p><h5 class="docSection3Title" id="title-ID0EDMCK">23.7.1.3. Example program</h5><p class="docText">Example 23-8 demonstrates the use of the <span class="docEmphasis">timerfd</span>
+ API. This program takes two command-line arguments. The first argument 
+is mandatory, and specifies the initial time and interval for a timer. 
+(This argument is interpreted using the <span class="docEmphasis">itimerspecFromStr()</span> function shown in Example 23-6.)
+ The second argument, which is optional, specifies the maximum number of
+ expirations of the timer that the program should wait for before 
+terminating; the default for this argument is 1.</p><p class="docText">The program creates a timer using <span class="docEmphasis">timerfd_create()</span>, and arms it using <span class="docEmphasis">timerfd_settime()</span>.
+ It then loops, reading expiration notifications from the file 
+descriptor until the specified number of expirations has been reached. 
+After each <span class="docEmphasis">read()</span>,
+ the program displays the time elapsed since the timer was started, the 
+number of expirations read, and the total number of expirations so far.</p><p class="docText">In
+ the following shell session log, the command-line arguments specify a 
+timer with a 1-second initial value and 1-second interval, and a maximum
+ of 100 expirations.</p><pre class="preFixedWidth">$ <b>./demo_timerfd 1:1 100 </b>
+1.000: expirations read: 1; total=1
+2.000: expirations read: 1; total=2
+3.000: expirations read: 1; total=3
+<i> Type Control-Z to suspend program in background for a few seconds</i>
+[1]+  Stopped           ./demo_timerfd 1:1 100
+$ <b>fg </b>                                      <i> Resume program in foreground</i>
+./demo_timerfd 1:1 100
+14.205: expirations read: 11; total=14    <i> Multiple expirations since last</i> <span class="docEmphasis">read()</span>
+15.000: expirations read: 1; total=15
+16.000: expirations read: 1; total=16
+<i> Type Control-C to terminate the program</i>
+
+					  </pre><br/>
+<p class="docText">From the above output, 
+we can see that multiple timer expirations occurred while the program 
+was suspended in the background, and all of these expirations were 
+returned on the first <span class="docEmphasis">read()</span> after the program resumed execution.</p><h5 class="docExampleTitle" id="title-ID0E2NCK">Example 23-8. Using the <span class="docEmphasis">timerfd</span> API</h5><p></p><div class="box"><pre class="preFixedHeight"><b>timers/demo_timerfd.c</b>
+#include &lt;sys/timerfd.h&gt;
+#include &lt;time.h&gt;
+#include &lt;stdint.h&gt;                     /* Definition of uint64_t */
+#include "itimerspec_from_str.h"        /* Declares itimerspecFromStr() */
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    struct itimerspec ts;
+    struct timespec start, now;
+    int maxExp, fd, secs, nanosecs;
+    uint64_t numExp, totalExp;
+    ssize_t s;
+
+    if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s secs[/nsecs][:int-secs[/int-nsecs]] [max-exp]\n", argv[0]);
+
+    itimerspecFromStr(argv[1], &amp;ts);
+    maxExp = (argc &gt; 2) ? getInt(argv[2], GN_GT_0, "max-exp") : 1;
+
+    fd = timerfd_create(CLOCK_REALTIME, 0);
+    if (fd == -1)
+        errExit("timerfd_create");
+
+    if (timerfd_settime(fd, 0, &amp;ts, NULL) == -1)
+        errExit("timerfd_settime");
+
+    if (clock_gettime(CLOCK_MONOTONIC, &amp;start) == -1)
+        errExit("clock_gettime");
+
+    for (totalExp = 0; totalExp &lt; maxExp;) {
+
+        /* Read number of expirations on the timer, and then display
+           time elapsed since timer was started, followed by number
+           of expirations read and total expirations so far. */
+
+        s = read(fd, &amp;numExp, sizeof(uint64_t));
+        if (s != sizeof(uint64_t))
+            errExit("read");
+
+        totalExp += numExp;
+
+        if (clock_gettime(CLOCK_MONOTONIC, &amp;now) == -1)
+            errExit("clock_gettime");
+
+        secs = now.tv_sec - start.tv_sec;
+        nanosecs = now.tv_nsec - start.tv_nsec;
+        if (nanosecs &lt; 0) {
+            secs--;
+            nanosecs += 1000000000;
+        }
+
+        printf("%d.%03d: expirations read: %llu; total=%llu\n",
+                secs, (nanosecs + 500000) / 1000000,
+                (unsigned long long) numExp, (unsigned long long) totalExp);
+    }
+
+    exit(EXIT_SUCCESS);
+}
+     <b>timers/demo_timerfd.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

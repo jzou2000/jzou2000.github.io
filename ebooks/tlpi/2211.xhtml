@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>22.11. Fetching Signals via a File Descriptor</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">22.11. Fetching Signals via a File Descriptor</h3><p class="docText">Starting with kernel 2.6.22, Linux provides the (nonstandard) <span class="docEmphasis">signalfd()</span> system call, which creates a special file descriptor from which signals directed to the caller can be read. The <span class="docEmphasis">signalfd</span> mechanism provides an alternative to the use of <span class="docEmphasis">sigwaitinfo()</span> for synchronously accepting signals.</p><pre>#include &lt;sys/signalfd.h&gt;
+
+int <b>signalfd</b>(int <span class="docEmphasis">fd</span>, const sigset_t *<span class="docEmphasis">maskl</span>, int <span class="docEmphasis">flags</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns file descriptor on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">mask</span> argument is a signal set that specifies the signals that we want to be able to read via the <span class="docEmphasis">signalfd</span> file descriptor. As with <span class="docEmphasis">sigwaitinfo()</span>, we should normally also block all of the signals in <span class="docEmphasis">mask</span> using <span class="docEmphasis">sigprocmask()</span>, so that the signals don’t get handled according to their default dispositions before we have a chance to read them.</p><p class="docText">If <span class="docEmphasis">fd</span> is specified as -1, then <span class="docEmphasis">signalfd()</span> creates a new file descriptor that can be used to read the signals in <span class="docEmphasis">mask</span>; otherwise, it modifies the mask associated with <span class="docEmphasis">fd</span>, which must be a file descriptor created by a previous call to <span class="docEmphasis">signalfd()</span>.</p><p class="docText">In the initial implementation, the <span class="docEmphasis">flags</span> argument was reserved for future use and had to be specified as 0. However, since Linux 2.6.27, two flags are supported:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SFD_CLOEXEC</span></span></span></p></dt><dd><p class="docList">Set the close-on-exec flag (<tt>FD_CLOEXEC</tt>) for the new file descriptor. This flag is useful for the same reasons as the <span class="docEmphasis">open()</span> <tt>O_CLOEXEC</tt> flag described in Section 4.3.1.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SFD_NONBLOCK</span></span></span></p></dt><dd><p class="docList">Set the <tt>O_NONBLOCK</tt> flag on the underlying open file description, so that future reads will be nonblocking. This saves additional calls to <span class="docEmphasis">fcntl()</span> to achieve the same result.</p></dd></dl><p class="docText">Having created the file descriptor, we can then read signals from it using <span class="docEmphasis">read()</span>. The buffer given to <span class="docEmphasis">read()</span> must be large enough to hold at least one <span class="docEmphasis">signalfd_siginfo</span> structure, defined as follows in <tt>&lt;sys/signalfd.h&gt;</tt>:</p><pre>struct signalfd_siginfo {
+    uint32_t  ssi_signo;    /* Signal number */
+    int32_t   ssi_errno;    /* Error number (generally unused) */
+    int32_t   ssi_code;     /* Signal code */
+    uint32_t  ssi_pid;      /* Process ID of sending process */
+    uint32_t  ssi_uid;      /* Real user ID of sender */
+    int32_t   ssi_fd;       /* File descriptor (SIGPOLL/SIGIO) */
+    uint32_t  ssi_tid;      /* Kernel timer ID (POSIX timers) */
+    uint32_t  ssi_band;     /* Band event (SIGPOLL/SIGIO) */
+    uint32_t  ssi_tid;      /* (Kernel-internal) timer ID (POSIX timers) */
+    uint32_t  ssi_overrun;  /* Overrun count (POSIX timers) */
+    uint32_t  ssi_trapno;   /* Trap number */
+    int32_t   ssi_status;   /* Exit status or signal (SIGCHLD) */
+    int32_t   ssi_int;      /* Integer sent by sigqueue() */
+    uint64_t  ssi_ptr;      /* Pointer sent by sigqueue() */
+    uint64_t  ssi_utime;    /* User CPU time (SIGCHLD) */
+    uint64_t  ssi_stime;    /* System CPU time (SIGCHLD) */
+    uint64_t  ssi_addr;     /* Address that generated signal
+                               (hardware-generated signals only) */
+};</pre><br/>
+<p class="docText">The fields in this structure return the same information as the similarly named fields in the traditional <span class="docEmphasis">siginfo_t</span> structure (Section 21.4).</p><p class="docText">Each call to <span class="docEmphasis">read()</span> returns as many <span class="docEmphasis">signalfd_siginfo</span>
+ structures as there are signals pending and will fit in the supplied 
+buffer. If no signals are pending at the time of the call, then <span class="docEmphasis">read()</span> blocks until a signal arrives. We can also use the <span class="docEmphasis">fcntl()</span> <tt>F_SETFL</tt> operation (Section 5.3) to set the <tt>O_NONBLOCK</tt> flag for the file descriptor, so that reads are nonblocking and will fail with the error <tt>EAGAIN</tt> if no signals are pending.</p><p class="docText">When a signal is read from a <span class="docEmphasis">signalfd</span> file descriptor, it is consumed and ceases to be pending for the process.</p><h5 class="docExampleTitle" id="title-ID0ERVBK">Example 22-7. Using <span class="docEmphasis">signalfd()</span> to read signals</h5><p></p><div class="box"><pre class="preFixedHeight"><b>signals/signalfd_sigval.c</b>
+#include &lt;sys/signalfd.h&gt;
+#include &lt;signal.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    sigset_t mask;
+    int sfd, j;
+    struct signalfd_siginfo fdsi;
+    ssize_t s;
+
+    if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s sig-num...\n", argv[0]);
+
+    printf("%s: PID = %ld\n", argv[0], (long) getpid());
+
+    sigemptyset(&amp;mask);
+    for (j = 1; j &lt; argc; j++)
+        sigaddset(&amp;mask, atoi(argv[j]));
+
+    if (sigprocmask(SIG_BLOCK, &amp;mask, NULL) == -1)
+        errExit("sigprocmask");
+
+    sfd = signalfd(-1, &amp;mask, 0);
+    if (sfd == -1)
+        errExit("signalfd");
+
+    for (;;) {
+        s = read(sfd, &amp;fdsi, sizeof(struct signalfd_siginfo));
+        if (s != sizeof(struct signalfd_siginfo))
+            errExit("read");
+
+        printf("%s: got signal %d", argv[0], fdsi.ssi_signo);
+        if (fdsi.ssi_code == SI_QUEUE) {
+            printf("; ssi_pid = %d; ", fdsi.ssi_pid);
+            printf("ssi_int = %d", fdsi.ssi_int);
+        }
+        printf("\n");
+    }
+}
+      <b>signals/signalfd_sigval.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">A <span class="docEmphasis">signalfd</span> file descriptor can be monitored along with other descriptors using <span class="docEmphasis">select()</span>, <span class="docEmphasis">poll()</span>, and <span class="docEmphasis">epoll</span> (described in Chapter 63). Among other uses, this feature provides an alternative to the self-pipe trick described in Section 63.5.2. If signals are pending, then these techniques indicate the file descriptor as being readable.</p><p class="docText">When we no longer require a <span class="docEmphasis">signalfd</span> file descriptor, we should close it, in order to release the associated kernel resources.</p><p class="docText">Example 22-7 (in Section 22.12) demonstrates the use of <span class="docEmphasis">signalfd()</span>.
+ This program creates a mask of the signal numbers specified in its 
+command-line arguments, blocks those signals, and then creates a <span class="docEmphasis">signalfd</span>
+ file descriptor to read those signals. It then loops, reading signals 
+from the file descriptor and displaying some of the information from the
+ returned <span class="docEmphasis">signalfd_siginfo</span> structure. In the following shell session, we run the program in Example 22-7 in the background and send it a realtime signal with accompanying data using the program in Example 22-2 (<tt>t_sigqueue.c</tt>):</p><pre class="preFixedWidth">$ <b>./signalfd_sigval 44 &amp; </b>
+./signalfd_sigval: PID = 6267
+[1] 6267
+$ <b>./t_sigqueue 6267 44 123 </b>          <i> Send signal 44 with data 123 to PID 6267</i>
+./t_sigqueue: PID is 6269, UID is 1000
+./signalfd_sigval: got signal 44; ssi_pid=6269; ssi_int=123
+$ <b>kill %1 </b>                           <i> Kill program running in background</i>
+
+					  </pre><br/>
+</div>
+</body>
+</html>

@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>22.8. Realtime Signals</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">22.8. Realtime Signals</h3><p class="docText">Realtime
+ signals were defined in POSIX.1b to remedy a number of limitations of 
+standard signals. They have the following advantages over standard 
+signals:</p><ul><li><p class="docList">Realtime
+ signals provide an increased range of signals that can be used for 
+application-defined purposes. Only two standard signals are freely 
+available for application-defined purposes: <tt>SIGUSR1</tt> and <tt>SIGUSR2</tt>.</p></li><li><p class="docList">Realtime
+ signals are queued. If multiple instances of a realtime signal are sent
+ to a process, then the signal is delivered multiple times. By contrast,
+ if we send further instances of a standard signal that is already 
+pending for a process, that signal is delivered only once.</p></li><li><p class="docList">When
+ sending a realtime signal, it is possible to specify data (an integer 
+or pointer value) that accompanies the signal. The signal handler in the
+ receiving process can retrieve this data.</p></li><li><p class="docList">The
+ order of delivery of different realtime signals is guaranteed. If 
+multiple different realtime signals are pending, then the 
+lowest-numbered signal is delivered first. In other words, signals are 
+prioritized, with lower-numbered signals having higher priority. When 
+multiple signals of the same type are queued, they are delivered—along 
+with their accompanying data—in the order in which they were sent.</p></li></ul><p class="docText">SUSv3 requires that an implementation provide a minimum of <tt>_POSIX_RTSIG_MAX</tt> (defined as 8) different realtime signals. The Linux kernel defines 32 different realtime signals, numbered from 32 to 63. The <tt>&lt;signal.h&gt;</tt> header file defines the constant <tt>RTSIG_MAX</tt> to indicate the number of available realtime signals, and the constants <tt>SIGRTMIN</tt> and <tt>SIGRTMAX</tt> to indicate the lowest and highest available realtime signal numbers.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On systems employing the LinuxThreads threading implementation, <tt>SIGRTMIN</tt>
+ is defined as 35 (rather than 32) to allow for the fact that 
+LinuxThreads makes internal use of the first three realtime signals. On 
+systems employing the NPTL threading implementation, <tt>SIGRTMIN</tt> is defined as 34 to allow for the fact that NPTL makes internal use of the first two realtime signals.</p><hr noshade="noshade" size="1"/><p class="docText">Realtime
+ signals are not individually identified by different constants in the 
+manner of standard signals. However, an application should not hard-code
+ integer values for them, since the range used for realtime signals 
+varies across UNIX implementations. Instead, a realtime signal number 
+can be referred to by adding a value to <tt>SIGRTMIN</tt>; for example, the expression (<span class="docEmphasis">SIGRTMIN + 1</span>) refers to the second realtime signal.</p><p class="docText">Be aware that SUSv3 doesn’t require <tt>SIGRTMAX</tt> and <tt>SIGRTMIN</tt>
+ to be simple integer values. They may be defined as functions (as they 
+are on Linux). This means that we can’t write code for the preprocessor 
+such as the following:</p><pre>#if SIGRTMIN+100 &gt; SIGRTMAX             /* WRONG! */
+#error "Not enough realtime signals"
+#endif</pre><br/>
+<p class="docText">Instead, we must perform equivalent checks at run time.</p><h4 class="docSection2Title" id="title-ID0EGIBK">22.8.1. </h4><h5 class="docSection3Title" id="title-ID0EKIBK">22.8.1.1. Limits on the number of queued realtime signals</h5><p class="docText">Queuing
+ realtime signals (with associated data) requires that the kernel 
+maintain data structures listing the signals queued to each process. 
+Since these data structures consume kernel memory, the kernel places 
+limits on the number of realtime signals that may be queued.</p><p class="docText">SUSv3
+ allows an implementation to place an upper limit on the number of 
+realtime signals (of all types) that may be queued to a process, and 
+requires that this limit be at least <tt>_POSIX_SIGQUEUE_MAX</tt> (defined as 32). An implementation can define the constant <tt>SIGQUEUE_MAX</tt>
+ to indicate the number of realtime signals it allows to be queued. It 
+can also make this information available through the following call:</p><pre>lim = sysconf(_SC_SIGQUEUE_MAX);</pre><br/>
+<p class="docText">On Linux, this call returns 
+-1. The reason for this is that Linux employs a different model for 
+limiting the number of realtime signals that may be queued to a process.
+ In Linux versions up to and including 2.6.7, the kernel enforces a 
+system-wide limit on the total number of realtime signals that may be 
+queued to all processes. This limit can be viewed and (with privilege) 
+changed via the Linux-specific <tt>/proc/sys/kernel/rtsig-max</tt>
+ file. The default value in this file is 1024. The number of currently 
+queued realtime signals can be found in the Linux-specific <tt>/proc/sys/kernel/rtsig-nr</tt> file.</p><p class="docText">Starting with Linux 2.6.8, this model was changed, and the aforementioned <tt>/proc</tt> interfaces were removed. Under the new model, the <tt>RLIMIT_SIGPENDING</tt>
+ soft resource limit defines a limit on the number of signals that can 
+be queued to all processes owned by a particular real user ID. We 
+describe this limit further in Section 36.3.</p><h5 class="docSection3Title" id="title-ID0EYLBK">22.8.1.2. Using realtime signals</h5><p class="docText">In order for a pair of processes to send and receive realtime signals, SUSv3 requires the following:</p><ul><li><p class="docList">The sending process sends the signal plus its accompanying data using the <span class="docEmphasis">sigqueue()</span> system call.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">A realtime signal can also be sent using <span class="docEmphasis">kill()</span>, <span class="docEmphasis">killpg()</span>, and <span class="docEmphasis">raise()</span>.
+ However, SUSv3 leaves it as implementation-dependent whether realtime 
+signals sent using these interfaces are queued. On Linux, these 
+interfaces do queue realtime signals, but on many other UNIX 
+implementations, they do not.</p><hr noshade="noshade" size="1"/></li><li><p class="docList">The receiving process establishes a handler for the signal using a call to <span class="docEmphasis">sigaction()</span> that specifies the <tt>SA_SIGINFO</tt>
+ flag. This causes the signal handler to be invoked with additional 
+arguments, one of which includes the data accompanying the realtime 
+signal.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On Linux, it is possible to queue realtime signals even if the receiving process doesn’t specify the <tt>SA_SIGINFO</tt>
+ flag when establishing the signal handler (although it is not then 
+possible to obtain the data associated with the signal in this case). 
+However, SUSv3 doesn’t require implementations to guarantee this 
+behavior, so we can’t portably rely on it.</p><hr noshade="noshade" size="1"/></li></ul><h4 class="docSection2Title" id="title-ID0ETOBK">22.8.2. Sending Realtime Signals</h4><p class="docText">The <span class="docEmphasis">sigqueue()</span> system call sends the realtime signal specified by <span class="docEmphasis">sig</span> to the process specified by <span class="docEmphasis">pid</span>.</p><pre>#define _POSIX_C_SOURCE 199309
+#include &lt;signal.h&gt;
+
+int <b>sigqueue</b>(pid_t <span class="docEmphasis">pid</span>, int <span class="docEmphasis">sig</span>, const union sigval <span class="docEmphasis">value</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The same permissions are required to send a signal using <span class="docEmphasis">sigqueue()</span> as are required with <span class="docEmphasis">kill()</span> (see Section 20.5). A null signal (i.e., signal 0) can be sent, with the same meaning as for <span class="docEmphasis">kill()</span>. (Unlike <span class="docEmphasis">kill()</span>, we can’t use <span class="docEmphasis">sigqueue()</span> to send a signal to an entire process group by specifying a negative value in <span class="docEmphasis">pid</span>.)</p><h5 class="docExampleTitle" id="title-ID0E1QBK">Example 22-2. Using <span class="docEmphasis">sigqueue()</span> to send realtime signals</h5><p></p><div class="box"><pre class="preFixedHeight"><b>signals/t_sigqueue.c</b>
+#define _POSIX_C_SOURCE 199309
+#include &lt;signal.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int sig, numSigs, j, sigData;
+    union sigval sv;
+
+    if (argc &lt; 4 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s pid sig-num data [num-sigs]\n", argv[0]);
+
+    /* Display our PID and UID, so that they can be compared with the
+       corresponding fields of the siginfo_t argument supplied to the
+       handler in the receiving process */
+
+    printf("%s: PID is %ld, UID is %ld\n", argv[0],
+            (long) getpid(), (long) getuid());
+
+    sig = getInt(argv[2], 0, "sig-num");
+    sigData = getInt(argv[3], GN_ANY_BASE, "data");
+    numSigs = (argc &gt; 4) ? getInt(argv[4], GN_GT_0, "num-sigs") : 1;
+
+    for (j = 0; j &lt; numSigs; j++) {
+        sv.sival_int = sigData + j;
+        if (sigqueue(getLong(argv[1], 0, "pid"), sig, sv) == -1)
+            errExit("sigqueue %d", j);
+    }
+
+    exit(EXIT_SUCCESS);
+}
+     <b>signals/t_sigqueue.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The <span class="docEmphasis">value</span> argument specifies the data to accompany the signal. This argument has the following form:</p><pre>union sigval {
+    int   sival_int;      /* Integer value for accompanying data */
+    void *sival_ptr;      /* Pointer value for accompanying data */
+};</pre><br/>
+<p class="docText">The interpretation of this argument is application-dependent, as is the choice of whether to set the <span class="docEmphasis">sival_int</span> or the <span class="docEmphasis">sival_ptr</span> field of the union. The <span class="docEmphasis">sival_ptr</span> field is seldom useful with <span class="docEmphasis">sigqueue()</span>,
+ since a pointer value that is useful in one process is rarely 
+meaningful in another process. However, this field is useful in other 
+functions that employ <span class="docEmphasis">sigval</span> unions, as we’ll see when we consider POSIX timers in Section 23.6 and POSIX message queue notification in Section 52.6.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Several UNIX implementations, including Linux, define a <span class="docEmphasis">sigval_t</span> data type as a synonym for <span class="docEmphasis">union sigval</span>.
+ However, this type is not specified in SUSv3 and is not available on 
+some implementations. Portable applications should avoid using it.</p><hr noshade="noshade" size="1"/><p class="docText">A call to <span class="docEmphasis">sigqueue()</span> may fail if the limit on the number of queued signals has been reached. In this case, <span class="docEmphasis">errno</span> is set to <tt>EAGAIN</tt>,
+ indicating that we need to send the signal again (at some later time 
+when some of the currently queued signals have been delivered).</p><p class="docText">An example of the use of <span class="docEmphasis">sigqueue()</span> is provided in Example 22-2
+ (page 459). This program takes up to four arguments, of which the first
+ three are mandatory: a signal number, a target process ID, and an 
+integer value to accompany the realtime signal. If more than one 
+instance of the specified signal is to be sent, the optional fourth 
+argument specifies the number of instances; in this case, the 
+accompanying integer data value is incremented by one for each 
+successive signal. We demonstrate the use of this program in Section 22.8.2.</p><h4 class="docSection2Title" id="title-ID0EETBK">22.8.3. Handling Realtime Signals</h4><p class="docText">We
+ can handle realtime signals just like standard signals, using a normal 
+(single-argument) signal handler. Alternatively, we can handle a 
+realtime signal using a three-argument signal handler established using 
+the <tt>SA_SIGINFO</tt> flag (Section 21.4). Here is an example of using <tt>SA_SIGINFO</tt> to establish a handler for the sixth realtime signal:</p><pre>struct sigaction act;
+
+sigemptyset(&amp;act.sa_mask);
+act.sa_sigaction = handler;
+act.sa_flags = SA_RESTART | SA_SIGINFO;
+
+if (sigaction(SIGRTMIN + 5, &amp;act, NULL) == -1)
+    errExit("sigaction");</pre><br/>
+<p class="docText">When we employ the <tt>SA_SIGINFO</tt> flag, the second argument passed to the signal handler is a <span class="docEmphasis">siginfo_t</span>
+ structure that contains additional information about the realtime 
+signal. We described this structure in detail in Section 21.4. For a 
+realtime signal, the following fields are set in the <span class="docEmphasis">siginfo_t</span> structure:</p><ul><li><p class="docList">The <span class="docEmphasis">si_signo</span> field is the same value as is passed in the first argument of the signal handler.</p></li><li><p class="docList">The <span class="docEmphasis">si_code</span> field indicates the source of the signal, and contains one of the values shown in Table 21-2 (page 441). For a realtime signal sent via <span class="docEmphasis">sigqueue()</span>, this field always has the value <tt>SI_QUEUE</tt>.</p></li><li><p class="docList">The <span class="docEmphasis">si_value</span> field contains the data specified in the <span class="docEmphasis">value</span> argument (the <span class="docEmphasis">sigval</span> union) by the process that sent the signal using <span class="docEmphasis">sigqueue()</span>. As noted already, the interpretation of this data is application-defined. (The <span class="docEmphasis">si_value</span> field doesn’t contain valid information if the signal was sent using <span class="docEmphasis">kill()</span>.)</p></li><li><p class="docList">The <span class="docEmphasis">si_pid</span> and <span class="docEmphasis">si_uid</span> fields contain, respectively, the process ID and real user ID of the process sending the signal.</p></li></ul><p class="docText">Example 22-3 provides an example of handling realtime signals. This program catches signals and displays various fields from the <span class="docEmphasis">siginfo_t</span>
+ structure passed to the signal handler. The program takes two optional 
+integer command-line arguments. If the first argument is supplied, the 
+main program blocks all signals, and then sleeps for the number of 
+seconds specified by this argument. During this time, we can queue 
+multiple realtime signals to the process and observe what happens when 
+the signals are unblocked. The second argument specifies the number of 
+seconds that the signal handler should sleep before returning. 
+Specifying a nonzero value (the default is 1 second) is useful for 
+slowing down the program so that we can more easily see what is 
+happening when multiple signals are handled.</p><p class="docText">We can use the program in Example 22-3, along with the program in Example 22-2 (<tt>t_sigqueue.c</tt>) to explore the behavior of realtime signals, as shown in the following shell session log:</p><pre class="preFixedWidth">$ <b>./catch_rtsigs 60 &amp; </b>
+[1] 12842
+$ ./catch_rtsigs: PID is 12842        <i> Shell prompt mixed with program output</i>
+./catch_rtsigs: signals blocked - sleeping 60 seconds
+<i> Press Enter to see next shell prompt</i>
+$ <b>./t_sigqueue 12842 54 100 3 </b>         <i> Send signal three times</i>
+./t_sigqueue: PID is 12843, UID is 1000
+$ <b>./t_sigqueue 12842 43 200 </b>
+./t_sigqueue: PID is 12844, UID is 1000
+$ <b>./t_sigqueue 12842 40 300 </b>
+./t_sigqueue: PID is 12845, UID is 1000
+
+					  </pre><br/>
+<p class="docText">Eventually, the <span class="docEmphasis">catch_rtsigs</span>
+ program completes sleeping, and displays messages as the signal handler
+ catches various signals. (We see a shell prompt mixed with the next 
+line of the program’s output because the <span class="docEmphasis">catch_rtsigs</span>
+ program is writing output from the background.) We first observe that 
+realtime signals are delivered lowest-numbered signal first, and that 
+the <span class="docEmphasis">siginfo_t</span> structure passed to the handler includes the process ID and user ID of the process that sent the signal:</p><pre>$ ./catch_rtsigs: sleep complete
+caught signal 40
+    si_signo=40, si_code=-1 (SI_QUEUE), si_value=300
+    si_pid=12845, si_uid=1000
+caught signal 43
+    si_signo=43, si_code=-1 (SI_QUEUE), si_value=200
+    si_pid=12844, si_uid=1000</pre><br/>
+<p class="docText">The remaining output is produced by the three instances of the same realtime signal. Looking at the <span class="docEmphasis">si_value</span> values, we can see that these signals were delivered in the order they were sent:</p><pre>caught signal 54
+    si_signo=54, si_code=-1 (SI_QUEUE), si_value=100
+    si_pid=12843, si_uid=1000
+caught signal 54
+    si_signo=54, si_code=-1 (SI_QUEUE), si_value=101
+    si_pid=12843, si_uid=1000
+caught signal 54
+    si_signo=54, si_code=-1 (SI_QUEUE), si_value=102
+    si_pid=12843, si_uid=1000</pre><br/>
+<p class="docText">We continue by using the shell <span class="docEmphasis">kill</span> command to send a signal to the <span class="docEmphasis">catch_rtsigs</span> program. As before, we see that the <span class="docEmphasis">siginfo_t</span> structure received by the handler includes the process ID and user ID of the sending process, but in this case, the <span class="docEmphasis">si_code</span> value is <tt>SI_USER</tt>:</p><pre class="preFixedWidth"><i> Press Enter to see next shell prompt</i>
+$ <b>echo $$ </b>                             <i> Display PID of shell</i>
+12780
+$ <b>kill -40 12842 </b>                      <i> Uses</i> kill(2) <i> to send a signal</i>
+$ caught signal 40
+    si_signo=40, si_code=0 (SI_USER), si_value=0
+    si_pid=12780, si_uid=1000         <i> PID is that of the shell</i>
+<i> Press Enter to see next shell prompt</i>
+$ <b>kill 12842 </b>                          <i> Kill</i> catch_rtsigs <i> by sending</i> SIGTERM
+Caught 6 signals
+<i> Press Enter to see notification from shell about terminated background job</i>
+[1]+  Done                    ./catch_rtsigs 60
+
+					  </pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EY2BK">Example 22-3. Handling realtime signals</h5><p></p><div class="box"><pre class="preFixedHeight"><b>signals/catch_rtsigs.c</b>
+#define _GNU_SOURCE
+#include &lt;string.h&gt;
+#include &lt;signal.h&gt;
+#include "tlpi_hdr.h"
+
+static volatile int handlerSleepTime;
+static volatile int sigCnt = 0;         /* Number of signals received */
+static volatile int allDone = 0;
+
+static void             /* Handler for signals established using SA_SIGINFO */
+siginfoHandler(int sig, siginfo_t *si, void *ucontext)
+{
+    /* UNSAFE: This handler uses non-async-signal-safe functions
+       (printf()); see Section 21.1.2) */
+
+    /* SIGINT or SIGTERM can be used to terminate program */
+
+    if (sig == SIGINT || sig == SIGTERM) {
+        allDone = 1;
+        return;
+    }
+
+    sigCnt++;
+    printf("caught signal %d\n", sig);
+
+    printf("    si_signo=%d, si_code=%d (%s), ", si-&gt;si_signo, si-&gt;si_code,
+            (si-&gt;si_code == SI_USER) ? "SI_USER" :
+            (si-&gt;si_code == SI_QUEUE) ? "SI_QUEUE" : "other");
+    printf("si_value=%d\n", si-&gt;si_value.sival_int);
+    printf("    si_pid=%ld, si_uid=%ld\n", (long) si-&gt;si_pid, (long) si-&gt;si_uid);
+
+    sleep(handlerSleepTime);
+}
+
+int
+main(int argc, char *argv[])
+{
+    struct sigaction sa;
+    int sig;
+    sigset_t prevMask, blockMask;
+
+    if (argc &gt; 1 &amp;&amp; strcmp(argv[1], "--help") == 0)
+        usageErr("%s [block-time [handler-sleep-time]]\n", argv[0]);
+
+    printf("%s: PID is %ld\n", argv[0], (long) getpid());
+
+    handlerSleepTime = (argc &gt; 2) ?
+                getInt(argv[2], GN_NONNEG, "handler-sleep-time") : 1;
+
+    /* Establish handler for most signals. During execution of the handler,
+       mask all other signals to prevent handlers recursively interrupting
+       each other (which would make the output hard to read). */
+
+    sa.sa_sigaction = siginfoHandler;
+    sa.sa_flags = SA_SIGINFO;
+    sigfillset(&amp;sa.sa_mask);
+
+    for (sig = 1; sig &lt; NSIG; sig++)
+        if (sig != SIGTSTP &amp;&amp; sig != SIGQUIT)
+            sigaction(sig, &amp;sa, NULL);
+
+    /* Optionally block signals and sleep, allowing signals to be
+       sent to us before they are unblocked and handled */
+
+    if (argc &gt; 1) {
+        sigfillset(&amp;blockMask);
+        sigdelset(&amp;blockMask, SIGINT);
+        sigdelset(&amp;blockMask, SIGTERM);
+
+        if (sigprocmask(SIG_SETMASK, &amp;blockMask, &amp;prevMask) == -1)
+            errExit("sigprocmask");
+
+        printf("%s: signals blocked - sleeping %s seconds\n", argv[0], argv[1]);
+        sleep(getInt(argv[1], GN_GT_0, "block-time"));
+        printf("%s: sleep complete\n", argv[0]);
+
+        if (sigprocmask(SIG_SETMASK, &amp;prevMask, NULL) == -1)
+            errExit("sigprocmask");
+    }
+
+    while (!allDone)                    /* Wait for incoming signals */
+        pause();
+}
+     <b>signals/catch_rtsigs.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

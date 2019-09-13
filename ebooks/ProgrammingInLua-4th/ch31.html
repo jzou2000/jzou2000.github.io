@@ -1,0 +1,635 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 31. User-Defined Types in C</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 31. User-Defined Types in C"><div class="titlepage"><div><h1><span class="partLabel">31</span> User-Defined Types in C</h1></div></div><p id="N16C72" style="text-indent: 0">
+In the previous chapter,
+we saw how to extend Lua with new functions written in C.
+Now, we will see how to extend Lua with new types written in C.
+We will start with a small example;
+through the chapter,
+we will extend it with metamethods and other goodies.
+</p><p id="N16C74" style="text-indent: 0">
+Our running example in this chapter
+will be a quite simple type:
+<a class="indexterm" id="N16C76"/>Boolean arrays.
+The main motivation for this example is that
+it does not involve complex algorithms,
+so we can concentrate on API issues.
+Nevertheless,
+the example is useful by itself.
+Of course, we can use tables to
+implement arrays of Booleans in Lua.
+But a C implementation,
+where we store each entry in one single bit,
+uses less than 3% of the memory used by a table.
+</p><p id="N16C7A" style="text-indent: 0">
+Our implementation will need the following
+definitions:
+</p><pre class="programlisting" id="N16C7C">      #include &lt;limits.h&gt;
+      
+      #define BITS_PER_WORD (CHAR_BIT * sizeof(unsigned int))
+      #define I_WORD(i)     ((unsigned int)(i) / BITS_PER_WORD)
+      #define I_BIT(i)      (1 &lt;&lt; ((unsigned int)(i) % BITS_PER_WORD))
+</pre><p style="text-indent: 0">
+<code class="literal">BITS_PER_WORD</code> is the number of bits in
+an unsigned integer.
+The macro <code class="literal">I_WORD</code> computes the word that stores
+the bit corresponding to a given index,
+and <code class="literal">I_BIT</code> computes a mask to access
+the correct bit inside this word.
+</p><p id="N16C88" style="text-indent: 0">
+We will represent our arrays with the following structure:
+</p><pre class="programlisting" id="N16C8A">      typedef struct BitArray {
+        int size;
+        unsigned int values[1];  /* variable part */
+      } BitArray;
+</pre><p style="text-indent: 0">
+We declare the array <code class="literal">values</code>
+with size 1 only as a placeholder,
+because C 89 does not allow an array with size 0;
+we will set the actual size when we allocate the array.
+The next expression computes the total size
+for an array with <code class="literal">n</code> elements:
+</p><pre class="programlisting" id="N16C93">      sizeof(BitArray) + I_WORD(n - 1) * sizeof(unsigned int)
+</pre><p style="text-indent: 0">
+(We subtract one from <code class="literal">n</code>
+because the original structure already
+includes space for one element.)
+</p><div class="sect1" title="Userdata"><div class="titlepage"><div><div><h2 class="title"><a id="userdata"/>Userdata</h2></div></div></div><p id="N16C9D" style="text-indent: 0">
+In this first version,
+we will use explicit calls to set and get values,
+as in the next example:
+</p><pre class="programlisting" id="N16C9F">      a = array.new(1000)
+      for i = 1, 1000 do
+        array.set(a, i, i % 2 == 0)     -- a[i] = (i % 2 == 0)
+      end
+      print(array.get(a, 10))           --&gt; true
+      print(array.get(a, 11))           --&gt; false
+      print(array.size(a))              --&gt; 1000
+</pre><p style="text-indent: 0">
+Later we will see how to support both an object-oriented style,
+like <code class="literal">a:get(i)</code>,
+and a conventional syntax, like <code class="literal">a[i]</code>.
+For all versions, the underlying functions are the same,
+defined in <a class="xref" href="ch31.html#setarray" title="Figure 31.1. Manipulating a Boolean array">Figure 31.1, “Manipulating a Boolean array”</a>.
+</p><div class="figure-float"><div class="figure"><a id="setarray"/><p class="title" style="text-indent: 0"><strong>Figure 31.1. Manipulating a Boolean array</strong></p><div class="figure-contents"><pre class="programlisting" id="N16CB0">      static int newarray (lua_State *L) {
+        int i;
+        size_t nbytes;
+        BitArray *a;
+      
+        int n = (int)luaL_checkinteger(L, 1);   /* number of bits */
+        luaL_argcheck(L, n &gt;= 1, 1, "invalid size");
+        nbytes = sizeof(BitArray) + I_WORD(n - 1)*sizeof(unsigned int);
+        a = (BitArray *)lua_newuserdata(L, nbytes);
+      
+        a-&gt;size = n;
+        for (i = 0; i &lt;= I_WORD(n - 1); i++)
+          a-&gt;values[i] = 0;  /* initialize array */
+      
+        return 1;  /* new userdata is already on the stack */
+      }
+      
+      static int setarray (lua_State *L) {
+        BitArray *a = (BitArray *)lua_touserdata(L, 1);
+        int index = (int)luaL_checkinteger(L, 2) - 1;
+      
+        luaL_argcheck(L, a != NULL, 1, "'array' expected");
+        luaL_argcheck(L, 0 &lt;= index &amp;&amp; index &lt; a-&gt;size, 2,
+                         "index out of range");
+        luaL_checkany(L, 3);
+      
+        if (lua_toboolean(L, 3))
+          a-&gt;values[I_WORD(index)] |= I_BIT(index);  /* set bit */
+        else
+          a-&gt;values[I_WORD(index)] &amp;= ~I_BIT(index);  /* reset bit */
+        return 0;
+      }
+      
+      static int getarray (lua_State *L) {
+        BitArray *a = (BitArray *)lua_touserdata(L, 1);
+        int index = (int)luaL_checkinteger(L, 2) - 1;
+      
+        luaL_argcheck(L, a != NULL, 1, "'array' expected");
+        luaL_argcheck(L, 0 &lt;= index &amp;&amp; index &lt; a-&gt;size, 2,
+                         "index out of range");
+      
+        lua_pushboolean(L, a-&gt;values[I_WORD(index)] &amp; I_BIT(index));
+        return 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+Let us see them, bit by bit.
+</p><p id="N16CB3" style="text-indent: 0">
+Our first concern is how to represent a C structure in Lua.
+Lua provides a basic type specifically for this task,
+called <a class="indexterm" id="N16CB5"/><em class="firstterm">userdata</em>.
+A userdata offers a raw memory area,
+with no predefined operations in Lua,
+which we can use to store anything.
+</p><p id="N16CBC" style="text-indent: 0">
+The function <a class="indexterm" id="N16CBE"></a><code class="function">lua_newuserdata</code> allocates a block of memory
+with a given size,
+pushes the corresponding userdata on the stack,
+and returns the block address:
+</p><pre class="programlisting" id="N16CC7">      void *lua_newuserdata (lua_State *L, size_t size);
+</pre><p style="text-indent: 0">
+If for some reason we need to allocate memory by other means,
+it is very easy to create a userdata with the size of a pointer
+and to store there a pointer to the real memory block.
+We will see examples of this technique in <a class="xref" href="ch32.html" title="Chapter 32. Managing Resources">Chapter 32, <em>Managing Resources</em></a>.
+</p><p id="N16CCD" style="text-indent: 0">
+Our first function in <a class="xref" href="ch31.html#setarray" title="Figure 31.1. Manipulating a Boolean array">Figure 31.1, “Manipulating a Boolean array”</a>,
+<code class="literal">newarray</code>, uses <a class="indexterm" id="N16CD5"/><code class="function">lua_newuserdata</code>
+to create new arrays.
+Its code is straightforward.
+It checks its sole parameter (the array size, in bits),
+computes the array size in bytes,
+creates a userdata with the appropriate size,
+initializes its fields,
+and returns the userdata to Lua.
+</p><p id="N16CDE" style="text-indent: 0">
+The next function is <code class="literal">setarray</code>,
+which receives three arguments:
+the array, the index, and the new value.
+It assumes that indices start at one, as usual in Lua.
+Because Lua accepts any value for a Boolean,
+we use <a class="indexterm" id="N16CE3"></a><code class="function">luaL_checkany</code> for the third parameter:
+it ensures only that there is a value (any value)
+for this parameter.
+If we call <code class="literal">setarray</code> with bad arguments,
+we get explanatory error messages,
+as in the following examples:
+</p><pre class="programlisting" id="N16CEF">      array.set(0, 11, 0)
+        --&gt; stdin:1: bad argument #1 to 'set' ('array' expected)
+      array.set(a, 1)
+        --&gt; stdin:1: bad argument #3 to 'set' (value expected)
+</pre><p style="text-indent: 0">
+</p><p id="N16CF2" style="text-indent: 0">
+The last function in <a class="xref" href="ch31.html#setarray" title="Figure 31.1. Manipulating a Boolean array">Figure 31.1, “Manipulating a Boolean array”</a> is <code class="literal">getarray</code>,
+the function to retrieve an entry.
+It is similar to <code class="literal">setarray</code>.
+</p><p id="N16CFD" style="text-indent: 0">
+We will also define a function to retrieve the size of an array
+and some extra code to initialize our library;
+see <a class="xref" href="ch31.html#bitarray" title="Figure 31.2. Extra code for the Boolean array library">Figure 31.2, “Extra code for the Boolean array library”</a>.
+</p><div class="figure-float"><div class="figure"><a id="bitarray"/><p class="title" style="text-indent: 0"><strong>Figure 31.2. Extra code for the Boolean array library</strong></p><div class="figure-contents"><pre class="programlisting" id="N16D07">      static int getsize (lua_State *L) {
+        BitArray *a = (BitArray *)lua_touserdata(L, 1);
+        luaL_argcheck(L, a != NULL, 1, "'array' expected");
+        lua_pushinteger(L, a-&gt;size);
+        return 1;
+      }
+      
+      static const struct luaL_Reg arraylib [] = {
+        {"new", newarray},
+        {"set", setarray},
+        {"get", getarray},
+        {"size", getsize},
+        {NULL, NULL}
+      };
+      
+      int luaopen_array (lua_State *L) {
+        luaL_newlib(L, arraylib);
+        return 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+Again, we use <a class="indexterm" id="N16D0A"></a><code class="function">luaL_newlib</code>, from the auxiliary library.
+It creates a table
+and fills it with the pairs name–function specified by the
+array <code class="literal">arraylib</code>.
+</p></div><div class="sect1" title="Metatables"><div class="titlepage"><div><div><h2 class="title"><a id="L294"/>Metatables</h2></div></div></div><p id="N16D19" style="text-indent: 0">
+Our current implementation has a major vulnerability.
+Suppose the user writes something like
+<code class="literal">array.set(io.stdin, 1, false)</code>.
+The value of <a class="indexterm" id="N16D1E"/><code class="function">io.stdin</code> is a userdata
+with a pointer to a stream (<code class="literal">FILE *</code>).
+Because it is a userdata,
+<code class="literal">array.set</code> will gladly accept it as a valid argument;
+the probable result will be a memory corruption
+(with luck we will get an index-out-of-range error instead).
+Such behavior is unacceptable for any Lua library.
+No matter how we use a library,
+it should neither corrupt C data
+nor cause the Lua system to crash.
+</p><p id="N16D2C" style="text-indent: 0">
+The usual method to distinguish
+one type of userdata from another is
+to create a unique <a class="indexterm" id="N16D2E"/>metatable for that type.
+Every time we create a userdata,
+we mark it with the corresponding <a class="indexterm" id="N16D32"/>metatable;
+every time we get a userdata,
+we check whether it has the right metatable.
+Because Lua code cannot change the metatable of a userdata,
+it cannot deceive these checks.
+</p><p id="N16D36" style="text-indent: 0">
+We also need a place to store this new <a class="indexterm" id="N16D38"/>metatable,
+so that we can access it to create new userdata and
+to check whether a given userdata has the correct type.
+As we saw earlier,
+there are two options for storing the metatable:
+in the <a class="indexterm" id="N16D3C"/>registry
+or as an upvalue for the functions in the library.
+It is customary, in Lua,
+to register any new C type into the <a class="indexterm" id="N16D40"/>registry,
+using a <a class="indexterm" id="N16D44"/><em class="firstterm">type name</em>
+as the index and the <a class="indexterm" id="N16D4B"/>metatable as the value.
+As with any other <a class="indexterm" id="N16D4F"/>registry index,
+we must choose a type name with care, to avoid clashes.
+Our example
+will use the name <code class="literal">"LuaBook.array"</code> for its new type.
+</p><p id="N16D56" style="text-indent: 0">
+As usual,
+the auxiliary library offers some functions to help us here.
+The new auxiliary functions we will use are these:
+</p><pre class="programlisting" id="N16D58">      int   luaL_newmetatable (lua_State *L, const char *tname);
+      void  luaL_getmetatable (lua_State *L, const char *tname);
+      void *luaL_checkudata   (lua_State *L, int index,
+                                             const char *tname);
+</pre><p style="text-indent: 0">
+The function <a class="indexterm" id="N16D5B"></a><code class="function">luaL_newmetatable</code>
+creates a new table (to be used as a metatable),
+leaves the new table on the top of the stack,
+and maps the table to the given name in the <a class="indexterm" id="N16D64"></a>registry.
+The function <a class="indexterm" id="N16D68"></a><code class="function">luaL_getmetatable</code> retrieves
+the <a class="indexterm" id="N16D71"></a>metatable associated with <code class="literal">tname</code> from the <a class="indexterm" id="N16D78"></a>registry.
+Finally, <a class="indexterm" id="N16D7C"></a><code class="function">luaL_checkudata</code> checks whether the object at the
+given stack position is a userdata with a metatable that matches
+the given name.
+It raises an error if the object is not a userdata
+or if it does not have the correct metatable;
+otherwise, it returns the userdata address.
+</p><p id="N16D85" style="text-indent: 0">
+Now we can start our modifications.
+The first step is to change the function that opens the library
+so that it creates the <a class="indexterm" id="N16D87"></a>metatable for arrays:
+</p><pre class="programlisting" id="N16D8B">      int luaopen_array (lua_State *L) {
+        luaL_newmetatable(L, "LuaBook.array");
+        luaL_newlib(L, arraylib);
+        return 1;
+      }
+</pre><p style="text-indent: 0">
+</p><p id="N16D8E" style="text-indent: 0">
+The next step is to change <code class="literal">newarray</code> so that it sets
+this metatable in all arrays that it creates:
+</p><pre class="programlisting" id="N16D93">      static int newarray (lua_State *L) {
+      
+        <em class="replaceable"><code>as before</code></em>
+      
+        luaL_getmetatable(L, "LuaBook.array");
+        lua_setmetatable(L, -2);
+      
+        return 1;  /* new userdata is already on the stack */
+      }
+</pre><p style="text-indent: 0">
+The function <a class="indexterm" id="N16D99"></a><code class="function">lua_setmetatable</code> pops a table from the stack
+and sets it as the <a class="indexterm" id="N16DA2"></a>metatable of the object at the given index.
+In our case, this object is the new userdata.
+</p><p id="N16DA6" style="text-indent: 0">
+Finally, <code class="literal">setarray</code>, <code class="literal">getarray</code>,
+and <code class="literal">getsize</code> have to check
+whether they have got a valid array as their first argument.
+To simplify their tasks, we define the following macro:
+</p><pre class="programlisting" id="N16DB1">      #define checkarray(L) \
+                (BitArray *)luaL_checkudata(L, 1, "LuaBook.array")
+</pre><p style="text-indent: 0">
+<a class="indexterm" id="N16DB4"></a>
+Using this macro,
+the new definition for <code class="literal">getsize</code> is straightforward:
+</p><pre class="programlisting" id="N16DBB">      static int getsize (lua_State *L) {
+        BitArray *a = checkarray(L);
+        lua_pushinteger(L, a-&gt;size);
+        return 1;
+      }
+</pre><p style="text-indent: 0">
+</p><p id="N16DBE" style="text-indent: 0">
+Because <code class="literal">setarray</code> and <code class="literal">getarray</code> also share code
+to read and check the index as their second argument,
+we factor out their common parts in
+a new auxiliary function (<code class="literal">getparams</code>).
+</p><div class="figure-float"><div class="figure"><a id="getparams"/><p class="title" style="text-indent: 0"><strong>Figure 31.3. New versions for <code class="literal">setarray</code>/<code class="literal">getarray</code></strong></p><div class="figure-contents"><pre class="programlisting" id="N16DD3">      static unsigned int *getparams (lua_State *L,
+                                      unsigned int *mask) {
+        BitArray *a = checkarray(L);
+        int index = (int)luaL_checkinteger(L, 2) - 1;
+      
+        luaL_argcheck(L, 0 &lt;= index &amp;&amp; index &lt; a-&gt;size, 2,
+                         "index out of range");
+      
+        *mask = I_BIT(index);  /* mask to access correct bit */
+        return &amp;a-&gt;values[I_WORD(index)]; /* word address */
+      }
+      
+      static int setarray (lua_State *L) {
+        unsigned int mask;
+        unsigned int *entry = getparams(L, &amp;mask);
+        luaL_checkany(L, 3);
+        if (lua_toboolean(L, 3))
+          *entry |= mask;
+        else
+          *entry &amp;= ~mask;
+      
+        return 0;
+      }
+      
+      static int getarray (lua_State *L) {
+        unsigned int mask;
+        unsigned int *entry = getparams(L, &amp;mask);
+        lua_pushboolean(L, *entry &amp; mask);
+        return 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+With this new function,
+<code class="literal">setarray</code> and <code class="literal">getarray</code> are straightforward,
+see <a class="xref" href="ch31.html#getparams" title="Figure 31.3. New versions for setarray/getarray">Figure 31.3, “New versions for <code class="literal">setarray</code>/<code class="literal">getarray</code>”</a>.
+Now, if we call them with an invalid userdata,
+we will get a proper error message:
+</p><pre class="programlisting" id="N16DDF">      a = array.get(io.stdin, 10)
+      --&gt; bad argument #1 to 'get' (LuaBook.array expected, got FILE*)
+</pre><p style="text-indent: 0">
+</p></div><div class="sect1" title="Object-Oriented Access"><div class="titlepage"><div><div><h2 class="title"><a id="oo-array"/>Object-Oriented Access</h2></div></div></div><p id="N16DE6" style="text-indent: 0">
+Our next step is to transform our new type into an object,
+so that we can operate on its instances
+using the usual object-oriented syntax,
+like this:
+</p><pre class="programlisting" id="N16DE8">      a = array.new(1000)
+      print(a:size())     --&gt; 1000
+      a:set(10, true)
+      print(a:get(10))    --&gt; true
+</pre><p style="text-indent: 0">
+</p><p id="N16DEB" style="text-indent: 0">
+Remember that <code class="literal">a:size()</code> is equivalent to <code class="literal">a.size(a)</code>.
+Therefore, we have to arrange for the expression <code class="literal">a.size</code>
+to return our function <code class="literal">getsize</code>.
+The key mechanism here is the <a class="indexterm" id="N16DF9"/><code class="literal">__index</code> metamethod.
+For tables, Lua calls this metamethod whenever it cannot find
+a value for a given key.
+For userdata, Lua calls it in every access,
+because userdata have no keys at all.
+</p><p id="N16E02" style="text-indent: 0">
+Assume that we run the following code:
+</p><pre class="programlisting" id="N16E04">      do
+        local metaarray = getmetatable(array.new(1))
+        metaarray.__index = metaarray
+        metaarray.set = array.set
+        metaarray.get = array.get
+        metaarray.size = array.size
+      end
+</pre><p style="text-indent: 0">
+In the first line,
+we create an array only to get its <a class="indexterm" id="N16E07"></a>metatable,
+which we assign to <code class="literal">metaarray</code>.
+(We cannot set the metatable of a userdata from Lua,
+but we can get it.)
+Then we set <code class="literal">metaarray.__index</code> to <code class="literal">metaarray</code>.
+When we evaluate <code class="literal">a.size</code>,
+Lua cannot find the key <code class="literal">"size"</code> in the object <code class="literal">a</code>,
+because the object is a userdata.
+Therefore, Lua tries to get this value from
+the field <a class="indexterm" id="N16E1D"></a><code class="literal">__index</code> of the <a class="indexterm" id="N16E26"></a>metatable of <code class="literal">a</code>,
+which happens to be <code class="literal">metaarray</code> itself.
+But <code class="literal">metaarray.size</code> is <code class="literal">array.size</code>,
+so <code class="literal">a.size(a)</code> results in <code class="literal">array.size(a)</code>,
+as we wanted.
+</p><p id="N16E3C" style="text-indent: 0">
+Of course, we can write the same thing in C.
+We can do even better:
+now that arrays are objects,
+with their own operations,
+we do not need to have these operations in the table
+<code class="literal">array</code> anymore.
+The only function that our library still has to export is <code class="literal">new</code>,
+to create new arrays.
+All other operations come only as methods.
+The C code can register them directly as such.
+</p><p id="N16E44" style="text-indent: 0">
+The operations <code class="literal">getsize</code>, <code class="literal">getarray</code>, and <code class="literal">setarray</code>
+do not change from our previous approach.
+What will change is how we register them.
+That is, we have to change the code that opens the library.
+First, we need two separate function lists:
+one for regular functions and one for methods.
+</p><pre class="programlisting" id="N16E4F">      static const struct luaL_Reg arraylib_f [] = {
+        {"new", newarray},
+        {NULL, NULL}
+      };
+      
+      static const struct luaL_Reg arraylib_m [] = {
+        {"set", setarray},
+        {"get", getarray},
+        {"size", getsize},
+        {NULL, NULL}
+      };
+</pre><p style="text-indent: 0">
+The new version of the open function <code class="literal">luaopen_array</code>
+has to create the metatable,
+assign it to its own <a class="indexterm" id="N16E55"></a><code class="literal">__index</code> field,
+register all the methods there,
+and create and fill the <code class="literal">array</code> table:
+</p><pre class="programlisting" id="N16E61">      int luaopen_array (lua_State *L) {
+        luaL_newmetatable(L, "LuaBook.array");  /* create metatable */
+        lua_pushvalue(L, -1);  /* duplicate the metatable */
+        lua_setfield(L, -2, "__index");  /* mt.__index = mt */
+        luaL_setfuncs(L, arraylib_m, 0);  /* register metamethods */
+        luaL_newlib(L, arraylib_f);  /* create lib table */
+        return 1;
+      }
+</pre><p style="text-indent: 0">
+Here we use <a class="indexterm" id="N16E64"></a><code class="function">luaL_setfuncs</code> again,
+to set the functions from the list <code class="literal">arraylib_m</code>
+into the <a class="indexterm" id="N16E6F"></a>metatable,
+which is on the top of the stack.
+Then we call <a class="indexterm" id="N16E73"></a><code class="function">luaL_newlib</code>
+to create a new table and register the functions
+from the list <code class="literal">arraylib_f</code> there.
+</p><p id="N16E7E" style="text-indent: 0">
+As a final touch,
+we will add a <a class="indexterm" id="N16E80"></a><code class="literal">__tostring</code> method to our new type,
+so that <code class="literal">print(a)</code> prints <code class="literal">"array"</code> plus the size of
+the array inside parentheses.
+The function itself is here:
+</p><pre class="programlisting" id="N16E8F">      int array2string (lua_State *L) {
+        BitArray *a = checkarray(L);
+        lua_pushfstring(L, "array(%d)", a-&gt;size);
+        return 1;
+      }
+</pre><p style="text-indent: 0">
+The call to <a class="indexterm" id="N16E92"></a><code class="function">lua_pushfstring</code> formats the string
+and leaves it on the top of the stack.
+We also have to add <code class="literal">array2string</code> to the list <code class="literal">arraylib_m</code>,
+to include it in the <a class="indexterm" id="N16EA0"></a>metatable of array objects:
+</p><pre class="programlisting" id="N16EA4">      static const struct luaL_Reg arraylib_m [] = {
+        {"__tostring", array2string},
+        <em class="replaceable"><code>other methods</code></em>
+      };
+</pre><p style="text-indent: 0">
+</p></div><div class="sect1" title="Array Access"><div class="titlepage"><div><div><h2 class="title"><a id="L295"/>Array Access</h2></div></div></div><p id="N16EAE" style="text-indent: 0">
+A better alternative to the object-oriented notation
+is to use a regular array notation to access our arrays.
+Instead of writing <code class="literal">a:get(i)</code>,
+we could simply write <code class="literal">a[i]</code>.
+For our example, this is easy to do,
+because our functions <code class="literal">setarray</code> and <code class="literal">getarray</code>
+already receive their arguments in the order that they
+are given to the corresponding metamethods.
+A quick solution is to define these
+metamethods directly in Lua:
+</p><pre class="programlisting" id="N16EBC">      local metaarray = getmetatable(array.new(1))
+      metaarray.__index = array.get
+      metaarray.__newindex = array.set
+      metaarray.__len = array.size
+</pre><p style="text-indent: 0">
+(We must run this code on the original implementation for arrays,
+without the modifications for object-oriented access.)
+That is all we need to use the standard syntax:
+</p><pre class="programlisting" id="N16EBF">      a = array.new(1000)
+      a[10] = true         -- 'setarray'
+      print(a[10])         -- 'getarray'   --&gt; true
+      print(#a)            -- 'getsize'    --&gt; 1000
+</pre><p style="text-indent: 0">
+</p><p id="N16EC2" style="text-indent: 0">
+If we prefer, we can register these metamethods in our C code.
+For this, we again modify our initialization function;
+see <a class="xref" href="ch31.html#newbitarray" title="Figure 31.4. New initialization code for the Bit Array library">Figure 31.4, “New initialization code for the Bit Array library”</a>.
+</p><div class="figure-float"><div class="figure"><a id="newbitarray"/><p class="title" style="text-indent: 0"><strong>Figure 31.4. New initialization code for the Bit Array library</strong></p><div class="figure-contents"><pre class="programlisting" id="N16ECC">      static const struct luaL_Reg arraylib_f [] = {
+        {"new", newarray},
+        {NULL, NULL}
+      };
+      
+      static const struct luaL_Reg arraylib_m [] = {
+        {"__newindex", setarray},
+        {"__index", getarray},
+        {"__len", getsize},
+        {"__tostring", array2string},
+        {NULL, NULL}
+      };
+      
+      int luaopen_array (lua_State *L) {
+        luaL_newmetatable(L, "LuaBook.array");
+        luaL_setfuncs(L, arraylib_m, 0);
+        luaL_newlib(L, arraylib_f);
+        return 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+In this new version,
+again we have only one public function, <code class="literal">new</code>.
+All other functions are available only as metamethods
+for specific operations.
+</p></div><div class="sect1" title="Light Userdata"><div class="titlepage"><div><div><h2 class="title"><a id="lightudata"/>Light Userdata</h2></div></div></div><p id="N16ED6" style="text-indent: 0">
+The kind of userdata that we have been using until now
+is called <em><a class="indexterm" id="N16ED9"/>full userdata</em>.
+Lua offers another kind of userdata,
+called <a class="indexterm" id="N16EDE"/><em class="firstterm">light userdata</em>.
+</p><p id="N16EE5" style="text-indent: 0">
+A light userdata is a value that represents a C pointer,
+that is, a <code class="literal">void *</code> value.
+A light userdata is a value,
+not an object;
+we do not create them
+(in the same way that we do not create numbers).
+To put a light userdata onto the stack,
+we call <a class="indexterm" id="N16EEA"></a><code class="function">lua_pushlightuserdata</code>:
+</p><pre class="programlisting" id="N16EF3">      void lua_pushlightuserdata (lua_State *L, void *p);
+</pre><p style="text-indent: 0">
+</p><p id="N16EF6" style="text-indent: 0">
+Despite their common name,
+light userdata and full userdata are quite different things.
+Light userdata are not buffers, but bare pointers.
+They have no metatables.
+Like numbers, <a class="indexterm" id="N16EF8"/>light userdata are not
+managed by the garbage collector.
+</p><p id="N16EFC" style="text-indent: 0">
+Sometimes, people use <a class="indexterm" id="N16EFE"/>light userdata as a
+cheap alternative to <a class="indexterm" id="N16F02"/>full userdata.
+This is not a typical use, however.
+First,
+<a class="indexterm" id="N16F06"/>light userdata do not have metatables,
+so there is no way to know their types.
+Second, despite the name, full userdata are inexpensive, too.
+They add little overhead compared to a <code class="literal">malloc</code>
+for the given memory size.
+</p><p id="N16F0D" style="text-indent: 0">
+The real use of light userdata comes from equality.
+As a full userdata is an object,
+it is only equal to itself.
+A light userdata, on the other hand, represents a C pointer value.
+As such,
+it is equal to any userdata that represents the same pointer.
+Therefore, we can use light userdata to find C objects inside Lua.
+</p><p id="N16F0F" style="text-indent: 0">
+We have already seen a typical use of light userdata,
+as keys in the registry (<a class="xref" href="ch30.html#sec_registry" title="The registry">the section called “The registry”</a>).
+There, the equality of light userdata was fundamental.
+Every time we push the same address with <a class="indexterm" id="N16F14"/><code class="function">lua_pushlightuserdata</code>,
+we get the same Lua value and,
+therefore, the same entry in the registry.
+</p><p id="N16F1C" style="text-indent: 0">
+Another typical scenario in Lua is to have Lua objects acting
+as proxies to corresponding C objects.
+For instance,
+the I/O library uses Lua userdata to represent C streams
+inside Lua.
+When the action goes from Lua to C,
+the mapping from the Lua object to the C object is easy.
+Again using the example of the I/O library,
+each Lua stream keeps a pointer to its corresponding C stream.
+However, when the action goes from C to Lua,
+the mapping can be tricky.
+As an example,
+suppose we have some kind of callback in our I/O system
+(e.g., to tell that there is data to be read).
+The callback receives the C stream where is should operate.
+From that, how can we find its corresponding Lua object?
+Because the C stream is defined by the C standard library,
+not by us,
+we cannot store anything there.
+</p><p id="N16F1E" style="text-indent: 0">
+Light userdata provide a nice solution for this mapping.
+We keep a table where the indices are light userdata
+with the stream addresses,
+and the values are the full userdata
+that represent the streams in Lua.
+In a callback,
+once we have a stream address,
+we use it —as a light userdata— as an index into that table
+to retrieve its corresponding Lua object.
+(The table should probably have weak values;
+otherwise, those full userdata would never be collected.)
+</p></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L296"/>Exercises</h2></div></div></div><p id="N16F24" style="text-indent: 0">
+Exercise 31.1:<a id="L297"/> 
+Modify the implementation of <code class="literal">setarray</code>
+so that it accepts only Boolean values.
+
+
+</p><p id="N16F2C" style="text-indent: 0">
+Exercise 31.2:<a id="L298"/> 
+We can see a Boolean array as a set of integers
+(the indices with true values in the array).
+Add to the implementation of Boolean arrays
+functions to compute
+the union and intersection of two arrays.
+These functions should receive two arrays and return a new one,
+without modifying its parameters.
+
+
+</p><p id="N16F31" style="text-indent: 0">
+Exercise 31.3:<a id="L299"/> 
+Extend the previous exercise so that we can use
+addition to get the union of two arrays
+and multiplication for the intersection.
+
+
+</p><p id="N16F36" style="text-indent: 0">
+Exercise 31.4:<a id="L300"/> 
+Modify the implementation of the <a class="indexterm" id="N16F3B"/><code class="literal">__tostring</code> metamethod
+so that it shows the full contents of the array
+in an appropriate way.
+Use the buffer facility (<a class="xref" href="ch30.html#sc_stringmanip" title="String Manipulation">the section called “String Manipulation”</a>)
+to create the resulting string.
+
+
+</p><p id="N16F47" style="text-indent: 0">
+Exercise 31.5:<a id="L301"/> 
+Based on the example for Boolean arrays,
+implement a small C library for integer arrays.
+
+
+</p></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

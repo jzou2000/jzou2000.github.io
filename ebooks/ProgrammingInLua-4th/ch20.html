@@ -1,0 +1,718 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 20. Metatables and Metamethods</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 20. Metatables and Metamethods"><div class="titlepage"><div><h1><span class="partLabel">20</span> Metatables and Metamethods</h1></div></div><p id="N13FB5" style="text-indent: 0">
+Usually,
+each value in Lua has a quite predictable set of operations.
+We can add numbers,
+we can concatenate strings,
+we can insert key–value pairs into tables,
+and so on.
+However, we cannot add tables,
+we cannot compare functions,
+and we cannot call a string.
+Unless we use metatables.
+</p><p id="N13FB7" style="text-indent: 0">
+Metatables allow us to change the behavior of a value
+when confronted with an unknown operation.
+For instance, using metatables,
+we can define how Lua computes the expression <code class="literal">a + b</code>,
+where <code class="literal">a</code> and <code class="literal">b</code> are tables.
+Whenever Lua tries to add two tables,
+it checks whether either of them has a <a class="indexterm" id="N13FC2"/><em class="firstterm">metatable</em>
+and whether this metatable has an <a class="indexterm" id="N13FC9"/><code class="literal">__add</code> field.
+If Lua finds this field, it calls the corresponding value
+—the so-called <a class="indexterm" id="N13FD2"/><em class="firstterm">metamethod</em>, which should be a function—
+to compute the sum.
+</p><p id="N13FD9" style="text-indent: 0">
+We can think about metatables as a restricted kind of classes,
+in object-oriented terminology.
+Like classes,
+metatables define the behavior of its instances.
+However,
+metatables are more restricted than classes,
+because they can only give behavior to a predefined set of operations;
+also, metatables do not have inheritance.
+Nevertheless, we will see in <a class="xref" href="ch21.html" title="Chapter 21. Object-Oriented Programming">Chapter 21, <em>Object-Oriented Programming</em></a>
+how to build a quite complete
+class system on top of metatables.
+</p><p id="N13FDE" style="text-indent: 0">
+Each value in Lua can have a <a class="indexterm" id="N13FE0"></a>metatable.
+Tables and userdata have individual metatables;
+values of other types share
+one single <a class="indexterm" id="N13FE4"></a>metatable for all values of that type.
+Lua always creates new tables without metatables:
+</p><pre class="programlisting" id="N13FE8">      t = {}
+      print(getmetatable(t))   --&gt; nil
+</pre><p style="text-indent: 0">
+We can use <a class="indexterm" id="N13FEB"></a><code class="function">setmetatable</code> to set or change the
+<a class="indexterm" id="N13FF2"></a>metatable of a table:
+</p><pre class="programlisting" id="N13FF6">      t1 = {}
+      setmetatable(t, t1)
+      print(getmetatable(t) == t1)   --&gt; true
+</pre><p style="text-indent: 0">
+</p><p id="N13FF9" style="text-indent: 0">
+From Lua, we can set the metatables only of tables;
+to manipulate the metatables of values of other types we
+must use C code or the debug library.
+(The main reason for this restriction is to curb
+excessive use of type-wide metatables.
+Experience with older versions of Lua has shown that
+those global settings frequently lead to non-reusable code.)
+The string library sets a <a class="indexterm" id="N13FFB"></a>metatable for strings;
+all other types by default have no metatable:
+</p><pre class="programlisting" id="N13FFF">      print(getmetatable("hi"))               --&gt; table: 0x80772e0
+      print(getmetatable("xuxu"))             --&gt; table: 0x80772e0
+      print(getmetatable(10))                 --&gt; nil
+      print(getmetatable(print))              --&gt; nil
+</pre><p style="text-indent: 0">
+</p><p id="N14002" style="text-indent: 0">
+Any table can be the <a class="indexterm" id="N14004"/>metatable of any value;
+a group of related tables can share a common metatable,
+which describes their common behavior;
+a table can be its own <a class="indexterm" id="N14008"/>metatable,
+so that it describes its own individual behavior.
+Any configuration is valid.
+</p><div class="sect1" title="Arithmetic Metamethods"><div class="titlepage"><div><div><h2 class="title"><a id="L191"/>Arithmetic Metamethods</h2></div></div></div><p id="N14010" style="text-indent: 0">
+In this section, we will introduce a running example
+to explain the basics of metatables.
+Suppose we have a module that uses tables to represent sets,
+with functions to compute set union,
+intersection, and the like,
+as shown in <a class="xref" href="ch20.html#set-mod" title="Figure 20.1. A simple module for sets">Figure 20.1, “A simple module for sets”</a>.
+</p><div class="figure-float"><div class="figure"><a id="set-mod"/><p class="title" style="text-indent: 0"><strong>Figure 20.1. A simple module for sets<a class="indexterm" id="N1401A"/></strong></p><div class="figure-contents"><pre class="programlisting" id="N1401D">      local Set = {}
+      
+      -- create a new set with the values of a given list
+      function Set.new (l)
+        local set = {}
+        for _, v in ipairs(l) do set[v] = true end
+        return set
+      end
+      
+      function Set.union (a, b)
+        local res = Set.new{}
+        for k in pairs(a) do res[k] = true end
+        for k in pairs(b) do res[k] = true end
+        return res
+      end
+      
+      function Set.intersection (a, b)
+        local res = Set.new{}
+        for k in pairs(a) do
+          res[k] = b[k]
+        end
+        return res
+      end
+      
+      -- presents a set as a string
+      function Set.tostring (set)
+        local l = {}     -- list to put all elements from the set
+        for e in pairs(set) do
+          l[#l + 1] = tostring(e)
+        end
+        return "{" .. table.concat(l, ", ") .. "}"
+      end
+      
+      return Set
+</pre></div></div></div><p style="text-indent: 0">
+
+</p><p id="N14020" style="text-indent: 0">
+Now, we want to use the addition operator
+to compute the union of two sets.
+For that, we will arrange for all tables
+representing sets to share a <a class="indexterm" id="N14022"></a>metatable.
+This metatable will define how they react to the addition operator.
+Our first step is to create a regular table,
+which we will use as the <a class="indexterm" id="N14026"></a>metatable for sets:
+</p><pre class="programlisting" id="N1402A">      local mt = {}    -- metatable for sets
+</pre><p style="text-indent: 0">
+The next step is to modify <code class="literal">Set.new</code>,
+which creates sets.
+The new version has only one extra line,
+which sets <code class="literal">mt</code> as the metatable for the
+tables that it creates:
+</p><pre class="programlisting" id="N14033">      function Set.new (l)   -- 2nd version
+        local set = {}
+        setmetatable(set, mt)
+        for _, v in ipairs(l) do set[v] = true end
+        return set
+      end
+</pre><p style="text-indent: 0">
+After that, every set we create with <code class="literal">Set.new</code> will have that
+same table as its <a class="indexterm" id="N14039"></a>metatable:
+</p><pre class="programlisting" id="N1403D">      s1 = Set.new{10, 20, 30, 50}
+      s2 = Set.new{30, 1}
+      print(getmetatable(s1))          --&gt; table: 0x00672B60
+      print(getmetatable(s2))          --&gt; table: 0x00672B60
+</pre><p style="text-indent: 0">
+</p><p id="N14040" style="text-indent: 0">
+Finally, we add to the <a class="indexterm" id="N14042"></a>metatable the <a class="indexterm" id="N14046"></a><em>metamethod</em> <a class="indexterm" id="N1404C"></a><code class="literal">__add</code>,
+a field that describes how to perform the addition:
+</p><pre class="programlisting" id="N14055">      mt.__add = Set.union
+</pre><p style="text-indent: 0">
+After that,
+whenever Lua tries to add two sets,
+it will call <code class="literal">Set.union</code>,
+with the two operands as arguments.
+</p><p id="N1405B" style="text-indent: 0">
+With the metamethod in place,
+we can use the addition operator to do set unions:
+</p><pre class="programlisting" id="N1405D">      s3 = s1 + s2
+      print(Set.tostring(s3))     --&gt; {1, 10, 20, 30, 50}
+</pre><p style="text-indent: 0">
+Similarly, we may set the multiplication
+operator to perform set intersection:
+</p><pre class="programlisting" id="N14060">      mt.__mul = Set.intersection
+      
+      print(Set.tostring((s1 + s2)*s1))     --&gt; {10, 20, 30, 50}
+</pre><p style="text-indent: 0">
+</p><p id="N14063" style="text-indent: 0">
+For each arithmetic operator there is a
+corresponding metamethod name.
+Besides addition and multiplication,
+there are metamethods for subtraction (<a class="indexterm" id="N14065"/><code class="literal">__sub</code>),
+float division (<a class="indexterm" id="N1406E"/><code class="literal">__div</code>),
+floor division (<a class="indexterm" id="N14077"/><code class="literal">__idiv</code>),
+negation (<a class="indexterm" id="N14080"/><code class="literal">__unm</code>),
+modulo (<a class="indexterm" id="N14089"/><code class="literal">__mod</code>),
+and  <a class="indexterm" id="N14092"/>exponentiation (<a class="indexterm" id="N14096"/><code class="literal">__pow</code>).
+Similarly,
+there are metamethods for all bitwise operations:
+bitwise AND (<a class="indexterm" id="N1409F"/><code class="literal">__band</code>),
+OR (<a class="indexterm" id="N140A8"/><code class="literal">__bor</code>),
+exclusive OR (<a class="indexterm" id="N140B1"/><code class="literal">__bxor</code>),
+NOT (<a class="indexterm" id="N140BA"/><code class="literal">__bnot</code>),
+left shift (<a class="indexterm" id="N140C3"/><code class="literal">__shl</code>),
+and right shift (<a class="indexterm" id="N140CC"/><code class="literal">__shr</code>).
+We may define also a behavior for the concatenation operator,
+with the field <a class="indexterm" id="N140D5"/><code class="literal">__concat</code>.
+</p><p id="N140DE" style="text-indent: 0">
+When we add two sets,
+there is no question about what <a class="indexterm" id="N140E0"></a>metatable to use.
+However, we may write an expression that mixes two values
+with different metatables, for instance like this:
+</p><pre class="programlisting" id="N140E4">      s = Set.new{1,2,3}
+      s = s + 8
+</pre><p style="text-indent: 0">
+When looking for a metamethod,
+Lua performs the following steps:
+if the first value has a <a class="indexterm" id="N140E7"></a>metatable with the required metamethod,
+Lua uses this metamethod,
+independently of the second value;
+otherwise,
+if the second value has a <a class="indexterm" id="N140EB"></a>metatable with the required metamethod,
+Lua uses it;
+otherwise, Lua raises an error.
+Therefore, the last example will call <code class="literal">Set.union</code>,
+as will the expressions <code class="literal">10 + s</code> and <code class="literal">"hello" + s</code>
+(because both numbers and strings
+do not have a metamethod <a class="indexterm" id="N140F8"></a><code class="literal">__add</code>).
+</p><p id="N14101" style="text-indent: 0">
+Lua does not care about these mixed types,
+but our implementation does.
+If we run the <code class="literal">s = s + 8</code> example,
+we will get an error inside the function <code class="literal">Set.union</code>:
+</p><pre class="programlisting" id="N14109">      bad argument #1 to 'pairs' (table expected, got number)
+</pre><p style="text-indent: 0">
+If we want more lucid error messages,
+we must check the type of the operands explicitly
+before attempting to perform the operation,
+for instance with code like this:
+</p><pre class="programlisting" id="N1410C">      function Set.union (a, b)
+        if getmetatable(a) ~= mt or getmetatable(b) ~= mt then
+          error("attempt to 'add' a set with a non-set value", 2)
+        end
+        <em class="replaceable"><code>as before</code></em>
+</pre><p style="text-indent: 0">
+Remember that the second argument to <a class="indexterm" id="N14112"></a><code class="function">error</code>
+(2, in this example)
+sets the source location in the error message
+to the code that called the operation.
+</p></div><div class="sect1" title="Relational Metamethods"><div class="titlepage"><div><div><h2 class="title"><a id="L192"/>Relational Metamethods</h2></div></div></div><p id="N1411C" style="text-indent: 0">
+Metatables<a class="indexterm" id="N1411E"/> also allow us to give meaning to
+the <a class="indexterm" id="N14122"/>relational operators,
+through the metamethods <a class="indexterm" id="N14126"/><code class="literal">__eq</code> (<em>equal to</em>),
+<a class="indexterm" id="N14132"/><code class="literal">__lt</code> (<em>less than</em>),
+and <a class="indexterm" id="N1413E"/><code class="literal">__le</code> (<em>less than or equal to</em>).
+There are no separate metamethods for the
+other three relational operators:
+Lua translates <code class="literal">a ~= b</code> to <code class="literal">not (a == b)</code>,
+<code class="literal">a &gt; b</code> to <code class="literal">b &lt; a</code>, and <code class="literal">a &gt;= b</code> to <code class="literal">b &lt;= a</code>.
+</p><p id="N1415C" style="text-indent: 0">
+In older versions,
+Lua translated all order operators to a single one,
+by translating <code class="literal">a &lt;= b</code> to <code class="literal">not (b &lt; a)</code>.
+However, this translation is incorrect when we have a
+<em><a class="indexterm" id="N14165"/>partial order</em>,
+that is, when not all elements in our type are properly ordered.
+For instance,
+most machines do not have
+a total order for floating-point numbers,
+because of the value <em>Not a Number</em> (<em><a class="indexterm" id="N1416E"/>NaN</em>).
+According to the <a class="indexterm" id="N14173"/>IEEE 754 standard,
+NaN represents undefined values,
+such as the result of <em>0/0</em>.
+The standard specifies that any comparison that
+involves NaN should result in false.
+This means that <code class="literal">NaN &lt;= x</code> is always false,
+but <code class="literal">x &lt; NaN</code> is also false.
+It also means that the translation from <code class="literal">a &lt;= b</code> to <code class="literal">not (b &lt; a)</code>
+is not valid in this case.
+</p><p id="N14186" style="text-indent: 0">
+In our example with sets, we have a similar problem.
+An obvious (and useful) meaning for <code class="literal">&lt;=</code>
+in sets is set containment:
+<code class="literal">a &lt;= b</code> means that <code class="literal">a</code> is a subset of <code class="literal">b</code>.
+With this meaning,
+it is possible that <code class="literal">a &lt;= b</code> and
+<code class="literal">b &lt; a</code> are both false.
+Therefore, we must implement both
+<a class="indexterm" id="N1419A"></a><code class="literal">__le</code> (<em>less or equal</em>, the subset relation)
+and <a class="indexterm" id="N141A6"></a><code class="literal">__lt</code> (<em>less than</em>, the proper subset relation):
+</p><pre class="programlisting" id="N141B2">      mt.__le = function (a, b)    -- subset
+        for k in pairs(a) do
+          if not b[k] then return false end
+        end
+        return true
+      end
+      
+      mt.__lt = function (a, b)    -- proper subset
+        return a &lt;= b and not (b &lt;= a)
+      end
+</pre><p style="text-indent: 0">
+Finally, we can define set equality through set containment:
+</p><pre class="programlisting" id="N141B5">      mt.__eq = function (a, b)
+        return a &lt;= b and b &lt;= a
+      end
+</pre><p style="text-indent: 0">
+After these definitions, we are ready to compare sets:
+</p><pre class="programlisting" id="N141B8">      s1 = Set.new{2, 4}
+      s2 = Set.new{4, 10, 2}
+      print(s1 &lt;= s2)       --&gt; true
+      print(s1 &lt; s2)        --&gt; true
+      print(s1 &gt;= s1)       --&gt; true
+      print(s1 &gt; s1)        --&gt; false
+      print(s1 == s2 * s1)  --&gt; true
+</pre><p style="text-indent: 0">
+</p><p id="N141BB" style="text-indent: 0">
+The equality comparison has some restrictions.
+If two objects have different basic types,
+the equality operation results in <strong>false</strong>,
+without even calling any metamethod.
+So, a set will always be different from a number,
+no matter what its metamethod says.
+</p></div><div class="sect1" title="Library-Defined Metamethods"><div class="titlepage"><div><div><h2 class="title"><a id="L193"/>Library-Defined Metamethods</h2></div></div></div><p id="N141C5" style="text-indent: 0">
+So far, all the metamethods we have seen are for the Lua core.
+It is the virtual machine who detects that the values involved
+in an operation have metatables with metamethods
+for that particular operation.
+However, because metatables are regular tables,
+anyone can use them.
+So, it is a common practice for libraries to
+define and use their own fields in metatables.
+</p><p id="N141C7" style="text-indent: 0">
+The function <a class="indexterm" id="N141C9"></a><code class="function">tostring</code> provides a typical example.
+As we saw earlier, <a class="indexterm" id="N141CF"></a><code class="function">tostring</code> represents tables in a
+rather simple format:
+</p><pre class="programlisting" id="N141D5">      print({})      --&gt; table: 0x8062ac0
+</pre><p style="text-indent: 0">
+The function <a class="indexterm" id="N141D8"></a><code class="function">print</code> always calls <a class="indexterm" id="N141DE"></a><code class="function">tostring</code>
+to format its output.
+However, when formatting any value,
+<a class="indexterm" id="N141E4"></a><code class="function">tostring</code> first checks whether the value has a
+<a class="indexterm" id="N141EA"></a><code class="literal">__tostring</code> metamethod.
+In this case,
+<a class="indexterm" id="N141F3"></a><code class="function">tostring</code> calls the metamethod to do its job,
+passing the object as an argument.
+Whatever this metamethod returns is the result of <a class="indexterm" id="N141F9"></a><code class="function">tostring</code>.
+</p><p id="N141FF" style="text-indent: 0">
+In our example with sets,
+we have already defined a function to present a set as a string.
+So, we need only to set the <a class="indexterm" id="N14201"></a><code class="literal">__tostring</code>
+field in the <a class="indexterm" id="N1420A"></a>metatable:
+</p><pre class="programlisting" id="N1420E">      mt.__tostring = Set.tostring
+</pre><p style="text-indent: 0">
+After that, whenever we call <a class="indexterm" id="N14211"></a><code class="function">print</code> with a set as its argument,
+<a class="indexterm" id="N14217"></a><code class="function">print</code> calls <a class="indexterm" id="N1421D"></a><code class="function">tostring</code> that calls <code class="literal">Set.tostring</code>:
+</p><pre class="programlisting" id="N14226">      s1 = Set.new{10, 4, 5}
+      print(s1)    --&gt; {4, 5, 10}
+</pre><p style="text-indent: 0">
+</p><p id="N14229" style="text-indent: 0">
+The functions <a class="indexterm" id="N1422B"></a><code class="function">setmetatable</code> and <a class="indexterm" id="N14231"></a><code class="function">getmetatable</code>
+also use a metafield,
+in this case to protect metatables.
+Suppose we want to protect our sets,
+so that users can neither see nor change their metatables.
+If we set a <a class="indexterm" id="N14237"></a><code class="literal">__metatable</code> field in the <a class="indexterm" id="N14240"></a>metatable,
+<a class="indexterm" id="N14244"></a><code class="function">getmetatable</code> will return the value of this field,
+whereas <a class="indexterm" id="N1424A"></a><code class="function">setmetatable</code> will raise an error:
+</p><pre class="programlisting" id="N14250">      mt.__metatable = "not your business"
+      
+      s1 = Set.new{}
+      print(getmetatable(s1))     --&gt; not your business
+      setmetatable(s1, {})
+        stdin:1: cannot change protected metatable
+</pre><p style="text-indent: 0">
+</p><p id="N14253" style="text-indent: 0">
+Since Lua 5.2, <a class="indexterm" id="N14255"/><code class="function">pairs</code> also have a metamethod,
+so that we can modify the way a table is traversed
+and add a traversal behavior to non-table objects.
+When an object has a <a class="indexterm" id="N1425B"/><code class="literal">__pairs</code> metamethod,
+<a class="indexterm" id="N14264"/><code class="function">pairs</code> will call it to do all its work.
+</p></div><div class="sect1" title="Table-Access Metamethods"><div class="titlepage"><div><div><h2 class="title"><a id="L194"/>Table-Access Metamethods</h2></div></div></div><p id="N1426E" style="text-indent: 0">
+The metamethods for arithmetic, bitwise, and relational
+operators all define behavior for otherwise erroneous situations;
+they do not change the normal behavior of the language.
+Lua also offers a way to change the behavior of
+tables for two normal situations,
+the access and modification of absent fields in a table.
+</p><div class="sect2" title="The __index metamethod"><div class="titlepage"><div><div><h3 class="title"><a id="indexmm"/>The <code class="literal">__index</code> metamethod</h3></div></div></div><p id="N14277" style="text-indent: 0">
+We saw earlier that,
+when we access an absent field in a table,
+the result is nil.
+This is true, but it is not the whole truth.
+Actually, such accesses trigger the interpreter to look
+for an <a class="indexterm" id="N14279"/><code class="literal">__index</code> metamethod:
+if there is no such method, as usually happens,
+then the access results in nil;
+otherwise, the metamethod will provide the result.
+</p><p id="N14283" style="text-indent: 0">
+The archetypal example here is <a class="indexterm" id="N14285"></a>inheritance.
+Suppose we want to create
+several tables describing windows.
+Each table must describe several window parameters,
+such as position, size, color scheme, and the like.
+All these parameters have default values
+and so we want to build window objects
+giving only the non-default parameters.
+A first alternative is to provide a constructor that fills in
+the absent fields.
+A second alternative is
+to arrange for the new windows to <em>inherit</em>
+any absent field from a prototype window.
+First, we declare the prototype:
+</p><pre class="programlisting" id="N1428C">      -- create the prototype with default values
+      prototype = {x = 0, y = 0, width = 100, height = 100}
+</pre><p style="text-indent: 0">
+Then, we define a constructor function,
+which creates new windows sharing a metatable:
+</p><pre class="programlisting" id="N1428F">      local mt = {}    -- create a metatable
+      -- declare the constructor function
+      function new (o)
+        setmetatable(o, mt)
+        return o
+      end
+</pre><p style="text-indent: 0">
+Now, we define the <a class="indexterm" id="N14292"></a><code class="literal">__index</code> metamethod:
+</p><pre class="programlisting" id="N1429B">      mt.__index = function (_, key)
+        return prototype[key]
+      end
+</pre><p style="text-indent: 0">
+After this code, we create a new window and query it for
+an absent field:
+</p><pre class="programlisting" id="N1429E">      w = new{x=10, y=20}
+      print(w.width)    --&gt; 100
+</pre><p style="text-indent: 0">
+Lua detects that <code class="literal">w</code> does not have the requested field,
+but has a <a class="indexterm" id="N142A4"></a>metatable with an <a class="indexterm" id="N142A8"></a><code class="literal">__index</code> field.
+So, Lua calls this <a class="indexterm" id="N142B1"></a><code class="literal">__index</code> metamethod,
+with arguments <code class="literal">w</code> (the table)
+and <code class="literal">"width"</code> (the absent key).
+The metamethod then indexes the prototype with the given key
+and returns the result.
+</p><p id="N142C0" style="text-indent: 0">
+The use of the <a class="indexterm" id="N142C2"></a><code class="literal">__index</code> metamethod for <a class="indexterm" id="N142CB"></a>inheritance is so common
+that Lua provides a shortcut.
+Despite being called a <em>method</em>,
+the <a class="indexterm" id="N142D2"></a><code class="literal">__index</code> metamethod does not need to be a function:
+it can be a table, instead.
+When it is a function,
+Lua calls it with the table and the absent key as its arguments,
+as we have just seen.
+When it is a table, Lua redoes the access in this table.
+Therefore,
+in our previous example,
+we could declare <a class="indexterm" id="N142DB"></a><code class="literal">__index</code> simply like this:
+</p><pre class="programlisting" id="N142E4">      mt.__index = prototype
+</pre><p style="text-indent: 0">
+Now, when Lua looks for the metatable’s <a class="indexterm" id="N142E7"></a><code class="literal">__index</code> field,
+it finds the value of <code class="literal">prototype</code>, which is a table.
+Consequently, Lua repeats the access in this table, that is,
+it executes the equivalent of <code class="literal">prototype["width"]</code>.
+This access then gives the desired result.
+</p><p id="N142F6" style="text-indent: 0">
+The use of a table as an <a class="indexterm" id="N142F8"/><code class="literal">__index</code> metamethod provides
+a fast and simple way of implementing single <a class="indexterm" id="N14301"/>inheritance.
+A function, although more expensive, provides more flexibility:
+we can implement multiple <a class="indexterm" id="N14305"/>inheritance,
+caching, and several other variations.
+We will discuss these forms of <a class="indexterm" id="N14309"/>inheritance
+in <a class="xref" href="ch21.html" title="Chapter 21. Object-Oriented Programming">Chapter 21, <em>Object-Oriented Programming</em></a>,
+when we will cover object-oriented programming.
+</p><p id="N14310" style="text-indent: 0">
+When we want to access a table without
+invoking its <a class="indexterm" id="N14312"/><code class="literal">__index</code> metamethod,
+we use the function <a class="indexterm" id="N1431B"/><code class="function">rawget</code>.
+The call <code class="literal">rawget(t, i)</code> does a
+<em>raw</em> access to table <code class="literal">t</code>,
+that is, a primitive access without considering metatables.
+Doing a <a class="indexterm" id="N1432B"/>raw access will not speed up our code
+(the overhead of a function call kills any gain we could have),
+but sometimes we need it, as we will see later.
+</p></div><div class="sect2" title="The __newindex metamethod"><div class="titlepage"><div><div><h3 class="title"><a id="L195"/>The <code class="literal">__newindex</code> metamethod</h3></div></div></div><p id="N14336" style="text-indent: 0">
+The <a class="indexterm" id="N14338"/><code class="literal">__newindex</code> metamethod does for table updates what
+<a class="indexterm" id="N14341"/><code class="literal">__index</code> does for table accesses.
+When we assign a value to an absent index in a table,
+the interpreter looks for a <a class="indexterm" id="N1434A"/><code class="literal">__newindex</code> metamethod:
+if there is one, the interpreter calls it
+instead of making the assignment.
+Like <a class="indexterm" id="N14353"/><code class="literal">__index</code>, if the metamethod is a table,
+the interpreter does the assignment in this table,
+instead of in the original one.
+Moreover, there is a raw function that
+allows us to bypass the metamethod:
+the call <code class="literal">rawset(t, k, v)</code> does the equivalent to <code class="literal">t[k] = v</code>
+without invoking any metamethod.
+</p><p id="N14362" style="text-indent: 0">
+The combined use of the <a class="indexterm" id="N14364"/><code class="literal">__index</code> and <a class="indexterm" id="N1436D"/><code class="literal">__newindex</code> metamethods
+allows several powerful constructs in Lua,
+such as read-only tables,
+tables with default values,
+and <a class="indexterm" id="N14376"/>inheritance for object-oriented programming.
+In this chapter, we will see some of these uses.
+Object-oriented programming has its own chapter, later.
+</p></div><div class="sect2" title="Tables with default values"><div class="titlepage"><div><div><h3 class="title"><a id="defvalues"/>Tables with default values</h3></div></div></div><p id="N1437E" style="text-indent: 0">
+The <a class="indexterm" id="N14380"></a>default value of any field in a regular table is nil.
+It is easy to change this default value with <a class="indexterm" id="N14384"></a>metatables:
+</p><pre class="programlisting" id="N14388">      function setDefault (t, d)
+        local mt = {__index = function () return d end}
+        setmetatable(t, mt)
+      end
+      
+      tab = {x=10, y=20}
+      print(tab.x, tab.z)     --&gt; 10   nil
+      setDefault(tab, 0)
+      print(tab.x, tab.z)     --&gt; 10   0
+</pre><p style="text-indent: 0">
+After the call to <code class="literal">setDefault</code>,
+any access to an absent field in <code class="literal">tab</code>
+calls its <a class="indexterm" id="N14391"></a><code class="literal">__index</code> metamethod,
+which returns zero
+(the value of <code class="literal">d</code> for this metamethod).
+</p><p id="N1439D" style="text-indent: 0">
+The function <code class="literal">setDefault</code> creates a new closure plus
+a new <a class="indexterm" id="N143A2"></a>metatable for each table that needs a default value.
+This can be expensive
+if we have many tables that need default values.
+However,
+the <a class="indexterm" id="N143A6"></a>metatable has the default value <code class="literal">d</code>
+wired into its metamethod,
+so we cannot use a single metatable for tables with
+different default values.
+To allow the use of a single metatable for all tables,
+we can store the default value of each table in the table itself,
+using an exclusive field.
+If we are not worried about name clashes,
+we can use a key like <code class="literal">"___"</code> for our exclusive field:
+</p><pre class="programlisting" id="N143B0">      local mt = {__index = function (t) return t.___ end}
+      function setDefault (t, d)
+        t.___ = d
+        setmetatable(t, mt)
+      end
+</pre><p style="text-indent: 0">
+Note that now we create the <a class="indexterm" id="N143B3"></a>metatable <code class="literal">mt</code>
+and its corresponding metamethod
+only once,
+outside <code class="literal">SetDefault</code>.
+</p><p id="N143BD" style="text-indent: 0">
+If we are worried about name clashes,
+it is easy to ensure the uniqueness of the special key.
+All we need is a new exclusive table to use as the key:
+</p><pre class="programlisting" id="N143BF">      local key = {}    -- unique key
+      local mt = {__index = function (t) return t[key] end}
+      function setDefault (t, d)
+        t[key] = d
+        setmetatable(t, mt)
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N143C2" style="text-indent: 0">
+An alternative approach for associating each table with its
+default value is a technique I call <a class="indexterm" id="N143C4"/><em>dual representation</em>,
+which uses a separate table
+where the indices are the tables
+and the values are their default values.
+However, for the correct implementation of this approach,
+we need a special breed of table
+called <em>weak tables</em>,
+and so we will not use it here;
+we will return to the subject in <a class="xref" href="ch23.html" title="Chapter 23. Garbage">Chapter 23, <em>Garbage</em></a>.
+</p><p id="N143D0" style="text-indent: 0">
+Another alternative is to <em>memorize</em> metatables
+in order to reuse the same metatable
+for tables with the same default.
+However, that needs weak tables too,
+so that again we will have to wait until <a class="xref" href="ch23.html" title="Chapter 23. Garbage">Chapter 23, <em>Garbage</em></a>.
+</p></div><div class="sect2" title="Tracking table accesses"><div class="titlepage"><div><div><h3 class="title"><a id="proxies"/>Tracking table accesses</h3></div></div></div><p id="N143DC" style="text-indent: 0">
+Suppose we want to track every single access to a certain table.
+Both <a class="indexterm" id="N143DE"></a><code class="literal">__index</code> and <a class="indexterm" id="N143E7"></a><code class="literal">__newindex</code> are relevant only when
+the index does not exist in the table.
+So, the only way to catch all accesses to a table
+is to keep it empty.
+If we want to monitor all accesses to a table,
+we should create a <em>proxy</em> for the real table.
+This <a class="indexterm" id="N143F3"></a>proxy is an empty table,
+with proper metamethods
+that track all accesses and redirect them to the original table.
+The code in <a class="xref" href="ch20.html#cd_track" title="Figure 20.2. Tracking table accesses">Figure 20.2, “Tracking table accesses”</a> implements this idea.
+</p><div class="figure-float"><div class="figure"><a id="cd_track"/><p class="title" style="text-indent: 0"><strong>Figure 20.2. Tracking table accesses<a class="indexterm" id="N143FF"/></strong></p><div class="figure-contents"><pre class="programlisting" id="N14402">      function track (t)
+        local proxy = {}        -- proxy table for 't'
+      
+        -- create metatable for the proxy
+        local mt = {
+          __index = function (_, k)
+            print("*access to element " .. tostring(k))
+            return t[k]   -- access the original table
+          end,
+      
+          __newindex = function (_, k, v)
+            print("*update of element " .. tostring(k) ..
+                  " to " .. tostring(v))
+            t[k] = v   -- update original table
+          end,
+      
+          __pairs = function ()
+            return function (_, k)   -- iteration function
+              local nextkey, nextvalue = next(t, k)
+              if nextkey ~= nil then   -- avoid last value
+                print("*traversing element " .. tostring(nextkey))
+              end
+              return nextkey, nextvalue
+            end
+          end,
+      
+          __len = function () return #t end
+        }
+      
+        setmetatable(proxy, mt)
+      
+        return proxy
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+The following example illustrates its use:
+</p><pre class="programlisting" id="N14405">      &gt; t = {}               -- an arbitrary table
+      &gt; t = track(t)
+      &gt; t[2] = "hello"
+        --&gt; *update of element 2 to hello
+      &gt; print(t[2])
+        --&gt; *access to element 2
+        --&gt; hello
+</pre><p style="text-indent: 0">
+</p><p id="N14408" style="text-indent: 0">
+The metamethods <a class="indexterm" id="N1440A"></a><code class="literal">__index</code> and <a class="indexterm" id="N14413"></a><code class="literal">__newindex</code>
+follow the guidelines that we set,
+tracking each access and then redirecting it to the original table.
+The <a class="indexterm" id="N1441C"></a><code class="literal">__pairs</code> metamethod
+allows us to traverse the proxy as if it were the original table,
+tracking the accesses along the way.
+Finally, the <a class="indexterm" id="N14425"></a><code class="literal">__len</code> metamethod gives the length operator
+through the proxy:
+</p><pre class="programlisting" id="N1442E">      t = track({10, 20})
+      print(#t)              --&gt; 2
+      for k, v in pairs(t) do print(k, v) end
+        --&gt; *traversing element 1
+        --&gt; 1	10
+        --&gt; *traversing element 2
+        --&gt; 2	20
+</pre><p style="text-indent: 0">
+</p><p id="N14431" style="text-indent: 0">
+If we want to monitor several tables,
+we do not need a different <a class="indexterm" id="N14433"/>metatable for each one.
+Instead, we can somehow map each proxy to its original table
+and share a common <a class="indexterm" id="N14437"/>metatable for all proxies.
+This problem is similar to the problem of associating tables to their
+default values,
+which we discussed in the previous section,
+and allows the same solutions.
+For instance, we can keep the original table in a proxy’s field,
+using an exclusive key,
+or we can use a dual representation to map each proxy
+to its corresponding table.
+</p></div><div class="sect2" title="Read-only tables"><div class="titlepage"><div><div><h3 class="title"><a id="L196"/>Read-only tables</h3></div></div></div><p id="N1443F" style="text-indent: 0">
+It is easy to adapt the concept of
+proxies to implement <a class="indexterm" id="N14441"></a>read-only tables.
+All we have to do is to raise an error whenever
+we track any attempt to update the table.
+For the <a class="indexterm" id="N14445"></a><code class="literal">__index</code> metamethod,
+we can use a table
+—the original table itself—
+instead of a function,
+as we do not need to track queries;
+it is simpler and rather more efficient to redirect all queries
+to the original table.
+This use demands a new <a class="indexterm" id="N1444E"></a>metatable for each read-only proxy,
+with <a class="indexterm" id="N14452"></a><code class="literal">__index</code> pointing to the original table:
+</p><pre class="programlisting" id="N1445B">      function readOnly (t)
+        local proxy = {}
+        local mt = {       -- create metatable
+          __index = t,
+          __newindex = function (t, k, v)
+            error("attempt to update a read-only table", 2)
+          end
+        }
+        setmetatable(proxy, mt)
+        return proxy
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N1445E" style="text-indent: 0">
+As an example of use,
+we can create a read-only table for weekdays:
+</p><pre class="programlisting" id="N14460">      days = readOnly{"Sunday", "Monday", "Tuesday", "Wednesday",
+               "Thursday", "Friday", "Saturday"}
+      
+      print(days[1])     --&gt; Sunday
+      days[2] = "Noday"
+        --&gt; stdin:1: attempt to update a read-only table
+</pre><p style="text-indent: 0">
+</p></div></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L197"/>Exercises</h2></div></div></div><p id="N14467" style="text-indent: 0">
+Exercise 20.1:<a id="L198"/> 
+Define a metamethod <a class="indexterm" id="N1446C"/><code class="literal">__sub</code> for sets
+that returns the difference of two sets.
+(The set <em>a - b</em> is the set of elements
+from <em>a</em> that are not in <em>b</em>.)
+
+
+</p><p id="N1447E" style="text-indent: 0">
+Exercise 20.2:<a id="L199"/> 
+Define a metamethod <a class="indexterm" id="N14483"/><code class="literal">__len</code> for sets
+so that <code class="literal">#s</code> returns the number of elements
+in the set <code class="literal">s</code>.
+
+
+</p><p id="N14492" style="text-indent: 0">
+Exercise 20.3:<a id="L200"/> 
+An alternative way to implement read-only tables
+might use a function as the <a class="indexterm" id="N14497"/><code class="literal">__index</code> metamethod.
+This alternative makes accesses more expensive,
+but the creation of read-only tables is cheaper,
+as all read-only tables can share a single <a class="indexterm" id="N144A0"/>metatable.
+Rewrite the function <code class="literal">readOnly</code> using this approach.
+
+
+</p><p id="N144A7" style="text-indent: 0">
+Exercise 20.4:<a id="L201"/> 
+Proxy tables can represent other kinds of objects besides tables.
+<a class="indexterm" id="N144AC"/>file as array
+Write a function <code class="literal">fileAsArray</code> that takes the
+name of a file and returns a proxy to that file,
+so that after a call <code class="literal">t = fileAsArray("myFile")</code>,
+an access to <code class="literal">t[i]</code> returns the <code class="literal">i</code>-th byte of that file,
+and an assignment to <code class="literal">t[i]</code> updates its <code class="literal">i</code>-th byte.
+
+
+</p><p id="N144C4" style="text-indent: 0">
+Exercise 20.5:<a id="L202"/> 
+Extend the previous example to allow us to
+traverse the bytes in the file with <code class="literal">pairs(t)</code> and
+get the file length with <code class="literal">#t</code>.
+
+
+</p></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

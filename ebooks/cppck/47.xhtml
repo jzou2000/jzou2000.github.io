@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 47. Template Partial Specialization</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 47. Template Partial Specialization</h2>
+		
+<p class="docText">Let’s
+ get it straight: you can’t partially specialize function templates. 
+It’s just not a part of the C++ language (although it may be some day). 
+What you probably want to do is overload them (see <span class="docEmphasis">Overloading Function Templates</span> [58, 213]). Accordingly, we are considering only class templates in this item.</p>
+		
+<p class="docText">The way class template
+ partial specialization works is straightforward. As with complete 
+specialization, you first need a general case—or primary template—to 
+specialize. Let’s use our <tt>Heap</tt> template from <span class="docEmphasis">Class Template Explicit Specialization</span> [46, 155]:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt; class Heap;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Explicit 
+specialization (also known colloquially as “complete” specialization) is
+ used to customize a class template for a precise set of arguments. In <span class="docEmphasis">Class Template Explicit Specialization</span> [46, 155], we used it to provide customized implementations of <tt>Heap</tt> for <tt>const char *</tt> and <tt>char *</tt>. However, we still have a problem with <tt>Heap</tt>s of other pointer types, in that we’d like to order the <tt>Heap</tt> according to the values to which the pointer elements refer, rather than the value of the pointers themselves.</p>
+		
+<div class="docText">
+  <pre>Heap&lt;double *&gt; readings; // primary template, T is double *
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Because the type (<tt>double *</tt>
+ ) does not match either of our character pointer complete 
+specializations, the compiler will instantiate the primary template. We 
+could provide complete specializations for <tt>double *</tt>
+ and every other pointer type of interest, but this is onerous and 
+ultimately unmaintainable. This is a job for partial specialization:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+class Heap&lt;T *&gt; {
+  public:
+    void push( const T *val );
+    T *pop();
+
+    bool empty() const { return h_.empty(); }
+  private:
+    std::vector&lt;T *&gt; h_;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The
+ syntax of a partial specialization is similar to that of a complete 
+specialization, but the template parameter list is not empty. Like a 
+complete specialization, the class template name is a template-id and 
+not a simple template name (see <span class="docEmphasis">Template Terminology</span> [45, 153]).</p>
+		
+<p class="docText">This partial 
+specialization for pointers allows us to modify the implementation 
+appropriately. For example, insertions can be made based on the value of
+ the object pointed to, rather than the value of the pointer. First, 
+let’s whip up a comparator that compares two pointers by the values of 
+what they point to (see <span class="docEmphasis">STL Function Objects</span> [20, 71]):</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+struct PtrCmp : public std::binary_function&lt;T *, T *, bool&gt; {
+    bool operator ()( const T *a, const T *b ) const
+        { return *a &lt; *b; }
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Now let’s use our comparator to implement a <tt>push</tt> operation with the correct behavior:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+void Heap&lt;T *&gt;::push( T *pval ) {
+    if( pval ) {
+        h_.push_back(pval);
+        std::push_heap( h_.begin(), h_.end(), PtrCmp&lt;T&gt;() );
+    }
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Note that, unlike a complete specialization of a class template, a partial specialization is a template, and the <tt>template</tt> keyword and parameter list are required in definitions of its members.</p>
+		
+<p class="docText">Unlike our complete specializations, the parameter type of this version of <tt>Heap</tt> is not completely determined; it’s only partially determined to be <tt>T *</tt>, where <tt>T</tt>
+ is an unspecified type. That’s what makes it a partial specialization. 
+This partial specialization will be preferred to the primary template 
+when instantiating a <tt>Heap</tt> with any (unqualified) pointer type. Further, the complete specializations of <tt>Heap</tt> for <tt>const char *</tt> and <tt>char *</tt> will be preferred to this partial specialization if the template argument type is <tt>const char *</tt> or <tt>char *</tt>.</p>
+		
+<div class="docText">
+  <pre>Heap&lt;std::string&gt; h1; // primary, T is std::string
+Heap&lt;std::string *&gt; h2; // partial spec, T is std::string
+Heap&lt;int **&gt; h3; // partial spec, T is int *
+Heap&lt;char *&gt; h4; // complete spec for char *
+Heap&lt;char **&gt; h5; // partial spec, T is char *
+Heap&lt;const int *&gt; h6; // partial spec, T is const int
+Heap&lt;int (*)()&gt; h7; // partial spec, T is int ()
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The complete set of
+ rules for choosing among the various available partial specializations 
+is rather involved, but most cases are straightforward. Generally, the 
+most specific, most restricted candidate is chosen. The partial 
+specialization mechanism is precise and allows us to select among 
+candidates with high precision. For example, we could augment our set of
+ partial specializations with one for pointers to const:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+class Heap&lt;const T *&gt; {
+    //...
+};
+//...
+Heap&lt;const int *&gt; h6; // different partial spec, now T is int
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Note that, as we discussed in <span class="docEmphasis">Class Template Explicit Specialization</span> [46,
+ 155], the compiler checks a class template specialization against the 
+declaration of the primary template. If the template arguments match the
+ primary template (in the case of <tt>Heap</tt>, if 
+there is a single type name argument) the compiler will look for the 
+complete or partial specialization that best matches the template 
+arguments.</p>
+		
+<p class="docText">Here’s a subtle and useful
+ point: A complete or partial specialization of a primary template must 
+be instantiated with the same number and kind of arguments as the 
+primary, but its template parameter list does not have to have the same 
+form as that of the primary. In the case of <tt>Heap</tt>, the primary takes a single type name parameter, so any complete or partial specialization of <tt>Heap</tt> must be instantiated with a single type name argument:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt; class Heap;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Therefore, a complete specialization of <tt>Heap</tt>
+ still takes a single type name template argument, but the template 
+parameter list differs from that of the primary because it is empty:</p>
+		
+<div class="docText">
+  <pre>template &lt;&gt; class Heap&lt;char *&gt;;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">A partial specialization of <tt>Heap</tt>
+ must also take a single type name template argument, and its template 
+parameter list may have a single type name parameter in its template 
+header</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt; class Heap&lt;T *&gt;;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">but it doesn’t have to.</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T, int n&gt; class Heap&lt;T [n]&gt;;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This partial specialization will be selected for a specialization of <tt>Heap</tt> with an array type. For example:</p>
+		
+<div class="docText">
+  <pre>Heap&lt;float *[6]&gt; h8; // partial spec, T is float * and n is 6
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Essentially, this 
+partial specialization says, “This partial specialization takes a single
+ type parameter like the primary template, but that parameter must have 
+the form ’array of <tt>T</tt> of size <tt>n</tt>.’” Consider some more involved examples:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename R, typename A1, typename A2&gt;
+class Heap&lt;R (*)(A1,A2)&gt;;
+
+
+template &lt;class C, typename T&gt;
+class Heap&lt;T C::*&gt;;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">With the addition of these partial specializations, we can special case for <tt>Heap</tt>s of pointers to non-member functions that take two arguments and <tt>Heap</tt>s of pointers to data members (though why you’d want heaps of these things is anybody’s guess):</p>
+		
+<div class="docText">
+  <pre>Heap&lt;char *(*)(int,int)&gt; h9; // partial spec
+                             // R is char *, A1 and A2 are int
+Heap&lt;std::string Name::*&gt; h10; // partial spec
+                               // T is string, C is Name
+</pre>
+</div>
+<br/>
+		
+
+
+</body>
+</html>

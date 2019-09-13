@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>13.5. Advising the Kernel About I/O Patterns</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">13.5. Advising the Kernel About I/O Patterns</h3><p class="docText">The <span class="docEmphasis">posix_fadvise()</span> system call allows a process to inform the kernel about its likely pattern for accessing file data.</p><pre>#include &lt;fcntl.h&gt;
+
+int <b>posix_fadvise</b>(int <span class="docEmphasis">fd</span>, off_t <span class="docEmphasis">offset</span>, off_t <span class="docEmphasis">len</span>, int <span class="docEmphasis">advice</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or a positive error number on error</p><hr noshade="noshade" size="1"/><p class="docText">The kernel may (but is not obliged to) use the information provided by <span class="docEmphasis">posix_fadvise()</span>
+ to optimize its use of the buffer cache, thereby improving I/O 
+performance for the process and for the system as a whole. Calling <span class="docEmphasis">posix_fadvise()</span> has no effect on the semantics of a program.</p><p class="docText">The <span class="docEmphasis">fd</span> argument is a file descriptor identifying the file about whose access patterns we wish to inform the kernel. The <span class="docEmphasis">offset</span> and <span class="docEmphasis">len</span> arguments identify the region of the file about which advice is being given: <span class="docEmphasis">offset</span> specifies the starting offset of the region, and <span class="docEmphasis">len</span> specifies the size of the region in bytes. A <span class="docEmphasis">len</span> value of 0 means all bytes from <span class="docEmphasis">offset</span> through to the end of the file. (In kernels before 2.6.6, a <span class="docEmphasis">len</span> of 0 was interpreted literally as zero bytes.)</p><p class="docText">The <span class="docEmphasis">advice</span> argument indicates the process’s expected pattern of access for the file. It is specified as one of the following:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">POSIX_FADV_NORMAL</span></span></span></p></dt><dd><p class="docList">The
+ process has no special advice to give about access patterns. This is 
+the default behavior if no advice is given for the file. On Linux, this 
+operation sets the file read-ahead window to the default size (128 kB).</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">POSIX_FADV_SEQUENTIAL</span></span></span></p></dt><dd><p class="docList">The
+ process expects to read data sequentially from lower offsets to higher 
+offsets. On Linux, this operation sets the file read-ahead window to the
+ twice the default size.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">POSIX_FADV_RANDOM</span></span></span></p></dt><dd><p class="docList">The process expects to access the data in random order. On Linux, this option disables file read-ahead.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">POSIX_FADV_WILLNEED</span></span></span></p></dt><dd><p class="docList">The
+ process expects to access the specified file region in the near future.
+ The kernel performs read-ahead to populate the buffer cache with file 
+data in the range specified by <span class="docEmphasis">offset</span> and <span class="docEmphasis">len</span>. Subsequent <span class="docEmphasis">read()</span>
+ calls on the file don’t block on disk I/O; instead, they simply fetch 
+data from the buffer cache. The kernel provides no guarantees about how 
+long the data fetched from the file will remain resident in the buffer 
+cache. If other processes or kernel activities place a sufficiently 
+strong demand on memory, then the pages will eventually be reused. In 
+other words, if memory pressure is high, then we should ensure that the 
+elapsed time between the <span class="docEmphasis">posix_fadvise()</span> call and the subsequent <span class="docEmphasis">read()</span> call(s) is short. (The Linux-specific <span class="docEmphasis">readahead()</span> system call provides functionality equivalent to the <tt>POSIX_FADV_WILLNEED</tt> operation.)</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">POSIX_FADV_DONTNEED</span></span></span></p></dt><dd><p class="docList">The
+ process expects not to access the specified file region in the near 
+future. This advises the kernel that it can free the corresponding cache
+ pages (if there are any). On Linux, this operation is performed in two 
+steps. First, if the underlying device is not currently congested with a
+ series of queued write operations, the kernel flushes any modified 
+pages in the specified region. Second, the kernel attempts to free any 
+cache pages for the region. For modified pages in the region, this 
+second step will succeed only if the pages have been written to the 
+underlying device in the first step—that is, if the device’s write queue
+ was not congested. Since congestion on the device can’t be controlled 
+by the application, an alternate way of ensuring that the cache pages 
+can be freed is to precede the <tt>POSIX_FADV_DONTNEED</tt> operation with a <span class="docEmphasis">sync()</span> or <span class="docEmphasis">fdatasync()</span> call that specifies <span class="docEmphasis">fd</span>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">POSIX_FADV_NOREUSE</span></span></span></p></dt><dd><p class="docList">The
+ process expects to access data in the specified file region once, and 
+then not to reuse it. This hint tells the kernel that it can free the 
+pages after they have been accessed once. On Linux, this operation 
+currently has no effect.</p></dd></dl><p class="docText">The specification of <span class="docEmphasis">posix_fadvise()</span> is new in SUSv3, and not all UNIX implementations support this interface. Linux provides <span class="docEmphasis">posix_fadvise()</span> since kernel 2.6.</p>
+</div>
+</body>
+</html>

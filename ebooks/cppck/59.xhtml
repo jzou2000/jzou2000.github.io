@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 59. SFINAE</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 59. SFINAE</h2>
+		
+<p class="docText">In
+ attempting to use function template argument deduction to select among a
+ number of overloaded function templates and nontemplate functions, the 
+compiler may attempt a specialization that fails on one or more of them.</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt; void f( T );
+template &lt;typename T&gt; void f( T * );
+//...
+f( 1024 ); // instantiates first f
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Even though substitution of the nonzero integer for <tt>T *</tt> in the second <tt>f</tt>
+ function template would have been incorrect, the attempted substitution
+ does not give rise to an error provided that a correct substitution is 
+found. In this case, the first <tt>f</tt> is 
+instantiated, and there is no error. Thus, we have the “substitution 
+failure is not an error” concept, dubbed SFINAE by Vandevoorde and 
+Josuttis.</p>
+		
+<p class="docText">SFINAE is an important 
+property in that, without it, it would be difficult to overload function
+ templates; the combination of argument deduction and overloading would 
+otherwise render many uses of a set of overloaded function templates 
+illegal. But SFINAE is also valuable as a metaprogramming technique.</p>
+		
+<p class="docText">Recall the <tt>IsPtr</tt> facility we developed in <span class="docEmphasis">Specializing for Type Information</span> [52,
+ 183]. There we used template partial specialization in order to 
+determine whether an unknown type was a pointer of some kind. We can use
+ SFINAE to achieve a similar result.</p>
+		
+<div class="docText">
+  <pre>typedef True char; // sizeof(True) == 1
+typedef struct { char a[2]; } False; // sizeof(False) &gt; 1
+//...
+template &lt;typename T&gt; True isPtr( T * );
+False isPtr( ... );
+
+#define is_ptr( e ) (sizeof(isPtr(e))==sizeof(True))
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Here, we can use <tt>is_ptr</tt>
+ to determine whether the type of an expression is a pointer through a 
+combination of function template argument deduction and SFINAE. If the 
+expression <tt>e</tt> has pointer type, the compiler will match the template function <tt>isPtr</tt>; otherwise it will match the nontemplate <tt>isPtr</tt> function with the ellipsis formal argument. SFINAE assures us that the attempt to match the template <tt>isPtr</tt> with a non-pointer will not result in a compile-time error.</p>
+		
+<p class="docText">The second bit of magic is the use of <tt>sizeof</tt> in the <tt>is_ptr</tt> macro. Notice that neither <tt>isPtr</tt> function is defined. This is correct, because they are never actually called. The appearance of a function call in a <tt>sizeof</tt>
+ expression causes the compiler to perform argument deduction and 
+function matching, but it doesn’t actually call the function. The <tt>sizeof</tt>
+ operator is interested only in the size of the return type of the 
+function that would have been called. We can then check the size of the 
+function’s return type to determine which function was matched. If the 
+compiler selected the function template, then the expression <tt>e</tt> had pointer type.</p>
+		
+<p class="docText">We did not have to special case for const pointers, volatile pointers, and const volatile pointers as we did for the <tt>IsPtr</tt>
+ facility that we implemented with class template partial 
+specialization. As part of function template argument deduction, the 
+compiler will ignore “first level” cv-qualifiers (<tt>const</tt> and <tt>volatile</tt>) as well as reference modifiers (see <span class="docEmphasis">Overloading Function Templates</span> [58,
+ 213]). Similarly, we do not have to be concerned about incorrectly 
+identifying as a pointer type a user-defined type that has a conversion 
+operator to a pointer type. The compiler employs a very restricted list 
+of conversions on the actual arguments during function template argument
+ deduction, and user-defined conversions are not on the list.</p>
+		
+<p class="docText">Notice the similarity of this technique with our use of template partial specialization to uncover type information in <span class="docEmphasis">Specializing for Type Information</span> [52,
+ 183]. There we used the primary template as a “catchall” and used 
+complete or partial specialization to detect the cases of interest. 
+Here, we’re using a function with an ellipsis formal argument as the 
+catchall and capturing cases of interest with more precisely overloaded 
+versions of the catchall. In fact, class template partial specialization
+ and function template overloading are very closely related technically;
+ the standard actually defines the selection algorithm for one in terms 
+of the other.</p>
+		
+<p class="docText">After one gets used to the <tt>is_ptr</tt>
+ example above, there really is nothing more to the SFINAE technique 
+from a technical perspective. However, this simple technique can be 
+employed in rather surprising ways to uncover information about types 
+and expressions at compile time. Let’s look at some (not at all simple) 
+examples.</p>
+		
+<p class="docText">Consider the problem of determining whether an unknown type is a class:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+struct IsClass {
+    template &lt;class C&gt; static True isClass( int C::* );
+    template &lt;typename C&gt; static False isClass( ... );
+    enum { r = sizeof(IsClass&lt;T&gt;::isClass&lt;T&gt;(0))
+        == sizeof(True) };
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Neatness counts, so this time we’ve encapsulated the SFINAE mechanism inside a class template, <tt>IsClass</tt>, and overloaded two function templates as static members of <tt>IsClass</tt>. One of the functions takes a pointer to member argument (see <span class="docEmphasis">Pointers to Class Members Are Not Pointers</span> [15, 53]). A literal zero can be converted to a pointer to class member (even for a function template), so if <tt>T</tt> is a class type, the first <tt>isClass</tt> will be matched. If <tt>T</tt> is not a class, SFINAE will ignore the erroneous first matching attempt and choose the version of <tt>isClass</tt> with the ellipsis argument list. As with <tt>is_ptr</tt>, we can check the size of the function’s return type to see which function was matched and, thereby, determine whether <tt>T</tt> is a class.</p>
+		
+<p class="docText">This next example is 
+abstracted from Vandevoorde and Josuttis: Suppose you’d like to know 
+whether a particular class type has a nested type name spelled 
+“iterator.” (Of course, this can be implemented to ask the question of 
+any nested type name, not just <tt>iterator</tt>.)</p>
+		
+<div class="docText">
+  <pre>template &lt;class C&gt;
+True hasIterator( typename C::iterator const * );
+template &lt;typename T&gt;
+False hasIterator( ... );
+#define has_iterator( C )\
+    (sizeof(hasIterator&lt;C&gt;(0))==sizeof(True))
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This <tt>has_iterator</tt> facility is mechanically identical to <tt>IsClass</tt>, but this time we’re accessing a nested type name of an unknown type (see <span class="docEmphasis">Disambiguating with Typename</span> [49, 169]). If <tt>C</tt>
+ has such a nested type, we’ll be able to convert the literal zero to a 
+pointer to such a type; otherwise we’ll match the catchall.</p>
+		
+<p class="docText">Finally, let’s look at some trickery from Andrei Alexandrescu: Given two unknown types <tt>T1</tt> and <tt>T2</tt>, can we convert <tt>T1</tt> to <tt>T2</tt>? Note that this mechanism will detect both predefined and user-defined conversions:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T1, typename T2&gt;
+struct CanConvert {
+    static True canConvert( T2 );
+    static False canConvert( ... );
+    static T1 makeT1();
+    enum { r = sizeof(canConvert( makeT1() )) == sizeof(True) };
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">As we saw in our <tt>Heap</tt> implementation in <span class="docEmphasis">Specializing for Type Information</span> [52,
+ 183], there is often a great advantage in flexibility or efficiency in 
+being able to provide special-purpose implementations based on 
+information that can be statically determined at compile time. Through 
+the use of SFINAE and other metaprogramming techniques, we’re able to 
+ask questions like, “Is this unknown type a pointer to a class type that
+ has a nested <tt>iterator</tt> typename that can be converted to <tt>std::string?</tt>”</p>
+		
+
+
+</body>
+</html>

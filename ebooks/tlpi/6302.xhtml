@@ -1,0 +1,376 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>63.2. I/O Multiplexing</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">63.2. I/O Multiplexing</h3><p class="docText">I/O
+ multiplexing allows us to simultaneously monitor multiple file 
+descriptors to see if I/O is possible on any of them. We can perform I/O
+ multiplexing using either of two system calls with essentially the same
+ functionality. The first of these, <span class="docEmphasis">select()</span>,
+ appeared along with the sockets API in BSD. This was historically the 
+more widespread of the two system calls. The other system call, <span class="docEmphasis">poll()</span>, appeared in System V. Both <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> are nowadays required by SUSv3.</p><p class="docText">We can use <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>
+ to monitor file descriptors for regular files, terminals, 
+pseudoterminals, pipes, FIFOs, sockets, and some types of character 
+devices. Both system calls allow a process either to block indefinitely 
+waiting for file descriptors to become ready or to specify a timeout on 
+the call.</p><h4 class="docSection2Title" id="title-ID0ENFIM">63.2.1. The <span class="docEmphasis">select()</span> System Call</h4><p class="docText">The <span class="docEmphasis">select()</span> system call blocks until one or more of a set of file descriptors becomes ready.</p><pre>#include &lt;sys/time.h&gt;         /* For portability */
+#include &lt;sys/select.h&gt;
+
+int <b>select</b>(int <span class="docEmphasis">nfds</span>, fd_set *<span class="docEmphasis">readfds</span>, fd_set *<span class="docEmphasis">writefds</span>, fd_set *<span class="docEmphasis">exceptfds</span>,
+           struct timeval *<span class="docEmphasis">timeout</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of ready file descriptors, 0 on timeout, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">nfds</span>, <span class="docEmphasis">readfds</span>, <span class="docEmphasis">writefds</span>, and <span class="docEmphasis">exceptfds</span> arguments specify the file descriptors that <span class="docEmphasis">select()</span> is to monitor. The <span class="docEmphasis">timeout</span> argument can be used to set an upper limit on the time for which <span class="docEmphasis">select()</span> will block. We describe each of these arguments in detail below.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In the prototype for <span class="docEmphasis">select()</span> shown above, we include <tt>&lt;sys/time.h&gt;</tt> because that was the header specified in SUSv2, and some UNIX implementations require this header. (The <tt>&lt;sys/time.h&gt;</tt> header is present on Linux, and including it does no harm.)</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EEIIM">63.2.1.1. File descriptor sets</h5><p class="docText">The <span class="docEmphasis">readfds</span>, <span class="docEmphasis">writefds</span>, and <span class="docEmphasis">exceptfds</span> arguments are pointers to <span class="docEmphasis">file descriptor sets</span>, represented using the data type <span class="docEmphasis">fd_set</span>. These arguments are used as follows:</p><ul><li><p class="docList"><span class="docEmphasis">readfds</span> is the set of file descriptors to be tested to see if input is possible;</p></li><li><p class="docList"><span class="docEmphasis">writefds</span> is the set of file descriptors to be tested to see if output is possible; and</p></li><li><p class="docList"><span class="docEmphasis">exceptfds</span> is the set of file descriptors to be tested to see if an exceptional condition has occurred.</p></li></ul><p class="docText">The term <span class="docEmphasis">exceptional condition</span>
+ is often misunderstood to mean that some sort of error condition has 
+arisen on the file descriptor. This is not the case. An exceptional 
+condition occurs in just two circumstances on Linux (other UNIX 
+implementations are similar):</p><ul><li><p class="docList">A state change occurs on a pseudoterminal slave connected to a master that is in packet mode (Section 64.5).</p></li><li><p class="docList">Out-of-band data is received on a stream socket (Section 61.13.1).</p></li></ul><p class="docText">Typically, the <span class="docEmphasis">fd_set</span>
+ data type is implemented as a bit mask. However, we don’t need to know 
+the details, since all manipulation of file descriptor sets is done via 
+four macros: <tt>FD_ZERO()</tt>, <tt>FD_SET()</tt>, <tt>FD_CLR()</tt>, and <tt>FD_ISSET()</tt>.</p><pre>#include &lt;sys/select.h&gt;
+
+void <b>FD_ZERO</b>(fd_set *<span class="docEmphasis">fdset</span>);
+void <b>FD_SET</b>(int <span class="docEmphasis">fd</span>, fd_set *<span class="docEmphasis">fdset</span>);
+void <b>FD_CLR</b>(int <span class="docEmphasis">fd</span>, fd_set *<span class="docEmphasis">fdset</span>);
+
+int <b>FD_ISSET</b>(int <span class="docEmphasis">fd</span>, fd_set *<span class="docEmphasis">fdset</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns true (1) if <span class="docEmphasis">fd</span> is in <span class="docEmphasis">fdset</span>, or false (0) otherwise</p><hr noshade="noshade" size="1"/><p class="docText">These macros operate as follows:</p><ul><li><p class="docList"><tt>FD_ZERO()</tt> initializes the set pointed to by <span class="docEmphasis">fdset</span> to be empty.</p></li><li><p class="docList"><tt>FD_SET()</tt> adds the file descriptor <span class="docEmphasis">fd</span> to the set pointed to by <span class="docEmphasis">fdset</span>.</p></li><li><p class="docList"><tt>FD_CLR()</tt> removes the file descriptor <span class="docEmphasis">fd</span> from the set pointed to by <span class="docEmphasis">fdset</span>.</p></li><li><p class="docList"><tt>FD_ISSET()</tt> returns true if the file descriptor <span class="docEmphasis">fd</span> is a member of the set pointed to by <span class="docEmphasis">fdset</span>.</p></li></ul><p class="docText">A file descriptor set has a maximum size, defined by the constant <tt>FD_SETSIZE</tt>. On Linux, this constant has the value 1024. (Other UNIX implementations have similar values for this limit.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Even though the <tt>FD_*</tt> macros are operating on user-space data structures, and the kernel implementation of <span class="docEmphasis">select()</span> can handle descriptor sets with larger sizes, <span class="docEmphasis">glibc</span> provides no simple way of modifying the definition of <tt>FD_SETSIZE</tt>. If we want to change this limit, we must modify the definition in the <span class="docEmphasis">glibc</span>
+ header files. However, for reasons that we describe later in this 
+chapter, if we need to monitor large numbers of descriptors, then using <span class="docEmphasis">epoll</span> is probably preferable to the use of <span class="docEmphasis">select()</span>.</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">readfds</span>, <span class="docEmphasis">writefds</span>, and <span class="docEmphasis">exceptfds</span> arguments are all value-result. Before the call to <span class="docEmphasis">select()</span>, the <span class="docEmphasis">fd_set</span> structures pointed to by these arguments must be initialized (using <tt>FD_ZERO()</tt> and <tt>FD_SET()</tt>) to contain the set of file descriptors of interest. The <span class="docEmphasis">select()</span>
+ call modifies each of these structures so that, on return, they contain
+ the set of file descriptors that are ready. (Since these structures are
+ modified by the call, we must ensure that we reinitialize them if we 
+are repeatedly calling <span class="docEmphasis">select()</span> from within a loop.) The structures can then be examined using <tt>FD_ISSET()</tt>.</p><p class="docText">If we are not interested in a particular class of events, then the corresponding <span class="docEmphasis">fd_set</span> argument can be specified as <tt>NULL</tt>. We say more about the precise meaning of each of the three event types in Section 63.2.3.</p><p class="docText">The <span class="docEmphasis">nfds</span>
+ argument must be set one greater than the highest file descriptor 
+number included in any of the three file descriptor sets. This argument 
+allows <span class="docEmphasis">select()</span> to 
+be more efficient, since the kernel then knows not to check whether file
+ descriptor numbers higher than this value are part of each file 
+descriptor set.</p><h5 class="docSection3Title" id="title-ID0E1QIM">63.2.1.2. The <span class="docEmphasis">timeout</span> argument</h5><p class="docText">The <span class="docEmphasis">timeout</span> argument controls the blocking behavior of <span class="docEmphasis">select()</span>. It can be specified either as <tt>NULL</tt>, in which case <span class="docEmphasis">select()</span> blocks indefinitely, or as a pointer to a <span class="docEmphasis">timeval</span> structure:</p><pre>struct timeval {
+    time_t      tv_sec;         /* Seconds */
+    suseconds_t tv_usec;        /* Microseconds (long int) */
+};</pre><br/>
+<p class="docText">If both fields of <span class="docEmphasis">timeout</span> are 0, then <span class="docEmphasis">select()</span> doesn’t block; it simply polls the specified file descriptors to see which ones are ready and returns immediately. Otherwise, <span class="docEmphasis">timeout</span> specifies an upper limit on the time for which <span class="docEmphasis">select()</span> is to wait.</p><p class="docText">Although the <span class="docEmphasis">timeval</span>
+ structure affords microsecond precision, the accuracy of the call is 
+limited by the granularity of the software clock (Section 10.6). SUSv3 
+specifies that the timeout is rounded upward if it is not an exact 
+multiple of this granularity.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">SUSv3
+ requires that the maximum permissible timeout interval be at least 31 
+days. Most UNIX implementations allow a considerably higher limit. Since
+ Linux/x86-32 uses a 32-bit integer for the <span class="docEmphasis">time_t</span> type, the upper limit is many years.</p><hr noshade="noshade" size="1"/><p class="docText">When <span class="docEmphasis">timeout</span> is <tt>NULL</tt>, or points to a structure containing nonzero fields, <span class="docEmphasis">select()</span> blocks until one of the following occurs:</p><ul><li><p class="docList">at least one of the file descriptors specified in <span class="docEmphasis">readfds</span>, <span class="docEmphasis">writefds</span>, or <span class="docEmphasis">exceptfds</span> becomes ready;</p></li><li><p class="docList">the call is interrupted by a signal handler; or</p></li><li><p class="docList">the amount of time specified by <span class="docEmphasis">timeout</span> has passed.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In older UNIX implementations that lacked a sleep call with subsecond precision (e.g., <span class="docEmphasis">nanosleep()</span>), <span class="docEmphasis">select()</span> was used to emulate this functionality by specifying <span class="docEmphasis">nfds</span> as 0; <span class="docEmphasis">readfds</span>, <span class="docEmphasis">writefds</span>, and <span class="docEmphasis">exceptfds</span> as <tt>NULL</tt>; and the desired sleep interval in <span class="docEmphasis">timeout</span>.</p><hr noshade="noshade" size="1"/><p class="docText">On Linux, if <span class="docEmphasis">select()</span> returns because one or more file descriptors became ready, and if <span class="docEmphasis">timeout</span> was non-<tt>NULL</tt>, then <span class="docEmphasis">select()</span> updates the structure to which <span class="docEmphasis">timeout</span>
+ points to indicate how much time remained until the call would have 
+timed out. However, this behavior is implementation-specific. SUSv3 also
+ allows the possibility that an implementation leaves the structure 
+pointed to by <span class="docEmphasis">timeout</span> unchanged, and most other UNIX implementations <span class="docEmphasis">don’t</span> modify this structure. Portable applications that employ <span class="docEmphasis">select()</span> within a loop should always ensure that the structure pointed to by <span class="docEmphasis">timeout</span> is initialized before each <span class="docEmphasis">select()</span> call, and should ignore the information returned in the structure after the call.</p><p class="docText">SUSv3 states that the structure pointed to by <span class="docEmphasis">timeout</span> may be modified only on a successful return from <span class="docEmphasis">select()</span>. However, on Linux, if <span class="docEmphasis">select()</span> is interrupted by a signal handler (so that it fails with the error <tt>EINTR</tt>),
+ then the structure is modified to indicate the time remaining until a 
+timeout would have occurred (i.e., like a successful return).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">If we use the Linux-specific <span class="docEmphasis">personality()</span> system call to set a personality that includes the <tt>STICKY_TIMEOUTS</tt> personality bit, then <span class="docEmphasis">select()</span> doesn’t modify the structure pointed to by <span class="docEmphasis">timeout</span>.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EFWIM">63.2.1.3. Return value from <span class="docEmphasis">select()</span></h5><p class="docText">As its function result, <span class="docEmphasis">select()</span> returns one of the following:</p><ul><li><p class="docList">A return value of -1 indicates that an error occurred. Possible errors include <tt>EBADF</tt> and <tt>EINTR</tt>. <tt>EBADF</tt> indicates that one of the file descriptors in <tt>readfds</tt>, <span class="docEmphasis">writefds</span>, or <span class="docEmphasis">exceptfds</span> is invalid (e.g., not currently open). <tt>EINTR</tt>, indicates that the call was interrupted by a signal handler. (As noted in Section 21.5, <span class="docEmphasis">select()</span> is never automatically restarted if interrupted by a signal handler.)</p></li><li><p class="docList">A
+ return value of 0 means that the call timed out before any file 
+descriptor became ready. In this case, each of the returned file 
+descriptor sets will be empty.</p></li><li><p class="docList">A
+ positive return value indicates that one or more file descriptors is 
+ready. The return value is the number of ready descriptors. In this 
+case, each of the returned file descriptor sets must be examined (using <tt>FD_ISSET()</tt>) in order to find out which I/O events occurred. If the same file descriptor is specified in more than one of <span class="docEmphasis">readfds</span>, <span class="docEmphasis">writefds</span>, and <span class="docEmphasis">exceptfds</span>, it is counted multiple times if it is ready for more than one event. In other words, <span class="docEmphasis">select()</span> returns the total number of file descriptors marked as ready in all three returned sets.</p></li></ul><h5 class="docSection3Title" id="title-ID0ETYIM">63.2.1.4. Example program</h5><p class="docText">The program in Example 63-1 demonstrates the use of <span class="docEmphasis">select()</span>. Using command-line arguments, we can specify the <span class="docEmphasis">timeout</span> and the file descriptors that we wish to monitor. The first command-line argument specifies the <span class="docEmphasis">timeout</span> for <span class="docEmphasis">select()</span>, in seconds. If a hyphen (-) is specified here, then <span class="docEmphasis">select()</span> is called with a timeout of <tt>NULL</tt>,
+ meaning block indefinitely. Each of the remaining command-line 
+arguments specifies the number of a file descriptor to be monitored, 
+followed by letters indicating the operations for which the descriptor 
+is to be checked. The letters we can specify here are <span class="docEmphasis">r</span> (ready for read) and <span class="docEmphasis">w</span> (ready for write).</p><h5 class="docExampleTitle" id="title-ID0EF1IM">Example 63-1. Using <span class="docEmphasis">select()</span> to monitor multiple file descriptors</h5><p></p><div class="box"><pre class="preFixedHeight"><b>altio/t_select.c</b>
+#include &lt;sys/time.h&gt;
+#include &lt;sys/select.h&gt;
+#include "tlpi_hdr.h"
+
+static void
+usageError(const char *progName)
+{
+    fprintf(stderr, "Usage: %s {timeout|-} fd-num[rw]...\n", progName);
+    fprintf(stderr, "    - means infinite timeout; \n");
+    fprintf(stderr, "    r = monitor for read\n");
+    fprintf(stderr, "    w = monitor for write\n\n");
+    fprintf(stderr, "    e.g.: %s - 0rw 1w\n", progName);
+    exit(EXIT_FAILURE);
+}
+int
+main(int argc, char *argv[])
+{
+    fd_set readfds, writefds;
+    int ready, nfds, fd, numRead, j;
+    struct timeval timeout;
+    struct timeval *pto;
+    char buf[10];                       /* Large enough to hold "rw\0" */
+
+    if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+        usageError(argv[0]);
+
+    /* Timeout for select() is specified in argv[1] */
+
+    if (strcmp(argv[1], "-") == 0) {
+        pto = NULL;                     /* Infinite timeout */
+    } else {
+        pto = &timeout;
+        timeout.tv_sec = getLong(argv[1], 0, "timeout");
+        timeout.tv_usec = 0;            /* No microseconds */
+    }
+
+    /* Process remaining arguments to build file descriptor sets */
+
+    nfds = 0;
+    FD_ZERO(&amp;readfds);
+    FD_ZERO(&amp;writefds);
+
+    for (j = 2; j &lt; argc; j++) {
+        numRead = sscanf(argv[j], "%d%2[rw]", &amp;fd, buf);
+        if (numRead != 2)
+            usageError(argv[0]);
+        if (fd &gt;= FD_SETSIZE)
+            cmdLineErr("file descriptor exceeds limit (%d)\n", FD_SETSIZE);
+
+        if (fd &gt;= nfds)
+            nfds = fd + 1;              /* Record maximum fd + 1 */
+        if (strchr(buf, 'r') != NULL)
+            FD_SET(fd, &amp;readfds);
+        if (strchr(buf, 'w') != NULL)
+            FD_SET(fd, &amp;writefds);
+    }
+
+    /* We've built all of the arguments; now call select() */
+
+    ready = select(nfds, &amp;readfds, &amp;writefds, NULL, pto);
+                                        /* Ignore exceptional events */
+    if (ready == -1)
+        errExit("select");
+
+    /* Display results of select() */
+
+    printf("ready = %d\n", ready);
+for (fd = 0; fd &lt; nfds; fd++)
+        printf("%d: %s%s\n", fd, FD_ISSET(fd, &amp;readfds) ? "r" : "",
+                FD_ISSET(fd, &amp;writefds) ? "w" : "");
+
+    if (pto != NULL)
+        printf("timeout after select(): %ld.%03ld\n",
+               (long) timeout.tv_sec, (long) timeout.tv_usec / 10000);
+    exit(EXIT_SUCCESS);
+}
+           <b>altio/t_select.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">In the following shell session log, we demonstrate the use of the program in Example 63-1. In the first example, we make a request to monitor file descriptor 0 for input with a 10-second <span class="docEmphasis">timeout</span>:</p><pre>$ <b>./t_select 10 0r </b>
+<i> Press Enter, so that a line of input is available on file descriptor 0</i>
+ready = 1
+0: r
+timeout after select(): 8.003
+$                                         <i> Next shell prompt is displayed</i></pre><br/>
+<p class="docText">The above output shows us that <span class="docEmphasis">select()</span>
+ determined that one file descriptor was ready. This was file descriptor
+ 0, which was ready for reading. We can also see that the <span class="docEmphasis">timeout</span> was modified. The final line of output, consisting of just the shell <tt>$</tt> prompt, appeared because the <span class="docEmphasis">t_select</span>
+ program didn’t read the newline character that made file descriptor 0 
+ready, and so that character was read by the shell, which responded by 
+printing another prompt.</p><p class="docText">In the next example, we again monitor file descriptor 0 for input, but this time with a <span class="docEmphasis">timeout</span> of 0 seconds:</p><pre>$ <b>./t_select 0 0r</b>
+ready = 0
+timeout after select(): 0.000</pre><br/>
+<p class="docText">The <span class="docEmphasis">select()</span> call returned immediately, and found no file descriptor was ready.</p><p class="docText">In
+ the next example, we monitor two file descriptors: descriptor 0, to see
+ if input is available, and descriptor 1, to see if output is possible. 
+In this case, we specify the <span class="docEmphasis">timeout</span> as <tt>NULL</tt> (the first command-line argument is a hyphen), meaning infinity:</p><pre>$ <b>./t_select - 0r 1w</b>
+ready = 1
+0:
+1: w</pre><br/>
+<p class="docText">The <span class="docEmphasis">select()</span> call returned immediately, informing us that output was possible on file descriptor 1.</p><h4 class="docSection2Title" id="title-ID0ER3IM">63.2.2. The <span class="docEmphasis">poll()</span> System Call</h4><p class="docText">The <span class="docEmphasis">poll()</span> system call performs a similar task to <span class="docEmphasis">select()</span>. The major difference between the two system calls lies in how we specify the file descriptors to be monitored. With <span class="docEmphasis">select()</span>, we provide three sets, each marked to indicate the file descriptors of interest. With <span class="docEmphasis">poll()</span>, we provide a list of file descriptors, each marked with the set of events of interest.</p><pre>#include &lt;poll.h&gt;
+
+int <b>poll</b>(struct pollfd <span class="docEmphasis">fds</span>[], nfds_t <span class="docEmphasis">nfds</span>, int <span class="docEmphasis">timeout</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of ready file descriptors, 0 on timeout, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">fds</span> argument and the <span class="docEmphasis">pollfd</span> array (<span class="docEmphasis">nfds</span>) specify the file descriptors that <span class="docEmphasis">poll()</span> is to monitor. The <span class="docEmphasis">timeout</span> argument can be used to set an upper limit on the time for which <span class="docEmphasis">poll()</span> will block. We describe each of these arguments in detail below.</p><h5 class="docSection3Title" id="title-ID0EG5IM">63.2.2.1. The <span class="docEmphasis">pollfd</span> array</h5><p class="docText">The <span class="docEmphasis">fds</span> argument lists the file descriptors to be monitored by <span class="docEmphasis">poll()</span>. This argument is an array of <span class="docEmphasis">pollfd</span> structures, defined as follows:</p><pre>struct pollfd {
+    int   fd;               /* File descriptor */
+    short events;           /* Requested events bit mask */
+    short revents;          /* Returned events bit mask */
+};</pre><br/>
+<p class="docText">The <span class="docEmphasis">nfds</span> arguments specifies the number of items in the <span class="docEmphasis">fds</span> array. The <span class="docEmphasis">nfds_t</span> data type used to type the <span class="docEmphasis">nfds</span> argument is an unsigned integer type.</p><p class="docText">The <span class="docEmphasis">events</span> and <span class="docEmphasis">revents</span> fields of the <span class="docEmphasis">pollfd</span> structure are bit masks. The caller initializes <span class="docEmphasis">events</span> to specify the events to be monitored for the file descriptor <span class="docEmphasis">fd</span>. Upon return from <span class="docEmphasis">poll()</span>, <span class="docEmphasis">revents</span> is set to indicate which of those events actually occurred for this file descriptor.</p><p class="docText">Table 63-2 lists the bits that may appear in the <span class="docEmphasis">events</span> and <span class="docEmphasis">revents</span> fields. The first group of bits in this table (<tt>POLLIN</tt>, <tt>POLLRDNORM</tt>, <tt>POLLRDBAND</tt>, <tt>POLLPRI</tt>, and <tt>POLLRDHUP</tt>) are concerned with input events. The next group of bits (<tt>POLLOUT</tt>, <tt>POLLWRNORM</tt>, and <tt>POLLWRBAND</tt>) are concerned with output events. The third group of bits (<tt>POLLERR</tt>, <tt>POLLHUP</tt>, and <tt>POLLNVAL</tt>) are set in the <span class="docEmphasis">revents</span> field to return additional information about the file descriptor. If specified in the <span class="docEmphasis">events</span> field, these three bits are ignored. The final bit (<tt>POLLMSG</tt>) is unused by <span class="docEmphasis">poll()</span> on Linux.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On UNIX implementations providing STREAMS devices, <tt>POLLMSG</tt> indicates that a message containing a <tt>SIGPOLL</tt> signal has reached the head of the stream. <tt>POLLMSG</tt> is unused on Linux, because Linux doesn’t implement STREAMS.</p><hr noshade="noshade" size="1"/><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 63-2. Bit-mask values for <span class="docEmphasis">events</span> and <span class="docEmphasis">revents</span> fields of the <span class="docEmphasis">pollfd</span> structure</h5></caption><colgroup span="4"><col></col><col></col><col></col><col></col></colgroup><thead><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Bit</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Input in <span class="docEmphasis">events</span>?</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Returned in <span class="docEmphasis">revents</span>?</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Description</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top"><tt>POLLIN</tt></td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">Data other than high-priority data can be read</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLLRDNORM</tt></td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">Equivalent to <tt>POLLIN</tt></td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLLRDBAND</tt></td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">Priority data can be read (unused on Linux)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLLPRI</tt></td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">High-priority data can be read</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLLRDHUP</tt></td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">Shutdown on peer socket</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLLOUT</tt></td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">Normal data can be written</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLLWRNORM</tt></td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">Equivalent to <tt>POLLOUT</tt></td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLLWRBAND</tt></td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">Priority data can be written</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLLERR</tt></td><td class="docTableCell"> </td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">An error has occurred</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLLHUP</tt></td><td class="docTableCell"> </td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">A hangup has occurred</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLLNVAL</tt></td><td class="docTableCell"> </td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">File descriptor is not open</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLLMSG</tt></td><td class="docTableCell"> </td><td class="docTableCell"> </td><td align="left" class="docTableCell" valign="top">Unused on Linux (and unspecified in SUSv3)</td></tr></tbody></table><p></p><br/><p class="docText">It is permissible to specify <span class="docEmphasis">events</span> as 0 if we are not interested in events on a particular file descriptor. Furthermore, specifying a negative value for the <span class="docEmphasis">fd</span> field (e.g., negating its value if nonzero) causes the corresponding <span class="docEmphasis">events</span> field to be ignored and the <span class="docEmphasis">revents</span>
+ field always to be returned as 0. Either of these techniques can be 
+used to (perhaps temporarily) disable monitoring of a single file 
+descriptor, without needing to rebuild the entire <span class="docEmphasis">fds</span> list.</p><p class="docText">Note the following further points regarding the Linux implementation of <span class="docEmphasis">poll()</span>:</p><ul><li><p class="docList">Although defined as separate bits, <tt>POLLIN</tt> and <tt>POLLRDNORM</tt> are synonymous.</p></li><li><p class="docList">Although defined as separate bits, <tt>POLLOUT</tt> and <tt>POLLWRNORM</tt> are synonymous.</p></li><li><p class="docList"><tt>POLLRDBAND</tt> is generally unused; that is, it is ignored in the <span class="docEmphasis">events</span> field and not set in <span class="docEmphasis">revents</span>.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The only place where <tt>POLLRDBAND</tt> is set is in code implementing the (obsolete) DECnet networking protocol.</p><hr noshade="noshade" size="1"/></li><li><p class="docList">Although set for sockets in certain circumstances, <tt>POLLWRBAND</tt> conveys no useful information. (There are no circumstances in which <tt>POLLWRBAND</tt> is set when <tt>POLLOUT</tt> and <tt>POLLWRNORM</tt> are not also set.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText"><tt>POLLRDBAND</tt> and <tt>POLLWRBAND</tt>
+ are meaningful on implementations that provide System V STREAMS (which 
+Linux does not). Under STREAMS, a message can be assigned a nonzero 
+priority, and such messages are queued to the receiver in decreasing 
+order of priority, in a band ahead of normal (priority 0) messages.</p><hr noshade="noshade" size="1"/></li><li><p class="docList">The <tt>_XOPEN_SOURCE</tt> feature test macro must be defined in order to obtain the definitions of the constants <tt>POLLRDNORM</tt>, <tt>POLLRDBAND</tt>, <tt>POLLWRNORM</tt>, and <tt>POLLWRBAND</tt> from <tt>&lt;poll.h&gt;</tt>.</p></li><li><p class="docList"><tt>POLLRDHUP</tt> is a Linux-specific flag available since kernel 2.6.17. In order to obtain this definition from <tt>&lt;poll.h&gt;</tt>, the <tt>_GNU_SOURCE</tt> feature test macro must be defined.</p></li><li><p class="docList"><tt>POLLNVAL</tt> is returned if the specified file descriptor was closed at the time of the <span class="docEmphasis">poll()</span> call.</p></li></ul><p class="docText">Summarizing the above points, the <span class="docEmphasis">poll()</span> flags of real interest are <tt>POLLIN</tt>, <tt>POLLOUT</tt>, <tt>POLLPRI</tt>, <tt>POLLRDHUP</tt>, <tt>POLLHUP</tt>, and <tt>POLLERR</tt>. We consider the meanings of these flags in greater detail in Section 63.2.3.</p><h5 class="docSection3Title" id="title-ID0EVUJM">63.2.2.2. The <span class="docEmphasis">timeout</span> argument</h5><p class="docText">The <span class="docEmphasis">timeout</span> argument determines the blocking behavior of <span class="docEmphasis">poll()</span> as follows:</p><ul><li><p class="docList">If <span class="docEmphasis">timeout</span> equals -1, block until one of the file descriptors listed in the <span class="docEmphasis">fds</span> array is ready (as defined by the corresponding <span class="docEmphasis">events</span> field) or a signal is caught.</p></li><li><p class="docList">If <span class="docEmphasis">timeout</span> equals 0, do not block—just perform a check to see which file descriptors are ready.</p></li><li><p class="docList">If <span class="docEmphasis">timeout</span> is greater than 0, block for up to <span class="docEmphasis">timeout</span> milliseconds, until one of the file descriptors in <span class="docEmphasis">fds</span> is ready, or until a signal is caught.</p></li></ul><p class="docText">As with <span class="docEmphasis">select()</span>, the accuracy of <span class="docEmphasis">timeout</span> is limited by the granularity of the software clock (Section 10.6), and SUSv3 specifies that <span class="docEmphasis">timeout</span> is always rounded upward if it is not an exact multiple of the clock granularity.</p><h5 class="docSection3Title" id="title-ID0EXWJM">63.2.2.3. Return value from <span class="docEmphasis">poll()</span></h5><p class="docText">As its function result, <span class="docEmphasis">poll()</span> returns one of the following:</p><ul><li><p class="docList">A return value of -1 indicates that an error occurred. One possible error is <tt>EINTR</tt>, indicating that the call was interrupted by a signal handler. (As noted in Section 21.5, <span class="docEmphasis">poll()</span> is never automatically restarted if interrupted by a signal handler.)</p></li><li><p class="docList">A return of 0 means that the call timed out before any file descriptor became ready.</p></li><li><p class="docList">A positive return value indicates that one or more file descriptors are ready. The returned value is the number of <span class="docEmphasis">pollfd</span> structures in the <span class="docEmphasis">fds</span> array that have a nonzero <span class="docEmphasis">revents</span> field.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Note the slightly different meaning of a positive return value from <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>. The <span class="docEmphasis">select()</span> system call counts a file descriptor multiple times if it occurs in more than one returned file descriptor set. The <span class="docEmphasis">poll()</span>
+ system call returns a count of ready file descriptors, and a file 
+descriptor is counted only once, even if multiple bits are set in the 
+corresponding <span class="docEmphasis">revents</span> field.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EEYJM">63.2.2.4. Example program</h5><p class="docText">Example 63-2 provides a simple demonstration of the use of <span class="docEmphasis">poll()</span>.
+ This program creates a number of pipes (each pipe uses a consecutive 
+pair of file descriptors), writes bytes to the write ends of randomly 
+selected pipes, and then performs a <span class="docEmphasis">poll()</span> to see which pipes have data available for reading.</p><p class="docText">The
+ following shell session shows an example of what we see when running 
+this program. The command-line arguments to the program specify that ten
+ pipes should be created, and writes should be made to three randomly 
+selected pipes.</p><pre>$ <b>./poll_pipes 10 3</b>
+Writing to fd:   4 (read fd:   3)
+Writing to fd:  14 (read fd:  13)
+Writing to fd:  14 (read fd:  13)
+poll() returned: 2
+Readable:   3
+Readable:  13</pre><br/>
+<p class="docText">From the above output, we can see that <span class="docEmphasis">poll()</span> found two pipes had data available for reading.</p><h5 class="docExampleTitle" id="title-ID0EDZJM">Example 63-2. Using <span class="docEmphasis">poll()</span> to monitor multiple file descriptors</h5><p></p><div class="box"><pre class="preFixedHeight"><b>altio/poll_pipes.c</b>
+#include &lt;time.h&gt;
+#include &lt;poll.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int numPipes, j, ready, randPipe, numWrites;
+    int (*pfds)[2];                     /* File descriptors for all pipes */
+    struct pollfd *pollFd;
+
+    if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s num-pipes [num-writes]\n", argv[0]);
+
+    /* Allocate the arrays that we use. The arrays are sized according
+       to the number of pipes specified on command line */
+
+    numPipes = getInt(argv[1], GN_GT_0, "num-pipes");
+
+    pfds = calloc(numPipes, sizeof(int [2]));
+    if (pfds == NULL)
+        errExit("malloc");
+    pollFd = calloc(numPipes, sizeof(struct pollfd));
+    if (pollFd == NULL)
+        errExit("malloc");
+
+    /* Create the number of pipes specified on command line */
+
+    for (j = 0; j &lt; numPipes; j++)
+        if (pipe(pfds[j]) == -1)
+            errExit("pipe %d", j);
+
+    /* Perform specified number of writes to random pipes */
+
+    numWrites = (argc &gt; 2) ? getInt(argv[2], GN_GT_0, "num-writes") : 1;
+
+    srandom((int) time(NULL));
+    for (j = 0; j &lt; numWrites; j++) {
+        randPipe = random() % numPipes;
+        printf("Writing to fd: %3d (read fd: %3d)\n",
+                pfds[randPipe][1], pfds[randPipe][0]);
+        if (write(pfds[randPipe][1], "a", 1) == -1)
+            errExit("write %d", pfds[randPipe][1]);
+    }
+
+    /* Build the file descriptor list to be supplied to poll(). This list
+       is set to contain the file descriptors for the read ends of all of
+       the pipes. */
+
+    for (j = 0; j &lt; numPipes; j++) {
+        pollFd[j].fd = pfds[j][0];
+        pollFd[j].events = POLLIN;
+    }
+
+    ready = poll(pollFd, numPipes, -1);         /* Nonblocking */
+    if (ready == -1)
+        errExit("poll");
+
+    printf("poll() returned: %d\n", ready);
+
+    /* Check which pipes have data available for reading */
+
+    for (j = 0; j &lt; numPipes; j++)
+        if (pollFd[j].revents &amp; POLLIN)
+            printf("Readable: %d %3d\n", j, pollFd[j].fd);
+
+    exit(EXIT_SUCCESS);
+}
+     <b>altio/poll_pipes.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0ERZJM">63.2.3. When Is a File Descriptor Ready?</h4><p class="docText">Correctly using <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>
+ requires an understanding of the conditions under which a file 
+descriptor indicates as being ready. SUSv3 says that a file descriptor 
+(with <tt>O_NONBLOCK</tt> clear) is considered to be ready if a call to an I/O function would not block, <span class="docEmphasis">regardless of whether the function would actually transfer data</span>. The key point is italicized: <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>
+ tell us whether an I/O operation would not block, rather than whether 
+it would successfully transfer data. In this light, let us consider how 
+these system calls operate for different types of file descriptors. We 
+show this information in tables containing two columns:</p><ul><li><p class="docList">The <span class="docEmphasis">select()</span> column indicates whether a file descriptor is marked as readable (<tt>r</tt>), writable (<tt>w</tt>), or having an exceptional condition (<tt>x</tt>).</p></li><li><p class="docList">The <span class="docEmphasis">poll()</span> column indicates the bit(s) returned in the <span class="docEmphasis">revents</span> field. In these tables, we omit mention of <tt>POLLRDNORM</tt>, <tt>POLLWRNORM</tt>, <tt>POLLRDBAND</tt>, and <tt>POLLWRBAND</tt>. Although some of these flags may be returned in <span class="docEmphasis">revents</span> in various circumstances (if they are specified in <span class="docEmphasis">events</span>), they convey no useful information beyond that provided by <tt>POLLIN</tt>, <tt>POLLOUT</tt>, <tt>POLLHUP</tt>, and <tt>POLLERR</tt>.</p></li></ul><h5 class="docSection3Title" id="title-ID0E42JM">63.2.3.1. Regular files</h5><p class="docText">File descriptors that refer to regular files are always marked as readable and writable by <span class="docEmphasis">select()</span>, and returned with <tt>POLLIN</tt> and <tt>POLLOUT</tt> set in <span class="docEmphasis">revents</span> for <span class="docEmphasis">poll()</span>, for the following reasons:</p><ul><li><p class="docList">A <span class="docEmphasis">read()</span> will always immediately return data, end-of-file, or an error (e.g., the file was not opened for reading).</p></li><li><p class="docList">A <span class="docEmphasis">write()</span> will always immediately transfer data or fail with some error.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">SUSv3 says that <span class="docEmphasis">select()</span>
+ should also mark a descriptor for a regular file as having an 
+exceptional condition (though this has no obvious meaning for regular 
+files). Only some implementations do this; Linux is one of those that do
+ not.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EB4JM">63.2.3.2. Terminals and pseudoterminals</h5><p class="docText">Table 63-3 summarizes the behavior of <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> for terminals and pseudoterminals (Chapter 64).</p><p class="docText">When one half of a pseudoterminal pair is closed, the <span class="docEmphasis">revents</span> setting returned by <span class="docEmphasis">poll()</span> for the other half of the pair depends on the implementation. On Linux, at least the <tt>POLLHUP</tt> flag is set. However, other implementations return various flags to indicate this event—for example, <tt>POLLHUP</tt>, <tt>POLLERR</tt>, or <tt>POLLIN</tt>.
+ Furthermore, on some implementations, the flags that are set depend on 
+whether it is the master or the slave device that is being monitored.</p><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 63-3. <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> indications for terminals and pseudoterminals</h5></caption><colgroup span="3"><col></col><col></col><col></col></colgroup><thead><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Condition or event</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom"><span class="docEmphasis">select()</span></th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom"><span class="docEmphasis">poll()</span></th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top">Input available</td><td align="left" class="docTableCell" valign="top"><tt>r</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLIN</tt></td></tr><tr><td align="left" class="docTableCell" valign="top">Output possible</td><td align="left" class="docTableCell" valign="top"><tt>w</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLOUT</tt></td></tr><tr><td align="left" class="docTableCell" valign="top">After <span class="docEmphasis">close()</span> by pseudoterminal peer</td><td align="left" class="docTableCell" valign="top"><tt>rw</tt></td><td align="left" class="docTableCell" valign="top">See text</td></tr><tr><td align="left" class="docTableCell" valign="top">Pseudoterminal master in packet mode detects slave state change</td><td align="left" class="docTableCell" valign="top"><tt>x</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLPRI</tt></td></tr></tbody></table><p></p><br/><h5 class="docSection3Title" id="title-ID0E1EKM">63.2.3.3. Pipes and FIFOs</h5><p class="docText">Table 63-4 summarizes the details for the read end of a pipe or FIFO. The <span class="docEmphasis">Data in pipe?</span> column indicates whether the pipe has at least 1 byte of data available for reading. In this table, we assume that <tt>POLLIN</tt> was specified in the <span class="docEmphasis">events</span> field for <span class="docEmphasis">poll()</span>.</p><p class="docText">On some other UNIX implementations, if the write end of a pipe is closed, then, instead of returning with <tt>POLLHUP</tt> set, <span class="docEmphasis">poll()</span> returns with the <tt>POLLIN</tt> bit set (since a <span class="docEmphasis">read()</span>
+ will return immediately with end-of-file). Portable applications should
+ check to see if either bit is set in order to know if a <span class="docEmphasis">read()</span> will block.</p><p class="docText">Table 63-5 summarizes the details for the write end of a pipe. In this table, we assume that <tt>POLLOUT</tt> was specified in the <span class="docEmphasis">events</span> field for <span class="docEmphasis">poll()</span>. The <span class="docEmphasis">Space for PIPE_BUF bytes?</span> column indicates whether the pipe has room to atomically write <tt>PIPE_BUF</tt>
+ bytes without blocking. This is the criterion on which Linux considers a
+ pipe ready for writing. Some other UNIX implementations use the same 
+criterion; others consider a pipe writable if even a single byte can be 
+written. (In Linux 2.6.10 and earlier, the capacity of a pipe is the 
+same as <tt>PIPE_BUF</tt>. This means that a pipe is considered unwritable if it contains even a single byte of data.)</p><p class="docText">On some other UNIX implementations, if the read end of a pipe is closed, then, instead of returning with <tt>POLLERR</tt> set, <span class="docEmphasis">poll()</span> returns with either the <tt>POLLOUT</tt> bit or the <tt>POLLHUP</tt> bit set. Portable applications need to check to see if any of these bits is set to determine if a <span class="docEmphasis">write()</span> will block.</p><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 63-4. <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> indications for the read end of a pipe or FIFO</h5></caption><colgroup span="4"><col></col><col></col><col></col><col></col></colgroup><thead><tr><th align="center" class="docTableCell thead" colspan="2" scope="col" style="text-align:center" valign="bottom">Condition or event</th><th align="center" class="docTableCell thead" rowspan="2" scope="col" style="text-align:center" valign="bottom"><span class="docEmphasis">select()</span></th><th align="center" class="docTableCell thead" rowspan="2" scope="col" style="text-align:center" valign="bottom"><span class="docEmphasis">poll()</span></th></tr><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Data in pipe?</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Write end open?</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top">no</td><td align="left" class="docTableCell" valign="top">no</td><td align="left" class="docTableCell" valign="top"><tt>r</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLHUP</tt></td></tr><tr><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top"><tt>r</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLIN</tt></td></tr><tr><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">no</td><td align="left" class="docTableCell" valign="top"><tt>r</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLIN | POLLHUP</tt></td></tr></tbody></table><p></p><br/><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 63-5. <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> indications for the write end of a pipe or FIFO</h5></caption><colgroup span="4"><col></col><col></col><col></col><col></col></colgroup><thead><tr><th align="center" class="docTableCell thead" colspan="2" scope="col" style="text-align:center" valign="bottom">Condition or event</th><th align="center" class="docTableCell thead" rowspan="2" scope="col" style="text-align:center" valign="bottom"><span class="docEmphasis">select()</span></th><th align="center" class="docTableCell thead" rowspan="2" scope="col" style="text-align:center" valign="bottom"><span class="docEmphasis">poll()</span></th></tr><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Space for <tt>PIPE_BUF</tt> bytes?</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Read end open?</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top">no</td><td align="left" class="docTableCell" valign="top">no</td><td align="left" class="docTableCell" valign="top"><tt>w</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLERR</tt></td></tr><tr><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top"><tt>w</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLOUT</tt></td></tr><tr><td align="left" class="docTableCell" valign="top">yes</td><td align="left" class="docTableCell" valign="top">no</td><td align="left" class="docTableCell" valign="top"><tt>w</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLOUT | POLLERR</tt></td></tr></tbody></table><p></p><br/><h5 class="docSection3Title" id="title-ID0EHOKM">63.2.3.4. Sockets</h5><p class="docText">Table 63-6 summarizes the behavior of <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> for sockets. For the <span class="docEmphasis">poll()</span> column, we assume that <span class="docEmphasis">events</span> was specified as <tt>(POLLIN | POLLOUT | POLLPRI)</tt>. For the <span class="docEmphasis">select()</span>
+ column, we assume that the file descriptor is being tested to see if 
+input is possible, output is possible, or an exceptional condition 
+occurred (i.e., the file descriptor is specified in all three sets 
+passed to <span class="docEmphasis">select()</span>). This table covers just the common cases, not all possible scenarios.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The Linux <span class="docEmphasis">poll()</span> behavior for UNIX domain sockets after a peer <span class="docEmphasis">close()</span> differs from that shown in Table 63-6. As well as the other flags, <span class="docEmphasis">poll()</span> additionally returns <tt>POLLHUP</tt> in <span class="docEmphasis">revents</span>.</p><hr noshade="noshade" size="1"/><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 63-6. <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> indications for sockets</h5></caption><colgroup span="3"><col></col><col></col><col></col></colgroup><thead><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Condition or event</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom"><span class="docEmphasis">select()</span></th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom"><span class="docEmphasis">poll()</span></th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top">Input available</td><td align="left" class="docTableCell" valign="top"><tt>r</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLIN</tt></td></tr><tr><td align="left" class="docTableCell" valign="top">Output possible</td><td align="left" class="docTableCell" valign="top"><tt>w</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLOUT</tt></td></tr><tr><td align="left" class="docTableCell" valign="top">Incoming connection established on listening socket</td><td align="left" class="docTableCell" valign="top"><tt>r</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLIN</tt></td></tr><tr><td align="left" class="docTableCell" valign="top">Out-of-band data received (TCP only)</td><td align="left" class="docTableCell" valign="top"><tt>x</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLPRI</tt></td></tr><tr><td align="left" class="docTableCell" valign="top">Stream socket peer closed connection or executed <span class="docEmphasis">shutdown(SHUT_WR)</span></td><td align="left" class="docTableCell" valign="top"><tt>rw</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLIN | POLLOUT | POLLRDHUP</tt></td></tr></tbody></table><p></p><br/><p class="docText">The Linux-specific <tt>POLLRDHUP</tt> flag (available since Linux 2.6.17) needs a little further explanation. This flag—actually in the form of <tt>EPOLLRDHUP</tt>—is designed primarily for use with the edge-triggered mode of the <span class="docEmphasis">epoll</span>
+ API (Section 63.4). It is returned when the remote end of a stream 
+socket connection has shut down the writing half of the connection. The 
+use of this flag allows an application that uses the <span class="docEmphasis">epoll</span>
+ edge-triggered interface to employ simpler code to recognize a remote 
+shutdown. (The alternative is for the application to note that the <tt>POLLIN</tt> flag is set and then perform a <span class="docEmphasis">read()</span>, which indicates the remote shutdown with a return of 0.)</p><h4 class="docSection2Title" id="title-ID0EOWKM">63.2.4. Comparison of <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span></h4><p class="docText">In this section, we consider some similarities and differences between <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>.</p><h5 class="docSection3Title" id="title-ID0ETXKM">63.2.4.1. Implementation details</h5><p class="docText">Within the Linux kernel, <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> both employ the same set of kernel-internal <span class="docEmphasis">poll</span> routines. These <span class="docEmphasis">poll</span> routines are distinct from the <span class="docEmphasis">poll()</span>
+ system call itself. Each routine returns information about the 
+readiness of a single file descriptor. This readiness information takes 
+the form of a bit mask whose values correspond to the bits returned in 
+the <span class="docEmphasis">revents</span> field by the <span class="docEmphasis">poll()</span> system call (Table 63-2). The implementation of the <span class="docEmphasis">poll()</span> system call involves calling the kernel <span class="docEmphasis">poll</span> routine for each file descriptor and placing the resulting information in the corresponding <span class="docEmphasis">revents</span> field.</p><p class="docText">To implement <span class="docEmphasis">select()</span>, a set of macros is used to convert the information returned by the kernel <span class="docEmphasis">poll</span> routines into the corresponding event types returned by <span class="docEmphasis">select()</span>:</p><pre>#define POLLIN_SET  (POLLRDNORM | POLLRDBAND | POLLIN | POLLHUP | POLLERR)
+                                     /* Ready for reading */
+#define POLLOUT_SET (POLLWRBAND | POLLWRNORM | POLLOUT | POLLERR)
+                                     /* Ready for writing */
+#define POLLEX_SET  (POLLPRI)        /* Exceptional condition */</pre><br/>
+<p class="docText">These macro definitions reveal the semantic correspondence between the information returned by <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>. (If we look at the <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> columns in the tables in Section 63.2.3,
+ we see that the indications provided by each system call are consistent
+ with the above macros.) The only additional information we need to 
+complete the picture is that <span class="docEmphasis">poll()</span> returns <tt>POLLNVAL</tt> in the <span class="docEmphasis">revents</span> field if one of the monitored file descriptors was closed at the time of the call, while <span class="docEmphasis">select()</span> returns -1 with <span class="docEmphasis">errno</span> set to <tt>EBADF</tt>.</p><h5 class="docSection3Title" id="title-ID0EYZKM">63.2.4.2. API differences</h5><p class="docText">The following are some differences between the <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> APIs:</p><ul><li><p class="docList">The use of the <span class="docEmphasis">fd_set</span> data type places an upper limit (<tt>FD_SETSIZE</tt>) on the range of file descriptors that can be monitored by <span class="docEmphasis">select()</span>. By default, this limit is 1024 on Linux, and changing it requires recompiling the application. By contrast, <span class="docEmphasis">poll()</span> places no intrinsic limit on the range of file descriptors that can be monitored.</p></li><li><p class="docList">Because the <span class="docEmphasis">fd_set</span> arguments of <span class="docEmphasis">select()</span> are value-result, we must reinitialize them if making repeated <span class="docEmphasis">select()</span> calls from within a loop. By using separate <span class="docEmphasis">events</span> (input) and <span class="docEmphasis">revents</span> (output) fields, <span class="docEmphasis">poll()</span> avoids this requirement.</p></li><li><p class="docList">The <span class="docEmphasis">timeout</span> precision afforded by <span class="docEmphasis">select()</span> (microseconds) is greater than that afforded by <span class="docEmphasis">poll()</span>
+ (milliseconds). (The accuracy of the timeouts of both of these system 
+calls is nevertheless limited by the software clock granularity.)</p></li><li><p class="docList">If one of the file descriptors being monitored was closed, then <span class="docEmphasis">poll()</span> informs us exactly which one, via the <tt>POLLNVAL</tt> bit in the corresponding <span class="docEmphasis">revents</span> field. By contrast, <span class="docEmphasis">select()</span> merely returns -1 with <span class="docEmphasis">errno</span> set to <tt>EBADF</tt>,
+ leaving us to determine which file descriptor is closed by checking for
+ an error when performing an I/O system call on the descriptor. However,
+ this is typically not an important difference, since an application can
+ usually keep track of which file descriptors it has closed.</p></li></ul><h5 class="docSection3Title" id="title-ID0E52KM">63.2.4.3. Portability</h5><p class="docText">Historically, <span class="docEmphasis">select()</span> was more widely available than <span class="docEmphasis">poll()</span>.
+ Nowadays, both interfaces are standardized by SUSv3 and widely 
+available on contemporary implementations. However, there is some 
+variation in the behavior of <span class="docEmphasis">poll()</span> across implementations, as noted in Section 63.2.3.</p><h5 class="docSection3Title" id="title-ID0EV3KM">63.2.4.4. Performance</h5><p class="docText">The performance of <span class="docEmphasis">poll()</span> and <span class="docEmphasis">select()</span> is similar if either of the following is true:</p><ul><li><p class="docList">The range of file descriptors to be monitored is small (i.e., the maximum file descriptor number is low).</p></li><li><p class="docList">A
+ large number of file descriptors are being monitored, but they are 
+densely packed (i.e., most or all of the file descriptors from 0 up to 
+some limit are being monitored).</p></li></ul><p class="docText">However, the performance of <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>
+ can differ noticeably if the set of file descriptors to be monitored is
+ sparse; that is, the maximum file descriptor number, N, is large, but 
+only one or a few descriptors in the range 0 to <span class="docEmphasis">N</span> are being monitored. In this case, <span class="docEmphasis">poll()</span> can perform better than <span class="docEmphasis">select()</span>. We can understand the reasons for this by considering the arguments passed to the two system calls. With <span class="docEmphasis">select()</span>, we pass one or more file descriptor sets and an integer, <span class="docEmphasis">nfds</span>, which is one greater than the maximum file descriptor to be examined in each set. The <span class="docEmphasis">nfds</span> argument has the same value, regardless of whether we are monitoring all file descriptors in the range 0 to <span class="docEmphasis">(nfds - 1)</span> or only the descriptor <span class="docEmphasis">(nfds - 1)</span>. In both cases, the kernel must examine <span class="docEmphasis">nfds</span> elements in each set in order to check exactly which file descriptors are to be monitored. By contrast, when using <span class="docEmphasis">poll()</span>, we specify only the file descriptors of interest to us, and the kernel checks only those descriptors.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The difference in performance for <span class="docEmphasis">poll()</span> and <span class="docEmphasis">select()</span>
+ with sparse descriptor sets was quite significant in Linux 2.4. Some 
+optimizations in Linux 2.6 have narrowed the performance gap 
+considerably.</p><hr noshade="noshade" size="1"/><p class="docText">We consider the performance of <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> further in Section 63.4.5, where we compare the performance of these system calls against <span class="docEmphasis">epoll</span>.</p><h4 class="docSection2Title" id="title-ID0EU5KM">63.2.5. Problems with <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span></h4><p class="docText">The <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>
+ system calls are the portable, long-standing, and widely used methods 
+of monitoring multiple file descriptors for readiness. However, these 
+APIs suffer some problems when monitoring a large number of file 
+descriptors:</p><ul><li><p class="docList">On each call to <span class="docEmphasis">select()</span> or <span class="docEmphasis">poll()</span>,
+ the kernel must check all of the specified file descriptors to see if 
+they are ready. When monitoring a large number of file descriptors that 
+are in a densely packed range, the time required for this operation 
+greatly outweighs the time required for the next two operations.</p></li><li><p class="docList">In each call to <span class="docEmphasis">select()</span> or <span class="docEmphasis">poll()</span>,
+ the program must pass a data structure to the kernel describing all of 
+the file descriptors to be monitored, and, after checking the 
+descriptors, the kernel returns a modified version of this data 
+structure to the program. (Furthermore, for <span class="docEmphasis">select()</span>, we must initialize the data structure before each call.) For <span class="docEmphasis">poll()</span>,
+ the size of the data structure increases with the number of file 
+descriptors being monitored, and the task of copying it from user to 
+kernel space and back again consumes a noticeable amount of CPU time 
+when monitoring many file descriptors. For <span class="docEmphasis">select()</span>, the size of the data structure is fixed by <tt>FD_SETSIZE</tt>, regardless of the number of file descriptors being monitored.</p></li><li><p class="docList">After the call to <span class="docEmphasis">select()</span> or <span class="docEmphasis">poll()</span>, the program must inspect every element of the returned data structure to see which file descriptors are ready.</p></li></ul><p class="docText">The consequence of the above points is that the CPU time required by <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> increases with the number of file descriptors being monitored (see Section 63.4.5 for more details). This creates problems for programs that monitor large numbers of file descriptors.</p><p class="docText">The poor scaling performance of <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>
+ stems from a simple limitation of these APIs: typically, a program 
+makes repeated calls to monitor the same set of file descriptors; 
+however, the kernel doesn’t remember the list of file descriptors to be 
+monitored between successive calls.</p><p class="docText">Signal-driven I/O and <span class="docEmphasis">epoll</span>,
+ which we examine in the following sections, are both mechanisms that 
+allow the kernel to record a persistent list of file descriptors in 
+which a process is interested. Doing this eliminates the performance 
+scaling problems of <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>,
+ yielding solutions that scale according to the number of I/O events 
+that occur, rather than according to the number of file descriptors 
+being monitored. Consequently, signal-driven I/O and <span class="docEmphasis">epoll</span> provide superior performance when monitoring large numbers of file descriptors.</p>
+</div>
+</body>
+</html>

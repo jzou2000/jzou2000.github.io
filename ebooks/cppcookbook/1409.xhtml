@@ -1,0 +1,394 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 14.8. Evaluating an XPath Expression</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 14.8. Evaluating an XPath Expression</h3>
+
+<h4 class="docSection2Title" id="title-ID0EBOBK">Problem</h4>
+<p class="docText">You want to extract information
+
+
+
+ from a parsed XML document by
+evaluating an XPath expression.</p>
+
+<h4 class="docSection2Title" id="title-ID0EHPBK">Solution</h4>
+<p class="docText">Use the Xalan
+library. First, parse the XML document to obtain a pointer to a
+<tt>xalanc::XalanDocument</tt>. This can be done by using
+instances of <tt>XalanSourceTreeInit</tt>,
+<tt>XalanSourceTreeDOMSupport</tt>, and
+<tt>XalanSourceTreeParserLiaison</tt>—each defined in
+the namespace <tt>xalanc</tt>—like so:</p>
+<pre>#include &lt;xercesc/framework/LocalFileInputSource.hpp&gt;
+#include &lt;xalanc/XalanSourceTree/XalanSourceTreeDOMSupport.hpp&gt;
+#include &lt;xalanc/XalanSourceTree/XalanSourceTreeInit.hpp&gt;
+#include &lt;xalanc/XalanSourceTree/XalanSourceTreeParserLiaison.hpp&gt;
+...
+int main( )
+{
+     ...
+     // Initialize the XalanSourceTree subsystem
+     XalanSourceTreeInit           init;
+     XalanSourceTreeDOMSupport     support; 
+
+     // Interface to the parser
+     XalanSourceTreeParserLiaison  liaison(support);
+
+     // Hook DOMSupport to ParserLiaison
+     support.setParserLiaison(&amp;liaison);  
+     LocalFileInputSource          src(<tt><i>document-location</i></tt>);
+     XalanDocument*                doc = liason.ParseXMLStream(doc);
+    ...
+}</pre><br/>
+<p class="docText">Alternatively, you can use the Xerces DOM parser to obtain a pointer
+to a <tt>DOMDocument</tt>, as in Example 14-14, and then use instances of
+<tt>XercesDOMSupport</tt>,
+<tt>XercesParserLiaison</tt>, and
+<tt>XercesDOMWrapperParsedSource</tt> — each defined
+in namespace <tt>xalanc</tt> — to obtain a pointer to
+a <tt>XalanDocument</tt> corresponding to the
+<tt>DOMDocument</tt>:</p>
+<pre>#include &lt;xercesc/dom/DOM.hpp&gt;
+#include &lt;xalanc/XalanTransformer/XercesDOMWrapperParsedSource.hpp&gt;
+#include &lt;xalanc/XercesParserLiaison/XercesParserLiaison.hpp&gt;
+#include &lt;xalanc/XercesParserLiaison/XercesDOMSupport.hpp&gt;
+...
+int main( ) {
+     ...
+    DOMDocument*                  doc = ... ;
+    XercesDOMSupport              support;
+    XercesParserLiaison           liaison(support);
+    XercesDOMWrapperParsedSource  src(doc, liaison, support);
+    XalanDocument*                xalanDoc = src.getDocument( );
+    ...
+}</pre><br/>
+<p class="docText">Next, obtain a pointer to the node that serves as the context node
+when evaluating the XPath expression. You can do this by using
+<tt>XalanDocument</tt>'s DOM interface.
+Construct an <tt>XPathEvaluator</tt> to evaluate the XPath
+expression and a <tt>XalanDocumentPrefixResolver</tt> to
+resolve namespace prefixes in the XML document. Finally, call the
+<tt>XPathEvaluator</tt>'s
+<tt>evaluate(</tt>
+<tt>)</tt> method, passing the
+<tt>DOMSupport</tt>, the context node, the XPath
+expression, and the <tt>PrefixResolver</tt> as arguments.
+The result of evaluating the expression is returned as an object of
+type <tt>XObjectPtr</tt>; the operations you can perform on
+this object depend on its XPath data type, which you can query using
+the <tt>getType(</tt>
+<tt>)</tt> method.</p>
+<p class="docText">For example, suppose you want to extract a list of
+animals' names from the document
+<i>animals.xml </i>from Example 14-1.
+You can do this by parsing the document and evaluating the XPath
+expression <tt>animalList/animal/name/child::text( )</tt>
+with the document root as context node. This is illustrated in Example 14-23.</p>
+<h5 class="docExampleTitle" id="title-ID0EESBK">Example 14-23. Evaluating an XPath expression using Xalan</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;cstddef&gt;      // size_t
+#include &lt;exception&gt;
+#include &lt;iostream&gt;     // cout
+#include &lt;xercesc/dom/DOM.hpp&gt;
+#include &lt;xercesc/parsers/XercesDOMParser.hpp&gt;
+#include &lt;xercesc/sax2/DefaultHandler.hpp&gt;
+#include &lt;xercesc/util/PlatformUtils.hpp&gt;
+#include &lt;xalanc/DOMSupport/XalanDocumentPrefixResolver.hpp&gt;
+#include &lt;xalanc/XalanTransformer/XercesDOMWrapperParsedSource.hpp&gt;
+#include &lt;xalanc/XercesParserLiaison/XercesParserLiaison.hpp&gt;
+#include &lt;xalanc/XercesParserLiaison/XercesDOMSupport.hpp&gt;
+#include &lt;xalanc/XPath/XObject.hpp&gt;
+#include &lt;xalanc/XPath/XPathEvaluator.hpp&gt;
+#include "animal.hpp"
+#include "xerces_strings.hpp"
+
+using namespace std;
+using namespace xercesc;
+using namespace xalanc;
+
+// RAII utility that initializes the parser and the XPath engine
+// and frees resources when it goes out of scope
+class XPathInitializer {
+public:
+    XPathInitializer( ) 
+    { 
+        XMLPlatformUtils::Initialize( );
+        XPathEvaluator::initialize( );
+    }
+    ~XPathInitializer( ) 
+    { 
+        XPathEvaluator::terminate( );
+        XMLPlatformUtils::Terminate( );
+    }
+private:
+    // Prohibit copying and assignment
+    XPathInitializer(const XPathInitializer&amp;);
+    XPathInitializer&amp; operator=(const XPathInitializer&amp;);
+};
+
+// Receives Error notifications
+class CircusErrorHandler : public DefaultHandler {
+public:
+    void error(const SAXParseException&amp; e)
+    {
+        throw runtime_error(toNative(e.getMessage( )));
+    }
+    void fatalError(const SAXParseException&amp; e) { error(e); }
+};
+
+int main( )
+{
+    try {
+        // Initialize Xerces and XPath and construct a DOM parser.
+        XPathInitializer    init;
+        XercesDOMParser     parser;
+    
+        // Register error handler
+        CircusErrorHandler error;
+        parser.setErrorHandler(&amp;error);
+
+        // Parse animals.xml.
+        parser.parse(fromNative("animals.xml").c_str( ));
+        DOMDocument* doc = parser.getDocument( );
+        DOMElement*  animalList = doc-&gt;getDocumentElement( );
+
+        // Create a XalanDocument based on doc.
+        XercesDOMSupport              support;
+        XercesParserLiaison           liaison(support);
+        XercesDOMWrapperParsedSource  src(doc, liaison, support);
+        XalanDocument*                xalanDoc = src.getDocument( );
+
+        // Evaluate an XPath expression to obtain a list 
+        // of text nodes containing animals' names
+        XPathEvaluator                evaluator;
+        XalanDocumentPrefixResolver   resolver(xalanDoc);
+        XercesString                  xpath = 
+            fromNative("animalList/animal/name/child::text( )");
+        XObjectPtr                    result =
+            evaluator.evaluate( 
+                support,        // DOMSupport
+                xalanDoc,       // context node
+                xpath.c_str( ),  // XPath expr
+                resolver );     // Namespace resolver
+        const NodeRefListBase&amp;        nodeset = result-&gt;nodeset( );
+
+
+        // Iterate through the node list, printing the animals' names
+        for ( size_t i = 0,
+                     len = nodeset.getLength( );
+              i &lt; len;
+              ++i )
+        {
+            const XMLCh* name = 
+              nodeset.item(i)-&gt;getNodeValue( ).c_str( );
+            std::cout &lt;&lt; toNative(name) &lt;&lt; "\n";
+        }
+    } catch (const DOMException&amp; e) {
+        cout &lt;&lt; "xml error: " &lt;&lt; toNative(e.getMessage( )) &lt;&lt; "\n";
+        return EXIT_FAILURE;
+    } catch (const exception&amp; e) {
+        cout &lt;&lt; e.what( ) &lt;&lt; "\n";
+        return EXIT_FAILURE;
+    }
+}
+
+					  </pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0ENSBK">Discussion</h4>
+<p class="docText">XPath is a pattern matching language designed to extract information
+from XML documents. XPath's main construct—the
+
+<span class="docEmphasis">path
+expression—</span>provides a hierarchical syntax for
+referring to elements, attributes, and text nodes based on their
+names, attributes, textual content, inheritance relations, and other
+properties. In addition to operating on sets of nodes,
+or
+
+<i>node sets</i>, the XPath language can handle
+strings, numbers, and <tt>boolean</tt> values. XPath
+Version 2.0, which is not currently supported by the Xalan library,
+provides an even richer data model, based on the XML Schema
+recommendation. (See Recipe 14.5.)</p>
+<p class="docText">XPath expressions are evaluated in the context of a node in an XML
+document, called the context node, which is used to interpret
+relative constructs such as <tt>parent</tt>,
+<tt>child</tt>, and <tt>descendent</tt>. In Example 14-23, I specified the <i>root</i> of
+the XML document as the context node; this is the node that is the
+parent of the XML document's root element and of any
+top-level processing instructions and comments. When evaluated with
+the root node as the context node, the path expression
+<tt>animalList/animal/name/child::text( )</tt> matches all
+text node children of <tt>name</tt> elements whose parent
+element is an <tt>animal</tt> element and whose grandparent
+is an <tt>animalList</tt> element.</p>
+<p class="docText">The <tt>evaluate( )</tt>
+ method of <tt>XPathEvaluator</tt>
+returns an <tt>XObjectPtr</tt> representing the result of
+evaluating the XPath expression. The data type of an
+<tt>XObjectPtr</tt> can be queried by dereferncing it to
+obtain an <tt>XObject</tt> and calling the method
+<tt>getType( )</tt>; the underlying data can then be
+accessed by calling <tt>num( )</tt>, <tt>boolean(
+)</tt>, <tt>str( )</tt>, or <tt>nodeset()</tt>. Since the XPath expression in Example 14-23 represents a node set, I used the
+<tt>nodeset( )</tt> method to obtain a reference to a
+<tt>NodeRefListBase</tt>, which provides access to the
+nodes in a node set through its <tt>getLength( )</tt> and
+<tt>item( )</tt> methods. The method <tt>item(
+)</tt> returns a pointer to a <tt>XalanNode</tt>,
+whose <tt>getNodeValue( )</tt> method returns a string with
+an interface similar to <tt>std::basic_string</tt>.</p>
+<p class="docText">Since XPath provides an easy way to
+locate
+
+nodes in an XML document, it's natural to wonder
+whether you can use Xalan XPath expressions to obtain instances of
+<tt>xercesc::DOMNode</tt> from a
+<tt>xercesc::DOMDocument</tt>. Indeed it is possible, but
+it is slightly awkward; what's more, by default, the
+<tt>xercesc::DOMNodes</tt> obtained in this way are part of
+a <span class="docEmphasis">read-only</span> view of the XML document tree, which
+limits the usefulness of XPath as a tool for DOM manipulation. There
+are ways to work around this restriction, but they are complex and
+potentially dangerous.</p>
+<p class="docText">Fortunately, the Pathan library provides an
+implementation of XPath that is compatible with Xerces and which
+allows easy manipulation of the Xerces DOM. Example 14-24 shows how to use Pathan to locate and remove
+the node corresponding to Herby the elephant in the XML document from
+Example 14-1, by evaluating the XPath expression
+<tt>animalList/animal[child::name='Herby']</tt>. Comparing
+this example with Example 14-10 makes it clear how
+powerful the XPath language is.</p>
+<h5 class="docExampleTitle" id="title-ID0EFXBK">Example 14-24. Locating a node and removing it using Pathan</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;exception&gt;
+#include &lt;iostream&gt;     // cout
+#include &lt;xercesc/dom/DOM.hpp&gt;
+#include &lt;xercesc/framework/LocalFileFormatTarget.hpp&gt;
+#include &lt;xercesc/util/PlatformUtils.hpp&gt;
+#include &lt;pathan/XPathNamespace.hpp&gt;
+#include &lt;pathan/XPathResult.hpp&gt;
+#include &lt;pathan/XPathEvaluator.hpp&gt;
+#include &lt;pathan/XPathExpression.hpp&gt; 
+#include "xerces_strings.hpp"  // Example 14-4
+
+using namespace std;
+using namespace xercesc;
+
+/*
+ * Define XercesInitializer as in Example 14-8, and
+ * CircusErrorHandler and DOMPtr as in Example 14-10
+ */
+
+int main( )
+{
+    try {
+        // Initialize Xerces and retrieve a DOMImplementation.
+        XercesInitializer   init;
+        DOMImplementation*  impl = 
+            DOMImplementationRegistry::getDOMImplementation(
+                fromNative("LS").c_str( )
+            );
+        if (impl == 0) {
+            cout &lt;&lt; "couldn't create DOM implementation\n";
+            return EXIT_FAILURE;
+        }
+
+        // Construct a DOMBuilder to parse animals.xml.
+        DOMPtr&lt;DOMBuilder&gt;  parser = 
+            static_cast&lt;DOMImplementationLS*&gt;(impl)-&gt;
+                createDOMBuilder(
+                    DOMImplementationLS::MODE_SYNCHRONOUS, 0
+                );
+        CircusErrorHandler  err;
+        parser-&gt;setErrorHandler(&amp;err);
+
+        // Parse animals.xml.
+        DOMDocument*  doc = 
+            parser-&gt;parseURI("animals.xml");
+        DOMElement*   animalList = doc-&gt;getDocumentElement( );
+
+        // Create XPath expression.
+        auto_ptr&lt;XPathEvaluator&gt;   
+            evaluator(XPathEvaluator::createEvaluator( ));
+        auto_ptr&lt;XPathNSResolver&gt;  
+            resolver(evaluator-&gt;createNSResolver(animalList));
+        auto_ptr&lt;XPathExpression&gt;  
+            xpath(
+                evaluator-&gt;createExpression(
+                    fromNative(
+                        "animalList/animal[child::name='Herby']"
+                    ).c_str( ),
+                    resolver.get( )
+                )
+            );
+auto_ptr&lt;XPathEvaluator&gt;   evaluator(XPathEvaluator::createEvaluator( ));
+auto_ptr&lt;XPathNSResolver&gt;  resolver(evaluator-&gt;createNSResolver(animalList));
+auto_ptr&lt;XPathExpression&gt;  xpath(
+      evaluator-&gt;createExpression(
+            fromNative("animalList/animal[child::name='Herby']").c_str( ),
+            resolver.get( )
+      ));
+
+        // Evaluate the expression.
+        XPathResult* result = 
+            xpath-&gt;evaluate(
+                doc, 
+                XPathResult::ORDERED_NODE_ITERATOR_TYPE, 
+                0
+            );
+
+        DOMNode* herby;
+        if (herby = result-&gt;iterateNext( )) {
+            animalList-&gt;removeChild(herby);
+            herby-&gt;release( ); // optional.
+        }
+
+        // Construct a DOMWriter to save animals.xml.
+        DOMPtr&lt;DOMWriter&gt; writer = 
+            static_cast&lt;DOMImplementationLS*&gt;(impl)-&gt;createDOMWriter( );
+        writer-&gt;setErrorHandler(&amp;err);
+
+        // Save animals.xml.
+        LocalFileFormatTarget file("circus.xml");
+        writer-&gt;writeNode(&amp;file, *animalList);
+    } catch (const DOMException&amp; e) {
+        cout &lt;&lt; toNative(e.getMessage( )) &lt;&lt; "\n";
+        return EXIT_FAILURE;
+    } catch (const XPathException &amp;e) {
+        cout &lt;&lt; e.getString( ) &lt;&lt; "\n";
+        return EXIT_FAILURE;
+    } catch (const exception&amp; e) {
+        cout &lt;&lt; e.what( ) &lt;&lt; "\n";
+        return EXIT_FAILURE;
+    }
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Example 14-24 uses Pathan 1, which implements the
+XPath 1.0 recommendation, the same version currently supported by
+Xalan. Pathan 2, currently available in a beta version, provides a
+preliminary implementation 
+
+
+
+of the XPath 2.0 recommendation.
+Pathan 2 represents a more faithful implementation of the XPath
+standard; I recommend using Pathan 2 instead of Pathan 1 as soon as a
+non-beta version becomes available.</p>
+
+<h4 class="docSection2Title" id="title-ID0ETYBK">See Also</h4>
+<p class="docText">Recipe 14.7</p>
+</div>
+</body>
+</html>

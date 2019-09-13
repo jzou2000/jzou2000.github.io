@@ -1,0 +1,1558 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Chapter 6. Functions for the future: generators and promises
+      </title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="epub__calibre sbo-stylesheetcss sbo-pagestylescss">
+<h2>Chapter 6. <a id="ch06__title"/>Functions for the future: generators and promises
+      </h2>
+      
+      <p class="epub__noind"><i class="epub__calibre6">This chapter covers</i></p>
+      
+      <p class="epub__calibre18"/>
+      <ul class="epub__calibre19">
+         
+         <li class="epub__calibre20">Continuing function execution with generators
+            
+         </li>
+         
+         <li class="epub__calibre20">Handling asynchronous tasks with promises
+            
+         </li>
+         
+         <li class="epub__calibre20">Achieving elegant asynchronous code by combining generators and promises
+            
+         </li>
+         
+      </ul>
+      
+      <p class="epub__noind">In the previous three chapters, we focused on functions, specifically on how to define functions and how to use them to great
+         effect. Although we’ve introduced some ES6 features, such as arrow functions and block scopes, we’ve mostly been exploring
+         features that have been part of JavaScript for quite some time. This chapter tackles the cutting edge of ES6 by presenting
+         <i class="epub__calibre6">generators</i> and <i class="epub__calibre6">promises</i>, two completely new JavaScript features.
+      </p>
+      
+      
+            <h5>Note</h5>
+      
+      
+      <p class="epub__noindclose">Generators and promises are both introduced by ES6. You can check out current browser support at http://mng.bz/sOs4 and http://mng.bz/Du38.
+      </p>
+      
+      
+            <p class="epub__noind"><a id="iddle1598"/><a id="iddle1887"/><i class="epub__calibre6">Generators</i> are a special type of function. Whereas a standard function produces at most a single value while running its code from start
+         to finish, generators produce multiple values, on a per request basis, while suspending their execution between these requests.
+         Although new in JavaScript, generators have existed for quite some time in Python, PHP, and C#.
+      </p>
+      
+      <p class="epub__noind">Generators are often considered an almost weird or fringe language feature not often used by the average programmer. Though
+         most of this chapter’s examples are designed to teach you how generator functions work, we’ll also explore some practical
+         aspects of generators. You’ll see how to use generators to simplify convoluted loops and how to take advantage of generators’
+         capability to suspend and resume their execution, which can help you write simpler and more elegant asynchronous code.
+      </p>
+      
+      <p class="epub__noind"><i class="epub__calibre6">Promises</i>, on the other hand, are a new, built-in type of object that help you work with asynchronous code. A promise is a placeholder
+         for a value that we don’t have yet but will at some later point. They’re especially good for working with multiple asynchronous
+         steps.
+      </p>
+      
+      <p class="epub__noind">In this chapter, you’ll see how both generators and promises work, and we’ll finish off by exploring how to combine them to
+         greatly simplify our dealings with asynchronous code. But before going into the specifics, let’s take a sneak peek into how
+         much more elegant our asynchronous code can be.
+      </p>
+      
+      <h3><a id="ch06qa1"/>Do you know?
+      </h3>
+      <blockquote class="epub__calibre14">
+         <p class="epub__calibre18"><a id="ch06qa1qe1"/></p>
+         <p class="epub__calibre18"><a id="ch06qa1q1"/><b class="epub__calibre21">Q1: </b></p><p class="epub__noind">What are some common uses for a generator function?</p>
+         <p class="epub__calibre18"/>
+      </blockquote>
+      <blockquote class="epub__calibre14">
+         <p class="epub__calibre18"><a id="ch06qa1qe2"/></p>
+         <p class="epub__calibre18"><a id="ch06qa1q2"/><b class="epub__calibre21">Q2: </b></p><p class="epub__noind">Why are promises better than simple callbacks for asynchronous code?</p>
+         <p class="epub__calibre18"/>
+      </blockquote>
+      <blockquote class="epub__calibre14">
+         <p class="epub__calibre18"><a id="ch06qa1qe3"/></p>
+         <p class="epub__calibre18"><a id="ch06qa1q3"/><b class="epub__calibre21">Q3: </b></p><p class="epub__noind">You start a number of long-running tasks with Promise.race. When does the promise resolve? When would it fail to resolve?</p>
+         <p class="epub__calibre18"/>
+      </blockquote>
+      
+      
+      <h3><a id="ch06lev1sec1__title"/>6.1. Making our async code elegant with generators and promises
+      </h3>
+      
+      <p class="epub__noind">Imagine that you’re a developer working at freelanceninja.com, a popular freelance ninja recruitment site enabling customers to hire ninjas for stealth missions. Your task is to implement
+         a functionality that lets users get details about the highest-rated mission done by the most popular ninja. The data representing
+         the ninjas, the summaries of their missions, as well as the details of the missions are stored on a remote server, encoded
+         in JSON. You might write something like this:
+      </p>
+      
+      <pre id="PLd0e13103" class="epub__calibre5">try {
+   var ninjas = syncGetJSON("ninjas.json");
+   var missions = syncGetJSON(ninjas[0].missionsUrl);
+   var missionDetails = syncGetJSON(missions[0].detailsUrl);
+   //Study the mission description
+}
+catch(e){
+  //Oh no, we weren't able to get the mission details
+}</pre>
+      
+      <p class="epub__noind"><a id="iddle1164"/><a id="iddle1533"/><a id="iddle2213"/>This code is relatively easy to understand, and if an error occurs in any of the steps, we can easily catch it in the <kbd class="epub__calibre15">catch</kbd> block. But unfortunately, this code has a big problem. Getting data from a server is a long-running operation, and because
+         JavaScript relies on a single-threaded execution model, we’ve just blocked our UI until the long-running operations finish.
+         This leads to unresponsive applications and disappointed users. To solve this problem, we can rewrite it with callbacks, which
+         will be invoked when a task finishes, without blocking the UI:
+      </p>
+      
+      <pre id="PLd0e13131" class="epub__calibre5">getJSON("ninjas.json", function(err, ninjas){
+  if(err) {
+    console.log("Error fetching list of ninjas", err);
+    return;
+  }
+  getJSON(ninjas[0].missionsUrl, function(err, missions) {
+    if(err) {
+      console.log("Error locating ninja missions", err);
+      return;
+    }
+  getJSON(missions[0].detailsUrl, function(err, missionDetails){
+    if(err) {
+      console.log("Error locating mission details", err);
+      return;
+    }
+    //Study the intel plan
+    });
+  });
+});</pre>
+      
+      <p class="epub__noind">Although this code will be much better received by our users, you’ll probably agree that it’s messy, it adds a lot of boilerplate
+         error-handling code, and it’s plain ugly. This is where generators and promises jump in. By combining them, we can turn the
+         nonblocking but awkward callback code into something much more elegant:
+      </p>
+      
+      <p class="epub__center1"><img src="Images/getfile(1)-6" alt="" class="epub__calibre2"/></p>
+      
+      <p class="epub__noind">Don’t worry if this example doesn’t make much sense or if you find some of the syntax (such as <kbd class="epub__calibre15">function*</kbd> or <kbd class="epub__calibre15">yield</kbd>) unfamiliar. By the end of this chapter, you’ll meet all <a id="iddle1008"/><a id="iddle1103"/><a id="iddle1505"/><a id="iddle1588"/><a id="iddle1800"/><a id="iddle1801"/>the necessary ingredients. For now, it’s enough that you compare the elegance (or the lack thereof) of the nonblocking callback
+         code and the nonblocking generators and promises code.
+      </p>
+      
+      <p class="epub__noind">Let’s start slowly by exploring generator functions, the first stepping stone toward elegant asynchronous code.</p>
+      
+      
+      
+      <h3><a id="ch06lev1sec2__title"/>6.2. Working with generator functions
+      </h3>
+      
+      <p class="epub__noind">Generators are a completely new type of function and are significantly different from standard, run-of-the-mill functions.
+         A <i class="epub__calibre6">generator</i> is a function that generates a sequence of values, but not all at once, as a standard function would, but on a per request
+         basis. We have to explicitly ask the generator for a new value, and the generator will either respond with a value or notify
+         us that it has no more values to produce. What’s even more curious is that after a value is produced, a generator function
+         doesn’t end its execution, as a normal function would. Instead, a generator is merely suspended. Then, when a request for
+         another value comes along, the generator resumes where it left off.
+      </p>
+      
+      <p class="epub__noind">The following listing provides a simple example of using a generator to generate a sequence of weapons.</p>
+      
+      
+      
+      <h5>Listing 6.1. <a id="ch06ex01__title"/>Using a generator function to generate a sequence of values
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(2)-11" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">We start by defining a generator that will produce a sequence of weapons. Creating a generator function is simple: We append
+         an asterisk (<kbd class="epub__calibre15">*</kbd>) after the <kbd class="epub__calibre15">function</kbd> keyword. This enables us to use the new <kbd class="epub__calibre15">yield</kbd> keyword within the body of the generator to produce individual values. Figure 6.1 illustrates the syntax.
+      </p>
+      
+      
+      
+      <h5>Figure 6.1. <a id="ch06fig01__title"/>Add an asterisk (*) after the function keyword to define a generator.
+      </h5>
+      
+      
+      
+      <p class="epub__center1"><img src="Images/getfile(3)-7" alt="" class="epub__calibre2"/></p>
+      
+      
+      
+      <p class="epub__noind">In this example, we create a generator called <kbd class="epub__calibre15">WeaponGenerator</kbd> that produces a sequence of weapons: <kbd class="epub__calibre15">Katana</kbd>, <kbd class="epub__calibre15">Wakizashi</kbd>, and <kbd class="epub__calibre15">Kusarigama</kbd>. One way of consuming that sequence of weapons is by using a new kind of loop, the <kbd class="epub__calibre15">for-of</kbd> loop:
+      </p>
+      
+      <pre id="PLd0e13264" class="epub__calibre5">for(let weapon of WeaponGenerator()) {
+  assert(weapon, weapon);
+}</pre>
+      
+      <p class="epub__noind">The result of invoking this <kbd class="epub__calibre15">for-of</kbd> loop is shown in figure 6.2. (For now, don’t worry much about the <kbd class="epub__calibre15">for-of</kbd> loop, as we’ll explore it later.)
+      </p>
+      
+      
+      <p class="epub__noind"/>
+      
+      
+      <h5>Figure 6.2. <a id="ch06fig02__title"/>The result of iterating over our <kbd class="epub__calibre15">WeaponGenerator()</kbd></h5>
+      
+      
+      
+      <p class="epub__center1"><img src="Images/getfile(4)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      
+      <p class="epub__noind"><a id="iddle1594"/><a id="iddle1695"/><a id="iddle1795"/><a id="iddle1982"/>On the right side of the <kbd class="epub__calibre15">for-of</kbd> loop, we’ve placed the result of invoking our generator. But if you take a closer look at the body of the <kbd class="epub__calibre15">WeaponGenerator</kbd> function, you’ll see that there’s no <kbd class="epub__calibre15">return</kbd> statement. What’s up with that? In this case, shouldn’t the right side of the <kbd class="epub__calibre15">for-of loop</kbd> evaluate to <kbd class="epub__calibre15">undefined</kbd>, as would be the case if we were dealing with a standard function?
+      </p>
+      
+      <p class="epub__noind">The truth is that generators are quite unlike standard functions. For starters, calling a generator doesn’t execute the generator
+         function; instead it creates an object called an <i class="epub__calibre6">iterator</i>. Let’s explore that object.
+      </p>
+      
+      
+      <h4>6.2.1. <a id="ch06lev2sec1__title"/>Controlling the generator through the iterator object
+      </h4>
+      
+      <p class="epub__noind">Making a call to a generator doesn’t mean that the body of the generator function will be executed. Instead, an iterator object
+         is created, an object through which we can communicate with the generator. For example, we can use the iterator to request
+         additional values. Let’s adjust our previous example to explore how the iterator object works.
+      </p>
+      
+      <h5>Listing 6.2. <a id="ch06ex02__title"/>Controlling a generator through an iterator object
+      </h5>
+      <p class="epub__center1"><img src="Images/getfile(5)-5" alt="" class="epub__calibre2"/></p>
+      <p class="epub__center1"><img src="Images/getfile(6)-5" alt="" class="epub__calibre2"/></p>
+      
+      <p class="epub__noind"><a id="iddle2208"/><a id="iddle2214"/>As you can see, when we call a generator, a new <i class="epub__calibre6">iterator</i> is created:
+      </p>
+      
+      <pre id="PLd0e13383" class="epub__calibre5">const weaponsIterator = WeaponGenerator();</pre>
+      
+      <p class="epub__noind">The iterator is used to control the execution of the generator. One of the fundamental things that the iterator object exposes
+         is the <kbd class="epub__calibre15">next</kbd> method, which we can use to control the generator by requesting a value from it:
+      </p>
+      
+      <pre id="PLd0e13395" class="epub__calibre5">const result1 = weaponsIterator.next();</pre>
+      
+      <p class="epub__noind">As a response to that call, the generator executes its code until it reaches a <kbd class="epub__calibre15">yield</kbd> keyword that produces an intermediary result (one item in the generated sequence of items), and returns a <i class="epub__calibre6">new</i> object that encapsulates that result and tells us whether its work is done.
+      </p>
+      
+      <p class="epub__noind">As soon as the current value is produced, the generator suspends its execution without blocking and patiently waits for another
+         value request. This is an incredibly powerful feature that standard functions don’t have, a feature that we’ll use later to
+         great effect.
+      </p>
+      
+      <p class="epub__noind">In this case, the first call to the iterator’s <kbd class="epub__calibre15">next</kbd> method executes the generator code to the first <kbd class="epub__calibre15">yield</kbd> expression, <kbd class="epub__calibre15">yield "Katana"</kbd>, and returns an object with the property <kbd class="epub__calibre15">value</kbd> set to <kbd class="epub__calibre15">Katana</kbd> and the property <kbd class="epub__calibre15">done</kbd> set to <kbd class="epub__calibre15">false</kbd>, signaling that there are more values to produce.
+      </p>
+      
+      <p class="epub__noind">Later, we request another value from the generator, by making another call to the <kbd class="epub__calibre15">weaponIterator</kbd>’s <kbd class="epub__calibre15">next</kbd> method:
+      </p>
+      
+      <pre id="PLd0e13446" class="epub__calibre5">const result2 = weaponsIterator.next();</pre>
+      
+      <p class="epub__noind">This wakes up the generator from suspension, and the generator continues where it left off, executing its code until another
+         intermediary value is reached: <kbd class="epub__calibre15">yield "Wakizashi"</kbd>. This suspends the generator and produces an object carrying <kbd class="epub__calibre15">Wakizashi</kbd>.
+      </p>
+      
+      <p class="epub__noind">Finally, when we call the <kbd class="epub__calibre15">next</kbd> method for the third time, the generator resumes its execution. But this time there’s no more code to execute, so the generator
+         returns an object with <kbd class="epub__calibre15">value</kbd> set to <kbd class="epub__calibre15">undefined</kbd>, and <kbd class="epub__calibre15">done</kbd> set to <kbd class="epub__calibre15">true</kbd>, signaling that it’s done with its work.
+      </p>
+      
+      <p class="epub__noind">Now that you’ve seen how to control generators through iterators, you’re ready to learn how to iterate over the produced values.</p>
+      
+      
+      
+      <h5><a id="ch06lev3sec1__title"/>Iterating the iterator
+      </h5>
+      
+      <p class="epub__noind"><a id="iddle1373"/><a id="iddle1506"/><a id="iddle1595"/><a id="iddle1696"/><a id="iddle2189"/>The iterator, created by calling a generator, exposes a <kbd class="epub__calibre15">next</kbd> method through which we can request a new value from the generator. The <kbd class="epub__calibre15">next</kbd> method returns an object that carries the value produced by the generator, as well as the information stored in the <kbd class="epub__calibre15">done</kbd> property that tells us whether the generator has additional values to produce.
+      </p>
+      
+      <p class="epub__noind">Now we’ll take advantage of these facts to use a plain old <kbd class="epub__calibre15">while</kbd> loop to iterate over values produced by a generator. See the following listing.
+      </p>
+      
+      
+      
+      <h5>Listing 6.3. <a id="ch06ex03__title"/>Iterating over generator results with a while loop
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(7)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">Here we again create an iterator object by calling a generator function:</p>
+      
+      <pre id="PLd0e13555" class="epub__calibre5">const weaponsIterator = WeaponGenerator();</pre>
+      
+      <p class="epub__noind">We also create an <kbd class="epub__calibre15">item</kbd> variable in which we’ll store individual values produced by the generator. We continue by specifying a <kbd class="epub__calibre15">while</kbd> loop with a slightly complicated looping condition, which we’ll break down a bit:
+      </p>
+      
+      <pre id="PLd0e13570" class="epub__calibre5">while(!(item = weaponsIterator.next()).done) {
+  assert(item !== null, item.value)
+}</pre>
+      
+      <p class="epub__noind">On each loop iteration, we fetch a value from the generator by calling the <kbd class="epub__calibre15">next</kbd> method of our <kbd class="epub__calibre15">weaponsIterator</kbd>, and we store that value in the <kbd class="epub__calibre15">item</kbd> variable. Like all such objects, the object referenced by the <kbd class="epub__calibre15">item</kbd> variable has a <kbd class="epub__calibre15">value</kbd> property that stores the value returned from the generator, and a <kbd class="epub__calibre15">done</kbd> property that signals whether the generator is finished producing values. If the generator isn’t done with its work, we go
+         into another iteration of the loop; and if it is, we stop looping.
+      </p>
+      
+      <p class="epub__noind">And that’s how the <kbd class="epub__calibre15">for-of</kbd> loop, from our first generator example, works. The <kbd class="epub__calibre15">for-of</kbd> loop is syntactic sugar for iterating over iterators:
+      </p>
+      
+      <pre id="PLd0e13606" class="epub__calibre5">for(var item of WeaponGenerator ()){
+  assert(item !== null, item);
+}</pre>
+      
+      <p class="epub__noind">Instead of manually calling the <kbd class="epub__calibre15">next</kbd> method of the matching iterator and always checking whether we’re finished, we can use the <kbd class="epub__calibre15">for-of</kbd> loop to do the exact same thing, only behind the scenes.
+      </p>
+      
+      
+      
+      
+      <h5><a id="ch06lev3sec2__title"/>Yielding to another generator
+      </h5>
+      
+      <p class="epub__noind"><a id="iddle1596"/><a id="iddle1601"/><a id="iddle1661"/><a id="iddle1697"/><a id="iddle2216"/>Just as we often call one standard function from another standard function, in certain cases we want to be able to delegate
+         the execution of one generator to another. Let’s take a look at an example that generates both warriors and ninjas.
+      </p>
+      
+      
+      
+      <h5>Listing 6.4. <a id="ch06ex04__title"/>Using yield* to delegate to another generator
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(8)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">If you run this code, you’ll see that the output is <kbd class="epub__calibre15">Sun Tzu</kbd>, <kbd class="epub__calibre15">Hattori</kbd>, <kbd class="epub__calibre15">Yoshi</kbd>, <kbd class="epub__calibre15">Genghis Khan</kbd>. Generating <kbd class="epub__calibre15">Sun Tzu</kbd> probably doesn’t catch you off guard; it’s the first value yielded by the <kbd class="epub__calibre15">WarriorGenerator</kbd>. But the second output, <kbd class="epub__calibre15">Hattori</kbd>, deserves an explanation.
+      </p>
+      
+      <p class="epub__noind">By using the <kbd class="epub__calibre15">yield*</kbd> operator on an iterator, we yield to another generator. In this example, from a <kbd class="epub__calibre15">WarriorGenerator</kbd> we’re yielding to a new <kbd class="epub__calibre15">NinjaGenerator</kbd>; all calls to the current <kbd class="epub__calibre15">WarriorGenerator</kbd> iterator’s <kbd class="epub__calibre15">next</kbd> method are rerouted to the <kbd class="epub__calibre15">NinjaGenerator</kbd>. This holds until the <kbd class="epub__calibre15">NinjaGenerator</kbd> has no work left to do. So in our example, after <kbd class="epub__calibre15">Sun Tzu</kbd>, the program generates <kbd class="epub__calibre15">Hattori</kbd> and <kbd class="epub__calibre15">Yoshi.</kbd> Only when the <kbd class="epub__calibre15">NinjaGenerator</kbd> is done with its work will the execution of the original iterator continue by outputting <kbd class="epub__calibre15">Genghis Khan</kbd>. Notice that this is happening transparently to the code that calls the original generator. The <kbd class="epub__calibre15">for-of</kbd> loop doesn’t care that the <kbd class="epub__calibre15">WarriorGenerator</kbd> yields to another generator; it keeps calling <kbd class="epub__calibre15">next</kbd> until it’s done.
+      </p>
+      
+      <p class="epub__noind">Now that you have a grasp of how generators work in general and how delegating to another generator works, let’s look at a
+         couple of practical examples.
+      </p>
+      
+      
+      
+      
+      <h4>6.2.2. <a id="ch06lev2sec2__title"/>Using generators
+      </h4>
+      
+      <p class="epub__noind">Generating sequences of items is all nice and dandy, but let’s get more practical, starting with a simple case of generating
+         unique IDs.
+      </p>
+      
+      
+      <h5><a id="ch06lev3sec3__title"/>Using generators to generate IDs
+      </h5>
+      
+      <p class="epub__noind">When creating certain objects, often we need to assign a unique ID to each object. The easiest way to do this is through a
+         global counter variable, but that’s kind of ugly because the variable can be accidently messed up from anywhere in our code.
+         Another option is to use a generator, as shown in the following listing.
+      </p>
+      
+      
+      <p class="epub__noind"/>
+      
+      
+      <h5>Listing 6.5. <a id="ch06ex05__title"/>Using generators for generating IDs
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(9)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind"><a id="iddle1652"/><a id="iddle2190"/>This example starts with a generator that has one local variable, <kbd class="epub__calibre15">id</kbd>, which represents our ID counter. The <kbd class="epub__calibre15">id</kbd> variable is local to our generator; there’s no fear that someone will accidently modify it from somewhere else in the code.
+         This is followed by an infinite <kbd class="epub__calibre15">while</kbd> loop, which at each iteration yields a new <kbd class="epub__calibre15">id</kbd> value and suspends its execution until a request for another ID comes along:
+      </p>
+      
+      <pre id="PLd0e13811" class="epub__calibre5">function *IdGenerator(){
+  let id = 0;
+  while(true){
+    yield ++id;
+  }
+}</pre>
+      
+      
+            <h5>Note</h5>
+      
+      
+      <p class="epub__noindclose">Writing infinite loops isn’t something that we generally want to do in a standard function. But with generators, everything
+         is fine! Whenever the generator encounters a <kbd class="epub__calibre15">yield</kbd> statement, the generator execution is suspended until the <kbd class="epub__calibre15">next</kbd> method is called again. So every <kbd class="epub__calibre15">next</kbd> call executes only one iteration of our infinite <kbd class="epub__calibre15">while</kbd> loop and sends back the next ID value.
+      </p>
+      
+      
+            <p class="epub__noind">After defining the generator, we create an iterator object:</p>
+      
+      <pre id="PLd0e13840" class="epub__calibre5">const idIterator = IdGenerator();</pre>
+      
+      <p class="epub__noind">This allows us to control the generator with calls to the <kbd class="epub__calibre15">idIterator.next()</kbd> method. This executes the generator until a <kbd class="epub__calibre15">yield</kbd> is encountered, returning a new ID value that we can use for our objects:
+      </p>
+      
+      <pre id="PLd0e13855" class="epub__calibre5">const ninja1 = { id: idIterator.next().value };</pre>
+      
+      <p class="epub__noind">See how simple this is? No messy global variables whose value can be accidentally changed. Instead, we use an iterator to
+         request values from a generator. In addition, if <a id="iddle1366"/><a id="iddle1602"/><a id="iddle2133"/>later we need another iterator for tracking the IDs of, for example, <kbd class="epub__calibre15">samurai</kbd>, we can initialize a new generator for that.
+      </p>
+      
+      
+      
+      <h5><a id="ch06lev3sec4__title"/>Using generators to traverse the DOM
+      </h5>
+      
+      <p class="epub__noind">As you saw in chapter 2, the layout of a web page is based on the DOM, a tree-like structure of HTML nodes, in which every node, except the root
+         one, has exactly one parent, and can have zero or more children. Because the DOM is such a fundamental structure in web development,
+         a lot of our code is based around traversing it. One relatively easy way to do this is by implementing a recursive function
+         that will be executed for each visited node. See the following code.
+      </p>
+      
+      
+      
+      <h5>Listing 6.6. <a id="ch06ex06__title"/>Recursive DOM traversal
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(10)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">In this example, we use a recursive function to traverse all descendants of the element with the <kbd class="epub__calibre15">id subtree</kbd>, in the process logging each type of node that we visit. In this case, the code outputs <kbd class="epub__calibre15">DIV</kbd>, <kbd class="epub__calibre15">FORM</kbd>, <kbd class="epub__calibre15">INPUT</kbd>, <kbd class="epub__calibre15">P</kbd>, and <kbd class="epub__calibre15">SPAN</kbd>.
+      </p>
+      
+      <p class="epub__noind">We’ve been writing such DOM traversal code for a while now, and it has served us perfectly fine. But now that we have generators
+         at our disposal, we can do it differently; see the following code.
+      </p>
+      
+      
+      
+      <h5>Listing 6.7. <a id="ch06ex07__title"/>Iterating over a DOM tree with generators
+      </h5>
+      
+      
+      <p class="epub__center1"><img src="Images/getfile(11)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind"><a id="iddle1233"/><a id="iddle1234"/><a id="iddle1507"/><a id="iddle1590"/><a id="iddle1591"/><a id="iddle1796"/>This listing shows that we can achieve DOM traversals with generators, just as easily as with standard recursion, but with
+         the aditional benefit of not having to use the slightly awkward syntax of callbacks. Instead of processing the subtree of
+         each visited node by recursing another level, we create one generator function for each visited node and yield to it. This
+         enables us to write what’s conceptually recursive code in iterable fashion. The benefit is that we can consume the generated
+         sequence of nodes with a simple <kbd class="epub__calibre15">for-of</kbd> loop, without resorting to nasty callbacks.
+      </p>
+      
+      <p class="epub__noind">This example is a particulary good one, because it also shows how to use generators in order to separate the code that’s producing
+         values (in this case, HTML nodes) from the code that’s consuming the sequence of generated values (in this case, the <kbd class="epub__calibre15">for-of</kbd> loop that logs the visited nodes), without having to resort to callbacks. In addition, using iterations is, in certain cases,
+         much more natural than recursion, so it’s always good to have our options open.
+      </p>
+      
+      <p class="epub__noind">Now that we’ve explored some practical aspects of generators, let’s go back to a slighty more theoretical topic and see how
+         to exchange data with a running generator.
+      </p>
+      
+      
+      
+      
+      <h4>6.2.3. <a id="ch06lev2sec3__title"/>Communicating with a generator
+      </h4>
+      
+      <p class="epub__noind">In the examples presented so far, you’ve seen how to return multiple values <i class="epub__calibre6">from</i> a generator by using <kbd class="epub__calibre15">yield</kbd> expressions. But generators are even more powerful than that! We can also send data <i class="epub__calibre6">to</i> a generator, thereby achieving two-way communication! With a generator, we can produce an intermediary result, use that result
+         to calculate something else from outside the generator, and then, whenever we’re ready, send completely new data back to the
+         generator and resume its execution. We’ll use this feature to great effect at the end of the chapter to deal with asynchronous
+         code, but for now, let’s keep it simple.
+      </p>
+      
+      
+      <h5><a id="ch06lev3sec5__title"/>Sending values as generator function arguments
+      </h5>
+      
+      <p class="epub__noind">The easiest way to send data to a generator is by treating it like any other function and using function call arguments. Take
+         a look at the following listing.
+      </p>
+      
+      
+      
+      <h5>Listing 6.8. <a id="ch06ex08__title"/>Sending data to and receiving data from a generator
+      </h5>
+      
+      
+      <p class="epub__center1"><img src="Images/getfile(12)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind"><a id="iddle1236"/><a id="iddle1593"/><a id="iddle2166"/><a id="iddle2209"/>A function receiving data is nothing special; plain old functions do it all the time. But remember, generators have this amazing
+         power; they can be suspended and resumed. And it turns out that, unlike standard functions, generators can even receive data
+         <i class="epub__calibre6">after</i> their execution has started, whenever we resume them by requesting the next value.
+      </p>
+      
+      
+      
+      <h5><a id="ch06lev3sec6__title"/>Using the next method to send values into a generator
+      </h5>
+      
+      <p class="epub__noind">In addition to providing data when first invoking the generator, we can send data <i class="epub__calibre6">into</i> a generator by passing arguments to the <kbd class="epub__calibre15">next</kbd> method. In the process, we wake up the generator from suspension and resume its execution. This passed-in value is used by
+         the generator as the value of the whole <kbd class="epub__calibre15">yield</kbd> expression, in which the generator was currently suspended, as shown in figure 6.3.
+      </p>
+      
+      
+      
+      <h5>Figure 6.3. <a id="ch06fig03__title"/>The first call to <kbd class="epub__calibre15">ninjaIterator.next()</kbd> requests a new value from the generator, which returns <kbd class="epub__calibre15">Hattori skulk</kbd> and suspends the execution of the generator at the <kbd class="epub__calibre15">yield</kbd> expression. The second call to <kbd class="epub__calibre15">ninjaIterator.next("Hanzo")</kbd> requests a new value, but also sends the argument <kbd class="epub__calibre15">Hanzo</kbd> into the generator. This value will be used as the value of the whole <kbd class="epub__calibre15">yield</kbd> expression, and the variable <kbd class="epub__calibre15">imposter</kbd> will now carry the value <kbd class="epub__calibre15">Hanzo</kbd>.
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(13)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">In this example, we have two calls to the <kbd class="epub__calibre15">ninjaIterator</kbd>’s <kbd class="epub__calibre15">next</kbd> method. The first call, <kbd class="epub__calibre15">ninjaIterator.next()</kbd>, requests the first value from the generator. Because our generator hasn’t started executing, this call starts the generator,
+         which calculates the <a id="iddle1165"/><a id="iddle1235"/><a id="iddle1434"/><a id="iddle1592"/><a id="iddle2117"/><a id="iddle2119"/><a id="iddle2134"/>value of the expression <kbd class="epub__calibre15">"Hattori " + action,</kbd> yields the <kbd class="epub__calibre15">Hattori skulk</kbd> value, and suspends the generator’s execution. There’s nothing special about this; we’ve done something similar multiple
+         times throughout this chapter.
+      </p>
+      
+      <p class="epub__noind">The interesting thing happens on the second call to the <kbd class="epub__calibre15">ninjaIterator</kbd>’s <kbd class="epub__calibre15">next</kbd> method: <kbd class="epub__calibre15">ninjaIterator.next("Hanzo")</kbd>. This time, we’re using the <kbd class="epub__calibre15">next</kbd> method to pass data back to the generator. Our generator function is patiently waiting, suspended at the expression <kbd class="epub__calibre15">yield ("Hattori " + action)</kbd>, so the value <kbd class="epub__calibre15">Hanzo</kbd>, passed as the argument to <kbd class="epub__calibre15">next()</kbd>, is used as the value of the whole <kbd class="epub__calibre15">yield</kbd> expression. In our case, this means that the variable <kbd class="epub__calibre15">imposter</kbd> in <kbd class="epub__calibre15">imposter = yield ("Hattori " + action)</kbd> will end up with the value <kbd class="epub__calibre15">Hanzo</kbd>.
+      </p>
+      
+      <p class="epub__noind">That’s how we achieve two-way communication with a generator. We use <kbd class="epub__calibre15">yield</kbd> to return data from a generator, and the <kbd class="epub__calibre15">iterator</kbd>’s <kbd class="epub__calibre15">next()</kbd> method to pass data back to the generator.
+      </p>
+      
+      
+            <h5>Note</h5>
+      
+      
+      <p class="epub__noindclose">The <kbd class="epub__calibre15">next</kbd> method supplies the value to the waiting <kbd class="epub__calibre15">yield</kbd> expression, so if there’s no <kbd class="epub__calibre15">yield</kbd> expression waiting, there’s nothing to supply the value to. For this reason, we <i class="epub__calibre6">can’t</i> supply values over the first call to the <kbd class="epub__calibre15">next</kbd> method. But remember, if you need to supply an initial value to the generator, you can do so when calling the generator itself,
+         as we did with <kbd class="epub__calibre15">NinjaGenerator("skulk")</kbd>.
+      </p>
+      
+      
+            <h5><a id="ch06lev3sec7__title"/>Throwing exceptions
+      </h5>
+      
+      <p class="epub__noind">There’s another, slightly less orthodox, way to supply a value to a generator: by throwing an exception. Each iterator, in
+         addition to having a <kbd class="epub__calibre15">next</kbd> method, has a <kbd class="epub__calibre15">throw</kbd> method that we can use to throw an exception back to the generator. Again, let’s look at a simple example.
+      </p>
+      
+      
+      
+      <h5>Listing 6.9. <a id="ch06ex09__title"/>Throwing exceptions to generators
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(14)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">Listing 6.9 starts similarly to listing 6.8, by specifying a generator called <kbd class="epub__calibre15">NinjaGenerator</kbd>. But this time, the body of the generator is slightly different. We’ve surrounded the whole function body code with a <kbd class="epub__calibre15">try-catch</kbd> block:
+      </p>
+      
+      
+      <pre id="PLd0e14328" class="epub__calibre5">function* NinjaGenerator() {
+  try{
+    yield "Hattori";
+    fail("The expected exception didn't occur");
+  }
+  catch(e){
+    assert(e === "Catch this!", "Aha! We caught an exception");
+  }
+}</pre>
+      
+      <p class="epub__noind"><a id="iddle1438"/><a id="iddle2083"/>We then continue by creating an iterator, and getting one value from the generator:
+      </p>
+      
+      <pre id="PLd0e14347" class="epub__calibre5">const ninjaIterator = NinjaGenerator();
+const result1 = ninjaIterator.next();</pre>
+      
+      <p class="epub__noind">Finally, we use the <kbd class="epub__calibre15">throw</kbd> method, available on all iterators, to throw an exception back to the generator:
+      </p>
+      
+      <pre id="PLd0e14359" class="epub__calibre5">ninjaIterator.throw("Catch this!");</pre>
+      
+      <p class="epub__noind">By running this listing, we can see that our exception throwing works as expected, as shown in figure 6.4.
+      </p>
+      
+      
+      
+      <h5>Figure 6.4. <a id="ch06fig04__title"/>We can throw exceptions to generators from outside a generator.
+      </h5>
+      
+      
+      
+      <p class="epub__center1"><img src="Images/getfile(15)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      
+      <p class="epub__noind">This feature that enables us to throw exceptions back to generators might feel a bit strange at first. Why would we even want
+         to do that? Don’t worry; we won’t keep you in the dark for long. At the end of this chapter, we’ll use this feature to improve
+         asynchronous server-side communication. Just be patient a bit longer.
+      </p>
+      
+      <p class="epub__noind">Now that you’ve seen several aspects of generators, we’re ready to take a look under the hood to see how generators work.</p>
+      
+      
+      
+      
+      <h4>6.2.4. <a id="ch06lev2sec4__title"/>Exploring generators under the hood
+      </h4>
+      
+      <p class="epub__noind">So far we know that calling a generator doesn’t execute it. Instead, it creates a new iterator that we can use to request
+         values from the generator. After a generator produces (or yields) a value, it suspends its execution and waits for the next
+         request. So in a way, a generator works almost like a small program, a state machine that moves between states:
+      </p>
+      
+      <p class="epub__calibre18"/>
+      <ul class="epub__calibre19">
+         
+         <li class="epub__calibre20"><b class="epub__calibre21"><i class="epub__calibre6">Suspended start—</i> </b>When the generator is created, it starts in this state. None of the generator’s code is executed.
+            
+         </li>
+         
+         <li class="epub__calibre20"><b class="epub__calibre21"><i class="epub__calibre6">Executing—</i> </b>The state in which the code of the generator is executed. The execution continues either from the beginning or from where
+            the generator was last suspended. A generator moves to this state when the matching iterator’s <kbd class="epub__calibre15">next</kbd> method is called, and there exists code to be executed.
+            
+         </li>
+         
+         <li class="epub__calibre20"><b class="epub__calibre21"><i class="epub__calibre6">Suspended yield—</i> </b><a id="iddle1797"/><a id="iddle1983"/><a id="iddle2210"/>During execution, when a generator reaches a <kbd class="epub__calibre15">yield</kbd> expression, it creates a new object carrying the return value, yields it, and suspends its execution. This is the state in
+            which the generator is paused and is waiting to continue its execution.
+            
+         </li>
+         
+         <li class="epub__calibre20"><b class="epub__calibre21"><i class="epub__calibre6">Completed—</i> </b>If during execution the generator either runs into a <kbd class="epub__calibre15">return</kbd> statement or runs out of code to execute, the generator moves into this state.
+            
+         </li>
+         
+      </ul>
+      
+      <p class="epub__noind">Figure 6.5 illustrates these states.
+      </p>
+      
+      
+      
+      <h5>Figure 6.5. <a id="ch06fig05__title"/>During execution, a generator moves between states triggered by calls to the matching iterator’s <kbd class="epub__calibre15">next</kbd> method.
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(16)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">Now let’s supplement this on an even deeper level, by seeing how the execution of generators is tracked with execution contexts.</p>
+      
+      
+      
+      <h5><a id="ch06lev3sec8__title"/>Tracking generators with execution contexts
+      </h5>
+      
+      <p class="epub__noind"><a id="iddle1441"/><a id="iddle1600"/>In the previous chapter, we introduced the execution context, an internal JavaScript mechanism used to track the execution
+         of functions. Although somewhat special, generators are still functions, so let’s take a closer look by exploring the relationship
+         between them and execution contexts. We’ll start with a simple code fragment:
+      </p>
+      
+      <pre id="PLd0e14512" class="epub__calibre5">function* NinjaGenerator(action) {
+  yield "Hattori " + action;
+  return "Yoshi " + action;
+}
+
+const ninjaIterator = NinjaGenerator("skulk");
+const result1 = ninjaIterator.next();
+const result2 = ninjaIterator.next();</pre>
+      
+      <p class="epub__noind">Here we reuse our generator that produces two values: <kbd class="epub__calibre15">Hattori skulk</kbd> and <kbd class="epub__calibre15">Yoshi skulk</kbd>.
+      </p>
+      
+      <p class="epub__noind">Now, we’ll explore the state of the application, the execution context stack at various points in the application execution.
+         Figure 6.6 gives a snapshot at two positions in the application execution. The first snapshot shows the state of the application execution
+         <i class="epub__calibre6">before</i> calling the <kbd class="epub__calibre15">NinjaGenerator</kbd> function <img src="Images/getfile(17)-5" alt="" class="epub__calibre2"/>. Because we’re executing global code, the execution context stack contains only the global execution context, which references
+         the global environment in which our identifiers are kept. Only the <kbd class="epub__calibre15">NinjaGenerator</kbd> identifier references a function, while the values of all other identifiers are <kbd class="epub__calibre15">undefined</kbd>.
+      </p>
+      
+      
+      <p class="epub__noind"/>
+      
+      
+      <h5>Figure 6.6. <a id="ch06fig06__title"/>The state of the execution context stack <i class="epub__calibre6">before</i> calling the <kbd class="epub__calibre15">NinjaGenerator</kbd> function <img src="Images/getfile(17)-6" alt="" class="epub__calibre2"/>, and <i class="epub__calibre6">when</i> calling the <kbd class="epub__calibre15">NinjaGenerator</kbd> function <img src="Images/getfile(18)-5" alt="" class="epub__calibre2"/></h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(19)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">When we make the call to the <kbd class="epub__calibre15">NinjaGenerator</kbd> function <img src="Images/getfile(18)-6" alt="" class="epub__calibre2"/></p>
+      
+      <pre id="PLd0e14590" class="epub__calibre5">const ninjaIterator = NinjaGenerator("skulk");</pre>
+      
+      <p class="epub__noind">the control flow enters the generator and, as it happens when we enter any other function, a new <kbd class="epub__calibre15">NinjaGenerator</kbd> execution context item is created (alongside the matching lexical environment) and pushed onto the stack. But because generators
+         are special, <i class="epub__calibre6">none</i> of the function code is executed. Instead, a new iterator, which we’ll refer to in the code as <kbd class="epub__calibre15">ninjaIterator</kbd>, is created and returned. Because the iterator is used to control the execution of the generator, the iterator gets a reference
+         to the execution context in which it was created.
+      </p>
+      
+      <p class="epub__noind">An interesting thing happens when the program execution leaves the generator, as shown in figure 6.7. Typically, when program execution returns from a standard function, the matching execution context is popped from the stack
+         and completely discarded. But this isn’t the case with generators.
+      </p>
+      
+      
+      <p class="epub__noind"/>
+      
+      
+      <h5>Figure 6.7. <a id="ch06fig07__title"/>The state of the application when returning from the <kbd class="epub__calibre15">NinjaGenerator</kbd> call
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(20)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind"><a id="iddle1798"/>The matching <kbd class="epub__calibre15">NinjaGenerator</kbd> stack item <i class="epub__calibre6">is</i> popped from the stack, but it’s <i class="epub__calibre6">not</i> discarded, because the <kbd class="epub__calibre15">ninjaIterator</kbd> keeps a reference to it. You can see it as an analogue to closures. In closures, we need to keep alive the variables that
+         are alive at the moment the function closure is created, so our functions keep a reference to the environment in which they
+         were created. In this way, we make sure that the environment and its variables are alive as long as the function itself. Generators,
+         on the other hand, have to be able to resume their execution. Because the execution of all functions is handled by execution
+         contexts, the iterator keeps a reference to its execution context, so that it’s alive for as long as the iterator needs it.
+      </p>
+      
+      <p class="epub__noind">Another interesting thing happens when we call the <kbd class="epub__calibre15">next</kbd> method on the iterator:
+      </p>
+      
+      <pre id="PLd0e14656" class="epub__calibre5">const result1 = ninjaIterator.next();</pre>
+      
+      <p class="epub__noind">If this was a standard straightforward function call, this would cause the creation of a <i class="epub__calibre6">new</i> <kbd class="epub__calibre15">next()</kbd> execution context item, which would be placed on the stack. But as you might have noticed, generators are anything but standard,
+         and a call to the <kbd class="epub__calibre15">next</kbd> method of an iterator behaves a lot differently. It reactivates the matching execution context, in this case, the <kbd class="epub__calibre15">NinjaGenerator</kbd> context, and places it on top of the stack, continuing the execution where it left off, as shown in figure 6.8.
+      </p>
+      
+      
+      
+      <h5>Figure 6.8. <a id="ch06fig08__title"/>Calling the iterator’s <kbd class="epub__calibre15">next</kbd> method reactivates the execution context stack item of the matching generator, pushes it on the stack, and continues where
+         it left off the last time.
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(21)-5" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">Figure 6.8 illustrates a crucial difference between standard functions and generators. Standard functions can only be called anew, and
+         each call creates a <i class="epub__calibre6">new</i> execution context. In contrast, the execution context of a generator can be temporarily suspended and resumed at will.
+      </p>
+      
+      <p class="epub__noind">In our example, because this is the first call to the <kbd class="epub__calibre15">next</kbd> method, and the generator hasn’t started executing, the generator starts its execution and moves to the Executing state.
+         The next interesting thing happens when our generator function reaches this point:
+      </p>
+      
+      <pre id="PLd0e14709" class="epub__calibre5">yield "Hattori " + action</pre>
+      
+      <p class="epub__noind"><a id="iddle2084"/><a id="iddle2215"/>The generator determines that the expression equals <kbd class="epub__calibre15">Hattori skulk</kbd>, and the evaluation reaches the <kbd class="epub__calibre15">yield</kbd> keyword. This means that <kbd class="epub__calibre15">Hattori skulk</kbd> is the first intermediary result of our generator and that we want to suspend the execution of the generator and return that
+         value. In terms of the application state, a similar thing happens as before: the <kbd class="epub__calibre15">NinjaGenerator</kbd> context is taken off the stack, but it’s not completely discarded, because <kbd class="epub__calibre15">ninjaIterator</kbd> keeps a reference to it. The generator is now suspended, and has moved to the Suspended Yield state, without blocking. The
+         program execution resumes in global code, by storing the yielded value to <kbd class="epub__calibre15">result1</kbd>. The current state of the application is shown in figure 6.9.
+      </p>
+      
+      
+      
+      <h5>Figure 6.9. <a id="ch06fig09__title"/>After yielding a value, the generator’s execution context is popped from the stack (but isn’t discarded, because <kbd class="epub__calibre15">ninjaIterator</kbd> keeps a reference to it), and the generator execution is suspended (the generator moves to the Suspended yield state).
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(22)-4" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">The code continues by reaching another iterator call:</p>
+      
+      <pre id="PLd0e14767" class="epub__calibre5">const result2 = ninjaIterator.next();</pre>
+      
+      <p class="epub__noind"><a id="iddle1878"/><a id="iddle1962"/><a id="iddle1975"/><a id="iddle1984"/><a id="iddle2112"/><a id="iddle2211"/>At this point, we go through the whole procedure once again: we reactivate the <kbd class="epub__calibre15">NinjaGenerator</kbd> context referenced by <kbd class="epub__calibre15">ninjaIterator</kbd>, push it onto the stack, and continue the execution where we left off. In this case, the generator evaluates the expression
+         <kbd class="epub__calibre15">"Yoshi " + action</kbd>. But this time there’s no <kbd class="epub__calibre15">yield</kbd> expression, and instead the program encounters a <kbd class="epub__calibre15">return</kbd> statement. This returns the value <kbd class="epub__calibre15">Yoshi skulk</kbd> and completes the generator’s execution by moving the generator into the Completed state.
+      </p>
+      
+      <p class="epub__noind">Uff, this was something! We went deep into how generators work under the hood to show you that all the wonderful benefits
+         of generators are a side effect of the fact that a generator’s execution context is kept alive if we yield from a generator,
+         and not destroyed as is the case with return values and standard functions.
+      </p>
+      
+      <p class="epub__noind">Now we recommend that you take a quick breather before continuing on to the second key ingredient required for writing elegant
+         asynchronous code: promises.
+      </p>
+      
+      
+      
+      
+      
+      <h3><a id="ch06lev1sec3__title"/>6.3. Working with promises
+      </h3>
+      
+      <p class="epub__noind">In JavaScript, we rely a lot on asynchronous computations, computations whose results we don’t have yet but will at some later
+         point. So ES6 has introduced a new concept that makes handling asynchronous tasks easier: promises.
+      </p>
+      
+      <p class="epub__noind">A <i class="epub__calibre6">promise</i> is a placeholder for a value that we don’t have now but will have later; it’s a guarantee that we’ll eventually know the
+         result of an asynchronous computation. If we make good on our promise, our result will be a value. If a problem occurs, our
+         result will be an error, an excuse for why we couldn’t deliver. One great example of using promises is fetching data from
+         a server; we promise that we’ll eventually get the data, but there’s always a chance that problems will occur.
+      </p>
+      
+      <p class="epub__noind">Creating a new promise is easy, as you can see in the following example.</p>
+      
+      
+      
+      <h5>Listing 6.10. <a id="ch06ex10__title"/>Creating a simple promise
+      </h5>
+      
+      
+      <p class="epub__center1"><img src="Images/getfile(23)-4" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind"><a id="iddle1157"/><a id="iddle1442"/><a id="iddle1475"/><a id="iddle2080"/><a id="iddle2136"/>To create a promise, we use the new, built-in <kbd class="epub__calibre15">Promise</kbd> constructor, to which we pass a function, in this case an arrow function (but we could just as easily use a function expression).
+         This function, called an <i class="epub__calibre6">executor</i> function, has two parameters: <kbd class="epub__calibre15">resolve</kbd> and <kbd class="epub__calibre15">reject</kbd>. The executor is called <i class="epub__calibre6">immediately</i> when constructing the <kbd class="epub__calibre15">Promise</kbd> object with two built-in functions as arguments: <kbd class="epub__calibre15">resolve</kbd>, which we manually call if we want the promise to resolve successfully, and <kbd class="epub__calibre15">reject</kbd>, which we call if an error occurs.
+      </p>
+      
+      <p class="epub__noind">This code uses the promise by calling the built-in <kbd class="epub__calibre15">then</kbd> method on the <kbd class="epub__calibre15">Promise</kbd> object, a method to which we pass two callback functions: a <i class="epub__calibre6">success</i> callback and a <i class="epub__calibre6">failure</i> callback. The former is called if the promise is resolved successfully (if the <kbd class="epub__calibre15">resolve</kbd> function is called on the promise), and the latter is called if there’s a problem (either an unhandled exception occurs or
+         the <kbd class="epub__calibre15">reject</kbd> function is called on a promise).
+      </p>
+      
+      <p class="epub__noind">In our example code, we create a promise and immediately resolve it by calling the <kbd class="epub__calibre15">resolve</kbd> function with the argument <kbd class="epub__calibre15">Hattori</kbd>. Therefore, when we call the <kbd class="epub__calibre15">then</kbd> method, the first, success, callback is executed and the test that outputs <kbd class="epub__calibre15">We were promised Hattori!</kbd> passes.
+      </p>
+      
+      <p class="epub__noind">Now that we have a general idea of what promises are and how they work, let’s take a step back to see some of the problems
+         that promises tackle.
+      </p>
+      
+      
+      <h4>6.3.1. <a id="ch06lev2sec5__title"/>Understanding the problems with simple callbacks
+      </h4>
+      
+      <p class="epub__noind">We use asynchronous code because we don’t want to block the execution of our application (thereby disappointing our users)
+         while long-running tasks are executing. Currently, we solve this problem with callbacks: To a long-running task we provide
+         a function, a callback that’s invoked when the task is finally done.
+      </p>
+      
+      <p class="epub__noind">For example, fetching a JSON file from a server is a long-running task, during which we don’t want to make the application
+         unresponsive for our users. Therefore, we provide a callback that will be invoked when the task is done:
+      </p>
+      
+      <pre id="PLd0e14974" class="epub__calibre5">getJSON("data/ninjas.json", function() {
+  /*Handle results*/
+});</pre>
+      
+      <p class="epub__noind">Naturally, during this long-running task, errors can happen. And the problem with callbacks is that you can’t use built-in
+         language constructs, such as <kbd class="epub__calibre15">try-catch</kbd> statements, in the following way:
+      </p>
+      
+      <pre id="PLd0e14986" class="epub__calibre5">try {
+  getJSON("data/ninjas.json", function() {
+    //Handle results
+  });
+} catch(e) {/*Handle errors*/}</pre>
+      
+      <p class="epub__noind">This happens because the code invoking the callback usually isn’t executed in the same step of the event loop as the code
+         that starts the long-running task (you’ll see exactly what this means when you learn more about the event loop in chapter 13). <a id="iddle1329"/>As a consequence, errors usually get lost. Many libraries, therefore, define their own conventions for reporting errors. For
+         example, in the Node.js world, callbacks customarily take two arguments, <kbd class="epub__calibre15">err</kbd> and <kbd class="epub__calibre15">data</kbd>, where <kbd class="epub__calibre15">err</kbd> will be a non-null value if an error occurs somewhere along the way. This leads to the first problem with callbacks: <i class="epub__calibre6">difficult error handling</i>.
+      </p>
+      
+      <p class="epub__noind">After we’ve performed a long-running task, we often want to do something with the obtained data. This can lead to starting
+         another long-running task, which can eventually trigger yet another long-running task, and so on—leading to a series of interdependent,
+         asynchronous, callback-processed steps. For example, if we want to execute a sneaky plan to find all ninjas at our disposal,
+         get the location of the first ninja, and send him some orders, we’d end up with something like this:
+      </p>
+      
+      <pre id="PLd0e15020" class="epub__calibre5">getJSON("data/ninjas.json", function(err, ninjas){
+  getJSON(ninjas[0].location, function(err, locationInfo){
+    sendOrder(locationInfo, function(err, status){
+     /*Process status*/
+    })
+  })
+});</pre>
+      
+      <p class="epub__noind">You’ve probably ended up, at least once or twice, with similarly structured code—a bunch of nested callbacks that represent
+         a series of steps that have to be made. You might notice that this code is difficult to understand, inserting new steps is
+         a pain, and error handling complicates your code significantly. You get this “pyramid of doom” that keeps growing and is difficult
+         to manage. This leads us to the second problem with callbacks: <i class="epub__calibre6">performing sequences of steps is tricky.</i></p>
+      
+      <p class="epub__noind">Sometimes, the steps that we have to go through to get to the final result don’t depend on each other, so we don’t have to
+         make them in sequence. Instead, to save precious milliseconds, we can do them in parallel. For example, if we want to set
+         a plan in motion that requires us to know which ninjas we have at our disposal, the plan itself, and the location where our
+         plan will play out, we could take advantage of jQuery’s <kbd class="epub__calibre15">get</kbd> method and write something like this:
+      </p>
+      
+      <pre id="PLd0e15037" class="epub__calibre5">var ninjas, mapInfo, plan;
+
+$.get("data/ninjas.json", function(err, data){
+  if(err) { processError(err); return; }
+  ninjas = data;
+  actionItemArrived();
+});
+
+$.get("data/mapInfo.json", function(err, data){
+  if(err) { processError(err); return; }
+  mapInfo = data;
+  actionItemArrived();
+});
+
+$.get("plan.json", function(err, data) {
+  if(err) { processError(err); return; }
+
+  plan = data;
+  actionItemArrived ();
+});
+
+function actionItemArrived(){
+  if(ninjas != null &amp;&amp; mapInfo != null &amp;&amp; plan != null){
+    console.log("The plan is ready to be set in motion!");
+  }
+}
+
+function processError(err){
+  alert("Error", err)
+}</pre>
+      
+      <p class="epub__noind"><a id="iddle1859"/><a id="iddle1888"/><a id="iddle1976"/><a id="iddle2137"/><a id="iddle2152"/>In this code, we execute the actions of getting the ninjas, getting the map info, and getting the plan in parallel, because
+         these actions don’t depend on each other. We only care that, in the end, we have all the data at our disposal. Because we
+         don’t know the order in which the data is received, every time we get some data, we have to check whether it’s the last piece
+         of the puzzle that we’re missing. Finally, when all pieces are in place, we can set our plan in motion. Notice that we have
+         to write a lot of boilerplate code just to do something as common as executing a number of actions in parallel. This leads
+         us to the third problem with callbacks: <i class="epub__calibre6">performing a number of steps in parallel is also tricky.</i></p>
+      
+      <p class="epub__noind">When presenting the first problem with callbacks—dealing with errors—we showed how we can’t use some of the fundamental language
+         constructs, such as <kbd class="epub__calibre15">try-catch</kbd> statements. A similar thing holds with loops: If you want to perform asynchronous actions for each item in a collection,
+         you have to jump through some more hoops to get it done.
+      </p>
+      
+      <p class="epub__noind">It’s true that you can make a library to simplify dealing with all these problems (and many people have). But this often leads
+         to a lot of slightly different ways of dealing with the same problems, so the people behind JavaScript have bestowed upon
+         us <i class="epub__calibre6">promises</i>, a standard approach for dealing with asynchronous computation.
+      </p>
+      
+      <p class="epub__noind">Now that you understand most of the reasons behind the introduction of promises, as well as have a basic understanding of
+         them, let’s take it up a notch.
+      </p>
+      
+      
+      
+      <h4>6.3.2. <a id="ch06lev2sec6__title"/>Diving into promises
+      </h4>
+      
+      <p class="epub__noind">A promise is an object that serves as a placeholder for a result of an asynchronous task. It represents a value that we don’t
+         have but hope to have in the future. For this reason, during its lifetime, a promise can go through a couple of states, as
+         shown in figure 6.10.
+      </p>
+      
+      
+      
+      <h5>Figure 6.10. <a id="ch06fig10__title"/>States of a promise
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(24)-4" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">A promise starts in the <i class="epub__calibre6">pending</i> state, in which we know nothing about our promised value. That’s why a promise in the pending state is also called an <kbd class="epub__calibre15">unresolved</kbd> promise. During program execution, if the promise’s <kbd class="epub__calibre15">resolve</kbd> function is called, the <a id="iddle1515"/><a id="iddle1963"/><a id="iddle2113"/>promise moves into the <i class="epub__calibre6">fulfilled</i> state, in which we’ve successfully obtained the promised value. On the other hand, if the promise’s <kbd class="epub__calibre15">reject</kbd> function is called, or if an unhandled exception occurs during promise handling, the promise moves into the <i class="epub__calibre6">rejected</i> state, in which we weren’t able to obtain the promised value, but in which we at least know why. Once a promise has reached
+         either the <i class="epub__calibre6">fulfilled</i> state or the <i class="epub__calibre6">rejected</i> state, it can’t switch (a promise can’t go from fulfilled to rejected or vice versa), and it always stays in that state.
+         We say that a promise is <i class="epub__calibre6">resolved</i> (either successfully or not).
+      </p>
+      
+      <p class="epub__noind">The following listing provides a closer look at what’s going on when we use promises.</p>
+      
+      <h5>Listing 6.11. <a id="ch06ex11__title"/>A closer look at promise order of execution
+      </h5>
+      <p class="epub__center1"><img src="Images/getfile(25)-4" alt="" class="epub__calibre2"/></p>
+      <p class="epub__center1"><img src="Images/getfile(26)-3" alt="" class="epub__calibre2"/></p>
+      
+      <p class="epub__noind"><a id="iddle1443"/><a id="iddle1860"/><a id="iddle1879"/>The code in listing 6.11 outputs the results shown in figure 6.11. As you can see, the code starts by logging the “At code start” message by using our custom-made <kbd class="epub__calibre15">report</kbd> function (appendix C) that outputs the message onscreen. This enables us to easily track the order of execution.
+      </p>
+      
+      
+      
+      <h5>Figure 6.11. <a id="ch06fig11__title"/>The result of executing listing 6.11</h5>
+      
+      
+      
+      <p class="epub__center1"><img src="Images/getfile(27)-3" alt="" class="epub__calibre2"/></p>
+      
+      
+      
+      <p class="epub__noind">Next we create a new promise by calling the <kbd class="epub__calibre15">Promise</kbd> constructor. This immediately invokes the executor function in which we set up a timeout:
+      </p>
+      
+      <pre id="PLd0e15232" class="epub__calibre5">setTimeout(() =&gt; {
+  report("Resolving ninjaDelayedPromise");
+  resolve("Hattori");
+}, 500);</pre>
+      
+      <p class="epub__noind">The timeout will resolve the promise after 500ms. This could have been any other asynchronous task, but we chose the humble
+         timeout because of its simplicity.
+      </p>
+      
+      <p class="epub__noind">After the <kbd class="epub__calibre15">ninjaDelayedPromise</kbd> has been created, it still doesn’t know the value that it will eventually have, or whether it will even be successful. (Remember,
+         it’s still waiting for the time-out that will resolve it.) So after construction, the <kbd class="epub__calibre15">ninjaDelayedPromise</kbd> is in the first promise state, <i class="epub__calibre6">pending</i>.
+      </p>
+      
+      <p class="epub__noind">Next we use the <kbd class="epub__calibre15">then</kbd> method on the <kbd class="epub__calibre15">ninjaDelayedPromise</kbd> to schedule a callback to be executed when the promise successfully resolves:
+      </p>
+      
+      <pre id="PLd0e15262" class="epub__calibre5">ninjaDelayedPromise.then(ninja =&gt; {
+  assert(ninja === "Hattori",
+        "ninjaDelayedPromise resolve handled with Hattori");
+});</pre>
+      
+      <p class="epub__noind">This callback will <i class="epub__calibre6">always</i> be called asynchronously, regardless of the current state of the promise.
+      </p>
+      
+      <p class="epub__noind"><a id="iddle1106"/><a id="iddle1166"/><a id="iddle1409"/><a id="iddle1459"/><a id="iddle1889"/><a id="iddle1964"/><a id="iddle1965"/><a id="iddle1977"/>We continue by creating another promise, <kbd class="epub__calibre15">ninjaImmediatePromise</kbd>, which is resolved immediately during its construction, by calling the <kbd class="epub__calibre15">resolve</kbd> function. Unlike the <kbd class="epub__calibre15">ninjaDelayedPromise</kbd>, which after construction is in the <i class="epub__calibre6">pending</i> state, the <kbd class="epub__calibre15">ninja-ImmediatePromise</kbd> finishes construction in the <i class="epub__calibre6">resolved</i> state, and the promise already has the value <kbd class="epub__calibre15">Yoshi</kbd>.
+      </p>
+      
+      <p class="epub__noind">Afterward, we use the <kbd class="epub__calibre15">ninjaImmediatePromise</kbd>’s <kbd class="epub__calibre15">then</kbd> method to register a callback that will be executed when the promise successfully resolves. But our promise is already settled;
+         does this mean that the success callback will be immediately called or that it will be ignored? The answer is <i class="epub__calibre6">neither</i>.
+      </p>
+      
+      <p class="epub__noind">Promises are designed to deal with asynchronous actions, so the JavaScript engine <i class="epub__calibre6">always</i> resorts to asynchronous handling, to make the promise behavior predictable. The engine does this by executing the <kbd class="epub__calibre15">then</kbd> callbacks after all the code in the current step of the event loop is executed (once again, we’ll explore exactly what this
+         means in chapter 13). For this reason, if we study the output in figure 6.11, we’ll see that we first log “At code end” and then we log that the <kbd class="epub__calibre15">ninjaImmediatePromise</kbd> was resolved. In the end, after the 500ms timeout expires, the <kbd class="epub__calibre15">ninjaDelayedPromise</kbd> is resolved, which causes the execution of the matching <kbd class="epub__calibre15">then</kbd> callback.
+      </p>
+      
+      <p class="epub__noind">In this example, for the sake of simplicity, we’ve worked only with the rosy scenario in which everything goes great. But
+         the real world isn’t all sunshine and rainbows, so let’s see how to deal with all sorts of crazy problems that can occur.
+      </p>
+      
+      
+      
+      <h4>6.3.3. <a id="ch06lev2sec7__title"/>Rejecting promises
+      </h4>
+      
+      <p class="epub__noind">There are two ways of rejecting a promise: <i class="epub__calibre6">explicitly</i>, by calling the passed-in <kbd class="epub__calibre15">reject</kbd> method in the executor function of a promise, and <i class="epub__calibre6">implicitly</i>, if during the handling of a promise, an unhandled exception occurs. Let’s start our exploration with the following listing.
+      </p>
+      
+      
+      
+      <h5>Listing 6.12. <a id="ch06ex12__title"/>Explicitly rejecting promises
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(28)-3" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">We can explicitly reject a promise, by calling the passed-in <kbd class="epub__calibre15">reject</kbd> method: <kbd class="epub__calibre15">reject("Explicitly reject a promise!")</kbd>. If a promise is rejected, when registering callbacks through the <kbd class="epub__calibre15">then</kbd> method, the second, error, callback will always be invoked.
+      </p>
+      
+      <p class="epub__noind">In addition, we can use an alternative syntax for handling promise rejections, by using the built-in <kbd class="epub__calibre15">catch</kbd> method, as shown in the following listing.
+      </p>
+      
+      
+      <p class="epub__noind"/>
+      
+      
+      <h5>Listing 6.13. <a id="ch06ex13__title"/>Chaining a catch method
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(29)-2" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind"><a id="iddle2138"/>As listing 6.13 shows, we can chain in the <kbd class="epub__calibre15">catch</kbd> method after the <kbd class="epub__calibre15">then</kbd> method, to also provide an error callback that will be invoked when a promise gets rejected. In this example, this is a matter
+         of personal style. Both options work equally well, but later, when working with chains of promises, we’ll see an example in
+         which chaining the <kbd class="epub__calibre15">catch</kbd> method is useful.
+      </p>
+      
+      <p class="epub__noind">In addition to explicit rejection (via the <kbd class="epub__calibre15">reject</kbd> call), a promise can also be rejected implicitly, if an exception occurs during its processing. Take a look at the following
+         example.
+      </p>
+      
+      
+      
+      <h5>Listing 6.14. <a id="ch06ex14__title"/>Exceptions implicitly reject a promise
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(30)-2" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">Within the body of the promise executor, we try to increment <kbd class="epub__calibre15">undeclaredVariable</kbd>, a variable that isn’t defined in our program. As expected, this results in an exception. Because there’s no <kbd class="epub__calibre15">try-catch</kbd> statement within the body of the executor, this results in an implicit rejection of the current promise, and the <kbd class="epub__calibre15">catch</kbd> callback is eventually invoked. In this situation, we could have just as easily supplied the second callback to the <kbd class="epub__calibre15">then</kbd> method, and the end effect would be the same.
+      </p>
+      
+      <p class="epub__noind">This way of treating all problems that happen while working with promises in a uniform way is extremely handy. Regardless
+         of how the promise was rejected, whether explicitly by calling the <kbd class="epub__calibre15">reject</kbd> method or even implicitly, if an exception occurs, all errors and rejection reasons are directed to our rejection callback.
+         This makes our lives as developers a little easier.
+      </p>
+      
+      <p class="epub__noind">Now that we understand how promises work, and how to schedule success and failure callbacks, let’s take a real-world scenario,
+         getting JSON-formatted data from a server, and “promisify” it.
+      </p>
+      
+      
+      
+      
+      <h4>6.3.4. <a id="ch06lev2sec8__title"/>Creating our first real-world promise
+      </h4>
+      
+      <p class="epub__noind"><a id="iddle1837"/><a id="iddle1838"/><a id="iddle1885"/><a id="iddle2206"/>One of the most common asynchronous actions on the client is fetching data from the server. As such, this is an excellent
+         little case study on the use of promises. For the underlying implementation, we’ll use the built-in <kbd class="epub__calibre15">XMLHttpRequest</kbd> object.
+      </p>
+      
+      <h5>Listing 6.15. <a id="ch06ex15__title"/>Creating a getJSON promise
+      </h5>
+      <p class="epub__center1"><img src="Images/getfile(31)-2" alt="" class="epub__calibre2"/></p>
+      <p class="epub__center1"><img src="Images/getfile(32)-2" alt="" class="epub__calibre2"/></p>
+      
+      
+            <h5>Note</h5>
+      
+      
+      <p class="epub__noindclose">Executing this example, and all subsequent examples that reuse this function, requires a running server. You can, for example,
+         use www.npmjs.com/package/http-server.
+      </p>
+      
+      
+            <p class="epub__noind">Our goal is to create a <kbd class="epub__calibre15">getJSON</kbd> function that returns a promise that will enable us to register success and failure callbacks for asynchronously getting
+         JSON-formatted data from the server. For the underlying implementation, we use the built-in <kbd class="epub__calibre15">XMLHttpRequest</kbd> object that offers two events: <kbd class="epub__calibre15">onload</kbd> and <kbd class="epub__calibre15">onerror</kbd>. The <kbd class="epub__calibre15">onload</kbd> event is triggered when the browser receives a response from the server, and <kbd class="epub__calibre15">onerror</kbd> is triggered when an error in communication happens. These event handlers will be called asynchronously by the browser, as
+         they occur.
+      </p>
+      
+      <p class="epub__noind"><a id="iddle1170"/><a id="iddle1709"/><a id="iddle1883"/><a id="iddle2114"/><a id="iddle2139"/>If an error in the communication happens, we definitely won’t be able to get our data from the server, so the honest thing
+         to do is to reject our promise:
+      </p>
+      
+      <pre id="PLd0e15615" class="epub__calibre5">request.onerror = function(){
+  reject(this.status + " " + this.statusText);
+};</pre>
+      
+      <p class="epub__noind">If we receive a response from the server, we have to analyze that response and consider the exact situation. Without going
+         into too much detail, a server can respond with various things, but in this case, we care only that the response is successful
+         (status 200). If it isn’t, again we reject the promise.
+      </p>
+      
+      <p class="epub__noind">Even if the server has successfully responded with data, this still doesn’t mean that we’re in the clear. Because our goal
+         was to get JSON-formatted objects from the server, the JSON code could always have syntax errors. This is why, when calling
+         the <kbd class="epub__calibre15">JSON.parse</kbd> method, we surround the code with a <kbd class="epub__calibre15">try-catch</kbd> statement. If an exception occurs while parsing the server response, we also reject the promise. With this, we’ve taken care
+         of all bad scenarios that can happen.
+      </p>
+      
+      <p class="epub__noind">If everything goes according to plan, and we successfully obtain our objects, we can safely resolve the promise. Finally,
+         we can use our <kbd class="epub__calibre15">getJSON</kbd> function to fetch ninjas from the server:
+      </p>
+      
+      <pre id="PLd0e15639" class="epub__calibre5">getJSON("data/ninjas.json").then(ninjas =&gt; {
+  assert(ninjas !== null, "Ninjas obtained!");
+}).catch(e =&gt; fail("Shouldn't be here:" + e));</pre>
+      
+      <p class="epub__noind">In this case, we have three potential sources of errors: errors in establishing the communication between the server and the
+         client, the server responding with unanticipated data (invalid response status), and invalid JSON code. But from the perspective
+         of the code that uses the <kbd class="epub__calibre15">getJSON</kbd> function, we don’t care about the specifics of error sources. We only supply a callback that gets triggered if everything
+         goes okay and the data is properly received, and a callback that gets triggered if any error occurs. This makes our lives
+         as developers so much easier.
+      </p>
+      
+      <p class="epub__noind">Now we’re going to take it up a notch and explore another big advantage of promises: their elegant composition. We’ll start
+         by chaining several promises in a series of distinct steps.
+      </p>
+      
+      
+      
+      <h4>6.3.5. <a id="ch06lev2sec9__title"/>Chaining promises
+      </h4>
+      
+      <p class="epub__noind">You’ve already seen how handling a sequence of interdependent steps leads to the pyramid of doom, a deeply nested and difficult-to-maintain
+         sequence of callbacks. Promises are a step toward solving that problem, because they have the ability to be chained.
+      </p>
+      
+      <p class="epub__noind">Earlier in the chapter, you saw how, by using the <kbd class="epub__calibre15">then</kbd> method on a promise, we can register a callback that will be executed if a promise is successfully resolved. What we didn’t
+         tell you is that calling the <kbd class="epub__calibre15">then</kbd> method also returns a new promise. So <a id="iddle1167"/><a id="iddle1391"/><a id="iddle1890"/>there’s nothing stopping us from chaining as many <kbd class="epub__calibre15">then</kbd> methods as we want; see the following code.
+      </p>
+      
+      
+      
+      <h5>Listing 6.16. <a id="ch06ex16__title"/>Chaining promises with then
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(33)-2" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">This creates a sequence of promises that will be, if everything goes according to plan, resolved one after another. First,
+         we use the <kbd class="epub__calibre15">getJSON("data/ninjas.json")</kbd> method to fetch a list of ninjas from the file on the server. After we receive that list, we take the information about the
+         first ninja, and we request a list of missions the ninja is assigned to: <kbd class="epub__calibre15">getJSON(ninjas[0].missionsUrl)</kbd>. Later, when these missions come in, we make yet another request for the details of the first mission: <kbd class="epub__calibre15">getJSON(missions[0].details-Url)</kbd>. Finally, we log the details of the mission.
+      </p>
+      
+      <p class="epub__noind">Writing such code using standard callbacks would result in a deeply nested sequence of callbacks. Identifying the exact sequence
+         of steps wouldn’t be easy, and God forbid we decide to add in an extra step somewhere in the middle.
+      </p>
+      
+      
+      <h5><a id="ch06lev3sec9__title"/>Catching errors in chained promises
+      </h5>
+      
+      <p class="epub__noind">When dealing with sequences of asynchronous steps, an error can occur in any step. We already know that we either can provide
+         a second, error callback to the <kbd class="epub__calibre15">then</kbd> call, or can chain in a <kbd class="epub__calibre15">catch</kbd> call that takes an error callback. When we care about only the success/failure of the entire sequence of steps, supplying
+         each step with special error handling might be tedious. So, as shown in listing 6.16, we can take advantage of the <kbd class="epub__calibre15">catch</kbd> method that you saw earlier:
+      </p>
+      
+      <pre id="PLd0e15741" class="epub__calibre5">...catch(error =&gt; fail("An error has occurred:" + err));</pre>
+      
+      <p class="epub__noind">If a failure occurs in any of the previous promises, the <kbd class="epub__calibre15">catch</kbd> method catches it. If no error occurs, the program flow continues through it, unobstructed.
+      </p>
+      
+      <p class="epub__noind">Dealing with a sequence of steps is much nicer with promises than with regular callbacks, wouldn’t you agree? But it’s still
+         not as elegant as it could be. We’ll get to that soon, but first let’s see how to use promises to take care of parallel asynchronous
+         steps.
+      </p>
+      
+      
+      
+      
+      <h4>6.3.6. <a id="ch06lev2sec10__title"/>Waiting for a number of promises
+      </h4>
+      
+      <p class="epub__noind">In addition to helping us deal with sequences of interdependent, asynchronous steps, promises significantly reduce the burden
+         of waiting for several independent asynchronous tasks. Let’s revisit our example in which we want to, in parallel, gather
+         information about the ninjas at our disposal, the intricacies of the plan, and the map of the <a id="iddle1880"/><a id="iddle1881"/>location where the plan will be set in motion. With promises, this is as simple as shown in the following listing.
+      </p>
+      
+      
+      
+      <h5>Listing 6.17. <a id="ch06ex17__title"/>Waiting for a number of promises with Promise.all
+      </h5>
+      
+      <p class="epub__center1"><img src="Images/getfile(34)-2" alt="" class="epub__calibre2"/></p>
+      
+      
+      <p class="epub__noind">As you can see, we don’t have to care about the order in which tasks are executed, and whether some of them have finished,
+         while others didn’t. We state that we want to wait for a number of promises by using the built-in <kbd class="epub__calibre15">Promise.all</kbd> method. This method takes in an array of promises and creates a <i class="epub__calibre6">new</i> promise that successfully resolves when all passed-in promises resolve, and rejects if even one of the promises fails. The
+         succeed callback receives an array of succeed values, one for each of the passed-in promises, in order. Take a minute to appreciate
+         the elegance of code that processes multiple parallel asynchronous tasks with promises.
+      </p>
+      
+      <p class="epub__noind">The <kbd class="epub__calibre15">Promise.all</kbd> method waits for all promises in a list. But at times we have numerous promises, but we care only about the first one that
+         succeeds (or fails). Meet the <kbd class="epub__calibre15">Promise.race</kbd> method.
+      </p>
+      
+      
+      <h5><a id="ch06lev3sec10__title"/>Racing promises
+      </h5>
+      
+      <p class="epub__noind">Imagine that we have a group of ninjas at our disposal, and that we want to give an assignment to the first ninja who answers
+         our call. When dealing with promises, we can write something like the following listing.
+      </p>
+      
+      
+      
+      <h5>Listing 6.18. <a id="ch06ex18__title"/>Racing promises with Promise.race
+      </h5>
+      <pre id="PLd0e15818" class="epub__calibre5"><b class="epub__calibre21">Promise.race</b>([getJSON("data/yoshi.json"),
+              getJSON("data/hattori.json"),
+              getJSON("data/hanzo.json")])
+       .then(ninja =&gt; {
+         assert(ninja !== null, ninja.name + " responded first");
+        }).catch(error =&gt; fail("Failure!"));</pre>
+      
+      <p class="epub__noind">It’s simple as that. There’s no need for manually tracking everything. We use the <kbd class="epub__calibre15">Promise.race</kbd> method to take an array of promises and return a completely <i class="epub__calibre6">new</i> promise that resolves or rejects as soon as the first of the promises resolves or rejects.
+      </p>
+      
+      <p class="epub__noind">So far you’ve seen how promises work, and how we can use them to greatly simplify dealing with a series of asynchronous steps,
+         either in series or in parallel. Although <a id="iddle1589"/><a id="iddle1799"/><a id="iddle1884"/>the improvements, when compared to plain old callbacks in terms of error handling and code elegance, are great, promisified
+         code still isn’t on the same level of elegance as simple synchronous code. In the next section, the two big concepts that
+         we’ve introduced in this chapter, <i class="epub__calibre6">generators</i> and <i class="epub__calibre6">promises</i>, come together to provide the simplicity of synchronous code with the nonblocking nature of asynchronous code.
+      </p>
+      
+      
+      
+      
+      
+      <h3><a id="ch06lev1sec4__title"/>6.4. Combining generators and promises
+      </h3>
+      
+      <p class="epub__noind">In this section, we’ll combine generators (and their capability to pause and resume their execution) with promises, in order
+         to achieve more elegant asynchronous code. We’ll use the example of a functionality that enables users to get details of the
+         highest-rated mission done by the most popular ninja. The data representing the ninjas, the summaries of their missions, as
+         well as the details of the missions are stored on a remote server, encoded in JSON.
+      </p>
+      
+      <p class="epub__noind">All of these subtasks are long-running and mutually dependent. If we were to implement them in a synchronous fashion, we’d
+         get the following straightforward code:
+      </p>
+      
+      <pre id="PLd0e15882" class="epub__calibre5">try {
+   const ninjas = syncGetJSON("data/ninjas.json");
+   const missions = syncGetJSON(ninjas[0].missionsUrl);
+   const missionDetails = syncGetJSON(missions[0].detailsUrl);
+   //Study the mission description
+} catch(e){
+  //Oh no, we weren't able to get the mission details
+}</pre>
+      
+      <p class="epub__noind">Although this code is great for its simplicity and error handling, it blocks the UI, which results in unhappy users. Ideally,
+         we’d like to change this code so that no blocking occurs during a long-running task. One way of doing this is by combining
+         generators and promises.
+      </p>
+      
+      <p class="epub__noind">As we know, yielding from a generator suspends the execution of the generator without blocking. To wake up the generator and
+         continue its execution, we have to call the <kbd class="epub__calibre15">next</kbd> method on the generator’s iterator. Promises, on the other hand, allow us to specify a callback that will be triggered in
+         case we were able to obtain the promised value, and a callback that will be triggered in case an error has occurred.
+      </p>
+      
+      <p class="epub__noind">The idea, then, is to combine generators and promises in the following way: We put the code that uses asynchronous tasks in
+         a generator, and we execute that generator function. When we reach a point in the generator execution that calls an asynchronous
+         task, we create a promise that represents the value of that asynchronous task. Because we have no idea when that promise will
+         be resolved (or even if it will be resolved), at this point of generator execution, we yield from the generator, so that we
+         don’t cause blocking. After a while, when the promise gets settled, we continue the execution of our generator by calling
+         the iterator’s <kbd class="epub__calibre15">next</kbd> method. We do this as many times as necessary. See the following listing for a practical example.
+      </p>
+      
+      
+      <p class="epub__noind"/>
+      <h5>Listing 6.19. <a id="ch06ex19__title"/>Combining generators and promises
+      </h5>
+      <p class="epub__center1"><img src="Images/getfile(35)-2" alt="" class="epub__calibre2"/></p>
+      <p class="epub__center1"><img src="Images/getfile(36)-2" alt="" class="epub__calibre2"/></p>
+      
+      <p class="epub__noind"><a id="iddle1104"/><a id="iddle2118"/>The <kbd class="epub__calibre15">async</kbd> function takes a generator, calls it, and creates an iterator that will be used to resume the generator execution. Inside
+         the <kbd class="epub__calibre15">async</kbd> function, we declare a <kbd class="epub__calibre15">handle</kbd> function that handles one return value from the generator—one “iteration” of our iterator. If the generator result is a promise
+         that gets resolved successfully, we use the iterator’s <kbd class="epub__calibre15">next</kbd> method to send the promised value back to the generator and resume the generator’s execution. If an error occurs and the
+         promise gets rejected, we throw that error to the generator by using the iterator’s <kbd class="epub__calibre15">throw</kbd> method (told you it would come in handy). We keep doing this until the generator says it’s done.
+      </p>
+      
+      
+            <h5>Note</h5>
+      
+      
+      <p class="epub__noindclose">This is a rough sketch, a minimum amount of code needed to combine generators and promises. We don’t recommend that you use
+         this code in production.
+      </p>
+      
+      
+            <p class="epub__noind">Now let’s take a closer look at the generator. On the first invocation of the iterator’s <kbd class="epub__calibre15">next</kbd> method, the generator executes up to the first <kbd class="epub__calibre15">getJSON("data/ninjas.json")</kbd> <a id="iddle1095"/><a id="iddle1156"/><a id="iddle1168"/><a id="iddle1495"/><a id="iddle2115"/><a id="iddle2212"/>call. This call creates a promise that will eventually contain the list of information about our <kbd class="epub__calibre15">ninjas</kbd>. Because this value is fetched asynchronously, we have no idea how much time it will take the browser to get it. But we know
+         one thing: We don’t want to block the application execution while we’re waiting. For this reason, at this moment of execution,
+         the generator yields control, which pauses the generator, and returns the control flow to the invocation of the <kbd class="epub__calibre15">handle</kbd> function. Because the yielded value is a <kbd class="epub__calibre15">getJSON</kbd> promise, in the <kbd class="epub__calibre15">handle</kbd> function, by using the <kbd class="epub__calibre15">then</kbd> and <kbd class="epub__calibre15">catch</kbd> methods of the promise, we register a success and an error callback, and continue execution. With this, the control flow
+         leaves the execution of the <kbd class="epub__calibre15">handle</kbd> function and the body of the <kbd class="epub__calibre15">async</kbd> function, and continues after the call to the <kbd class="epub__calibre15">async</kbd> function (in our case, there’s no more code after, so it idles). During this time, our generator function patiently waits
+         suspended, without blocking the program execution.
+      </p>
+      
+      <p class="epub__noind">Much, much later, when the browser receives a response (either a positive or a negative one), one of the promise callbacks
+         is invoked. If the promise was resolved successfully, the success callback is invoked, which in turn causes the execution
+         of the iterator’s <kbd class="epub__calibre15">next</kbd> method, which asks the generator for another value. This brings back the generator from suspension and sends to it the value
+         passed in by the callback. This means that we reenter the body of our generator, after the first <kbd class="epub__calibre15">yield</kbd> expression, whose value becomes the <kbd class="epub__calibre15">ninjas</kbd> list that was asynchronously fetched from the server. The execution of the generator function continues, and the value is
+         assigned to the <kbd class="epub__calibre15">plan</kbd> variable.
+      </p>
+      
+      <p class="epub__noind">In the next line of the generator, we use some of the obtained data, <kbd class="epub__calibre15">ninjas[0].missionUrl</kbd>, to make another <kbd class="epub__calibre15">getJSON</kbd> call that creates another promise that should eventually contain a list of missions done by the most popular ninja. Again,
+         because this is an asynchronous task, we have no idea how long it’s going to take, so we again yield the execution and repeat
+         the whole process.
+      </p>
+      
+      <p class="epub__noind">This process is repeated as long as there are asynchronous tasks in the generator.</p>
+      
+      <p class="epub__noind">This was a tad on the complex side, but we like this example because it combines a lot of things that you’ve learned so far:</p>
+      
+      <p class="epub__calibre18"/>
+      <ul class="epub__calibre19">
+         
+         <li class="epub__calibre20"><b class="epub__calibre21"><i class="epub__calibre6">Functions as first-class objects—</i> </b>We send a function as an argument to the <kbd class="epub__calibre15">async</kbd> function.
+            
+         </li>
+         
+         <li class="epub__calibre20"><b class="epub__calibre21"><i class="epub__calibre6">Generator functions—</i> </b>We use their ability to suspend and resume execution.
+            
+         </li>
+         
+         <li class="epub__calibre20"><b class="epub__calibre21"><i class="epub__calibre6">Promises—</i> </b>They help us deal with asynchronous code.
+            
+         </li>
+         
+         <li class="epub__calibre20"><b class="epub__calibre21"><i class="epub__calibre6">Callbacks—</i> </b>We register success and failure callbacks on our promises.
+            
+         </li>
+         
+         <li class="epub__calibre20"><b class="epub__calibre21"><i class="epub__calibre6">Arrow functions—</i> </b>Because of their simplicity, for callbacks we use arrow functions.
+            
+         </li>
+         
+         <li class="epub__calibre20"><b class="epub__calibre21"><i class="epub__calibre6">Closures—</i> </b>The iterator, through which we control the generator, is created in the <kbd class="epub__calibre15">async</kbd> function, and we access it, through closures, in the promise callbacks.
+            
+         </li>
+         
+      </ul>
+      
+      <p class="epub__noind">Now that we’ve gone through the whole process, let’s take a minute to appreciate how much more elegant the code that implements
+         our business logic is. Consider this:
+      </p>
+      
+      
+      <pre id="PLd0e16122" class="epub__calibre5">getJSON("data/ninjas.json", (err, ninjas) =&gt; {
+  if(err) { console.log("Error fetching ninjas", err); return; }
+
+  getJSON(ninjas[0].missionsUrl, (err, missions) =&gt; {
+     if(err) { console.log("Error locating ninja missions", err); return; }
+     console.log(misssions);
+  })
+});</pre>
+      
+      <p class="epub__noind"><a id="iddle1114"/><a id="iddle2140"/>Instead of mixed control-flow and error handling, and slightly confusing code, we end up with something like this:
+      </p>
+      
+      <pre id="PLd0e16141" class="epub__calibre5">async(function*() {
+  try {
+    const ninjas = yield getJSON("data/ninjas.json");
+    const missions = yield getJSON(ninjas[0].missionsUrl);
+
+    //All information recieved
+  }
+  catch(e) {
+    //An error has occurred
+  }
+});</pre>
+      
+      <p class="epub__noind">This end result combines the advantages of synchronous and asynchronous code. From synchronous code, we have the ease of understanding,
+         and the ability to use all standard control-flow and exception-handling mechanisms such as loops and <kbd class="epub__calibre15">try-catch</kbd> statements. From asynchronous code, we get the nonblocking nature; the execution of our application isn’t blocked while waiting
+         for long-running asynchronous tasks.
+      </p>
+      
+      
+      <h4>6.4.1. <a id="ch06lev2sec11__title"/>Looking forward—the async function
+      </h4>
+      
+      <p class="epub__noind">Notice that we still had to write some boilerplate code; we had to develop an <kbd class="epub__calibre15">async</kbd> function that takes care of handling promises and requesting values from the generator. Although we can write this function
+         only once and then reuse it throughout our code, it would be even nicer if we didn’t have to think about it. The people in
+         charge of JavaScript are well aware of the usefulness of the combination of generators and promises, and they want to make
+         our lives even easier by building in direct language support for mixing generators and promises.
+      </p>
+      
+      <p class="epub__noind">For these situations, the current plan is to include two new keywords, <kbd class="epub__calibre15">async</kbd> and <kbd class="epub__calibre15">await</kbd>, that would take care of this boilerplate code. Soon, we’ll be able to write something like this:
+      </p>
+      
+      <pre id="PLd0e16173" class="epub__calibre5">(<b class="epub__calibre21">async</b> function (){
+  try {
+    const ninjas = <b class="epub__calibre21">await</b> getJSON("data/ninjas.json");
+    const missions = <b class="epub__calibre21">await</b> getJSON(missions[0].missionsUrl);
+
+    console.log(missions);
+  }
+  catch(e) {
+    console.log("Error: ", e);
+  }
+})()</pre>
+      
+      <p class="epub__noind"><a id="iddle1534"/>We use the <kbd class="epub__calibre15">async</kbd> keyword in front of the function keyword to specify that this function relies on asynchronous values, and at every place
+         where we call an asynchronous task, we place the <kbd class="epub__calibre15">await</kbd> keyword that says to the JavaScript engine, please wait for this result without blocking. In the background, everything happens
+         as we’ve discussed previously throughout the chapter, but now we don’t need to worry about it.
+      </p>
+      
+      
+            <h5>Note</h5>
+      
+      
+      <p class="epub__noindclose">Async functions will appear in the next installment of JavaScript. Currently no browser supports it, but you can use transpilers
+         such as Babel or Traceur if you wish to use async in your code today.
+      </p>
+      
+      
+            <h3><a id="ch06lev1sec5__title"/>6.5. Summary
+      </h3>
+      
+      <p class="epub__calibre18"/>
+      <ul class="epub__calibre19">
+         
+         <li class="epub__calibre20">Generators are functions that generate sequences of values—not all at once, but on a per request basis.
+            
+         </li>
+         
+         <li class="epub__calibre20">Unlike standard functions, generators can suspend and resume their execution. After a generator has generated a value, it
+            suspends its execution without blocking the main thread and patiently waits for the next request.
+            
+         </li>
+         
+         <li class="epub__calibre20">A generator is declared by putting an asterisk (<kbd class="epub__calibre15">*</kbd>) after the function keyword. Within the body of the generator, we can use the new <kbd class="epub__calibre15">yield</kbd> keyword that yields a value and suspends the execution of the generator. If we want to yield to another generator, we use
+            the <kbd class="epub__calibre15">yield*</kbd> operator.
+            
+         </li>
+         
+         <li class="epub__calibre20">Calling a generator creates an iterator object through which we control the execution of the generator. We request new values
+            from the generator by using the iterator’s <kbd class="epub__calibre15">next</kbd> method, and we can even throw exceptions into the generator by calling the iterator’s <kbd class="epub__calibre15">throw</kbd> method. In addition, the <kbd class="epub__calibre15">next</kbd> method can be used to send in values to the generator.
+            
+         </li>
+         
+         <li class="epub__calibre20">A promise is a placeholder for the results of a computation; it’s a guarantee that eventually we’ll know the result of the
+            computation, most often an asynchronous computation. A promise can either succeed or fail, and after it has done so, there
+            will be no more changes.
+            
+         </li>
+         
+         <li class="epub__calibre20">Promises significantly simplify our dealings with asynchronous tasks. We can easily work with sequences of interdependent
+            asynchronous steps by using the <kbd class="epub__calibre15">then</kbd> method to chain promises. Parallel handling of multiple asynchronous steps is also greatly simplified; we use the <kbd class="epub__calibre15">Promise.all</kbd> method.
+            
+         </li>
+         
+         <li class="epub__calibre20">We can combine generators and promises to deal with asynchronous tasks with the simplicity of synchronous code.
+            
+         </li>
+         
+      </ul>
+      
+      
+      
+      
+      <h3><a id="ch06lev1sec6__title"/>6.6. Exercises
+      </h3>
+      
+      <p class="epub__calibre18"><a id="ch06qa2"/></p>
+      <blockquote class="epub__calibre14">
+         <p class="epub__calibre18"><a id="ch06qa2qe1"/></p>
+         <p class="epub__calibre18"><a id="ch06qa2q1"/><b class="epub__calibre21">1 </b></p><p class="epub__noind"><a id="iddle1508"/><a id="iddle2191"/>After running the following code, what are the values of variables <kbd class="epub__calibre15">a1</kbd> to <kbd class="epub__calibre15">a4</kbd>?
+            </p>
+            
+            <pre id="PLd0e16315" class="epub__calibre5">function *EvenGenerator(){
+  let num = 2;
+  while(true){
+    yield num;
+    num = num + 2;
+  }
+}
+
+let generator = EvenGenerator();
+
+let a1 = generator.next().value;
+let a2 = generator.next().value;
+let a3 = EvenGenerator().next().value;
+let a4 = generator.next().value;</pre>
+            <p class="epub__calibre18"/>
+      </blockquote>
+      <blockquote class="epub__calibre14">
+         <p class="epub__calibre18"><a id="ch06qa2qe2"/></p>
+         <p class="epub__calibre18"><a id="ch06qa2q2"/><b class="epub__calibre21">2 </b></p><p class="epub__noind">What’s the content of the <kbd class="epub__calibre15">ninjas</kbd> array after running the following code? (Hint: think about how the <kbd class="epub__calibre15">for-of</kbd> loop can be implemented with a <kbd class="epub__calibre15">while</kbd> loop.)
+            </p>
+            
+            <pre id="PLd0e16337" class="epub__calibre5">function* NinjaGenerator(){
+  yield "Yoshi";
+  return "Hattori";
+  yield "Hanzo";
+}
+
+var ninjas = [];
+for(let ninja of NinjaGenerator()){
+  ninjas.push(ninja);
+}
+
+ninjas;</pre>
+            <p class="epub__calibre18"/>
+      </blockquote>
+      <blockquote class="epub__calibre14">
+         <p class="epub__calibre18"><a id="ch06qa2qe3"/></p>
+         <p class="epub__calibre18"><a id="ch06qa2q3"/><b class="epub__calibre21">3 </b></p><p class="epub__noind">What are the values of variables <kbd class="epub__calibre15">a1</kbd> and <kbd class="epub__calibre15">a2</kbd>, after running the following code?
+            </p>
+            
+            <pre id="PLd0e16356" class="epub__calibre5">function *Gen(val){
+  val = yield val * 2;
+  yield val;
+}
+
+let generator = Gen(2);
+let a1 = generator.next(3).value;
+let a2 = generator.next(4).value;</pre>
+            <p class="epub__calibre18"/>
+      </blockquote>
+      <blockquote class="epub__calibre14">
+         <p class="epub__calibre18"><a id="ch06qa2qe4"/></p>
+         <p class="epub__calibre18"><a id="ch06qa2q4"/><b class="epub__calibre21">4 </b></p><p class="epub__noind">What’s the output of the following code?</p>
+            
+            <pre id="PLd0e16369" class="epub__calibre5">const promise = new Promise((resolve, reject) =&gt; {
+  reject("Hattori");
+});
+
+promise.then(val =&gt; alert("Success: " + val))
+       .catch(e =&gt; alert("Error: " + e));</pre>
+            <p class="epub__calibre18"/>
+      </blockquote>
+      <blockquote class="epub__calibre14">
+         <p class="epub__calibre18"><a id="ch06qa2qe5"/></p>
+         <p class="epub__calibre18"><a id="ch06qa2q5"/><b class="epub__calibre21">5 </b></p><p class="epub__noind">What’s the output of the following code?</p>
+            
+            <pre id="PLd0e16383" class="epub__calibre5">const promise = new Promise((resolve, reject) =&gt; {
+  resolve("Hattori");
+  setTimeout(()=&gt; reject("Yoshi"), 500);
+});
+
+promise.then(val =&gt; alert("Success: " + val))
+       .catch(e =&gt; alert("Error: " + e));</pre>
+            <p class="epub__calibre18"/>
+      </blockquote>
+      
+      
+      
+      
+      
+      
+      <div class="epub__calibre25" id="calibre_pb_27"/>
+</div>
+
+
+</body>
+</html>

@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 9.2. Making a Constructor Exception-Safe</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 9.2. Making a Constructor Exception-Safe</h3>
+
+<h4 class="docSection2Title" id="title-ID0EOKCI">Problem</h4>
+<p class="docText">Your constructor needs to 
+
+uphold basic and strong
+exception-safety guarantees. See the discussion that follows for the
+definitions of "basic" and
+"strong" guarantees.</p>
+
+<h4 class="docSection2Title" id="title-ID0EJLCI">Solution</h4>
+<p class="docText">Use <tt>try</tt> and <tt>catch</tt> in the
+constructor to clean up properly if an exception is thrown during
+construction. Example 9-2 presents examples of the
+simple <tt>Device</tt> and <tt>Broker</tt>
+classes. <tt>Broker</tt> constructs two
+<tt>Device</tt> objects on the heap, but needs to be able
+to properly clean them up if an exception is thrown during
+construction.</p>
+<h5 class="docExampleTitle" id="title-ID0ECMCI">Example 9-2. An exception-safe constructor</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;iostream&gt;
+#include &lt;stdexcept&gt;
+
+using namespace std;
+
+class Device {
+public:
+   Device(int devno) {
+      if (devno == 2)
+         throw runtime_error("Big problem");
+   }
+  ~Device( ) {}
+};
+
+class Broker {
+  
+public:
+   Broker (int devno1, int devno2) :
+      dev1_(NULL), dev2_(NULL) {
+      try {                            
+         dev1_ = new Device(devno1);  // Enclose the creation of heap
+         dev2_ = new Device(devno2);  // objects in a try block...
+      }
+      catch (...) {
+         delete dev1_;                // ...clean up and rethrow if
+         throw;                       // something goes wrong.
+      }
+   }
+  ~Broker( ) {
+      delete dev1_;
+      delete dev2_;
+   }
+
+private:
+   Broker( );
+   Device* dev1_;
+   Device* dev2_;
+};
+
+int main( ) {
+
+   try {
+      Broker b(1, 2);
+   }
+   catch(exception&amp; e) {
+      cerr &lt;&lt; "Exception: " &lt;&lt; e.what( ) &lt;&lt; endl;
+   }
+}
+
+					  </pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0ELMCI">Discussion</h4>
+<p class="docText">To say that a constructor, member function, destructor, or anything
+else is "exception-safe" is to
+guarantee that it won't leak resources and possibly
+that it won't leave its object in an inconsistent
+state. In C++, these two kinds of guarantees have been given the
+names <span class="docEmphasis">basic</span> and <span class="docEmphasis">strong</span>.</p>
+<p class="docText">The
+<span class="docEmphasis">basic</span>
+exception-safety guarantee, which is quite intuitive, says that if an
+exception is thrown, the current operation won't
+leak resources and the objects involved in the operation will still
+be usable (meaning you can call other member functions and destroy
+the object, i.e., it won't be in a corrupt state).
+It also means the program will be left in a consistent state,
+although it might not be a predictable state. The rules are
+straightforward: if an exception is thrown anywhere in the body of
+(for example) a member function, heap objects are not orphaned and
+the objects involved in the operation can be destroyed or reset by
+the caller. The other guarantee, called the
+<span class="docEmphasis">strong</span> exception-safety
+guarantee, ensures that the object state remains unchanged if the
+operation fails. The latter applies to postconstruction operations on
+an object, since, by definition, an object that throws an exception
+during construction is never fully constructed and therefore never in
+a valid state. I will return to the subject of member functions in
+Recipe 9.4. For now, let's
+focus on construction.</p>
+<p class="docText">Example 9-2 defines two classes,
+<tt>Device</tt> and <tt>Broker</tt>, that
+don't do much, but could easily represent any sort
+of device/broker scenario where you have some class that opens a
+connection to each of two devices and manages communication between
+them. A broker is useless if only one of the devices is available, so
+you want transactional semantics when you instantiate a broker, such
+that if one of the two throws an exception when it is being acquired,
+the other is released. This will ensure memory and other resources
+are not leaked.</p>
+<p class="docText"><tt>try</tt> and <tt>catch</tt> will do the job.
+In the constructor, wrap the allocation of heap objects in a try
+block and catch anything that is thrown during their construction
+like this:</p>
+<pre>try {                            
+   dev1_ = new Device(devno1);
+   dev2_ = new Device(devno2);
+}
+catch (...) {
+   delete dev1_;
+   throw;
+}</pre><br/>
+<p class="docText">The ellipsis in the <tt>catch</tt> handler means that
+anything that is thrown will be caught. This is what you need here,
+because all you're doing is cleaning up after
+yourself if something goes wrong, then rethrowing regardless of what
+sort of exception was thrown. You need to re<tt>throw</tt>
+so the client code that is trying to instantiate the
+<tt>Broker</tt> object can do something useful with the
+exception, like write its error message somewhere.</p>
+<p class="docText">I only delete <tt>dev1_</tt> in the catch handler because
+the last chance for an exception to be thrown is in the call to
+<tt>new</tt> for <tt>dev2_</tt>. If this throws
+an exception, than <tt>dev2_</tt> will not be assigned a
+value and, therefore, I don't need to
+<tt>delete</tt> it. However, if you do something after
+<tt>dev2_</tt>'s initialization, you will
+need to be sure to clean it up. For example:</p>
+<pre>try {                            
+   dev1_ = new Device(devno1);
+   dev2_ = new Device(devno2);
+   <span class="docEmphBold">foo_ = new MyClass( );       // Might throw</span>
+}
+catch (...) {
+   delete dev1_;
+   <span class="docEmphBold">delete dev2_;</span>
+   throw;
+}</pre><br/>
+<p class="docText">In this case, you don't need to worry about deleting
+pointers that were never assigned real values (as long as you
+properly initialized them in the first place), since deleting a
+<tt>NULL</tt> pointer has no effect. In other words, if the
+assignment to <tt>dev1_</tt> throws an exception, your
+<tt>catch</tt> handler still calls
+<tt>delete</tt>
+<tt>dev2_</tt>, but
+that's okay as long as you initialized it to
+<tt>NULL</tt> in the initializer list.</p>
+<p class="docText">As I said in Recipe 9.1, designing
+
+
+a sound,
+flexible exception strategy can be tricky, and exception-safety is no
+different. For a detailed look at designing exception-safe code, see
+<span class="docEmphasis">Exceptional C++</span> by Herb Sutter (Addison Wesley).</p>
+
+<h4 class="docSection2Title" id="title-ID0EGQCI">See Also</h4>
+<p class="docText">Recipe 9.3</p>
+</div>
+</body>
+</html>

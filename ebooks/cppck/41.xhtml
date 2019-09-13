@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 41. New, Constructors, and Exceptions</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 41. New, Constructors, and Exceptions</h2>
+		
+<p class="docText">To
+ write perfectly exception safe code, it’s necessary to keep track of 
+any allocated resources and to be prepared to release them if an 
+exception occurs. This is often a straightforward process. We can either
+ organize our code in such a way that no resource recovery is necessary 
+(see <span class="docEmphasis">Exception Safe Functions</span> [39, 135]) or use resource handles to recover the resources automatically (see <span class="docEmphasis">RAII</span> [40,
+ 139]). In extreme situations, we can get down and dirty with try blocks
+ or even nested try blocks, but this should be an exception, not the 
+rule.</p>
+		
+<p class="docText">We do, however, have an apparent problem with the use of the <tt>new</tt> operator. The <tt>new</tt> operator actually performs two separate operations (see <span class="docEmphasis">Placement New</span> [35, 119]); first it calls a function named <tt>operator new</tt> to allocate some storage, and then it may invoke a constructor to turn that uninitialized storage into an object:</p>
+		
+<div class="docText">
+  <pre>String *title = new String( "Kicks" );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The problem is that, if an exception occurs, we can’t tell whether it was thrown by <tt>operator new</tt> or the <tt>String</tt> constructor. This matters, because if <tt>operator new</tt> succeeds and the constructor throws an exception, we should probably call <tt>operator delete</tt> on the allocated (but uninitialized) storage. If <tt>operator new</tt> was the function that threw the exception, no memory was allocated and we should not call <tt>operator delete</tt>.</p>
+		
+<p class="docText">One horrible approach
+ is to handcraft the proper behavior by separating the allocation and 
+initialization behavior and tossing in a try block:</p>
+		
+<div class="docText">
+  <pre class="preFixedWidth">				<span class="docEmphMark">String *title // allocate raw storage                                   </span>
+				<span class="docEmphMark">    = static_cast&lt;String *&gt;(::operator new(sizeof(String));             </span>
+				<span class="docEmphMark">try {                                                                   </span>
+				<span class="docEmphMark">    new( title ) String( "Kicks" ); // placement new                    </span>
+				<span class="docEmphMark">}                                                                       </span>
+				<span class="docEmphMark">catch( ... ) {                                                          </span>
+				<span class="docEmphMark">    ::operator delete( title ); // clean up if ctor throws              </span>
+				<span class="docEmphMark">}                                                                       </span>
+			
+
+					  </pre>
+</div>
+<br/>
+		
+<p class="docText">Ouch. So many things are
+ wrong with this code that the approach is not worth considering. In 
+addition to being more trouble for you, the overworked coder, it will 
+not behave properly if <tt>String</tt> has a member <tt>operator new</tt> and <tt>operator delete</tt> (see <span class="docEmphasis">Class-Specific Memory Management</span> [36,
+ 123]). This is a perfect example of too-clever code that works 
+initially but fails subtly in the future because of a remote change (for
+ example, if someone adds <tt>String</tt>-specific memory management).</p>
+		
+<p class="docText">Fortunately, the 
+compiler handles this situation for us and produces code that performs 
+in the same way as in our hand-coded approach above, but with one 
+exception. It will invoke the <tt>operator delete</tt> that corresponds to the <tt>operator new</tt> used to perform the allocation.</p>
+		
+<div class="docText">
+  <pre>String *title = new String( "Kicks" ); // use members if present
+String *title = ::new String( "Kicks" ); // use global new/delete
+</pre>
+</div>
+<br/>
+		
+<p class="docText">In particular, if the allocation uses a member <tt>operator new</tt>, then the corresponding member <tt>operator delete</tt> will be called to reclaim the storage if the <tt>String</tt> constructor throws an exception. This is yet another good reason to declare a member <tt>operator delete</tt> if you declare a member <tt>operator new</tt>.</p>
+		
+<p class="docText">Essentially the same situation applies to array allocation and allocations that use overloaded versions of <tt>operator new[]</tt>; the compiler will attempt to find and call the appropriate <tt>operator delete[]</tt>.</p>
+		
+
+
+</body>
+</html>

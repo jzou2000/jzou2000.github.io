@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>44.4. Using Pipes to Connect Filters</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">44.4. Using Pipes to Connect Filters</h3><p class="docText">When
+ a pipe is created, the file descriptors used for the two ends of the 
+pipe are the next lowest-numbered descriptors available. Since, in 
+normal circumstances, descriptors 0, 1, and 2 are already in use for a 
+process, some higher-numbered descriptors will be allocated for the 
+pipe. So how do we bring about the situation shown in Figure 44-1, where two filters (i.e., programs that read from <span class="docEmphasis">stdin</span> and write to <span class="docEmphasis">stdout</span>)
+ are connected using a pipe, such that the standard output of one 
+program is directed into the pipe and the standard input of the other is
+ taken from the pipe? And in particular, how can we do this without 
+modifying the code of the filters themselves?</p><p class="docText">The answer is to use the techniques described in Section 5.5 for duplicating file descriptors. Traditionally, the following series of calls was used to accomplish the desired result:</p><pre>int pfd[2];
+
+pipe(pfd);          /* Allocates (say) file descriptors 3 and 4 for pipe */
+
+/* Other steps here, e.g., fork() */
+
+close(STDOUT_FILENO);           /* Free file descriptor 1 */
+dup(pfd[1]);                    /* Duplication uses lowest free file
+                                   descriptor, i.e., fd 1 */</pre><br/>
+<p class="docText">The end result of the above 
+steps is that the process’s standard output is bound to the write end of
+ the pipe. A corresponding set of calls can be used to bind a process’s 
+standard input to the read end of the pipe.</p><p class="docText">Note
+ that these steps depend on the assumption that file descriptors 0, 1, 
+and 2 for a process are already open. (The shell normally ensures this 
+for each program it executes.) If file descriptor 0 was already closed 
+prior to the above steps, then we would erroneously bind the process’s 
+standard <span class="docEmphasis">input</span> to the write end of the pipe. To avoid this possibility, we can replace the calls to <span class="docEmphasis">close()</span> and <span class="docEmphasis">dup()</span> with the following <span class="docEmphasis">dup2()</span> call, which allows us to explicitly specify the descriptor to be bound to the pipe end:</p><pre>dup2(pfd[1], STDOUT_FILENO);    /* Close descriptor 1, and reopen bound
+                                   to write end of pipe */</pre><br/>
+<p class="docText">After duplicating <span class="docEmphasis">pfd[1]</span>, we now have two file descriptors referring to the write end of the pipe: descriptor 1 and <span class="docEmphasis">pfd[1]</span>. Since unused pipe file descriptors should be closed, after the <span class="docEmphasis">dup2()</span> call, we close the superfluous descriptor:</p><pre>close(pfd[1]);</pre><br/>
+<p class="docText">The code we have shown so far relies on standard output having been previously open. Suppose that, prior to the <span class="docEmphasis">pipe()</span> call, standard input and standard output had both been closed. In this case, <span class="docEmphasis">pipe()</span> would have allocated these two descriptors to the pipe, perhaps with <span class="docEmphasis">pfd[0]</span> having the value 0 and <span class="docEmphasis">pfd[1]</span> having the value 1. Consequently, the preceding <span class="docEmphasis">dup2()</span> and <span class="docEmphasis">close()</span> calls would be equivalent to the following:</p><pre>dup2(1, 1);         /* Does nothing */
+close(1);           /* Closes sole descriptor for write end of pipe */</pre><br/>
+<p class="docText">Therefore, it is good defensive programming practice to bracket these calls with an <tt>if</tt> statement of the following form:</p><pre>if (pfd[1] != STDOUT_FILENO) {
+    dup2(pfd[1], STDOUT_FILENO);
+    close(pfd[1]);
+}</pre><br/>
+<h4 class="docSection2Title" id="title-ID0EPZAM">44.4.1. </h4><h5 class="docSection3Title" id="title-ID0ETZAM">44.4.1.1. Example program</h5><p class="docText">The program in Example 44-4 uses the techniques described in this section to bring about the setup shown in Figure 44-1.
+ After building a pipe, this program creates two child processes. The 
+first child binds its standard output to the write end of the pipe and 
+then execs <span class="docEmphasis">ls</span>. The second child binds its standard input to the read end of the pipe and then execs <span class="docEmphasis">wc</span>.</p><h5 class="docExampleTitle" id="title-ID0EP2AM">Example 44-4. Using a pipe to connect <span class="docEmphasis">ls</span> and <span class="docEmphasis">wc</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>pipes/pipe_ls_wc.c</b>
+#include &lt;sys/wait.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int pfd[2];                                     /* Pipe file descriptors */
+
+    if (pipe(pfd) == -1)                            /* Create pipe */
+        errExit("pipe");
+
+    switch (fork()) {
+    case -1:
+        errExit("fork");
+
+    case 0:             /* First child: exec 'ls' to write to pipe */
+        if (close(pfd[0]) == -1)                    /* Read end is unused */
+            errExit("close 1");
+
+        /* Duplicate stdout on write end of pipe; close duplicated descriptor */
+
+        if (pfd[1] != STDOUT_FILENO) {              /* Defensive check */
+            if (dup2(pfd[1], STDOUT_FILENO) == -1)
+                errExit("dup2 1");
+            if (close(pfd[1]) == -1)
+                errExit("close 2");
+        }
+
+        execlp("ls", "ls", (char *) NULL);          /* Writes to pipe */
+        errExit("execlp ls");
+
+    default:            /* Parent falls through to create next child */
+        break;
+    }
+
+    switch (fork()) {
+    case -1:
+        errExit("fork");
+
+    case 0:             /* Second child: exec 'wc' to read from pipe */
+        if (close(pfd[1]) == -1)                    /* Write end is unused */
+            errExit("close 3");
+
+        /* Duplicate stdin on read end of pipe; close duplicated descriptor */
+
+        if (pfd[0] != STDIN_FILENO) {               /* Defensive check */
+            if (dup2(pfd[0], STDIN_FILENO) == -1)
+                errExit("dup2 2");
+            if (close(pfd[0]) == -1)
+                errExit("close 4");
+        }
+
+        execlp("wc", "wc", "-l", (char *) NULL);    /* Reads from pipe */
+        errExit("execlp wc");
+
+    default:            /* Parent falls through */
+        break;
+    }
+
+    /* Parent closes unused file descriptors for pipe, and waits for children */
+
+    if (close(pfd[0]) == -1)
+        errExit("close 5");
+    if (close(pfd[1]) == -1)
+        errExit("close 6");
+    if (wait(NULL) == -1)
+        errExit("wait 1");
+    if (wait(NULL) == -1)
+        errExit("wait 2");
+
+    exit(EXIT_SUCCESS);
+}
+     <b>pipes/pipe_ls_wc.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">When we run the program in Example 44-4, we see the following:</p><pre>$ <b>./pipe_ls_wc </b>
+     24
+$ <b>ls | wc -l </b>                    <i> Verify the results using shell commands</i>
+     24</pre><br/>
+</div>
+</body>
+</html>

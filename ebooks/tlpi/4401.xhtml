@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>44.1. Overview</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">44.1. Overview</h3><p class="docText">Every
+ user of the shell is familiar with the use of pipes in commands such as
+ the following, which counts the number of files in a directory:</p><pre>$ <b>ls | wc -l</b></pre><br/>
+<p class="docText">In order to execute the above command, the shell creates two processes, executing <span class="docEmphasis">ls</span> and <span class="docEmphasis">wc</span>, respectively. (This is done using <span class="docEmphasis">fork()</span> and <span class="docEmphasis">exec()</span>, which are described in Chapter 24 and Chapter 27.) Figure 44-1 shows how the two processes employ the pipe.</p><p class="docText">Among other things, Figure 44-1
+ is intended to illustrate how pipes got their name. We can think of a 
+pipe as a piece of plumbing that allows data to flow from one process to
+ another.</p><p></p><center><h5 class="docFigureTitle">Figure 44-1. Using a pipe to connect two processes</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-74.png"/></p></center><p></p><br/><p class="docText">One point to note in Figure 44-1 is that the two processes are connected to the pipe so that the writing process (<span class="docEmphasis">ls</span>) has its standard output (file descriptor 1) joined to the write end of the pipe, while the reading process (<span class="docEmphasis">wc</span>)
+ has its standard input (file descriptor 0) joined to the read end of 
+the pipe. In effect, these two processes are unaware of the existence of
+ the pipe; they just read from and write to the standard file 
+descriptors. The shell must do some work in order to set things up in 
+this way, and we see how this is done in Section 44.4.</p><p class="docText">In the following paragraphs, we cover a number of important characteristics of pipes.</p><h4 class="docSection2Title" id="title-ID0ETTAM">44.1.1. </h4><h5 class="docSection3Title" id="title-ID0EXTAM">44.1.1.1. A pipe is a byte stream</h5><p class="docText">When
+ we say that a pipe is a byte stream, we mean that there is no concept 
+of messages or message boundaries when using a pipe. The process reading
+ from a pipe can read blocks of data of any size, regardless of the size
+ of blocks written by the writing process. Furthermore, the data passes 
+through the pipe sequentially—bytes are read from a pipe in exactly the 
+order they were written. It is not possible to randomly access the data 
+in a pipe using <span class="docEmphasis">lseek()</span>.</p><p class="docText">If
+ we want to implement the notion of discrete messages in a pipe, we must
+ do this within our application. While this is feasible (refer to Section 44.8),
+ it may be preferable to use alternative IPC mechanisms, such as message
+ queues and datagram sockets, which we discuss in later chapters.</p><h5 class="docSection3Title" id="title-ID0EUUAM">44.1.1.2. Reading from a pipe</h5><p class="docText">Attempts
+ to read from a pipe that is currently empty block until at least one 
+byte has been written to the pipe. If the write end of a pipe is closed,
+ then a process reading from the pipe will see end-of-file (i.e., <span class="docEmphasis">read()</span> returns 0) once it has read all remaining data in the pipe.</p><h5 class="docSection3Title" id="title-ID0E3UAM">44.1.1.3. Pipes are unidirectional</h5><p class="docText">Data
+ can travel only in one direction through a pipe. One end of the pipe is
+ used for writing, and the other end is used for reading.</p><p class="docText">On some other UNIX implementations—notably those derived from System V Release 4—pipes are bidirectional (so-called <span class="docEmphasis">stream pipes</span>).
+ Bidirectional pipes are not specified by any UNIX standards, so that, 
+even on implementations where they are provided, it is best to avoid 
+reliance on their semantics. As an alternative, we can use UNIX domain 
+stream socket pairs (created using the <span class="docEmphasis">socketpair()</span> system call described in Section 57.5), which provide a standardized bidirectional communication mechanism that is semantically equivalent to stream pipes.</p><h5 class="docSection3Title" id="title-ID0ERVAM">44.1.1.4. Writes of up to <tt>PIPE_BUF</tt> bytes are guaranteed to be atomic</h5><p class="docText">If
+ multiple processes are writing to a single pipe, then it is guaranteed 
+that their data won’t be intermingled if they write no more than <tt>PIPE_BUF</tt> bytes at a time.</p><p class="docText">SUSv3 requires that <tt>PIPE_BUF</tt> be at least <tt>_POSIX_PIPE_BUF</tt> (512). An implementation should define <tt>PIPE_BUF</tt> (in <tt>&lt;limits.h&gt;</tt>) and/or allow the call <span class="docEmphasis">fpathconf(fd, _PC_PIPE_BUF)</span> to return the actual upper limit for atomic writes. <tt>PIPE_BUF</tt>
+ varies across UNIX implementations; for example, it is 512 bytes on 
+FreeBSD 6.0, 4096 bytes on Tru64 5.1, and 5120 bytes on Solaris 8. On 
+Linux, <tt>PIPE_BUF</tt> has the value 4096.</p><p class="docText">When writing blocks of data larger than <tt>PIPE_BUF</tt>
+ bytes to a pipe, the kernel may transfer the data in multiple smaller 
+pieces, appending further data as the reader removes bytes from the 
+pipe. (The <span class="docEmphasis">write()</span>
+ call blocks until all of the data has been written to the pipe.) When 
+there is only a single process writing to a pipe (the usual case), this 
+doesn’t matter. However, if there are multiple writer processes, then 
+writes of large blocks may be broken into segments of arbitrary size 
+(which may be smaller than <tt>PIPE_BUF</tt> bytes) and interleaved with writes by other processes.</p><p class="docText">The <tt>PIPE_BUF</tt> limit affects exactly when data is transferred to the pipe. When writing up to <tt>PIPE_BUF</tt> bytes, <span class="docEmphasis">write()</span>
+ will block if necessary until sufficient space is available in the pipe
+ so that it can complete the operation atomically. When more than <tt>PIPE_BUF</tt> bytes are being written, <span class="docEmphasis">write()</span>
+ transfers as much data as possible to fill the pipe, and then blocks 
+until data has been removed from the pipe by some reading process. If 
+such a blocked <span class="docEmphasis">write()</span>
+ is interrupted by a signal handler, then the call unblocks and returns a
+ count of the number of bytes successfully transferred, which will be 
+less than was requested (a so-called <span class="docEmphasis">partial write</span>).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On Linux 2.2, pipe writes of <span class="docEmphasis">any</span> size are atomic, unless interrupted by a signal handler. On Linux 2.4 and later, any write greater than <tt>PIPE_BUF</tt>
+ bytes may be interleaved with writes by other processes. (The kernel 
+code implementing pipes underwent substantial changes between kernel 
+versions 2.2 and 2.4.)</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0E6XAM">44.1.1.5. Pipes have a limited capacity</h5><p class="docText">A
+ pipe is simply a buffer maintained in kernel memory. This buffer has a 
+maximum capacity. Once a pipe is full, further writes to the pipe block 
+until the reader removes some data from the pipe.</p><p class="docText">SUSv3
+ makes no requirement about the capacity of a pipe. In Linux kernels 
+before 2.6.11, the pipe capacity is the same as the system page size 
+(e.g., 4096 bytes on x86-32); since Linux 2.6.11, the pipe capacity is 
+65,536 bytes. Other UNIX implementations have different pipe capacities.</p><p class="docText">In
+ general, an application never needs to know the exact capacity of a 
+pipe. If we want to prevent the writer process(es) from blocking, the 
+process(es) reading from the pipe should be designed to read data as 
+soon as it is available.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In
+ theory, there is no reason why a pipe couldn’t operate with smaller 
+capacities, even with a single-byte buffer. The reason for employing 
+large buffer sizes is efficiency: each time a writer fills the pipe, the
+ kernel must perform a context switch to allow the reader to be 
+scheduled so that it can empty some data from the pipe. Employing a 
+larger buffer size means that fewer context switches are required.</p><p class="docText">Starting with Linux 2.6.35, the capacity of a pipe can be modified. The Linux-specific call <span class="docEmphasis">fcntl(fd, F_SETPIPE_SZ, size)</span> changes the capacity of the pipe referred to by <span class="docEmphasis">fd</span> to be at least <span class="docEmphasis">size</span>
+ bytes. An unprivileged process can change the pipe capacity to any 
+value in the range from the system page size up to the value in <tt>/proc/sys/fs/pipe-max-size</tt>. The default value for <tt>pipe-max-size</tt> is 1,048,576 bytes. A privileged (<tt>CAP_SYS_RESOURCE</tt>) process can override this limit. When allocating space for the pipe, the kernel may round <span class="docEmphasis">size</span> up to some value convenient for the implementation. The <span class="docEmphasis">fcntl(fd, F_GETPIPE_SZ)</span> call returns the actual size allocated for the pipe.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

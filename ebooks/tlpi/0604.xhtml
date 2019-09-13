@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>6.4. Virtual Memory Management</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">6.4. Virtual Memory Management</h3><p class="docText">The previous discussion of the memory layout of a process glossed over the fact that we were talking about the layout in <span class="docEmphasis">virtual memory</span>. Since an understanding of virtual memory is useful later on when we look at topics such as the <span class="docEmphasis">fork()</span> system call, shared memory, and mapped files, we now consider some of the details.</p><p class="docText">Like most modern kernels, Linux employs a technique known as <span class="docEmphasis">virtual memory management</span>.
+ The aim of this technique is to make efficient use of both the CPU and 
+RAM (physical memory) by exploiting a property that is typical of most 
+programs: <span class="docEmphasis">locality of reference</span>. Most programs demonstrate two kinds of locality:</p><ul><li><p class="docList"><span class="docEmphasis">Spatial locality</span>
+ is the tendency of a program to reference memory addresses that are 
+near those that were recently accessed (because of sequential processing
+ of instructions, and, sometimes, sequential processing of data 
+structures).</p></li><li><p class="docList"><span class="docEmphasis">Temporal locality</span>
+ is the tendency of a program to access the same memory addresses in the
+ near future that it accessed in the recent past (because of loops).</p></li></ul><p></p><center><h5 class="docFigureTitle">Figure 6-1. Typical memory layout of a process on Linux/x86-32</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-8.png"/></p></center><p></p><br/><p class="docText">The
+ upshot of locality of reference is that it is possible to execute a 
+program while maintaining only part of its address space in RAM.</p><p class="docText">A virtual memory scheme splits the memory used by each program into small, fixed-size units called <span class="docEmphasis">pages</span>. Correspondingly, RAM is divided into a series of <span class="docEmphasis">page frames</span>
+ of the same size. At any one time, only some of the pages of a program 
+need to be resident in physical memory page frames; these pages form the
+ so-called <span class="docEmphasis">resident set</span>. Copies of the unused pages of a program are maintained in the <span class="docEmphasis">swap area</span>—a
+ reserved area of disk space used to supplement the computer’s RAM—and 
+loaded into physical memory only as required. When a process references a
+ page that is not currently resident in physical memory, a <span class="docEmphasis">page fault</span> occurs, at which point the kernel suspends execution of the process while the page is loaded from disk into memory.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On
+ x86-32, pages are 4096 bytes in size. Some other Linux implementations 
+use larger page sizes. For example, Alpha uses a page size of 8192 
+bytes, and IA-64 has a variable page size, with the usual default being 
+16,384 bytes. A program can determine the system virtual memory page 
+size using the call <span class="docEmphasis">sysconf(_SC_PAGESIZE)</span>, as described in Section 11.2.</p><hr noshade="noshade" size="1"/><p></p><center><h5 class="docFigureTitle">Figure 6-2. Overview of virtual memory</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_002.png"/></p></center><p></p><br/><p class="docText">In order to support this organization, the kernel maintains a <span class="docEmphasis">page table</span> for each process (Figure 6-2). The page table describes the location of each page in the process’s <span class="docEmphasis">virtual address space</span>
+ (the set of all virtual memory pages available to the process). Each 
+entry in the page table either indicates the location of a virtual page 
+in RAM or indicates that it currently resides on disk.</p><p class="docText">Not
+ all address ranges in the process’s virtual address space require 
+page-table entries. Typically, large ranges of the potential virtual 
+address space are unused, so that it isn’t necessary to maintain 
+corresponding page-table entries. If a process tries to access an 
+address for which there is no corresponding page-table entry, it 
+receives a <tt>SIGSEGV</tt> signal.</p><p class="docText">A
+ process’s range of valid virtual addresses can change over its 
+lifetime, as the kernel allocates and deallocates pages (and page-table 
+entries) for the process. This can happen in the following 
+circumstances:</p><ul><li><p class="docList">as the stack grows downward beyond limits previously reached;</p></li><li><p class="docList">when memory is allocated or deallocated on the heap, by raising the program break using <span class="docEmphasis">brk()</span>, <span class="docEmphasis">sbrk()</span>, or the <span class="docEmphasis">malloc</span> family of functions (Chapter 7);</p></li><li><p class="docList">when System V shared memory regions are attached using <span class="docEmphasis">shmat()</span> and detached using <span class="docEmphasis">shmdt()</span> (Chapter 48); and</p></li><li><p class="docList">when memory mappings are created using <span class="docEmphasis">mmap()</span> and unmapped using <span class="docEmphasis">munmap()</span> (Chapter 49).</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The implementation of virtual memory requires hardware support in the form of a <span class="docEmphasis">paged memory management unit</span>
+ (PMMU). The PMMU translates each virtual memory address reference into 
+the corresponding physical memory address and advises the kernel of a 
+page fault when a particular virtual memory address corresponds to a 
+page that is not resident in RAM.</p><hr noshade="noshade" size="1"/><p class="docText">Virtual
+ memory management separates the virtual address space of a process from
+ the physical address space of RAM. This provides many advantages:</p><ul><li><p class="docList">Processes
+ are isolated from one another and from the kernel, so that one process 
+can’t read or modify the memory of another process or the kernel. This 
+is accomplished by having the page-table entries for each process point 
+to distinct sets of physical pages in RAM (or in the swap area).</p></li><li><p class="docList">Where
+ appropriate, two or more processes can share memory. The kernel makes 
+this possible by having page-table entries in different processes refer 
+to the same pages of RAM. Memory sharing occurs in two common 
+circumstances:</p><ul><li><p class="docList">Multiple
+ processes executing the same program can share a single (read-only) 
+copy of the program code. This type of sharing is performed implicitly 
+when multiple programs execute the same program file (or load the same 
+shared library).</p></li><li><p class="docList">Processes can use the <span class="docEmphasis">shmget()</span> and <span class="docEmphasis">mmap()</span>
+ system calls to explicitly request sharing of memory regions with other
+ processes. This is done for the purpose of interprocess communication.</p></li></ul></li><li><p class="docList">The
+ implementation of memory protection schemes is facilitated; that is, 
+page-table entries can be marked to indicate that the contents of the 
+corresponding page are readable, writable, executable, or some 
+combination of these protections. Where multiple processes share pages 
+of RAM, it is possible to specify that each process has different 
+protections on the memory; for example, one process might have read-only
+ access to a page, while another has read-write access.</p></li><li><p class="docList">Programmers,
+ and tools such as the compiler and linker, don’t need to be concerned 
+with the physical layout of the program in RAM.</p></li><li><p class="docList">Because
+ only a part of a program needs to reside in memory, the program loads 
+and runs faster. Furthermore, the memory footprint (i.e., virtual size) 
+of a process can exceed the capacity of RAM.</p></li></ul><p class="docText">One
+ final advantage of virtual memory management is that since each process
+ uses less RAM, more processes can simultaneously be held in RAM. This 
+typically leads to better CPU utilization, since it increases the 
+likelihood that, at any moment in time, there is at least one process 
+that the CPU can execute.</p>
+</div>
+</body>
+</html>

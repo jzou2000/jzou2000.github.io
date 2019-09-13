@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>25.4. Interactions Between fork(), stdio Buffers, and _exit()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">25.4. Interactions Between <span class="docEmphasis">fork()</span>, <span class="docEmphasis">stdio</span> Buffers, and <span class="docEmphasis">_exit()</span></h3><p class="docText">The output yielded by the program in Example 25-2
+ demonstrates a phenomenon that is at first puzzling. When we run this 
+program with standard output directed to the terminal, we see the 
+expected result:</p><pre>$ <b>./fork_stdio_buf</b>
+Hello world
+Ciao</pre><br/>
+<p class="docText">However, when we redirect standard output to a file, we see the following:</p><pre>$ <b>./fork_stdio_buf &gt; a</b>
+$ <b>cat a</b>
+Ciao
+Hello world
+Hello world</pre><br/>
+<p class="docText">In the above output, we see two strange things: the line written by <span class="docEmphasis">printf()</span> appears twice, and the output of <span class="docEmphasis">write()</span> precedes that of <span class="docEmphasis">printf()</span>.</p><h5 class="docExampleTitle" id="title-ID0EURCK">Example 25-2. Interaction of <span class="docEmphasis">fork()</span> and <span class="docEmphasis">stdio</span> buffering</h5><p></p><div class="box"><pre><b>procexec/fork_stdio_buf.c</b>
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    printf("Hello world\n");
+    write(STDOUT_FILENO, "Ciao\n", 5);
+
+    if (fork() == -1)
+        errExit("fork");
+
+    /* Both child and parent continue execution here */
+
+    exit(EXIT_SUCCESS);
+}
+     <b>procexec/fork_stdio_buf.c</b></pre><br/>
+</div><p></p><p class="docText">To understand why the message written with <span class="docEmphasis">printf()</span> appears twice, recall that the <span class="docEmphasis">stdio</span> buffers are maintained in a process’s user-space memory (refer to Section 13.2). Therefore, these buffers are duplicated in the child by <span class="docEmphasis">fork()</span>.
+ When standard output is directed to a terminal, it is line-buffered by 
+default, with the result that the newline-terminated string written by <span class="docEmphasis">printf()</span>
+ appears immediately. However, when standard output is directed to a 
+file, it is block-buffered by default. Thus, in our example, the string 
+written by <span class="docEmphasis">printf()</span> is still in the parent’s <span class="docEmphasis">stdio</span> buffer at the time of the <span class="docEmphasis">fork()</span>, and this string is duplicated in the child. When the parent and the child later call <span class="docEmphasis">exit()</span>, they both flush their copies of the <span class="docEmphasis">stdio</span> buffers, resulting in duplicate output.</p><p class="docText">We can prevent this duplicated output from occurring in one of the following ways:</p><ul><li><p class="docList">As a specific solution to the <span class="docEmphasis">stdio</span> buffering issue, we can use <span class="docEmphasis">fflush()</span> to flush the <span class="docEmphasis">stdio</span> buffer prior to a <span class="docEmphasis">fork()</span> call. Alternatively, we could use <span class="docEmphasis">setvbuf()</span> or <span class="docEmphasis">setbuf()</span> to disable buffering on the <span class="docEmphasis">stdio</span> stream.</p></li><li><p class="docList">Instead of calling <span class="docEmphasis">exit()</span>, the child can call <span class="docEmphasis">_exit()</span>, so that it doesn’t flush <span class="docEmphasis">stdio</span>
+ buffers. This technique exemplifies a more general principle: in an 
+application that creates child processes that don’t exec new programs, 
+typically only one of the processes (most often the parent) should 
+terminate via <span class="docEmphasis">exit()</span>, while the other processes should terminate via <span class="docEmphasis">_exit()</span>. This ensures that only one process calls exit handlers and flushes <span class="docEmphasis">stdio</span> buffers, which is usually desirable.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Other approaches that allow both the parent and child to call <span class="docEmphasis">exit()</span>
+ are possible (and sometimes necessary). For example, it may be possible
+ to design exit handlers so that they operate correctly even if called 
+from multiple processes, or to have the application install exit 
+handlers only after the call to <span class="docEmphasis">fork()</span>. Furthermore, sometimes we may actually want all processes to flush their <span class="docEmphasis">stdio</span> buffers after a <span class="docEmphasis">fork()</span>. In this case, we may choose to terminate the processes using <span class="docEmphasis">exit()</span>, or use explicit calls to <span class="docEmphasis">fflush()</span> in each process, as appropriate.</p><hr noshade="noshade" size="1"/><p class="docText">The output of the <span class="docEmphasis">write()</span> in the program in Example 25-2 doesn’t appear twice, because <span class="docEmphasis">write()</span> transfers data directly to a kernel buffer, and this buffer is not duplicated during a <span class="docEmphasis">fork()</span>.</p><p class="docText">By
+ now, the reason for the second strange aspect of the program’s output 
+when redirected to a file should be clear. The output of <span class="docEmphasis">write()</span> appears before that from <span class="docEmphasis">printf()</span> because the output of <span class="docEmphasis">write()</span> is immediately transferred to the kernel buffer cache, while the output from <span class="docEmphasis">printf()</span> is transferred only when the <span class="docEmphasis">stdio</span> buffers are flushed by the call to <span class="docEmphasis">exit()</span>. (In general, care is required when mixing <span class="docEmphasis">stdio</span> functions and system calls to perform I/O on the same file, as described in Section 13.7.)</p>
+</div>
+</body>
+</html>

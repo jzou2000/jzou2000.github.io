@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 23. Namespaces</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 23. Namespaces</h2>
+		
+<p class="docText">Global
+ scope was getting overly crowded. Everybody and his brother implemented
+ libraries that reused the same names for different classes and 
+functions. For example, many libraries wanted to include a class named <tt>String</tt>, but if you used two different libraries that defined a <tt>String</tt>
+ type, you’d get a multiple definition error or worse. Various 
+extra-language approaches used to address this problem (naming 
+conventions, the preprocessor, ...) only made things worse. Namespaces 
+to the rescue.</p>
+		
+<p class="docText">In some ways, namespaces introduce complexity (see <span class="docEmphasis">Argument Dependent Lookup</span> [25, 89]), but most uses of namespaces are simple and simplifying. A namespace is a subdivision of global scope:</p>
+		
+<div class="docText">
+  <pre>namespace org_semantics {
+    class String { ... };
+    String operator +( const String &amp;, const String &amp; );
+    // other classes, functions, typedefs, etc...
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This code snippet opens a namespace called <tt>org_semantics</tt>,
+ declares some useful things, and then closes the namespace with a 
+closing curly brace. You can always add more to a namespace by just 
+repeating the process; namespaces are “open.”</p>
+		
+<p class="docText">Note that some of the names in the <tt>org_semantics</tt> namespace are declared but not defined. To define these names, we can reopen the namespace:</p>
+		
+<div class="docText">
+  <pre>namespace org_semantics {
+<span class="docEmphMark">    String operator +( const String &amp;a, String &amp;b ) { // oops!</span>
+        //...
+    }
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Alternatively, we can simply qualify the definition with the namespace name without reopening the namespace:</p>
+		
+<div class="docText">
+  <pre>org_semantics::String
+org_semantics::operator +(
+    const org_semantics::String &amp;a,
+    const org_semantics::String &amp;b ) {
+    //...
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This has the advantage of not allowing one to inadvertently declare a new namespace name (as we did when we left out the <tt>const</tt> in the second argument of our first definition of <tt>operator +</tt>) rather than define an already declared one. Admittedly, the seemingly endless repetition of <tt>org_semantics</tt> in this case can be tedious, but that’s the price of security! We’ll discuss some approaches that can improve this situation.</p>
+		
+<p class="docText">If you want to use a name 
+that’s defined in a particular namespace, you have to tell the compiler 
+in what namespace the name is to be found:</p>
+		
+<div class="docText">
+  <pre>org_semantics::String s( "Hello, World!" );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Although some of the C++ standard library has remained in global scope (the standard global <tt>operator new</tt>s, <tt>operator delete</tt>s, array news, and array deletes come to mind), the bulk of the standard library is now resident in the <tt>std</tt> (that is, “standard”) namespace, and most standard library use requires qualification with the <tt>std</tt> namespace name:</p>
+		
+<div class="docText">
+  <pre>#include &lt;iostream&gt;
+#include &lt;vector&gt;
+//...
+void aFunc() {
+<span class="docEmphMark">    vector&lt;int&gt; a; // error! I don't see a vector!           </span>
+    std::vector&lt;int&gt; b; // Oh, there it is!
+<span class="docEmphMark">    cout &lt;&lt; "Oops!" &lt;&lt; endl; // errors!                      </span>
+    std::cout &lt;&lt; "Better!" &lt;&lt; std::endl; // OK
+    //...
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Clearly, continual explicit qualification can be tedious. One way to relieve the tedium is to employ a “using directive.”</p>
+		
+<div class="docText">
+  <pre>void aFunc() {
+    using namespace std; // using directive
+    vector&lt;int&gt; a; // OK
+    cout &lt;&lt; "Hello!" &lt;&lt; endl; // OK
+    //...
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">A
+ using directive essentially “imports” the names from the namespace, 
+making them accessible without qualification in the scope of the using 
+directive. In this case, the using directive is in force until the end 
+of the function body, and then you’re back to explicit qualification. 
+For this reason, many C++ programmers (even many who should know better)
+ suggest putting the using directive at global scope:</p>
+		
+<div class="docText">
+  <pre>#include &lt;iostream&gt;
+#include &lt;vector&gt;
+<span class="docEmphMark">using namespace std;                              </span>
+				<span class="docEmphMark">using namespace org_semantics;                    </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">That’s a bad idea. Now 
+we’re back nearly to square one, with all the names from a namespace 
+available everywhere, sowing confusion and disarray. This is a 
+particularly bad idea in a header file, where you can leverage your bad 
+decision over any file that includes your header. In header files, we 
+usually prefer to stick with explicit qualification and reserve using 
+directives for smaller scopes (such as function bodies or blocks within a
+ function) where their effects are bounded and easier to control. 
+Basically, you have to be on your best behavior in header files and on 
+pretty good behavior in source files, but you can kick back and relax 
+inside a function.</p>
+		
+<p class="docText">One interesting aspect of 
+using directives is that they make the names of a namespace available, 
+but as if they were declared at global scope, not necessarily at the 
+scope in which the using directive occurs. Local names will hide 
+namespace names:</p>
+		
+<div class="docText">
+  <pre>void aFunc() {
+    using namespace std; // using directive
+    //...
+    int vector = 12; // a poorly named local variable...
+<span class="docEmphMark">    vector&lt;int&gt; a; // error! std::vector is hidden               </span>
+    std::vector&lt;int&gt; b; // OK, can use explicit qualification
+    //...
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">An alternative is a “using declaration” that provides access to a namespace name through an actual declaration:</p>
+		
+<div class="docText">
+  <pre>void aFunc() {
+    using std::vector; // using declaration
+    //...
+<span class="docEmphMark">    int vector = 12; // error! redeclaration of vector          </span>
+    vector&lt;int&gt; a; // OK
+    //...
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Using declarations
+ are often a good middle ground between tedious explicit qualification 
+and unrestrained use of using directives, particularly if a given 
+section of code uses only a few names from two or more namespaces but 
+uses them repeatedly:</p>
+		
+<div class="docText">
+  <pre>void aFunc() {
+    using std::cout;
+    using std::endl;
+    using org_semantics::String;
+    String a, b, c;
+    //...
+    cout &lt;&lt; a &lt;&lt; b &lt;&lt; c &lt;&lt; endl;
+    // etc.
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Another way to deal with long, tedious namespace names is to employ an alias:</p>
+		
+<div class="docText">
+  <pre>namespace S = org_semantics;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Now <tt>S</tt> may be used in place of <tt>org_semantics</tt> within the scope of the alias. Like a using directive, a namespace alias is best avoided in a header file. (<tt>S</tt> is likely to conflict with other names more often than <tt>org_semantics</tt>, after all...)</p>
+		
+<p class="docText">Let’s finish up our quick tour of namespaces with a look at anonymous namespaces:</p>
+		
+<div class="docText">
+  <pre>namespace {
+    int anInt = 12;
+    int aFunc() { return anInt; }
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This anonymous namespace behaves identically to the following, where <tt>__compiler_generated_name__</tt> is unique for each anonymous namespace:</p>
+		
+<div class="docText">
+  <pre>namespace __compiler_generated_name__ {
+    int anInt = 12;
+    int aFunc() { return anInt; }
+}
+using namespace __compiler_generated_name__;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This is the 
+trendy new way to avoid declaring functions and variables with static 
+linkage. In the anonymous namespace above, both <tt>anInt</tt> and <tt>aFunc</tt>
+ have external linkage, but they can be accessed only within the 
+translation unit (that is, preprocessed file) in which they occur, just 
+like a static.</p>
+		
+
+
+</body>
+</html>

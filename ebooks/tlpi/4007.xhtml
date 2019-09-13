@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>40.7. The lastlog File</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">40.7. The <tt>lastlog</tt> File</h3><p class="docText">The <tt>lastlog</tt> file records the time each user last logged in to the system. (This is different from the <tt>wtmp</tt> file, which records all logins and logouts by all users.) Among other things, the <tt>lastlog</tt> file allows the <span class="docEmphasis">login</span> program to inform users (at the start of a new login session) when they last logged in. In addition to updating <tt>utmp</tt> and <tt>wtmp</tt>, applications providing login services should also update <tt>lastlog</tt>.</p><p class="docText">As with the <tt>utmp</tt> and <tt>wtmp</tt> files, there is variation in the location and format of the <tt>lastlog</tt> file. (A few UNIX implementations don’t provide this file.) On Linux, this file resides at <tt>/var/log/lastlog</tt>, and a constant, <tt>_PATH_LASTLOG</tt>, is defined in <tt>&lt;paths.h&gt;</tt> to point to this location. Like the <tt>utmp</tt> and <tt>wtmp</tt> files, the <tt>lastlog</tt> file is normally protected so that it can be read by all users but can be updated only by privileged processes.</p><p class="docText">The records in the <tt>lastlog</tt> file have the following format (defined in <tt>&lt;lastlog.h&gt;</tt>):</p><pre>#define UT_NAMESIZE           32
+#define UT_HOSTSIZE          256
+
+struct lastlog {
+    time_t ll_time;                     /* Time of last login */
+    char   ll_line[UT_NAMESIZE];        /* Terminal for remote login */
+    char   ll_host[UT_HOSTSIZE];        /* Hostname for remote login */
+};</pre><br/>
+<p class="docText">Note that these records don’t include a username or user ID. Instead, the <tt>lastlog</tt> file consists of a series of records that are indexed by user ID. Thus, to find the <tt>lastlog</tt> record for user ID 1000, we would seek to byte <span class="docEmphasis">(1000 * sizeof(struct lastlog))</span> of the file. This is demonstrated in Example 40-4, a program that allows us to view the <tt>lastlog</tt> records for the user(s) listed on its command line. This is similar to the functionality offered by the <span class="docEmphasis">lastlog(1)</span> command. Here is an example of the output produced by running this program:</p><pre>$ <b>./view_lastlog annie paulh</b>
+annie    tty2                        Mon Jan 17 11:00:12 2011
+paulh    pts/11                      Sat Aug 14 09:22:14 2010</pre><br/>
+<p class="docText">Performing updates on <tt>lastlog</tt> is similarly a matter of opening the file, seeking to the correct location, and performing a write.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Since the <tt>lastlog</tt> file is indexed by user ID, it is not possible to distinguish logins under different usernames that have the same user ID. (In Section 8.1, we noted that it is possible, though unusual, to have multiple login names with the same user ID.)</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0E2THK">Example 40-4. Displaying information from the <tt>lastlog</tt> file</h5><p></p><div class="box"><pre class="preFixedHeight"><b>loginacct/view_lastlog.c</b>
+#include &lt;time.h&gt;
+#include &lt;lastlog.h&gt;
+#include &lt;paths.h&gt;                      /* Definition of _PATH_LASTLOG */
+#include &lt;fcntl.h&gt;
+#include "ugid_functions.h"             /* Declaration of userIdFromName() */
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    struct lastlog llog;
+    int fd, j;
+    uid_t uid;
+
+    if (argc &gt; 1 &amp;&amp; strcmp(argv[1], "--help") == 0)
+        usageErr("%s [username...]\n", argv[0]);
+
+    fd = open(_PATH_LASTLOG, O_RDONLY);
+    if (fd == -1)
+        errExit("open");
+
+    for (j = 1; j &lt; argc; j++) {
+        uid = userIdFromName(argv[j]);
+        if (uid == -1) {
+            printf("No such user: %s\n", argv[j]);
+            continue;
+        }
+
+        if (lseek(fd, uid * sizeof(struct lastlog), SEEK_SET) == -1)
+            errExit("lseek");
+
+        if (read(fd, &amp;llog, sizeof(struct lastlog)) &lt;= 0) {
+            printf("read failed for %s\n", argv[j]);    /* EOF or error */
+            continue;
+        }
+
+        printf("%-8.8s %-6.6s %-20.20s %s", argv[j], llog.ll_line,
+                llog.ll_host, ctime((time_t *) &amp;llog.ll_time));
+    }
+
+    close(fd);
+    exit(EXIT_SUCCESS);
+}
+      <b>loginacct/view_lastlog.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

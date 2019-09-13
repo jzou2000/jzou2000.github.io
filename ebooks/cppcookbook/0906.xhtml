@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 9.5. Safely Copying an Object</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 9.5. Safely Copying an Object</h3>
+
+<h4 class="docSection2Title" id="title-ID0EZPCI">Problem</h4>
+<p class="docText">You need the basic class copy 
+
+
+
+operations—copy
+construction and assignment—to be exception-safe.</p>
+
+<h4 class="docSection2Title" id="title-ID0ECRCI">Solution</h4>
+<p class="docText">Employ the tactics discussed in Recipe 9.4
+by doing everything that might <tt>throw</tt> first, then
+changing the object state with operations that can't
+<tt>throw</tt> only after the hazardous work is complete.
+Example 9-6 presents the <tt>Message</tt>
+class again, this time with the assignment operator and copy
+constructor defined.</p>
+<h5 class="docExampleTitle" id="title-ID0E1RCI">Example 9-6. Exception-safe assignment and copy construction</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;iostream&gt;
+#include &lt;string&gt;
+
+const static int DEFAULT_BUF_SIZE = 3;
+const static int MAX_SIZE         = 4096;
+
+class Message {
+
+public:
+   Message(int bufSize = DEFAULT_BUF_SIZE) :
+      bufSize_(bufSize),
+      initBufSize_(bufSize),
+      msgSize_(0),
+      key_("") {
+      buf_ = new char[bufSize]; // Note: now this is in the body
+   }
+
+  ~Message( ) {
+      delete[] buf_;
+   }
+
+   // Exception-safe copy ctor
+   Message(const Message&amp; orig) : 
+      bufSize_(orig.bufSize_),
+      initBufSize_(orig.initBufSize_),
+      msgSize_(orig.msgSize_),
+      key_(orig.key_) { // This can throw...
+
+      buf_ = new char[orig.bufSize_];  // ...so can this
+      copy(orig.buf_, orig.buf_+msgSize_, buf_); // This can't
+   }
+
+   // Exception-safe assignment, using the copy ctor
+   Message&amp; operator=(const Message&amp; rhs) {
+
+      Message tmp(rhs);   // Copy construct a temporary
+      swapInternals(tmp); // Swap members with it
+      return(*this);      // When we leave, tmp is destroyed, taking
+                          // the original data with it
+   }
+
+   const char* data( ) {
+      return(buf_);
+   }
+
+private:
+   void swapInternals(Message&amp; msg) {
+      // Since key_ is not a built-in data type it can throw,
+      // so do it first.
+      swap(key_, msg.key_);
+
+      // If it hasn't thrown, then do all the primitives
+      swap(bufSize_,     msg.bufSize_);
+      swap(initBufSize_, msg.initBufSize_);
+      swap(msgSize_,     msg.msgSize_);
+      swap(buf_,         msg.buf_);
+   }
+   int bufSize_;
+   int initBufSize_;
+   int msgSize_;
+   char* buf_;
+   string key_;
+};
+
+					  </pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0EDSCI">Discussion</h4>
+<p class="docText">The copy constructor and the private member
+<tt>swapInternals</tt> do all the work here. The copy
+constructor initializes the primitive members and one of the
+nonprimitive members in the initializer list. Then it allocates a new
+buffer and copies the data into it. Simple enough, but why do it in
+this order? You could argue that all the initialization goes in the
+initializer list, but doing so can open the door for subtle bugs.</p>
+<p class="docText">For example, you may want to put the buffer allocation in the
+initializer list, like this:</p>
+<pre>Message(const Message&amp; orig) : 
+   bufSize_(orig.bufSize_),
+   initBufSize_(orig.initBufSize_),
+   msgSize_(orig.msgSize_),
+   key_(orig.key_),
+   <b>buf_(new char[orig.bufSize_])</b> {
+   copy(orig.buf_, orig.buf_+msgSize_, buf_);
+}</pre><br/>
+<p class="docText">You might expect that everything will be fine, because if the
+<tt>new</tt> in the buffer allocation fails, all the other
+fully constructed objects will be destroyed. But this behavior is not
+guaranteed, because the members are initialized in the order in which
+they are declared in the class header, <span class="docEmphasis">not</span> the
+order in which you list them in the initializer list. The order of
+the member declaration looks like this:</p>
+<pre>int bufSize_;
+int initBufSize_;
+int msgSize_;
+char* buf_;
+string key_;</pre><br/>
+<p class="docText">As a result, <tt>buf_</tt> will be initialized before
+<tt>key_</tt>. If the initialization of
+<tt>key_</tt> throws something, <tt>buf_</tt>
+will not be destroyed and you will have created a hunk of
+unreferenced memory. You can guard against this by using a
+<tt>try</tt>/<tt>catch</tt> block in the
+constructor (see Recipe 9.2), but it is
+easier just to put <tt>buf_</tt>'s
+initialization in the body of the constructor where it is guaranteed
+to be called after the initializer list.</p>
+<p class="docText">The call to <tt>copy</tt> won't throw
+because it's copying primitive values. But this is
+where the subtleties of exception-safety come in: it can
+<tt>throw</tt> if it is copying objects (e.g., if this is a
+generic container of <tt>T</tt> elements), in which case,
+you will need to <tt>catch</tt> it and
+<tt>delete</tt> the associated memory.</p>
+<p class="docText">The other way you may want to copy an object is by using the
+assignment operator, <tt>operator=</tt>. Since it and the
+copy constructor have similar needs (e.g., make my members equal to
+my argument's members), reuse what you have already
+done and make your life easier. The only twist is that you can make
+things slick by using a private member to swap member data. I wish I had
+invented this technique, but I have to credit Herb Sutter and Stephen
+Dewhurst since their writing is where I first saw it.</p>
+<p class="docText">It may make sense to you at first glance, but I will explain just in
+case it doesn't. Consider the first line, which copy
+constructs a temporary object, <tt>tmp</tt>:</p>
+<pre>Message tmp(rhs);</pre><br/>
+<p class="docText">Now we have just created a clone of the object we are assigning from.
+Essentially, <tt>tmp</tt> is now equivalent to
+<tt>rhs</tt>. Now, swap its members with
+<tt>*this</tt>'s members:</p>
+<pre>swapInternals(tmp);</pre><br/>
+<p class="docText">I will come back to <tt>swapInternals</tt> in a moment. For
+now, all we care about is that now the
+<tt>*this</tt>'s members are the same as
+<tt>tmp</tt>'s were a second ago. And
+<tt>tmp</tt> was a copy of <tt>rhs</tt>, so now
+<tt>*this</tt> is equivalent to <tt>rhs</tt>. But
+wait: we still have this temporary object hanging around. No problem,
+when you return <tt>*this</tt>, <tt>tmp</tt> is
+automatically destroyed when it goes out of scope, taking the old
+members with it.</p>
+<pre>return(*this);</pre><br/>
+<p class="docText">That's it. But is it exception-safe? Constructing
+<tt>tmp</tt> is, since our constructor is exception-safe.
+The call to <tt>swapInternals</tt> is what does the
+majority of the work, so let's have a look at what
+it does to see if it's safe.</p>
+<p class="docText"><tt>swapInternals</tt> exchanges each data member in the
+current object with those in the object that is passed in. It does
+this by using <tt>swap</tt>, which takes two arguments
+<span class="docEmphasis">a</span> and <span class="docEmphasis">b</span>, creates a
+temporary copy of <span class="docEmphasis">a</span>, assigns
+<span class="docEmphasis">b</span> to <span class="docEmphasis">a</span>, and then assigns
+the temporary to <span class="docEmphasis">b</span>. As such, it is
+exception-safe and exception-neutral because the only exceptions that
+come out of it are those that may be thrown by the objects it is
+operating on. It uses no dynamic memory, so it upholds the basic
+guarantee of not leaking resources.</p>
+<p class="docText">Since <tt>key_</tt> isn't a primitive,
+which means that operations on it may throw an exception, I swap it
+first. That way, if it throws an exception, none of the other member
+variables are corrupted. This doesn't guarantee that
+<tt>key_</tt> won't be corrupted though.
+When working with object members, you are at the mercy of their
+exception-safety guarantees. If that doesn't throw,
+I'm home free because I know that swapping native
+variables won't throw. Therefore,
+<tt>swapInternals</tt> is both basically and strongly
+exception-safe.</p>
+<p class="docText">This brings up an interesting point though. What if you have more
+than one object member? If you had two string members, the beginning
+of <tt>swapInternals</tt> may look like this:</p>
+<pre>void swapInternals(Message&amp; msg) {
+   swap(key_, msg.key_);
+   swap(myObj_, msg.myObj_);
+   // ...</pre><br/>
+<p class="docText">There is a problem: If the second swap throws an exception, how can
+we safely undo the first swap? In other words, now
+<tt>key_</tt> has been updated with the new value, but the
+swap of <tt>myObj_</tt> failed, so <tt>key_</tt>
+is now corrupt. If the caller catches the exception and wants to
+proceed as though nothing happened, he is now working with something
+different than what he started with. Copying <tt>key_</tt>
+to a temporary string first is one approach, but it
+can't guarantee safety because doing that copy may
+throw an exception.</p>
+<p class="docText">One way to get around this is to use heap objects:</p>
+<pre>void swapInternals(Message&amp; msg) {
+   // key_ is a string* and myObj_ is a MyClass*
+   swap(key_, msg.key_);
+   swap(myObj_, msg.myObj_);</pre><br/>
+<p class="docText">Of course, this means that now you have more dynamic memory to
+manage, but making exception-safety guarantees will often affect your
+design, so it is a good idea to start thinking about it early in the
+design process.</p>
+<p class="docText">The theme for this recipe is unchanged from the previous recipes
+about exception-safety. Do the work that might cause problems first,
+wait with a <tt>try</tt>/<tt>catch</tt> block
+just in case something goes wrong, and, if something does go wrong,
+then clean up after yourself. If nothing goes wrong, pat yourself
+
+
+
+
+on the
+back and update the object state.</p>
+
+<h4 class="docSection2Title" id="title-ID0ENYCI">See Also</h4>
+<p class="docText">Recipe 9.2 and Recipe 9.3</p>
+</div>
+</body>
+</html>

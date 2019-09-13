@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>32.5. Cleanup Handlers</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">32.5. Cleanup Handlers</h3><p class="docText">If
+ a thread with a pending cancellation were simply terminated when it 
+reached a cancellation point, then shared variables and Pthreads objects
+ (e.g., mutexes) might be left in an inconsistent state, perhaps causing
+ the remaining threads in the process to produce incorrect results, 
+deadlock, or crash. To get around this problem, a thread can establish 
+one or more <span class="docEmphasis">cleanup handlers</span>—functions
+ that are automatically executed if the thread is canceled. A cleanup 
+handler can perform tasks such as modifying the values of global 
+variables and unlocking mutexes before the thread is terminated.</p><p class="docText">Each
+ thread can have a stack of cleanup handlers. When a thread is canceled,
+ the cleanup handlers are executed working down from the top of the 
+stack; that is, the most recently established handler is called first, 
+then the next most recently established, and so on. When all of the 
+cleanup handlers have been executed, the thread terminates.</p><p class="docText">The <span class="docEmphasis">pthread_cleanup_push()</span> and <span class="docEmphasis">pthread_cleanup_pop()</span> functions respectively add and remove handlers on the calling thread’s stack of cleanup handlers.</p><pre>#include &lt;pthread.h&gt;
+
+void <b>pthread_cleanup_push</b>(void (*<span class="docEmphasis">routine</span>)(void*), void *<span class="docEmphasis">arg</span>);
+void <b>pthread_cleanup_pop</b>(int <span class="docEmphasis">execute</span>);</pre><br/>
+<p class="docText">The <span class="docEmphasis">pthread_cleanup_push()</span> function adds the function whose address is specified in <span class="docEmphasis">routine</span> to the top of the calling thread’s stack of cleanup handlers. The <span class="docEmphasis">routine</span> argument is a pointer to a function that has the following form:</p><pre>void
+routine(void *arg)
+{
+    /* Code to perform cleanup */
+}</pre><br/>
+<p class="docText">The <span class="docEmphasis">arg</span> value given to <span class="docEmphasis">pthread_cleanup_push()</span> is passed as the argument of the cleanup handler when it is invoked. This argument is typed as <span class="docEmphasis">void *</span>, but, using judicious casting, other data types can be passed in this argument.</p><p class="docText">Typically,
+ a cleanup action is needed only if a thread is canceled during the 
+execution of a particular section of code. If the thread reaches the end
+ of that section without being canceled, then the cleanup action is no 
+longer required. Thus, each call to <span class="docEmphasis">pthread_cleanup_push()</span> has an accompanying call to <span class="docEmphasis">pthread_cleanup_pop()</span>. This function removes the topmost function from the stack of cleanup handlers. If the <span class="docEmphasis">execute</span>
+ argument is nonzero, the handler is also executed. This is convenient 
+if we want to perform the cleanup action even if the thread was not 
+canceled.</p><p class="docText">Although we have described <span class="docEmphasis">pthread_cleanup_push()</span> and <span class="docEmphasis">pthread_cleanup_pop()</span> as functions, SUSv3 permits them to be implemented as macros that expand to statement sequences that include an opening (<tt>{</tt>) and closing (<tt>}</tt>)
+ brace, respectively. Not all UNIX implementations do things this way, 
+but Linux and many others do. This means that each use of <span class="docEmphasis">pthread_cleanup_push()</span> must be paired with exactly one corresponding <span class="docEmphasis">pthread_cleanup_pop()</span> in the same lexical block. (On implementations that do things this way, variables declared between the <span class="docEmphasis">pthread_cleanup_push()</span> and <span class="docEmphasis">pthread_cleanup_pop()</span> will be limited to that lexical scope.) For example, it is not correct to write code such as the following:</p><pre>pthread_cleanup_push(func, arg);
+...
+if (cond) {
+    pthread_cleanup_pop(0);
+}</pre><br/>
+<p class="docText">As a coding convenience, any 
+cleanup handlers that have not been popped are also executed 
+automatically if a thread terminates by calling <span class="docEmphasis">pthread_exit()</span> (but not if it does a simple <tt>return</tt>).</p><h4 class="docSection2Title" id="title-ID0E32EK">32.5.1. </h4><h5 class="docSection3Title" id="title-ID0EA3EK">32.5.1.1. Example program</h5><p class="docText">The program in Example 32-2 provides a simple example of the use of a cleanup handler. The main program creates a thread <img alt="" border="0" id="" src="Images/getfile_006-10.png"/> whose first actions are to allocate a block of memory <img alt="" border="0" id="" src="Images/getfile_002-28.png"/> whose location is stored in <span class="docEmphasis">buf</span>, and then lock the mutex <span class="docEmphasis">mtx</span> <img alt="" border="0" id="" src="Images/getfile_003-24.png"/>. Since the thread may be canceled, it uses <span class="docEmphasis">pthread_cleanup_push()</span> <img alt="" border="0" id="" src="Images/getfile_009-5.png"/> to install a cleanup handler that is called with the address stored in <span class="docEmphasis">buf</span>. If it is invoked, the cleanup handler deallocates the freed memory <img alt="" border="0" id="" src="Images/getfile_005-18.png"/> and unlocks the mutex <img alt="" border="0" id="" src="Images/getfile_004-10.png"/>.</p><p class="docText">The thread then enters a loop waiting for the condition variable <span class="docEmphasis">cond</span> to be signaled <img alt="" border="0" id="" src="Images/getfile_011.png"/>. This loop will terminate in one of two ways, depending on whether the program is supplied with a command-line argument:</p><ul><li><p class="docList">If no command-line argument is supplied, the thread is canceled by <span class="docEmphasis">main()</span> <img alt="" border="0" id="" src="Images/getfile_008-7.png"/>. In this case, cancellation will occur at the call to <span class="docEmphasis">pthread_cond_wait()</span> <img alt="" border="0" id="" src="Images/getfile_011.png"/>, which is one of the cancellation points shown in Table 32-1. As part of cancellation, the cleanup handler established using <span class="docEmphasis">pthread_cleanup_push()</span> is invoked automatically.</p></li><li><p class="docList">If a command-line argument is supplied, the condition variable is signaled <img alt="" border="0" id="" src="Images/getfile_010-4.png"/> after the associated global variable, <span class="docEmphasis">glob</span>, is first set to a nonzero value. In this case, the thread falls through to execute <span class="docEmphasis">pthread_cleanup_pop()</span> <img alt="" border="0" id="" src="Images/getfile_007-12.png"/>, which, given a nonzero argument, also causes the cleanup handler to be invoked.</p></li></ul><p class="docText">The main program joins with the terminated thread <img alt="" border="0" id="" src="Images/getfile-57.png"/>, and reports whether the thread was canceled or terminated normally.</p><h5 class="docExampleTitle" id="title-ID0EWAFK">Example 32-2. Using cleanup handlers</h5><p></p><div class="box"><pre class="preFixedHeight"><b>threads/thread_cleanup.c</b>
+    #include &lt;pthread.h&gt;
+    #include "tlpi_hdr.h"
+
+    static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+    static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
+    static int glob = 0;                    /* Predicate variable */
+
+    static void     /* Free memory pointed to by 'arg' and unlock mutex */
+    cleanupHandler(void *arg)
+    {
+        int s;
+
+        printf("cleanup: freeing block at %p\n", arg);
+<img alt="" border="0" id="" src="Images/getfile_005-19.png"/>    free(arg);
+
+        printf("cleanup: unlocking mutex\n");
+<img alt="" border="0" id="" src="Images/getfile_004-11.png"/>    s = pthread_mutex_unlock(&amp;mtx);
+        if (s != 0)
+            errExitEN(s, "pthread_mutex_unlock");
+    }
+
+    static void *
+    threadFunc(void *arg)
+    {
+        int s;
+        void *buf = NULL;                   /* Buffer allocated by thread */
+
+<img alt="" border="0" id="" src="Images/getfile_002-29.png"/>    buf = malloc(0x10000);              /* Not a cancellation point */
+        printf("thread:  allocated memory at %p\n", buf);
+
+<img alt="" border="0" id="" src="Images/getfile_003-25.png"/>    s = pthread_mutex_lock(&amp;mtx);       /* Not a cancellation point */
+        if (s != 0)
+            errExitEN(s, "pthread_mutex_lock");
+
+<img alt="" border="0" id="" src="Images/getfile_009-6.png"/>    pthread_cleanup_push(cleanupHandler, buf);
+
+        while (glob == 0) {
+<img alt="" border="0" id="" src="Images/getfile_011.png"/>        s = pthread_cond_wait(&amp;cond, &amp;mtx);    /* A cancellation point */
+            if (s != 0)
+                errExitEN(s, "pthread_cond_wait");
+        }
+
+        printf("thread:  condition wait loop completed\n");
+<img alt="" border="0" id="" src="Images/getfile_007-13.png"/>    pthread_cleanup_pop(1);             /* Executes cleanup handler */
+        return NULL;
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        pthread_t thr;
+        void *res;
+        int s;
+
+    <img alt="" border="0" id="" src="Images/getfile_006-11.png"/>    s = pthread_create(&amp;thr, NULL, threadFunc, NULL);
+        if (s != 0)
+            errExitEN(s, "pthread_create");
+
+        sleep(2);                   /* Give thread a chance to get started */
+
+        if (argc == 1) {            /* Cancel thread */
+            printf("main:    about to cancel thread\n");
+<img alt="" border="0" id="" src="Images/getfile_008-8.png"/>        s = pthread_cancel(thr);
+            if (s != 0)
+                errExitEN(s, "pthread_cancel");
+
+        } else {                    /* Signal condition variable */
+            printf("main:    about to signal condition variable\n");
+            glob = 1;
+<img alt="" border="0" id="" src="Images/getfile_010-5.png"/>        s = pthread_cond_signal(&amp;cond);
+            if (s != 0)
+                errExitEN(s, "pthread_cond_signal");
+        }
+
+<img alt="" border="0" id="" src="Images/getfile-58.png"/>    s = pthread_join(thr, &amp;res);
+        if (s != 0)
+            errExitEN(s, "pthread_join");
+        if (res == PTHREAD_CANCELED)
+            printf("main:    thread was canceled\n");
+        else
+            printf("main:    thread terminated normally\n");
+
+        exit(EXIT_SUCCESS);
+    }
+          <b>threads/thread_cleanup.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">If we invoke the program in Example 32-2 without any command-line arguments, then <span class="docEmphasis">main()</span> calls <span class="docEmphasis">pthread_cancel()</span>, the cleanup handler is invoked automatically, and we see the following:</p><pre>$ .<b>/thread_cleanup</b>
+thread:  allocated memory at 0x804b050
+main:    about to cancel thread
+cleanup: freeing block at 0x804b050
+cleanup: unlocking mutex
+main:    thread was canceled</pre><br/>
+<p class="docText">If we invoke the program with a command-line argument, then <span class="docEmphasis">main()</span> sets <span class="docEmphasis">glob</span> to 1 and signals the condition variable, the cleanup handler is invoked by <span class="docEmphasis">pthread_cleanup_pop()</span>, and we see the following:</p><pre>$ <b>./thread_cleanup s</b>
+thread:  allocated memory at 0x804b050
+main:    about to signal condition variable
+thread:  condition wait loop completed
+cleanup: freeing block at 0x804b050
+cleanup: unlocking mutex
+main:    thread terminated normally</pre><br/>
+</div>
+</body>
+</html>

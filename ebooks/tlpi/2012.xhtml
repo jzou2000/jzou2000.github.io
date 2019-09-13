@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>20.12. Signals Are Not Queued</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">20.12. Signals Are Not Queued</h3><p class="docText">The
+ set of pending signals is only a mask; it indicates whether or not a 
+signal has occurred, but not how many times it has occurred. In other 
+words, if the same signal is generated multiple times while it is 
+blocked, then it is recorded in the set of pending signals, and later 
+delivered, just once. (One of the differences between standard and 
+realtime signals is that realtime signals are queued, as discussed in 
+Section 22.8.)</p><p class="docText">Example 20-6 and Example 20-7 show two programs that can be used to observe that signals are not queued. The program in Example 20-6 takes up to four command-line arguments, as follows:</p><pre>$ <b>./sig_sender</b> <b><tt><i>PID num-sigs sig-num [sig-num-2]</i></tt></b></pre><br/>
+<p class="docText">The first argument is the 
+process ID of a process to which the program should send signals. The 
+second argument specifies the number of signals to be sent to the target
+ process. The third argument specifies the signal number that is to be 
+sent to the target process. If a signal number is supplied as the fourth
+ argument, then the program sends one instance of that signal after 
+sending the signals specified by the previous arguments. In the example 
+shell session below, we use this final argument to send a <tt>SIGINT</tt> signal to the target process; the purpose of sending this signal will become clear in a moment.</p><h5 class="docExampleTitle" id="title-ID0EYPAK">Example 20-6. Sending multiple signals</h5><p></p><div class="box"><pre class="preFixedHeight"><b>signals/sig_sender.c</b>
+#include &lt;signal.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int numSigs, sig, j;
+    pid_t pid;
+
+    if (argc &lt; 4 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s pid num-sigs sig-num [sig-num-2]\n", argv[0]);
+    pid = getLong(argv[1], 0, "PID");
+    numSigs = getInt(argv[2], GN_GT_0, "num-sigs");
+    sig = getInt(argv[3], 0, "sig-num");
+
+    /* Send signals to receiver */
+
+    printf("%s: sending signal %d to process %ld %d times\n",
+            argv[0], sig, (long) pid, numSigs);
+
+    for (j = 0; j &lt; numSigs; j++)
+        if (kill(pid, sig) == -1)
+            errExit("kill");
+
+    /* If a fourth command-line argument was specified, send that signal */
+
+    if (argc &gt; 4)
+        if (kill(pid, getInt(argv[4], 0, "sig-num-2")) == -1)
+            errExit("kill");
+
+    printf("%s: exiting\n", argv[0]);
+    exit(EXIT_SUCCESS);
+}
+     <b>signals/sig_sender.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The program shown in Example 20-7 is designed to catch and report statistics on signals sent by the program in Example 20-6. This program performs the following steps:</p><ul><li><p class="docList">The program sets up a single handler to catch all signals <img alt="" border="0" id="" src="Images/getfile_002-5.png"/>. (It isn’t possible to catch <tt>SIGKILL</tt> and <tt>SIGSTOP</tt>,
+ but we ignore the error that occurs when trying to establish a handler 
+for these signals.) For most types of signals, the handler <img alt="" border="0" id="" src="Images/getfile_003-4.png"/> simply counts the signal using an array. If <tt>SIGINT</tt> is received, the handler sets a flag (<span class="docEmphasis">gotSigint</span>) that causes the program to exit its main loop (the <tt>while</tt> loop described below). (We explain the use of the <tt>volatile</tt> qualifier and the <span class="docEmphasis">sig_atomic_t</span> data type used to declare the <span class="docEmphasis">gotSigint</span> variable in Section 21.1.3.)</p></li><li><p class="docList">If
+ a command-line argument was supplied to the program, then the program 
+blocks all signals for the number of seconds specified by that argument,
+ and then, prior to unblocking the signals, displays the set of pending 
+signals <img alt="" border="0" id="" src="Images/getfile-31.png"/>. This allows us to send signals to the process before it commences the following step.</p></li><li><p class="docList">The program executes a <tt>while</tt> loop that consumes CPU time until <span class="docEmphasis">gotSigint</span> is set <img alt="" border="0" id="" src="Images/getfile_004.png"/>. (Section 20.14 and Section 22.9 describe the use of <span class="docEmphasis">pause()</span> and <span class="docEmphasis">sigsuspend()</span>, which are more CPU-efficient ways of waiting for the arrival of a signal.)</p></li><li><p class="docList">After exiting the <tt>while</tt> loop, the program displays counts of all signals received <img alt="" border="0" id="" src="Images/getfile_005-2.png"/>.</p></li></ul><p class="docText">We
+ first use these two programs to illustrate that a blocked signal is 
+delivered only once, no matter how many times it is generated. We do 
+this by specifying a sleep interval for the receiver and sending all 
+signals before the sleep interval completes.</p><pre class="preFixedWidth">$ <b>./sig_receiver 15 &amp; </b>                     <i> Receiver blocks signals for 15 secs</i>
+[1] 5368
+./sig_receiver: PID is 5368
+./sig_receiver: sleeping for 15 seconds
+$ <b>./sig_sender 5368 1000000 10 2 </b>          <i> Send</i> SIGUSR1  <span class="docEmphasis">signals</span>, <span class="docEmphasis">plus a</span> SIGINT
+./sig_sender: sending signal 10 to process 5368 1000000 times
+./sig_sender: exiting
+./sig_receiver: pending signals are:
+                2 (Interrupt)
+                10 (User defined signal 1)
+./sig_receiver: signal 10 caught 1 time
+[1]+  Done                    ./sig_receiver 15
+
+					  </pre><br/>
+<p class="docText">The command-line arguments to the sending program specified the <tt>SIGUSR1</tt> and <tt>SIGINT</tt> signals, which are signals 10 and 2, respectively, on Linux/x86.</p><p class="docText">From the output above, we can see that even though one million signals were sent, only one was delivered to the receiver.</p><p class="docText">Even
+ if a process doesn’t block signals, it may receive fewer signals than 
+are sent to it. This can happen if the signals are sent so fast that 
+they arrive before the receiving process has a chance to be scheduled 
+for execution by the kernel, with the result that the multiple signals 
+are recorded just once in the process’s pending signal set. If we 
+execute the program in Example 20-7 with no command-line arguments (so that it doesn’t block signals and sleep), we see the following:</p><pre>$ <b>./sig_receiver &amp;</b>
+[1] 5393
+./sig_receiver: PID is 5393
+$ <b>./sig_sender 5393 1000000 10 2</b>
+./sig_sender: sending signal 10 to process 5393 1000000 times
+./sig_sender: exiting
+./sig_receiver: signal 10 caught 52 times
+[1]+  Done                    ./sig_receiver</pre><br/>
+<p class="docText">Of the million signals 
+sent, just 52 were caught by the receiving process. (The precise number 
+of signals caught will vary depending on the vagaries of decisions made 
+by the kernel scheduling algorithm.) The reason for this is that each 
+time the sending program is scheduled to run, it sends multiple signals 
+to the receiver. However, only one of these signals is marked as pending
+ and then delivered when the receiver has a chance to run.</p><h5 class="docExampleTitle" id="title-ID0E1UAK">Example 20-7. Catching and counting signals</h5><p></p><div class="box"><pre class="preFixedHeight"><b>signals/sig_receiver.c</b>
+    #define _GNU_SOURCE
+    #include &lt;signal.h&gt;
+    #include "signal_functions.h"           /* Declaration of printSigset() */
+    #include "tlpi_hdr.h"
+
+    static int sigCnt[NSIG];                /* Counts deliveries of each signal */
+    static volatile sig_atomic_t gotSigint = 0;
+                                            /* Set nonzero if SIGINT is delivered */
+
+    static void
+<img alt="" border="0" id="" src="Images/getfile_003-5.png"/> handler(int sig)
+    {
+            if (sig == SIGINT)
+            gotSigint = 1;
+        else
+            sigCnt[sig]++;
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        int n, numSecs;
+        sigset_t pendingMask, blockingMask, emptyMask;
+
+        printf("%s: PID is %ld\n", argv[0], (long) getpid());
+
+<img alt="" border="0" id="" src="Images/getfile_002-6.png"/>     for (n = 1; n &lt; NSIG; n++)          /* Same handler for all signals */
+            (void) signal(n, handler);      /* Ignore errors */
+
+        /* If a sleep time was specified, temporarily block all signals,
+           sleep (while another process sends us signals), and then
+           display the mask of pending signals and unblock all signals */
+
+<img alt="" border="0" id="" src="Images/getfile-32.png"/>     if (argc &gt; 1) {
+            numSecs = getInt(argv[1], GN_GT_0, NULL);
+
+            sigfillset(&amp;blockingMask);
+            if (sigprocmask(SIG_SETMASK, &amp;blockingMask, NULL) == -1)
+                errExit("sigprocmask");
+
+            printf("%s: sleeping for %d seconds\n", argv[0], numSecs);
+            sleep(numSecs);
+
+            if (sigpending(&amp;pendingMask) == -1)
+                errExit("sigpending");
+
+            printf("%s: pending signals are: \n", argv[0]);
+            printSigset(stdout, "\t\t", &amp;pendingMask);
+
+            sigemptyset(&amp;emptyMask);        /* Unblock all signals */
+            if (sigprocmask(SIG_SETMASK, &amp;emptyMask, NULL) == -1)
+                errExit("sigprocmask");
+        }
+
+<img alt="" border="0" id="" src="Images/getfile_004.png"/>     while (!gotSigint)                  /* Loop until SIGINT caught */
+            continue;
+
+<img alt="" border="0" id="" src="Images/getfile_005-3.png"/>
+     for (n = 1; n &lt; NSIG; n++)          /* Display number of signals received */
+            if (sigCnt[n] != 0)
+                printf("%s: signal %d caught %d time%s\n", argv[0], n,
+                        sigCnt[n], (sigCnt[n] == 1) ? "" : "s");
+
+        exit(EXIT_SUCCESS);
+    }
+         <b>signals/sig_receiver.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

@@ -1,0 +1,301 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 55. Template Template Parameters</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 55. Template Template Parameters</h2>
+		
+<p class="docText">Let’s pick up the <tt>Stack</tt> template we considered in <span class="docEmphasis">Specializing for Type Information</span> [52, 183]. We decided to implement it with a standard <tt>deque</tt>,
+ which is a pretty good compromise choice of implementation, though in 
+many circumstances a different container would be more efficient or 
+appropriate. We can address this problem by adding an additional 
+template parameter to <tt>Stack</tt> for the container type used in its implementation.</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T, class Cont&gt;
+class Stack;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">For simplicity, let’s abandon 
+the standard library (not usually a good idea, by the way) and assume we
+ have available a set of nonstandard container templates: <tt>List, Vector, Deque</tt>,
+ and perhaps others. Let’s also assume these containers are similar to 
+the standard containers but have only a single template parameter for 
+the element type of the container.</p>
+		
+<p class="docText">Recall that the standard 
+containers actually have at least two parameters: the element type and 
+an allocator type. Containers use allocators to allocate and free their 
+working memory so that this behavior may be customized. In effect, the 
+allocator specifies a memory management policy for the container (see <span class="docEmphasis">Policies</span> [56, 205]). The allocator has a default so it’s easy to forget it’s there. However, when you instantiate a standard container like <tt>vector&lt;int&gt;</tt>, you’re actually getting <tt>vector&lt; int, std::allocator&lt;int&gt; &gt;</tt>.</p>
+		
+<p class="docText">For example, the declaration of our nonstandard <tt>List</tt> would be</p>
+		
+<div class="docText">
+  <pre>template &lt;typename&gt; class List;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Notice that we’ve left out the name of template parameter in the declaration of <tt>List</tt>,
+ above. Just as with a formal argument name in a function declaration, 
+giving a name to a template parameter in a template declaration is 
+optional. As with a function definition, the name of a template 
+parameter is required only in a template definition and only if the 
+parameter name is used
+ in the template. However, as with formal arguments in function 
+declarations, it’s common to give names to template parameters in 
+template declarations to help document the template.</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T, class Cont&gt;
+class Stack {
+  public:
+    ~Stack();
+    void push( const T &amp; );
+    //...
+  private:
+    Cont s_;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">A user of <tt>Stack</tt> 
+now has to provide two template arguments, an element type and a 
+container type, and the container has to be able to hold objects of the 
+element type.</p>
+		
+<div class="docText">
+  <pre>Stack&lt;int, List&lt;int&gt; &gt; aStack1; // OK
+<span class="docEmphMark">Stack&lt;double, List&lt;int&gt; &gt; aStack2; // legal, not OK           </span>
+				<span class="docEmphMark">Stack&lt;std::string, Deque&lt;char *&gt; &gt; aStack3; // error!         </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">The declarations of <tt>aStack2</tt> and <tt>aStack3</tt>
+ show we have a potential problem in coordination. If the user selects 
+the incorrect type of container for the element type, we’ll get a 
+compile-time error (in the case of <tt>aStack3</tt>, because of the inability to copy a <tt>string</tt> to a <tt>char *</tt>) or a subtle bug (in the case of <tt>aStack2</tt>, because of loss of precision in copying a <tt>double</tt> to an <tt>int</tt>). Additionally, most users of <tt>Stack</tt>
+ don’t want to be bothered with selection of its underlying 
+implementation and will be satisfied with a reasonable default. We can 
+improve the situation by providing a default for the second template 
+parameter.</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T, class Cont = Deque&lt;T&gt; &gt;
+class Stack {
+    //...
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This helps in cases where the user of a <tt>Stack</tt> is willing to accept a <tt>Deque</tt> implementation or doesn’t particularly care about the implementation.</p>
+		
+<div class="docText">
+  <pre>Stack&lt;int&gt; aStack1; // container is Deque&lt;int&gt;
+Stack&lt;double&gt; aStack2; // container is Deque&lt;double&gt;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This is more or less the approach employed by the standard container adapters <tt>stack</tt>, <tt>queue</tt>, and <tt>priority_queue</tt>.</p>
+		
+<div class="docText">
+  <pre>std::stack&lt;int&gt; stds; // container is
+                      // deque&lt; int, allocator&lt;int&gt; &gt;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This approach is a good compromise of convenience for the casual user of the <tt>Stack</tt> facility and of flexibility for the experienced user to employ any (legal and effective) kind of container to hold the <tt>Stack</tt>’s elements.</p>
+		
+<p class="docText">However, this 
+flexibility comes at a cost in safety. It’s still necessary to 
+coordinate the types of element and container in other specializations, 
+and this requirement of coordination opens up the possibility of 
+miscoordination.</p>
+		
+<div class="docText">
+  <pre>Stack&lt;int, List&lt;int&gt; &gt; aStack3;
+<span class="docEmphMark">Stack&lt;int, List&lt;unsigned&gt; &gt; aStack4; // oops!                  </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">Let’s see if we can improve 
+safety and still have reasonable flexibility. A template can take a 
+parameter that is itself the name of a template. These parameters have 
+the pleasingly repetitious name of template template parameters.</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T, template &lt;typename&gt; class Cont&gt;
+class Stack;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This new template parameter list for <tt>Stack</tt> looks unnerving, but it’s not as bad as it appears. The first parameter, <tt>T</tt>, is old hat. It’s just the name of a type. The second parameter, <tt>Cont</tt>,
+ is a template template parameter. It’s the name of a class template 
+that has a single type name parameter. Note that we didn’t give a name 
+to the type name parameter of <tt>Cont</tt>, although we could have:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T, template &lt;typename ElementType&gt; class Cont&gt;
+class Stack;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">However, such a name (<tt>ElementType</tt>,
+ above) can serve only as documentation, similar to a formal argument 
+name in a function declaration. These names are commonly omitted, but 
+you should feel free to use them where you think they improve 
+readability. Conversely, we could take the opportunity to reduce 
+readability to a minimum by eliminating all technically unnecessary 
+names in the declaration of <tt>Stack</tt>:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename, template &lt;typename&gt; class&gt;
+class Stack;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">But compassion for the readers of our code does impose constraints on such practices, even if the C++ language does not.</p>
+		
+<p class="docText">The <tt>Stack</tt> 
+template uses its type name parameter to instantiate its template 
+template parameter. The resulting container type is used to implement 
+the <tt>Stack</tt>:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T, template &lt;typename&gt; class Cont&gt;
+class Stack {
+    //...
+  private:
+    Cont&lt;T&gt; s_;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This approach allows coordination between element and container to be handled by the implementation of the <tt>Stack</tt> itself, rather than in all the various code that specializes <tt>Stack</tt>.
+ This single point of specialization reduces the possibility of 
+miscoordination between the element type and the container used to hold 
+the elements.</p>
+		
+<div class="docText">
+  <pre>Stack&lt;int,List&gt; aStack1;
+Stack&lt;std::string,Deque&gt; aStack2;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">For additional convenience, we can employ a default for the template template argument:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T, template &lt;typename&gt; class Cont = Deque&gt;
+class Stack {
+    //...
+};
+//...
+Stack&lt;int&gt; aStack1; // use default: Cont is Deque
+Stack&lt;std::string,List&gt; aStack2; // Cont is List
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This is often a good approach 
+for dealing with coordination of a set of arguments to a template and a 
+template that is to be instantiated with the arguments.</p>
+		
+<p class="docText">It’s common to 
+confuse template template parameters with type name parameters that just
+ happen to be generated from templates. For example, consider the 
+following class template declaration:</p>
+		
+<div class="docText">
+  <pre>template &lt;class Cont&gt; class Wrapper1;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The <tt>Wrapper1</tt> template needs a type name for its template argument. (We used the keyword <tt>class</tt> instead of <tt>typename</tt> in the declaration of the <tt>Cont</tt> parameter of <tt>Wrapper1</tt> to tell the readers of our code that we’re expecting a <tt>class</tt> or <tt>struct</tt> rather than an arbitrary type, but it’s all the same to the compiler. In this context <tt>typename</tt> and <tt>class</tt> mean exactly the same thing technically. See <span class="docEmphasis">Optional Keywords</span> [63, 231].) That type name could be generated from a template, as in <tt>Wrapper1&lt; List&lt;int&gt; &gt;</tt>, but <tt>List&lt;int&gt;</tt> is still just a class name, even though it was generated from a template.</p>
+		
+<div class="docText">
+  <pre>Wrapper1&lt; List&lt;int&gt; &gt; w1; // fine, List&lt;int&gt; is a type name
+Wrapper1&lt; std::list&lt;int&gt; &gt; w2; // fine, list&lt;int&gt; is a type
+<span class="docEmphMark">Wrapper1&lt;List&gt; w3; // error! List is a template name         </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">Alternatively, consider the following class template declaration:</p>
+		
+<div class="docText">
+  <pre>template &lt;template &lt;typename&gt; class Cont&gt; class Wrapper2;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The <tt>Wrapper2</tt>
+ template needs a template name for its template argument, and not just 
+any template name. The declaration says that the template must take a 
+single type argument.</p>
+		
+<div class="docText">
+  <pre>Wrapper2&lt;List&gt; w4; // fine, List is a template one type
+<span class="docEmphMark">Wrapper2&lt; List&lt;int&gt; &gt; w5; // error! List&lt;int&gt; isn't a template </span>
+				<span class="docEmphMark">Wrapper2&lt;std::list&gt; w6; // error! std::list takes 2+ arguments </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">If we want to have a chance at being able to specialize with a standard container, we have to do the following:</p>
+		
+<div class="docText">
+  <pre>template &lt;template &lt;typename Element,
+    class Allocator&gt; class Cont&gt;
+class Wrapper3;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">or equivalently:</p>
+		
+<div class="docText">
+  <pre>template &lt;template &lt;typename,typename&gt; class Cont&gt;
+class Wrapper3;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This declaration says that the template must take two type name arguments:</p>
+		
+<div class="docText">
+  <pre>Wrapper3&lt;std::list&gt; w7; // might work...
+<span class="docEmphMark">Wrapper3&lt; std::list&lt;int&gt; &gt; w8; // error! list&lt;int&gt; is a class </span>
+				<span class="docEmphMark">Wrapper3&lt;List&gt; w9; // error! List takes one type argument     </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">However, the standard container templates (like <tt>list</tt>) may legally be declared to take more than two parameters, so the declaration of <tt>w7</tt> above may not work on all platforms. Well, we all love and respect the STL, but we never claimed it was perfect.</p>
+		
+
+
+</body>
+</html>

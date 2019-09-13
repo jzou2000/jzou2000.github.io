@@ -1,0 +1,386 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Parallel Threading</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <section data-type="chapter" xmlns:epub="http://www.idpf.org/2007/ops" epub:type="chapter" class="epub__pagenumrestart" data-pdf-bookmark="Chapter 1. Asynchrony: Now &amp; Later">
+  <div class="epub__chapter" id="chapter-1-asynchrony-now-later">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<section data-type="sect1" data-pdf-bookmark="Parallel Threading"><div class="epub__sect1" id="parallel-threading">
+<h1>Parallel Threading</h1>
+
+<p>It’s very common to conflate the terms “async” and “parallel,” but they
+are actually quite different. Remember, async is about the gap between
+<em>now</em> and <em>later</em>. But parallel is about things being able to occur
+simultaneously.</p>
+
+<p>The most common tools for parallel computing are <em>processes</em> and <em>threads</em>.
+Processes and threads execute independently and may execute
+simultaneously: on separate processors, or even separate computers, but
+multiple threads can share the memory of a single process.</p>
+
+<p>An event loop, by contrast, breaks its work into tasks and executes them
+in serial, disallowing parallel access and changes to shared memory.
+Parallelism and serialism can coexist in the form of cooperating event
+loops in separate threads.</p>
+
+<p>The interleaving of parallel threads of execution and the interleaving
+of asynchronous events occur at very different levels of granularity.</p>
+
+<p>For example:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">function</code> <code class="epub__nx">later</code><code class="epub__p">()</code> <code class="epub__p">{</code>
+    <code class="epub__nx">answer</code> <code class="epub__o">=</code> <code class="epub__nx">answer</code> <code class="epub__o">*</code> <code class="epub__mi">2</code><code class="epub__p">;</code>
+    <code class="epub__nx">console</code><code class="epub__p">.</code><code class="epub__nx">log</code><code class="epub__p">(</code> <code class="epub__s2">"Meaning of life:"</code><code class="epub__p">,</code> <code class="epub__nx">answer</code> <code class="epub__p">);</code>
+<code class="epub__p">}</code></pre>
+
+<p>While the entire contents of <code>later()</code> would be regarded as a single
+event loop queue entry, when thinking about a thread this code would run
+on, there’s actually perhaps a dozen different low-level operations. For
+example, <code>answer = answer * 2</code> requires first loading the current value
+of <code>answer</code>, then putting <code>2</code> somewhere, then performing the
+multiplication, then taking the result and storing it back into
+<code>answer</code>.</p>
+
+<p>In a single-threaded environment, it really doesn’t matter that the
+items in the thread queue are low-level operations, because nothing can
+interrupt the thread. But if you have a parallel system, where two
+different threads are operating in the same program, you could very
+likely have unpredictable behavior.</p>
+
+<p>Consider:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">var</code> <code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__mi">20</code><code class="epub__p">;</code>
+
+<code class="epub__kd">function</code> <code class="epub__nx">foo</code><code class="epub__p">()</code> <code class="epub__p">{</code>
+    <code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__nx">a</code> <code class="epub__o">+</code> <code class="epub__mi">1</code><code class="epub__p">;</code>
+<code class="epub__p">}</code>
+
+<code class="epub__kd">function</code> <code class="epub__nx">bar</code><code class="epub__p">()</code> <code class="epub__p">{</code>
+    <code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__nx">a</code> <code class="epub__o">*</code> <code class="epub__mi">2</code><code class="epub__p">;</code>
+<code class="epub__p">}</code>
+
+<code class="epub__c1">// ajax(..) is some arbitrary Ajax function given by a library</code>
+<code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.1"</code><code class="epub__p">,</code> <code class="epub__nx">foo</code> <code class="epub__p">);</code>
+<code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.2"</code><code class="epub__p">,</code> <code class="epub__nx">bar</code> <code class="epub__p">);</code></pre>
+
+<p>In JavaScript’s single-threaded behavior, if <code>foo()</code> runs before
+<code>bar()</code>, the result is that <code>a</code> has <code>42</code>, but if <code>bar()</code> runs before
+<code>foo()</code> the result in <code>a</code> will be <code>41</code>.</p>
+
+<p>If JS events sharing the same data executed in parallel, though, the
+problems would be much more subtle. Consider these two lists of
+pseudocode tasks as the threads that could respectively run the code in
+<code>foo()</code> and <code>bar()</code>, and consider what happens if they are running at
+exactly the same time:</p>
+
+<p>Thread 1 (<code>X</code> and <code>Y</code> are temporary memory locations):</p>
+
+<pre data-type="programlisting">foo():
+  a. load value of `a` in `X`
+  b. store `1` in `Y`
+  c. add `X` and `Y`, store result in `X`
+  d. store value of `X` in `a`</pre>
+
+<p>Thread 2 (<code>X</code> and <code>Y</code> are temporary memory locations):</p>
+
+<pre data-type="programlisting">bar():
+  a. load value of `a` in `X`
+  b. store `2` in `Y`
+  c. multiply `X` and `Y`, store result in `X`
+  d. store value of `X` in `a`</pre>
+
+<p>Now, let’s say that the two threads are running truly in parallel. You
+can probably spot the problem, right? They use shared memory locations
+<code>X</code> and <code>Y</code> for their temporary steps.</p>
+
+<p>What’s the end result in <code>a</code> if the steps happen like this?</p>
+
+<pre data-type="programlisting">1a  (load value of `a` in `X`   ==&gt; `20`)
+2a  (load value of `a` in `X`   ==&gt; `20`)
+1b  (store `1` in `Y`   ==&gt; `1`)
+2b  (store `2` in `Y`   ==&gt; `2`)
+1c  (add `X` and `Y`, store result in `X`   ==&gt; `22`)
+1d  (store value of `X` in `a`   ==&gt; `22`)
+2c  (multiply `X` and `Y`, store result in `X`   ==&gt; `44`)
+2d  (store value of `X` in `a`   ==&gt; `44`)</pre>
+
+<p>The result in <code>a</code> will be <code>44</code>. But what about this ordering?</p>
+
+<pre data-type="programlisting">1a  (load value of `a` in `X`   ==&gt; `20`)
+2a  (load value of `a` in `X`   ==&gt; `20`)
+2b  (store `2` in `Y`   ==&gt; `2`)
+1b  (store `1` in `Y`   ==&gt; `1`)
+2c  (multiply `X` and `Y`, store result in `X`   ==&gt; `20`)
+1c  (add `X` and `Y`, store result in `X`   ==&gt; `21`)
+1d  (store value of `X` in `a`   ==&gt; `21`)
+2d  (store value of `X` in `a`   ==&gt; `21`)</pre>
+
+<p>The result in <code>a</code> will be <code>21</code>.</p>
+
+<p>So, threaded programming is very tricky, because if you don’t take
+special steps to prevent this kind of interruption/interleaving from
+happening, you can get very surprising, nondeterministic behavior that
+frequently leads to headaches.</p>
+
+<p>JavaScript never shares data across threads, which means that level
+of nondeterminism isn’t a concern. But that doesn’t mean JS is always
+deterministic. Remember earlier, where the relative ordering of <code>foo()</code>
+and <code>bar()</code> produces two different results (<code>41</code> or <code>42</code>)?</p>
+<div data-type="note" epub:type="note"><h6>Note</h6>
+<p>It may not be obvious yet, but not all nondeterminism is bad.
+Sometimes it’s irrelevant, and sometimes it’s intentional. We’ll see
+more examples of that throughout this and the next few chapters.</p>
+</div>
+
+
+
+
+
+
+
+
+<section data-type="sect2" data-pdf-bookmark="Run-to-Completion"><div class="epub__sect2" id="run-to-completion">
+<h2>Run-to-Completion</h2>
+
+<p>Because of JavaScript’s single-threading, the code inside of <code>foo()</code>
+(and <code>bar()</code>) is atomic, which means that once <code>foo()</code> starts running,
+the entirety of its code will finish before any of the code in <code>bar()</code>
+can run, or vice versa. This is called <em>run-to-completion</em> behavior.</p>
+
+<p>In fact, the run-to-completion semantics are more obvious when <code>foo()</code>
+and <code>bar()</code> have more code in them, such as:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">var</code> <code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__mi">1</code><code class="epub__p">;</code>
+<code class="epub__kd">var</code> <code class="epub__nx">b</code> <code class="epub__o">=</code> <code class="epub__mi">2</code><code class="epub__p">;</code>
+
+<code class="epub__kd">function</code> <code class="epub__nx">foo</code><code class="epub__p">()</code> <code class="epub__p">{</code>
+    <code class="epub__nx">a</code><code class="epub__o">++</code><code class="epub__p">;</code>
+    <code class="epub__nx">b</code> <code class="epub__o">=</code> <code class="epub__nx">b</code> <code class="epub__o">*</code> <code class="epub__nx">a</code><code class="epub__p">;</code>
+    <code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__nx">b</code> <code class="epub__o">+</code> <code class="epub__mi">3</code><code class="epub__p">;</code>
+<code class="epub__p">}</code>
+
+<code class="epub__kd">function</code> <code class="epub__nx">bar</code><code class="epub__p">()</code> <code class="epub__p">{</code>
+    <code class="epub__nx">b</code><code class="epub__o">--</code><code class="epub__p">;</code>
+    <code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__mi">8</code> <code class="epub__o">+</code> <code class="epub__nx">b</code><code class="epub__p">;</code>
+    <code class="epub__nx">b</code> <code class="epub__o">=</code> <code class="epub__nx">a</code> <code class="epub__o">*</code> <code class="epub__mi">2</code><code class="epub__p">;</code>
+<code class="epub__p">}</code>
+
+<code class="epub__c1">// ajax(..) is some arbitrary Ajax function given by a library</code>
+<code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.1"</code><code class="epub__p">,</code> <code class="epub__nx">foo</code> <code class="epub__p">);</code>
+<code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.2"</code><code class="epub__p">,</code> <code class="epub__nx">bar</code> <code class="epub__p">);</code></pre>
+
+<p>Because <code>foo()</code> can’t be interrupted by <code>bar()</code>, and <code>bar()</code> can’t be
+interrupted by <code>foo()</code>, this program has only two possible outcomes
+depending on which starts running first—if threading were present,
+and the individual statements in <code>foo()</code> and <code>bar()</code> could be
+interleaved, the number of possible outcomes would be greatly increased!</p>
+
+<p>Chunk 1 is synchronous (happens <em>now</em>), but chunks 2 and 3 are
+asynchronous (happen <em>later</em>), which means their execution will be
+separated by a gap of time.</p>
+
+<p>Chunk 1:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">var</code> <code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__mi">1</code><code class="epub__p">;</code>
+<code class="epub__kd">var</code> <code class="epub__nx">b</code> <code class="epub__o">=</code> <code class="epub__mi">2</code><code class="epub__p">;</code></pre>
+
+<p>Chunk 2 (<code>foo()</code>):</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__nx">a</code><code class="epub__o">++</code><code class="epub__p">;</code>
+<code class="epub__nx">b</code> <code class="epub__o">=</code> <code class="epub__nx">b</code> <code class="epub__o">*</code> <code class="epub__nx">a</code><code class="epub__p">;</code>
+<code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__nx">b</code> <code class="epub__o">+</code> <code class="epub__mi">3</code><code class="epub__p">;</code></pre>
+
+<p>Chunk 3 (<code>bar()</code>):</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__nx">b</code><code class="epub__o">--</code><code class="epub__p">;</code>
+<code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__mi">8</code> <code class="epub__o">+</code> <code class="epub__nx">b</code><code class="epub__p">;</code>
+<code class="epub__nx">b</code> <code class="epub__o">=</code> <code class="epub__nx">a</code> <code class="epub__o">*</code> <code class="epub__mi">2</code><code class="epub__p">;</code></pre>
+
+<p>Chunks 2 and 3 may happen in either-first order, so there are two
+possible outcomes for this program, as illustrated here:</p>
+
+<p>Outcome 1:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">var</code> <code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__mi">1</code><code class="epub__p">;</code>
+<code class="epub__kd">var</code> <code class="epub__nx">b</code> <code class="epub__o">=</code> <code class="epub__mi">2</code><code class="epub__p">;</code>
+
+<code class="epub__c1">// foo()</code>
+<code class="epub__nx">a</code><code class="epub__o">++</code><code class="epub__p">;</code>
+<code class="epub__nx">b</code> <code class="epub__o">=</code> <code class="epub__nx">b</code> <code class="epub__o">*</code> <code class="epub__nx">a</code><code class="epub__p">;</code>
+<code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__nx">b</code> <code class="epub__o">+</code> <code class="epub__mi">3</code><code class="epub__p">;</code>
+
+<code class="epub__c1">// bar()</code>
+<code class="epub__nx">b</code><code class="epub__o">--</code><code class="epub__p">;</code>
+<code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__mi">8</code> <code class="epub__o">+</code> <code class="epub__nx">b</code><code class="epub__p">;</code>
+<code class="epub__nx">b</code> <code class="epub__o">=</code> <code class="epub__nx">a</code> <code class="epub__o">*</code> <code class="epub__mi">2</code><code class="epub__p">;</code>
+
+<code class="epub__nx">a</code><code class="epub__p">;</code> <code class="epub__c1">// 11</code>
+<code class="epub__nx">b</code><code class="epub__p">;</code> <code class="epub__c1">// 22</code></pre>
+
+<p>Outcome 2:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">var</code> <code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__mi">1</code><code class="epub__p">;</code>
+<code class="epub__kd">var</code> <code class="epub__nx">b</code> <code class="epub__o">=</code> <code class="epub__mi">2</code><code class="epub__p">;</code>
+
+<code class="epub__c1">// bar()</code>
+<code class="epub__nx">b</code><code class="epub__o">--</code><code class="epub__p">;</code>
+<code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__mi">8</code> <code class="epub__o">+</code> <code class="epub__nx">b</code><code class="epub__p">;</code>
+<code class="epub__nx">b</code> <code class="epub__o">=</code> <code class="epub__nx">a</code> <code class="epub__o">*</code> <code class="epub__mi">2</code><code class="epub__p">;</code>
+
+<code class="epub__c1">// foo()</code>
+<code class="epub__nx">a</code><code class="epub__o">++</code><code class="epub__p">;</code>
+<code class="epub__nx">b</code> <code class="epub__o">=</code> <code class="epub__nx">b</code> <code class="epub__o">*</code> <code class="epub__nx">a</code><code class="epub__p">;</code>
+<code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__nx">b</code> <code class="epub__o">+</code> <code class="epub__mi">3</code><code class="epub__p">;</code>
+
+<code class="epub__nx">a</code><code class="epub__p">;</code> <code class="epub__c1">// 183</code>
+<code class="epub__nx">b</code><code class="epub__p">;</code> <code class="epub__c1">// 180</code></pre>
+
+<p>Two outcomes from the same code means we still have nondeterminism! But
+it’s at the function (event) ordering level, rather than at the
+statement ordering level (or, in fact, the expression operation ordering
+level) as it is with threads. In other words, it’s more deterministic than threads would have been.</p>
+
+<p>As applied to JavaScript’s behavior, this function-ordering
+nondeterminism is the common term <em>race condition</em>, as <code>foo()</code> and
+<code>bar()</code> are racing against each other to see which runs first.
+Specifically, it’s a race condition because you cannot reliably predict how <code>a</code> and <code>b</code> will turn out.</p>
+<div data-type="note" epub:type="note"><h6>Note</h6>
+<p>If there was a function in JS that somehow did not have
+run-to-completion behavior, we could have many more possible outcomes,
+right? It turns out ES6 introduces just such a thing (see Chapter 4), but don’t worry right now, we’ll come back to that!</p>
+</div>
+</div></section>
+
+
+
+
+
+</div></section>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</div>
+</section>
+
+
+</body>
+</html>

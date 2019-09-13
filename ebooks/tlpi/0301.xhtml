@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>3.1. System Calls</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">3.1. System Calls</h3><p class="docText">A <span class="docEmphasis">system call</span>
+ is a controlled entry point into the kernel, allowing a process to 
+request that the kernel perform some action on the process’s behalf. The
+ kernel makes a range of services accessible to programs via the system 
+call application programming interface (API). These services include, 
+for example, creating a new process, performing I/O, and creating a pipe
+ for interprocess communication. (The <span class="docEmphasis">syscalls(2)</span> manual page lists the Linux system calls.)</p><p class="docText">Before going into the details of how a system call works, we note some general points:</p><ul><li><p class="docList">A system call changes the processor state from user mode to kernel mode, so that the CPU can access protected kernel memory.</p></li><li><p class="docList">The
+ set of system calls is fixed. Each system call is identified by a 
+unique number. (This numbering scheme is not normally visible to 
+programs, which identify system calls by name.)</p></li><li><p class="docList">Each
+ system call may have a set of arguments that specify information to be 
+transferred from user space (i.e., the process’s virtual address space) 
+to kernel space and vice versa.</p></li></ul><p class="docText">From
+ a programming point of view, invoking a system call looks much like 
+calling a C function. However, behind the scenes, many steps occur 
+during the execution of a system call. To illustrate this, we consider 
+the steps in the order that they occur on a specific hardware 
+implementation, the x86-32. The steps are as follows:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">The application program makes a system call by invoking a wrapper function in the C library.</p></div></li><li><div style="font-weight:normal"><p class="docList">The
+ wrapper function must make all of the system call arguments available 
+to the system call trap-handling routine (described shortly). These 
+arguments are passed to the wrapper via the stack, but the kernel 
+expects them in specific registers. The wrapper function copies the 
+arguments to these registers.</p></div></li><li><div style="font-weight:normal"><p class="docList">Since
+ all system calls enter the kernel in the same way, the kernel needs 
+some method of identifying the system call. To permit this, the wrapper 
+function copies the system call number into a specific CPU register (<tt>%eax</tt>).</p></div></li><li><div style="font-weight:normal"><p class="docList">The wrapper function executes a <span class="docEmphasis">trap</span> machine instruction (<tt>int 0x80</tt>), which causes the processor to switch from user mode to kernel mode and execute code pointed to by location <tt>0x80</tt> (128 decimal) of the system’s trap vector.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">More recent x86-32 architectures implement the <tt>sysenter</tt> instruction, which provides a faster method of entering kernel mode than the conventional <tt>int 0x80</tt> trap instruction. The use of <tt>sysenter</tt> is supported in the 2.6 kernel and from <span class="docEmphasis">glibc</span> 2.3.2 onward.</p><hr noshade="noshade" size="1"/></div></li><li><div style="font-weight:normal"><p class="docList">In response to the trap to location <tt>0x80</tt>, the kernel invokes its <span class="docEmphasis">system_call()</span> routine (located in the assembler file <tt>arch/i386/entry.S</tt>) to handle the trap. This handler:</p><div style="font-weight:bold"><ol class="docList" type="a"><li><div style="font-weight:normal"><p class="docList">Saves register values onto the kernel stack (Section 6.5).</p></div></li><li><div style="font-weight:normal"><p class="docList">Checks the validity of the system call number.</p></div></li><li><div style="font-weight:normal"><p class="docList">Invokes
+ the appropriate system call service routine, which is found by using 
+the system call number to index a table of all system call service 
+routines (the kernel variable <span class="docEmphasis">sys_call_table</span>).
+ If the system call service routine has any arguments, it first checks 
+their validity; for example, it checks that addresses point to valid 
+locations in user memory. Then the service routine performs the required
+ task, which may involve modifying values at addresses specified in the 
+given arguments and transferring data between user memory and kernel 
+memory (e.g., in I/O operations). Finally, the service routine returns a
+ result status to the <span class="docEmphasis">system_call()</span> routine.</p></div></li><li><div style="font-weight:normal"><p class="docList">Restores register values from the kernel stack and places the system call return value on the stack.</p></div></li><li><div style="font-weight:normal"><p class="docList">Returns to the wrapper function, simultaneously returning the processor to user mode.</p></div></li></ol></div></div></li><li><div style="font-weight:normal"><p class="docList">If the return value of the system call service routine indicated an error, the wrapper function sets the global variable <span class="docEmphasis">errno</span> (see Section 3.4)
+ using this value. The wrapper function then returns to the caller, 
+providing an integer return value indicating the success or failure of 
+the system call.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On
+ Linux, system call service routines follow a convention of returning a 
+nonnegative value to indicate success. In case of an error, the routine 
+returns a negative number, which is the negated value of one of the <span class="docEmphasis">errno</span>
+ constants. When a negative value is returned, the C library wrapper 
+function negates it (to make it positive), copies the result into <span class="docEmphasis">errno</span>, and returns -1 as the function result of the wrapper to indicate an error to the calling program.</p><p class="docText">This
+ convention relies on the assumption that system call service routines 
+don’t return negative values on success. However, for a few of these 
+routines, this assumption doesn’t hold. Normally, this is not a problem,
+ since the range of negated <span class="docEmphasis">errno</span> values doesn’t overlap with valid negative return values. However, this convention does cause a problem in one case: the <tt>F_GETOWN</tt> operation of the <span class="docEmphasis">fcntl()</span> system call, which we describe in Section 63.3.</p><hr noshade="noshade" size="1"/></div></li></ol></div><p class="docText">Figure 3-1 illustrates the above sequence using the example of the <span class="docEmphasis">execve()</span> system call. On Linux/x86-32, <span class="docEmphasis">execve()</span> is system call number 11 (<tt>__NR_execve</tt>). Thus, in the <span class="docEmphasis">sys_call_table</span> vector, entry 11 contains the address of <span class="docEmphasis">sys_execve()</span>, the service routine for this system call. (On Linux, system call service routines typically have names of the form <span class="docEmphasis">sys_xyz()</span>, where <span class="docEmphasis">xyz()</span> is the system call in question.)</p><p class="docText">The
+ information given in the preceding paragraphs is more than we’ll 
+usually need to know for the remainder of this book. However, it 
+illustrates the important point that, even for a simple system call, 
+quite a bit of work must be done, and thus system calls have a small but
+ appreciable overhead.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">As an example of the overhead of making a system call, consider the <span class="docEmphasis">getppid()</span>
+ system call, which simply returns the process ID of the parent of the 
+calling process. On one of the author’s x86-32 systems running Linux 
+2.6.25, 10 million calls to <span class="docEmphasis">getppid()</span>
+ required approximately 2.2 seconds to complete. This amounts to around 
+0.3 microseconds per call. By comparison, on the same system, 10 million
+ calls to a C function that simply returns an integer required 0.11 
+seconds, or around one-twentieth of the time required for calls to <span class="docEmphasis">getppid()</span>. Of course, most system calls have significantly more overhead than <span class="docEmphasis">getppid()</span>.</p><hr noshade="noshade" size="1"/><p class="docText">Since,
+ from the point of view of a C program, calling the C library wrapper 
+function is synonymous with invoking the corresponding system call 
+service routine, in the remainder of this book, we use wording such as 
+“invoking the system call <span class="docEmphasis">xyz()</span>” to mean “calling the wrapper function that invokes the system call <span class="docEmphasis">xyz()</span>.”</p><p></p><center><h5 class="docFigureTitle">Figure 3-1. Steps in the execution of a system call</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-3.png"/></p></center><p></p><br/><p class="docText">Appendix A describes the <span class="docEmphasis">strace</span>
+ command, which can be used to trace the system calls made by a program,
+ either for debugging purposes or simply to investigate what a program 
+is doing.</p><p class="docText">More 
+information about the Linux system call mechanism can be found in [Love,
+ 2010], [Bovet &amp; Cesati, 2005], and [Maxwell, 1999].</p>
+</div>
+</body>
+</html>

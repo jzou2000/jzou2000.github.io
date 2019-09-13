@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>63.3. Signal-Driven I/O</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">63.3. Signal-Driven I/O</h3><p class="docText">With I/O multiplexing, a process makes a system call (<span class="docEmphasis">select()</span> or <span class="docEmphasis">poll()</span>)
+ in order to check whether I/O is possible on a file descriptor. With 
+signal-driven I/O, a process requests that the kernel send it a signal 
+when I/O is possible on a file descriptor. The process can then perform 
+any other activity until I/O is possible, at which time the signal is 
+delivered to the process. To use signal-driven I/O, a program performs 
+the following steps:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Establish a handler for the signal delivered by the signal-driven I/O mechanism. By default, this notification signal is <tt>SIGIO</tt>.</p></div></li><li><div style="font-weight:normal"><p class="docList">Set the <span class="docEmphasis">owner</span>
+ of the file descriptor—that is, the process or process group that is to
+ receive signals when I/O is possible on the file descriptor. Typically,
+ we make the calling process the owner. The owner is set using an <span class="docEmphasis">fcntl()</span> <tt>F_SETOWN</tt> operation of the following form:</p><pre>fcntl(fd, F_SETOWN, pid);</pre><br/>
+</div></li><li><div style="font-weight:normal"><p class="docList">Enable nonblocking I/O by setting the <tt>O_NONBLOCK</tt> open file status flag.</p></div></li><li><div style="font-weight:normal"><p class="docList">Enable signal-driven I/O by turning on the <tt>O_ASYNC</tt> open file status flag. This can be combined with the previous step, since they both require the use of the <span class="docEmphasis">fcntl()</span> <tt>F_SETFL</tt> operation (Section 5.3), as in the following example:</p><pre>flags = fcntl(fd, F_GETFL);                 /* Get current flags */
+fcntl(fd, F_SETFL, flags | O_ASYNC | O_NONBLOCK);</pre><br/>
+</div></li><li><div style="font-weight:normal"><p class="docList">The
+ calling process can now perform other tasks. When I/O becomes possible,
+ the kernel generates a signal for the process and invokes the signal 
+handler established in step 1.</p></div></li><li><div style="font-weight:normal"><p class="docList">Signal-driven I/O provides edge-triggered notification (Section 63.1.1).
+ This means that once the process has been notified that I/O is 
+possible, it should perform as much I/O (e.g., read as many bytes) as 
+possible. Assuming a nonblocking file descriptor, this means executing a
+ loop that performs I/O system calls until a call fails with the error <tt>EAGAIN</tt> or <tt>EWOULDBLOCK</tt>.</p></div></li></ol></div><p class="docText">On
+ Linux 2.4 and earlier, signal-driven I/O can be employed with file 
+descriptors for sockets, terminals, pseudoterminals, and certain other 
+types of devices. Linux 2.6 additionally allows signal-driven I/O to be 
+employed with pipes and FIFOs. Since Linux 2.6.25, signal-driven I/O can
+ also be used with <span class="docEmphasis">inotify</span> file descriptors.</p><p class="docText">In
+ the following pages, we first present an example of the use of 
+signal-driven I/O, and then explain some of the above steps in greater 
+detail.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Historically, signal-driven I/O was sometimes referred to as <span class="docEmphasis">asynchronous I/O</span>, and this is reflected in the name (<tt>O_ASYNC</tt>) of the associated open file status flag. However, nowadays, the term <span class="docEmphasis">asynchronous I/O</span>
+ is used to refer to the type of functionality provided by the POSIX AIO
+ specification. Using POSIX AIO, a process requests the kernel to 
+perform an I/O operation, and the kernel <span class="docEmphasis">initiates</span>
+ the operation, but immediately passes control back to the calling 
+process; the process is then later notified when the I/O operation 
+completes or an error occurs.</p><p class="docText"><tt>O_ASYNC</tt>
+ was specified in POSIX.1g, but was not included in SUSv3 because the 
+specification of the required behavior for this flag was deemed 
+insufficient.</p><p class="docText">Several UNIX implementations, especially older ones, don’t define the <tt>O_ASYNC</tt> constant for use with <span class="docEmphasis">fcntl()</span>. Instead, the constant is named <tt>FASYNC</tt>, and <span class="docEmphasis">glibc</span> defines this latter name as a synonym for <tt>O_ASYNC</tt>.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0E4OIM">63.3.1. </h4><h5 class="docSection3Title" id="title-ID0EBPIM">63.3.1.1. Example program</h5><p class="docText">Example 63-3
+ provides a simple example of the use of signal-driven I/O. This program
+ performs the steps described above for enabling signal-driven I/O on 
+standard input, and then places the terminal in cbreak mode (Section 62.6.3),
+ so that input is available a character at a time. The program then 
+enters an infinite loop, performing the “work” of incrementing a 
+variable, <span class="docEmphasis">cnt</span>, while waiting for input to become available. Whenever input becomes available, the <tt>SIGIO</tt> handler sets a flag, <span class="docEmphasis">gotSigio</span>,
+ that is monitored by the main program. When the main program sees that 
+this flag is set, it reads all available input characters and prints 
+them along with the current value of <span class="docEmphasis">cnt</span>. If a hash character (<tt>#</tt>) is read in the input, the program terminates.</p><p class="docText">Here is an example of what we see when we run this program and type the <span class="docEmphasis">x</span> character a number of times, followed by a hash (<tt>#</tt>) character:</p><pre>$ <b>./demo_sigio</b>
+cnt=37; read x
+cnt=100; read x
+cnt=159; read x
+cnt=223; read x
+cnt=288; read x
+cnt=333; read #</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EPQIM">Example 63-3. Using signal-driven I/O on a terminal</h5><p></p><div class="box"><pre class="preFixedHeight"><b>altio/demo_sigio.c</b>
+#include &lt;signal.h&gt;
+#include &lt;ctype.h&gt;
+#include &lt;fcntl.h&gt;
+#include &lt;termios.h&gt;
+#include "tty_functions.h"      /* Declaration of ttySetCbreak() */
+#include "tlpi_hdr.h"
+
+static volatile sig_atomic_t gotSigio = 0;
+                                /* Set nonzero on receipt of SIGIO */
+
+static void
+sigioHandler(int sig)
+{
+    gotSigio = 1;
+}
+
+int
+main(int argc, char *argv[])
+{
+    int flags, j, cnt;
+    struct termios origTermios;
+    char ch;
+    struct sigaction sa;
+    Boolean done;
+
+    /* Establish handler for "I/O possible" signal */
+
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sa.sa_handler = sigioHandler;
+    if (sigaction(SIGIO, &amp;sa, NULL) == -1)
+        errExit("sigaction");
+
+    /* Set owner process that is to receive "I/O possible" signal */
+
+    if (fcntl(STDIN_FILENO, F_SETOWN, getpid()) == -1)
+        errExit("fcntl(F_SETOWN)");
+
+    /* Enable "I/O possible" signaling and make I/O nonblocking
+       for file descriptor */
+
+    flags = fcntl(STDIN_FILENO, F_GETFL);
+    if (fcntl(STDIN_FILENO, F_SETFL, flags | O_ASYNC | O_NONBLOCK) == -1)
+        errExit("fcntl(F_SETFL)");
+
+    /* Place terminal in cbreak mode */
+
+    if (ttySetCbreak(STDIN_FILENO, &amp;origTermios) == -1)
+        errExit("ttySetCbreak");
+
+    for (done = FALSE, cnt = 0; !done ; cnt++) {
+        for (j = 0; j &lt; 100000000; j++)
+            continue;                   /* Slow main loop down a little */
+
+        if (gotSigio) {                 /* Is input available? */
+
+            /* Read all available input until error (probably EAGAIN)
+               or EOF (not actually possible in cbreak mode) or a
+               hash (#) character is read */
+
+            while (read(STDIN_FILENO, &amp;ch, 1) &gt; 0 &amp;&amp; !done) {
+                printf("cnt=%d; read %c\n", cnt, ch);
+                done = ch == '#';
+            }
+
+            gotSigio = 0;
+        }
+    }
+
+    /* Restore original terminal settings */
+
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &amp;origTermios) == -1)
+        errExit("tcsetattr");
+    exit(EXIT_SUCCESS);
+}
+     <b>altio/demo_sigio.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0E1QIM">63.3.1.2. Establish the signal handler before enabling signal-driven I/O</h5><p class="docText">Because the default action of <tt>SIGIO</tt> is to terminate the process, we should enable the handler for <tt>SIGIO</tt> before enabling signal-driven I/O on a file descriptor. If we enable signal-driven I/O before establishing the <tt>SIGIO</tt> handler, then there is a time window during which, if I/O becomes possible, delivery of <tt>SIGIO</tt> will terminate the process.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On some UNIX implementations, <tt>SIGIO</tt> is ignored by default.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EURIM">63.3.1.3. Setting the file descriptor owner</h5><p class="docText">We set the file descriptor owner using an <span class="docEmphasis">fcntl()</span> operation of the following form:</p><pre>fcntl(fd, F_SETOWN, pid);</pre><br/>
+<p class="docText">We may specify that either a 
+single process or all of the processes in a process group are to be 
+signaled when I/O is possible on the file descriptor. If <span class="docEmphasis">pid</span> is positive, it is interpreted as a process ID. If <span class="docEmphasis">pid</span> is negative, its absolute value specifies a process group ID.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On older UNIX implementations, an <span class="docEmphasis">ioctl()</span> operation—either <tt>FIOSETOWN</tt> or <tt>SIOCSPGRP</tt>—was used to achieve the same effect as <tt>F_SETOWN</tt>. For compatibility, these <span class="docEmphasis">ioctl()</span> operations are also provided on Linux.</p><hr noshade="noshade" size="1"/><p class="docText">Typically, <span class="docEmphasis">pid</span>
+ is specified as the process ID of the calling process (so that the 
+signal is sent to the process that has the file descriptor open). 
+However, it is possible to specify another process or a process group 
+(e.g., the caller’s process group), and signals will be sent to that 
+target, subject to the permission checks described in Section 20.5, 
+where the sending process is considered to be the process that does the <tt>F_SETOWN</tt>.</p><p class="docText">The <span class="docEmphasis">fcntl()</span> <tt>F_GETOWN</tt>
+ operation returns the ID of the process or process group that is to 
+receive signals when I/O is possible on a specified file descriptor:</p><pre>id = fcntl(fd, F_GETOWN);
+if (id == -1)
+    errExit("fcntl");</pre><br/>
+<p class="docText">A process group ID is returned as a negative number by this call.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">ioctl()</span> operation that corresponds to <tt>F_GETOWN</tt> on older UNIX implementations was <tt>FIOGETOWN</tt> or <tt>SIOCGPGRP</tt>. Both of these <span class="docEmphasis">ioctl()</span> operations are also provided on Linux.</p><hr noshade="noshade" size="1"/><p class="docText">A
+ limitation in the system call convention employed on some Linux 
+architectures (notably, x86) means that if a file descriptor is owned by
+ a process group ID less than 4096, then, instead of returning that ID 
+as a negative function result from the <span class="docEmphasis">fcntl()</span> <tt>F_GETOWN</tt> operation, <span class="docEmphasis">glibc</span> misinterprets it as a system call error. Consequently, the <span class="docEmphasis">fcntl()</span> wrapper function returns -1, and <span class="docEmphasis">errno</span>
+ contains the (positive) process group ID. This is a consequence of the 
+fact that the kernel system call interface indicates errors by returning
+ a negative <span class="docEmphasis">errno</span>
+ value as a function result, and there are a few cases where it is 
+necessary to distinguish such results from a successful call that 
+returns a valid negative value. To make this distinction, <span class="docEmphasis">glibc</span> interprets negative system call returns in the range -1 to -4095 as indicating an error, copies this (absolute) value into <span class="docEmphasis">errno</span>,
+ and returns -1 as the function result for the application program. This
+ technique is generally sufficient for dealing with the few system call 
+service routines that can return a valid negative result; the <span class="docEmphasis">fcntl()</span> <tt>F_GETOWN</tt>
+ operation is the only practical case where it fails. This limitation 
+means that an application that uses process groups to receive “I/O 
+possible” signals (which is unusual) can’t reliably use <tt>F_GETOWN</tt> to discover which process group owns a file descriptor.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Since <span class="docEmphasis">glibc</span> version 2.11, the <span class="docEmphasis">fcntl()</span> wrapper function fixes the problem of <tt>F_GETOWN</tt> with process group IDs less than 4096. It does this by implementing <tt>F_GETOWN</tt> in user space using the <tt>F_GETOWN_EX</tt> operation (Section 63.3.2), which is provided by Linux 2.6.32 and later.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0EZWIM">63.3.2. When Is "I/O Possible" Signaled?</h4><p class="docText">We now consider the details of when “I/O possible” is signaled for various file types.</p><h5 class="docSection3Title" id="title-ID0ENXIM">63.3.2.1. Terminals and pseudoterminals</h5><p class="docText">For
+ terminals and pseudoterminals, a signal is generated whenever new input
+ becomes available, even if previous input has not yet been read. “Input
+ possible” is also signaled if an end-of-file condition occurs on a 
+terminal (but not on a pseudoterminal).</p><p class="docText">There is no “output possible” signaling for terminals. A terminal disconnect is also not signaled.</p><p class="docText">Starting
+ with kernel 2.4.19, Linux provides “output possible” signaling for the 
+slave side of a pseudoterminal. This signal is generated whenever input 
+is consumed on the master side of the pseudoterminal.</p><h5 class="docSection3Title" id="title-ID0EUXIM">63.3.2.2. Pipes and FIFOs</h5><p class="docText">For the read end of a pipe or FIFO, a signal is generated in these circumstances:</p><ul><li><p class="docList">Data is written to the pipe (even if there was already unread input available).</p></li><li><p class="docList">The write end of the pipe is closed.</p></li></ul><p class="docText">For the write end of a pipe or FIFO, a signal is generated in these circumstances:</p><ul><li><p class="docList">A read from the pipe increases the amount of free space in the pipe so that it is now possible to write <tt>PIPE_BUF</tt> bytes without blocking.</p></li><li><p class="docList">The read end of the pipe is closed.</p></li></ul><h5 class="docSection3Title" id="title-ID0EIYIM">63.3.2.3. Sockets</h5><p class="docText">Signal-driven
+ I/O works for datagram sockets in both the UNIX and the Internet 
+domains. A signal is generated in the following circumstances:</p><ul><li><p class="docList">An input datagram arrives on the socket (even if there were already unread datagrams waiting to be read).</p></li><li><p class="docList">An asynchronous error occurs on the socket.</p></li></ul><p class="docText">Signal-driven
+ I/O works for stream sockets in both the UNIX and the Internet domains.
+ A signal is generated in the following circumstances:</p><ul><li><p class="docList">A new connection is received on a listening socket.</p></li><li><p class="docList">A TCP <span class="docEmphasis">connect()</span> request completes; that is, the active end of a TCP connection entered the ESTABLISHED state, as shown in Figure 61-5 (page 1272). The analogous condition is not signaled for UNIX domain sockets.</p></li><li><p class="docList">New input is received on the socket (even if there was already unread input available).</p></li><li><p class="docList">The peer closes its writing half of the connection using <span class="docEmphasis">shutdown()</span>, or closes its socket altogether using <span class="docEmphasis">close()</span>.</p></li><li><p class="docList">Output is possible on the socket (e.g., space has become available in the socket send buffer).</p></li><li><p class="docList">An asynchronous error occurs on the socket.</p></li></ul><h5 class="docSection3Title" id="title-ID0EZZIM">63.3.2.4. <span class="docEmphasis">inotify</span> file descriptors</h5><p class="docText">A signal is generated when the <span class="docEmphasis">inotify</span> file descriptor becomes readable—that is, when an event occurs for one of the files monitored by the <span class="docEmphasis">inotify</span> file descriptor.</p><h4 class="docSection2Title" id="title-ID0EA2IM">63.3.3. Refining the Use of Signal-Driven I/O</h4><p class="docText">In
+ applications that need to simultaneously monitor very large numbers 
+(i.e., thousands) of file descriptors—for example, certain types of 
+network servers—signal-driven I/O can provide significant performance 
+advantages by comparison with <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>.
+ Signal-driven I/O offers superior performance because the kernel 
+“remembers” the list of file descriptors to be monitored, and signals 
+the program only when I/O events actually occur on those descriptors. As
+ a result, the performance of a program employing signal-driven I/O 
+scales according to the number of I/O events that occur, rather than the
+ number of file descriptors being monitored.</p><p class="docText">To take full advantage of signal-driven I/O, we must perform two steps:</p><ul><li><p class="docList">Employ a Linux-specific <span class="docEmphasis">fcntl()</span> operation, <tt>F_SETSIG</tt>, to specify a realtime signal that should be delivered instead of <tt>SIGIO</tt> when I/O is possible on a file descriptor.</p></li><li><p class="docList">Specify the <tt>SA_SIGINFO</tt> flag when using <span class="docEmphasis">sigaction()</span> to establish the handler for the realtime signal employed in the previous step (see Section 21.4).</p></li></ul><p class="docText">The <span class="docEmphasis">fcntl()</span> <tt>F_SETSIG</tt> operation specifies an alternative signal that should be delivered instead of <tt>SIGIO</tt> when I/O is possible on a file descriptor:</p><pre>if (fcntl(fd, F_SETSIG, sig) == -1)
+    errExit("fcntl");</pre><br/>
+<p class="docText">The <tt>F_GETSIG</tt> operation performs the converse of <tt>F_SETSIG</tt>, retrieving the signal currently set for a file descriptor:</p><pre>sig = fcntl(fd, F_GETSIG);
+if (sig == -1)
+    errExit("fcntl");</pre><br/>
+<p class="docText">(In order to obtain the definitions of the <tt>F_SETSIG</tt> and <tt>F_GETSIG</tt> constants from <tt>&lt;fcntl.h&gt;</tt>, we must define the <tt>_GNU_SOURCE</tt> feature test macro.)</p><p class="docText">Using <tt>F_SETSIG</tt>
+ to change the signal used for “I/O possible” notification serves two 
+purposes, both of which are needed if we are monitoring large numbers of
+ I/O events on multiple file descriptors:</p><ul><li><p class="docList">The default “I/O possible” signal, <tt>SIGIO</tt>, is one of the standard, nonqueuing signals. If multiple I/O events are signaled while <tt>SIGIO</tt> is blocked—perhaps because the <tt>SIGIO</tt> handler is already invoked—all notifications except the first will be lost. If we use <tt>F_SETSIG</tt> to specify a realtime signal as the “I/O possible” signal, multiple notifications can be queued.</p></li><li><p class="docList">If the handler for the signal is established using a <span class="docEmphasis">sigaction()</span> call in which the <tt>SA_SIGINFO</tt> flag is specified in the <span class="docEmphasis">sa.sa_flags</span> field, then a <span class="docEmphasis">siginfo_t</span>
+ structure is passed as the second argument to the signal handler 
+(Section 21.4). This structure contains fields identifying the file 
+descriptor on which the event occurred, as well as the type of event.</p></li></ul><p class="docText">Note that the use of <span class="docEmphasis">both</span> <tt>F_SETSIG</tt> and <tt>SA_SIGINFO</tt> is required in order for a valid <span class="docEmphasis">siginfo_t</span> structure to be passed to the signal handler.</p><p class="docText">If we perform an <tt>F_SETSIG</tt> operation specifying <span class="docEmphasis">sig</span> as 0, then we return to the default behavior: <tt>SIGIO</tt> is delivered, and a <span class="docEmphasis">siginfo_t</span> argument is not supplied to the handler.</p><p class="docText">For an “I/O possible” event, the fields of interest in the <span class="docEmphasis">siginfo_t</span> structure passed to the signal handler are as follows:</p><ul><li><p class="docList"><span class="docEmphasis">si_signo</span>:
+ the number of the signal that caused the invocation of the handler. 
+This value is the same as the first argument to the signal handler.</p></li><li><p class="docList"><span class="docEmphasis">si_fd</span>: the file descriptor for which the I/O event occurred.</p></li><li><p class="docList"><span class="docEmphasis">si_code</span>:
+ a code indicating the type of event that occurred. The values that can 
+appear in this field, along with their general descriptions, are shown 
+in Table 63-7.</p></li><li><p class="docList"><span class="docEmphasis">si_band</span>: a bit mask containing the same bits as are returned in the <span class="docEmphasis">revents</span> field by the <span class="docEmphasis">poll()</span> system call. The value set in <span class="docEmphasis">si_code</span> has a one-to-one correspondence with the bit-mask setting in <span class="docEmphasis">si_band</span>, as shown in Table 63-7.</p><p></p><table border="1" cellspacing="0" width="90%"><caption><h5 class="docTableTitle">Table 63-7. <span class="docEmphasis">si_code</span> and <span class="docEmphasis">si_band</span> values in the <span class="docEmphasis">siginfo_t</span> structure for "I/O possible" events</h5></caption><colgroup span="3"><col></col><col></col><col></col></colgroup><thead><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom"><span class="docEmphasis">si_code</span></th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom"><span class="docEmphasis">si_band</span> mask value</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Description</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top"><tt>POLL_IN</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLIN | POLLRDNORM</tt></td><td align="left" class="docTableCell" valign="top">Input available; end-of-file condition</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLL_OUT</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLOUT | POLLWRNORM | POLLWRBAND</tt></td><td align="left" class="docTableCell" valign="top">Output possible</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLL_MSG</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLIN | POLLRDNORM | POLLMSG</tt></td><td align="left" class="docTableCell" valign="top">Input message available (unused)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLL_ERR</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLERR</tt></td><td align="left" class="docTableCell" valign="top">I/O error</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLL_PRI</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLPRI | POLLRDNORM</tt></td><td align="left" class="docTableCell" valign="top">High-priority input available</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>POLL_HUP</tt></td><td align="left" class="docTableCell" valign="top"><tt>POLLHUP | POLLERR</tt></td><td align="left" class="docTableCell" valign="top">Hangup occurred</td></tr></tbody></table><p></p><br/></li></ul><p class="docText">In an application that is purely input-driven, we can further refine the use of <tt>F_SETSIG</tt>.
+ Instead of monitoring I/O events via a signal handler, we can block the
+ nominated “I/O possible” signal, and then accept the queued signals via
+ calls to <span class="docEmphasis">sigwaitinfo()</span> or <span class="docEmphasis">sigtimedwait()</span> (Section 22.10). These system calls return a <span class="docEmphasis">siginfo_t</span> structure that contains the same information as is passed to a signal handler established with <tt>SA_SIGINFO</tt>.
+ Accepting signals in this manner returns us to a synchronous model of 
+event processing, but with the advantage that we are much more 
+efficiently notified about the file descriptors on which I/O events have
+ occurred than if we use <span class="docEmphasis">select()</span> or <span class="docEmphasis">poll()</span>.</p><h5 class="docSection3Title" id="title-ID0E6IJM">63.3.3.1. Handling signal-queue overflow</h5><p class="docText">We
+ saw in Section 22.8 that there is a limit on the number of realtime 
+signals that may be queued. If this limit is reached, the kernel reverts
+ to delivering the default <tt>SIGIO</tt> signal 
+for “I/O possible” notifications. This informs the process that a 
+signal-queue overflow occurred. When this happens, we lose information 
+about which file descriptors have I/O events, because <tt>SIGIO</tt> is not queued. (Furthermore, the <tt>SIGIO</tt> handler doesn’t receive a <span class="docEmphasis">siginfo_t</span> argument, which means that the signal handler can’t determine the file descriptor that generated the signal.)</p><p class="docText">We
+ can reduce the likelihood of signal-queue overflows by increasing the 
+limit on the number of realtime signals that can be queued, as described
+ in Section 22.8. However, this doesn’t eliminate the need to handle the
+ possibility of an overflow. A properly designed application using <tt>F_SETSIG</tt> to establish a realtime signal as the “I/O possible” notification mechanism must also establish a handler for <tt>SIGIO</tt>. If <tt>SIGIO</tt> is delivered, then the application can drain the queue of realtime signals using <span class="docEmphasis">sigwaitinfo()</span> and temporarily revert to the use of <span class="docEmphasis">select()</span> or <span class="docEmphasis">poll()</span> to obtain a complete list of file descriptors with outstanding I/O events.</p><h5 class="docSection3Title" id="title-ID0ERLJM">63.3.3.2. Using signal-driven I/O with multithreaded applications</h5><p class="docText">Starting with kernel 2.6.32, Linux provides two new, nonstandard <span class="docEmphasis">fcntl()</span> operations that can be used to set the target for “I/O possible” signals: <tt>F_SETOWN_EX</tt> and <tt>F_GETOWN_EX</tt>.</p><p class="docText">The <tt>F_SETOWN_EX</tt> operation is like <tt>F_SETOWN</tt>,
+ but as well as allowing the target to be specified as a process or 
+process group, it also permits a thread to be specified as the target 
+for “I/O possible” signals. For this operation, the third argument of <span class="docEmphasis">fcntl()</span> is a pointer to a structure of the following form:</p><pre>struct f_owner_ex {
+    int   type;
+    pid_t pid;
+};</pre><br/>
+<p class="docText">The <span class="docEmphasis">type</span> field defines the meaning of the <span class="docEmphasis">pid</span> field, and has one of the following values:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">F_OWNER_PGRP</span></span></span></p></dt><dd><p class="docList">The <span class="docEmphasis">pid</span> field specifies the ID of a process group that is to be the target of “I/O possible” signals. Unlike with <tt>F_SETOWN</tt>, a process group ID is specified as a positive value.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">F_OWNER_PID</span></span></span></p></dt><dd><p class="docList">The <span class="docEmphasis">pid</span> field specifies the ID of a process that is to be the target of “I/O possible” signals.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">F_OWNER_TID</span></span></span></p></dt><dd><p class="docList">The <span class="docEmphasis">pid</span> field specifies the ID of a thread that is to be the target of “I/O possible” signals. The ID specified in <span class="docEmphasis">pid</span> is a value returned by <span class="docEmphasis">clone()</span> or <span class="docEmphasis">gettid()</span>.</p></dd></dl><p class="docText">The <tt>F_GETOWN_EX</tt> operation is the converse of the <tt>F_GETOWN_EX</tt> operation. It uses the <span class="docEmphasis">f_owner_ex</span> structure pointed to by the third argument of <span class="docEmphasis">fcntl()</span> to return the settings defined by a previous <tt>F_SETOWN_EX</tt> operation.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Because the <tt>F_SETOWN_EX</tt> and <tt>F_GETOWN_EX</tt> operations represent process group IDs as positive values, <tt>F_GETOWN_EX</tt> doesn’t suffer the problem described earlier for <tt>F_GETOWN</tt> when using process group IDs less than 4096.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

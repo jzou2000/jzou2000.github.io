@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>44.7. FIFOs</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">44.7. FIFOs</h3><p class="docText">Semantically,
+ a FIFO is similar to a pipe. The principal difference is that a FIFO 
+has a name within the file system and is opened in the same way as a 
+regular file. This allows a FIFO to be used for communication between 
+unrelated processes (e.g., a client and server).</p><p class="docText">Once a FIFO has been opened, we use the same I/O system calls as are used with pipes and other files (i.e., <span class="docEmphasis">read()</span>, <span class="docEmphasis">write()</span>, and <span class="docEmphasis">close()</span>).
+ Just as with pipes, a FIFO has a write end and a read end, and data is 
+read from the pipe in the same order as it is written. This fact gives 
+FIFOs their name: <span class="docEmphasis">first in, first out</span>. FIFOs are also sometimes known as <span class="docEmphasis">named pipes</span>.</p><p class="docText">As with pipes, when all descriptors referring to a FIFO have been closed, any outstanding data is discarded.</p><p class="docText">We can create a FIFO from the shell using the <span class="docEmphasis">mkfifo</span> command:</p><pre>$ <b>mkfifo</b> [<b>-m</b> <b><tt><i>mode</i></tt></b>] <b><tt><i>pathname</i></tt></b></pre><br/>
+<p class="docText">The <span class="docEmphasis">pathname</span> is the name of the FIFO to be created, and the <span class="docEmphasis">-m</span> option is used to specify a permission <span class="docEmphasis">mode</span> in the same way as for the <span class="docEmphasis">chmod</span> command.</p><p class="docText">When applied to a FIFO (or pipe), <span class="docEmphasis">fstat()</span> and <span class="docEmphasis">stat()</span> return a file type of <tt>S_IFIFO</tt> in the <span class="docEmphasis">st_mode</span> field of the <span class="docEmphasis">stat</span> structure (Section 15.1). When listed with <span class="docEmphasis">ls -l</span>, a FIFO is shown with the type <span class="docEmphasis">p</span> in the first column, and <span class="docEmphasis">ls -F</span> appends an the pipe symbol (<tt>|</tt>) to the FIFO pathname.</p><p class="docText">The <span class="docEmphasis">mkfifo()</span> function creates a new FIFO with the given <span class="docEmphasis">pathname</span>.</p><pre>#include &lt;sys/stat.h&gt;
+
+int <b>mkfifo</b>(const char *<span class="docEmphasis">pathname</span>, mode_t <span class="docEmphasis">mode</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">mode</span>
+ argument specifies the permissions for the new FIFO. These permissions 
+are specified by ORing the desired combination of constants from Table 15-4, in Section 15.4.2. As usual, these permissions are masked against the process umask value (Section 15.4.6).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Historically, FIFOs were created using the system call <span class="docEmphasis">mknod(pathname, S_IFIFO, 0)</span>. POSIX.1-1990 specified <span class="docEmphasis">mkfifo()</span> as a simpler API avoiding the generality of <span class="docEmphasis">mknod()</span>, which allows creation of various types of files, including device files. (SUSv3 specifies <span class="docEmphasis">mknod()</span>, but weakly, defining only its use for creating FIFOs.) Most UNIX implementations provide <span class="docEmphasis">mkfifo()</span> as a library function layered on top of <span class="docEmphasis">mknod()</span>.</p><hr noshade="noshade" size="1"/><p class="docText">Once a FIFO has been created, any process can open it, subject to the usual file permission checks (Section 15.4.3).</p><p class="docText">Opening
+ a FIFO has somewhat unusual semantics. Generally, the only sensible use
+ of a FIFO is to have a reading process and a writing process on each 
+end. Therefore, by default, opening a FIFO for reading (the <span class="docEmphasis">open()</span> <tt>O_RDONLY</tt> flag) blocks until another process opens the FIFO for writing (the <span class="docEmphasis">open()</span> <tt>O_WRONLY</tt>
+ flag). Conversely, opening the FIFO for writing blocks until another 
+process opens the FIFO for reading. In other words, opening a FIFO 
+synchronizes the reading and writing processes. If the opposite end of a
+ FIFO is already open (perhaps because a pair of processes have already 
+opened each end of the FIFO), then <span class="docEmphasis">open()</span> succeeds immediately.</p><p class="docText">Under
+ most UNIX implementations (including Linux), it is possible to 
+circumvent the blocking behavior when opening FIFOs by specifying the <tt>O_RDWR</tt> flag when opening a FIFO. In this case, <span class="docEmphasis">open()</span>
+ returns immediately with a file descriptor that can be used for reading
+ and writing on the FIFO. Doing this rather subverts the I/O model for 
+FIFOs, and SUSv3 explicitly notes that opening a FIFO with the <tt>O_RDWR</tt>
+ flag is unspecified; therefore, for portability reasons, this technique
+ should be avoided. In circumstances where we need to prevent blocking 
+when opening a FIFO, the <span class="docEmphasis">open()</span> <tt>O_NONBLOCK</tt> flag provides a standardized method for doing so (refer to Section 44.9).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Avoiding the use of the <tt>O_RDWR</tt> flag when opening a FIFO can be desirable for a another reason. After such an <span class="docEmphasis">open()</span>,
+ the calling process will never see end-of-file when reading from the 
+resulting file descriptor, because there will always be at least one 
+descriptor open for writing to the FIFO—the same descriptor from which 
+the process is reading.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0E4BBM">44.7.1. </h4><h5 class="docSection3Title" id="title-ID0EBCBM">44.7.1.1. Using FIFOs and <span class="docEmphasis">tee(1)</span> to create a dual pipeline</h5><p class="docText">One
+ of the characteristics of shell pipelines is that they are linear; each
+ process in the pipeline reads data produced by its predecessor and 
+sends data to its successor. Using FIFOs, it is possible to create a 
+fork in a pipeline, so that a duplicate copy of the output of a process 
+is sent to another process in addition to its successor in the pipeline.
+ In order to do this, we need to use the <span class="docEmphasis">tee</span>
+ command, which writes two copies of what it reads from its standard 
+input: one to standard output and the other to the file named in its 
+command-line argument.</p><p class="docText">Making the <span class="docEmphasis">file</span> argument to <span class="docEmphasis">tee</span> a FIFO allows us to have two processes simultaneously reading the duplicate output produced by <span class="docEmphasis">tee</span>. We demonstrate this in the following shell session, which creates a FIFO named <tt>myfifo</tt>, starts a background <span class="docEmphasis">wc</span>
+ command that opens the FIFO for reading (this will block until the FIFO
+ is opened for writing), and then executes a pipeline that sends the 
+output of <span class="docEmphasis">ls</span> to <span class="docEmphasis">tee</span>, which both passes the output further down the pipeline to <span class="docEmphasis">sort</span> and sends it to the <tt>myfifo</tt> FIFO. (The <span class="docEmphasis">-k5n</span> option to <span class="docEmphasis">sort</span> causes the output of <span class="docEmphasis">ls</span> to be sorted in increasing numerical order on the fifth space-delimited field.)</p><pre>$ <b>mkfifo myfifo </b>
+$ <b>wc -l &lt; myfifo &amp; </b>
+$ <b>ls -l | tee myfifo | sort -k5n </b>
+<i> (Resulting output not shown)</i></pre><br/>
+<p class="docText">Diagrammatically, the above commands create the situation shown in Figure 44-5.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">tee</span> program is so named because of its shape. We can consider <span class="docEmphasis">tee</span>
+ as functioning similarly to a pipe, but with an additional branch that 
+sends duplicate output. Diagrammatically, this has the shape of a 
+capital letter <span class="docEmphasis">T</span> (see Figure 44-5). In addition to the purpose described here, <span class="docEmphasis">tee</span> is also useful for debugging pipelines and for saving the results produced at some intervening point in a complex pipeline.</p><hr noshade="noshade" size="1"/><p></p><center><h5 class="docFigureTitle">Figure 44-5. Using a FIFO and <span class="docEmphasis">tee(1)</span> to create a dual pipeline</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-80.png"/></p></center><p></p><br/>
+</div>
+</body>
+</html>

@@ -1,0 +1,775 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 24. Coroutines</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 24. Coroutines"><div class="titlepage"><div><h1><span class="partLabel">24</span> Coroutines</h1></div></div><p id="N150E7" style="text-indent: 0">
+We do not need coroutines very often,
+but when we do,
+it is an unparalleled feature.
+Coroutines can literally turn upside-down
+the relationship between callers and callees,
+and this flexibility solves what I call the
+“who-is-the-boss” (or “who-has-the-main-loop”)
+problem in software architecture.
+This is a generalization of several
+seemingly unrelated problems,
+such as entanglement in event-driven programs,
+building iterators through generators,
+and cooperative multithreading.
+Coroutines solve all these problems in simple
+and efficient ways.
+</p><p id="N150E9" style="text-indent: 0">
+A <a class="indexterm" id="N150EB"/><em class="firstterm">coroutine</em> is similar to a thread
+(in the sense of <a class="indexterm" id="N150F2"/>multithreading):
+it is a line of execution,
+with its own stack, its own local variables,
+and its own instruction pointer;
+it shares global variables and mostly
+anything else with other coroutines.
+The main difference between <a class="indexterm" id="N150F6"/>threads and coroutines is that
+a multithreaded program runs several threads in parallel,
+while coroutines are collaborative:
+at any given time,
+a program with coroutines is running only one of its coroutines,
+and this running coroutine suspends its execution only
+when it explicitly requests to be suspended.
+</p><p id="N150FA" style="text-indent: 0">
+In this chapter we will cover how coroutines work in Lua
+and how we can use them to solve a diverse set of problems.
+</p><div class="sect1" title="Coroutine Basics"><div class="titlepage"><div><div><h2 class="title"><a id="L233"/>Coroutine Basics</h2></div></div></div><p id="N15100" style="text-indent: 0">
+Lua packs all its coroutine-related functions in
+the table <a class="indexterm" id="N15102"></a><code class="function">coroutine</code>.
+The function <a class="indexterm" id="N15108"></a><code class="function">create</code> creates new coroutines.
+It has a single argument,
+a function with the code that the coroutine will run
+(the coroutine <em>body</em>).
+It returns a value of type <code class="literal">"thread"</code>,
+which represents the new coroutine.
+Often,
+the argument to <a class="indexterm" id="N15117"></a><code class="function">create</code> is an <a class="indexterm" id="N1511F"></a>anonymous function,
+like here:
+</p><pre class="programlisting" id="N15123">      co = coroutine.create(function () print("hi") end)
+      print(type(co))           --&gt; thread
+</pre><p style="text-indent: 0">
+</p><p id="N15126" style="text-indent: 0">
+A <a class="indexterm" id="N15128"></a>coroutine can be in one of four states:
+suspended, running, normal, and dead.
+We can check the state of a coroutine
+with the function <a class="indexterm" id="N1512C"></a><code class="function">coroutine.status</code>:
+</p><pre class="programlisting" id="N15135">      print(coroutine.status(co))   --&gt; suspended
+</pre><p style="text-indent: 0">
+</p><p id="N15138" style="text-indent: 0">
+When we create a coroutine, it starts in the suspended state;
+a coroutine does not run its body automatically
+when we create it.
+The function <a class="indexterm" id="N1513A"></a><code class="function">coroutine.resume</code> (re)starts the execution of
+a coroutine, changing its state from suspended to running:
+</p><pre class="programlisting" id="N15143">      coroutine.resume(co)   --&gt; hi
+</pre><p style="text-indent: 0">
+(If you run this code in interactive mode,
+you may want to finish the previous line with a <a class="indexterm" id="N15146"></a>semicolon,
+to suppress the display of the result from <a class="indexterm" id="N1514A"></a><code class="function">resume</code>.)
+In this first example,
+the <a class="indexterm" id="N15152"></a>coroutine body simply prints <code class="literal">"hi"</code> and terminates,
+leaving the coroutine in the dead state:
+</p><pre class="programlisting" id="N15159">      print(coroutine.status(co))   --&gt; dead
+</pre><p style="text-indent: 0">
+</p><p id="N1515C" style="text-indent: 0">
+Until now, coroutines look like nothing more than a complicated
+way to call functions.
+The real power of coroutines
+stems from the function <a class="indexterm" id="N1515E"></a><code class="function">yield</code>,
+which allows a running <a class="indexterm" id="N15167"></a>coroutine to suspend its own execution
+so that it can be resumed later.
+Let us see a simple example:
+</p><pre class="programlisting" id="N1516B">      co = coroutine.create(function ()
+             for i = 1, 10 do
+               print("co", i)
+               coroutine.yield()
+             end
+           end)
+</pre><p style="text-indent: 0">
+Now, the coroutine body does a loop,
+printing numbers and yielding after each print.
+When we resume this coroutine,
+it starts its execution and runs until the first <a class="indexterm" id="N1516E"></a><code class="function">yield</code>:
+</p><pre class="programlisting" id="N15176">      coroutine.resume(co)    --&gt; co   1
+</pre><p style="text-indent: 0">
+If we check its status,
+we can see that the coroutine is suspended and,
+therefore, can be resumed:
+</p><pre class="programlisting" id="N15179">      print(coroutine.status(co))   --&gt; suspended
+</pre><p style="text-indent: 0">
+From the coroutine’s point of view,
+all activity that happens while it is suspended
+is happening inside its call to <a class="indexterm" id="N1517C"></a><code class="function">yield</code>.
+When we resume the coroutine,
+this call to <a class="indexterm" id="N15184"></a><code class="function">yield</code> finally returns
+and the coroutine continues its execution
+until the next yield or until its end:
+</p><pre class="programlisting" id="N1518C">      coroutine.resume(co)    --&gt; co   2
+      coroutine.resume(co)    --&gt; co   3
+        ...
+      coroutine.resume(co)    --&gt; co   10
+      coroutine.resume(co)    -- prints nothing
+</pre><p style="text-indent: 0">
+During the last call to <a class="indexterm" id="N1518F"></a><code class="function">resume</code>,
+the coroutine body finishes the loop and then returns,
+without printing anything.
+If we try to resume it again,
+<a class="indexterm" id="N15197"></a><code class="function">resume</code> returns <strong>false</strong> plus an error message:
+</p><pre class="programlisting" id="N151A3">      print(coroutine.resume(co))
+        --&gt; false   cannot resume dead coroutine
+</pre><p style="text-indent: 0">
+Note that <a class="indexterm" id="N151A6"></a><code class="function">resume</code> runs in <a class="indexterm" id="N151AE"></a>protected mode,
+like <a class="indexterm" id="N151B2"></a><code class="function">pcall</code>.
+Therefore, if there is any error inside a coroutine,
+Lua will not show the error message,
+but instead will return it to the <a class="indexterm" id="N151B8"></a><code class="function">resume</code> call.
+</p><p id="N151C0" style="text-indent: 0">
+When a coroutine resumes another,
+it is not suspended;
+after all, we cannot resume it.
+However, it is not running either,
+because the running coroutine is the other one.
+So, its own status is what we call the <em>normal</em> state.
+</p><p id="N151C5" style="text-indent: 0">
+A useful facility in Lua is that
+a pair resume–yield can exchange data.
+The first <a class="indexterm" id="N151C7"></a><code class="function">resume</code>, which has no corresponding <a class="indexterm" id="N151CF"></a><code class="function">yield</code>
+waiting for it, passes its extra arguments to the
+coroutine main function:
+</p><pre class="programlisting" id="N151D7">      co = coroutine.create(function (a, b, c)
+             print("co", a, b, c + 2)
+           end)
+      coroutine.resume(co, 1, 2, 3)    --&gt; co  1  2  5
+</pre><p style="text-indent: 0">
+A call to <a class="indexterm" id="N151DA"></a><code class="function">coroutine.resume</code> returns,
+after the <strong>true</strong> that signals no errors,
+any arguments passed to the corresponding <a class="indexterm" id="N151E6"></a><code class="function">yield</code>:
+</p><pre class="programlisting" id="N151EE">      co = coroutine.create(function (a,b)
+             coroutine.yield(a + b, a - b)
+           end)
+      print(coroutine.resume(co, 20, 10))  --&gt; true  30  10
+</pre><p style="text-indent: 0">
+Symmetrically, <a class="indexterm" id="N151F1"></a><code class="function">coroutine.yield</code> returns any extra arguments
+passed to the corresponding <a class="indexterm" id="N151F9"></a><code class="function">resume</code>:
+</p><pre class="programlisting" id="N15201">      co = coroutine.create (function (x)
+             print("co1", x)
+             print("co2", coroutine.yield())
+           end)
+      coroutine.resume(co, "hi")     --&gt; co1  hi
+      coroutine.resume(co, 4, 5)     --&gt; co2  4  5
+</pre><p style="text-indent: 0">
+Finally, when a coroutine ends,
+any values returned by its main function go to
+the corresponding <a class="indexterm" id="N15204"></a><code class="function">resume</code>:
+</p><pre class="programlisting" id="N1520C">      co = coroutine.create(function ()
+             return 6, 7
+           end)
+      print(coroutine.resume(co))   --&gt; true  6  7
+</pre><p style="text-indent: 0">
+We seldom use all these facilities in the same coroutine,
+but all of them have their uses.
+</p><p id="N1520F" style="text-indent: 0">
+Although the general concept of coroutines is well understood,
+the details vary considerably.
+So, for those that already know something about coroutines,
+it is important to clarify these details before we go on.
+Lua offers what we call <a class="indexterm" id="N15211"/><em class="firstterm">asymmetric coroutines</em>.
+This means that it has a function to suspend the
+execution of a <a class="indexterm" id="N15218"/>coroutine
+and a different function to resume a suspended coroutine.
+Some other languages offer <a class="indexterm" id="N1521C"/><em class="firstterm">symmetric coroutines</em>,
+where there is only one function to transfer
+control from one coroutine to another.
+</p><p id="N15223" style="text-indent: 0">
+Some people call asymmetric coroutines <a class="indexterm" id="N15225"/><em class="firstterm">semi-coroutines</em>.
+However, other people use the same term <em>semi-coroutine</em>
+to denote a restricted implementation of coroutines,
+where a <a class="indexterm" id="N1522F"/>coroutine can suspend its execution only when it is not
+calling any function, that is,
+when it has no pending calls in its control stack.
+In other words,
+only the main body of such semi-coroutines can yield.
+(A <a class="indexterm" id="N15233"/><em class="firstterm">generator</em> in <a class="indexterm" id="N1523A"/>Python is an example
+of this meaning of semi-coroutines.)
+</p><p id="N1523E" style="text-indent: 0">
+Unlike the difference between symmetric and asymmetric coroutines,
+the difference between coroutines and <a class="indexterm" id="N15240"/>generators
+(as presented in <a class="indexterm" id="N15244"/>Python) is a deep one;
+generators are simply not powerful enough to implement
+some of the most interesting constructions
+that we can write with full coroutines.
+Lua offers full, asymmetric coroutines.
+Those that prefer symmetric coroutines can implement them on
+top of the asymmetric facilities of Lua
+(see <a class="link" href="ch24.html#ex_transfer">Exercise 24.6</a>).
+</p></div><div class="sect1" title="Who Is the Boss?"><div class="titlepage"><div><div><h2 class="title"><a id="who-boss"/>Who Is the Boss?</h2></div></div></div><p id="N15250" style="text-indent: 0">
+One of the most paradigmatic examples of coroutines is the
+<a class="indexterm" id="N15252"></a>producer–consumer problem.
+Let us suppose that we have a function that continually produces
+values (e.g., reading them from a file) and
+another function that continually consumes these values
+(e.g., writing them to another file).
+These two functions could look like this:
+</p><pre class="programlisting" id="N15256">      function producer ()
+        while true do
+          local x = io.read()     -- produce new value
+          send(x)                 -- send it to consumer
+        end
+      end
+      
+      function consumer ()
+        while true do
+          local x = receive()        -- receive value from producer
+          io.write(x, "\n")          -- consume it
+        end
+      end
+</pre><p style="text-indent: 0">
+(To simplify this example,
+both the producer and the consumer run forever.
+It is not hard to change them to stop when there is
+no more data to handle.)
+The problem here is how to match <code class="literal">send</code> with <code class="literal">receive</code>.
+It is a typical instance of the <span class="quote">“<span class="quote">who-has-the-main-loop</span>”</span> problem.
+Both the producer and the consumer are active,
+both have their own <a class="indexterm" id="N15262"></a>main loops,
+and both assume that the other is a callable service.
+For this particular example,
+it is easy to change the structure of one of the functions,
+unrolling its loop and making it a passive agent.
+However, this change of structure may be
+far from easy in other real scenarios.
+</p><p id="N15266" style="text-indent: 0">
+Coroutines provide an ideal tool to match producers and consumers
+without changing their structure,
+because a resume–yield pair turns upside-down the typical
+relationship between the caller and its callee.
+When a <a class="indexterm" id="N15268"></a>coroutine calls <a class="indexterm" id="N1526C"></a><code class="function">yield</code>,
+it does not enter into a new function;
+instead, it returns a pending call (to <a class="indexterm" id="N15274"></a><code class="function">resume</code>).
+Similarly, a call to <a class="indexterm" id="N1527C"></a><code class="function">resume</code> does not start a new function,
+but returns a call to <a class="indexterm" id="N15284"></a><code class="function">yield</code>.
+This property is exactly what we need to match a
+<code class="literal">send</code> with a <code class="literal">receive</code> in such a way that
+each one acts as if it were the master and the other the slave.
+(That is why I called this the “who-is-the-boss” problem.)
+So, <code class="literal">receive</code> resumes the producer,
+so that it can produce a new value;
+and <code class="literal">send</code> yields the new value back to the consumer:
+</p><pre class="programlisting" id="N15298">      function receive ()
+        local status, value = coroutine.resume(producer)
+        return value
+      end
+      
+      function send (x)
+        coroutine.yield(x)
+      end
+</pre><p style="text-indent: 0">
+Of course, the producer must now run inside a coroutine:
+</p><pre class="programlisting" id="N1529B">      producer = coroutine.create(producer)
+</pre><p style="text-indent: 0">
+</p><p id="N1529E" style="text-indent: 0">
+In this design, the program starts by calling the consumer.
+When the consumer needs an item, it resumes the producer,
+which runs until it has an item to give to the consumer,
+and then stops until the consumer resumes it again.
+Therefore, we have what we call a <a class="indexterm" id="N152A0"/><em class="firstterm">consumer-driven</em> design.
+Another way to write the program is to use a
+<a class="indexterm" id="N152A7"/><em class="firstterm">producer-driven</em> design,
+where the consumer is the coroutine.
+Although the details seem reversed,
+the overall idea of both designs is the same.
+</p><p id="N152AE" style="text-indent: 0">
+We can extend this design with filters,
+which are tasks that sit between the producer and the consumer
+doing some kind of transformation in the data.
+A <a class="indexterm" id="N152B0"></a><em class="firstterm">filter</em> is a consumer and a producer at the same time,
+so it resumes a producer to get new values and
+yields the transformed values to a consumer.
+As a trivial example,
+we can add to our previous code a filter that inserts a
+line number at the beginning of each line.
+The code is in <a class="xref" href="ch24.html#filter" title="Figure 24.1. Producer–consumer with filters">Figure 24.1, “Producer–consumer with filters”</a>.
+</p><div class="figure-float"><div class="figure"><a id="filter"/><p class="title" style="text-indent: 0"><strong>Figure 24.1. Producer–consumer with filters</strong></p><div class="figure-contents"><pre class="programlisting" id="N152BF">      function receive (prod)
+        local status, value = coroutine.resume(prod)
+        return value
+      end
+      
+      function send (x)
+        coroutine.yield(x)
+      end
+      
+      function producer ()
+        return coroutine.create(function ()
+          while true do
+            local x = io.read()     -- produce new value
+            send(x)
+          end
+        end)
+      end
+      
+      function filter (prod)
+        return coroutine.create(function ()
+          for line = 1, math.huge do
+            local x = receive(prod)   -- get new value
+            x = string.format("%5d %s", line, x)
+            send(x)      -- send it to consumer
+          end
+        end)
+      end
+      
+      function consumer (prod)
+        while true do
+          local x = receive(prod)    -- get new value
+          io.write(x, "\n")          -- consume new value
+        end
+      end
+      
+      consumer(filter(producer()))
+</pre></div></div></div><p style="text-indent: 0">
+
+Its last line simply creates the components it needs,
+connects them, and starts the final consumer.
+</p><p id="N152C2" style="text-indent: 0">
+If you thought about <a class="indexterm" id="N152C4"/>POSIX
+<a class="indexterm" id="N152C8"/>pipes after reading the previous example,
+you are not alone.
+After all, coroutines are a kind of
+(non-preemptive) <a class="indexterm" id="N152CC"/>multithreading.
+With pipes, each task runs in a separate process;
+with coroutines, each task runs in a separate <a class="indexterm" id="N152D0"/>coroutine.
+Pipes provide a buffer between the writer (producer)
+and the reader (consumer)
+so there is some freedom in their relative speeds.
+This is important in the context of pipes,
+because the cost of switching between processes is high.
+With coroutines,
+the cost of switching between tasks is much smaller
+(roughly equivalent to a function call),
+so the writer and the reader can run hand in hand.
+</p></div><div class="sect1" title="Coroutines as Iterators"><div class="titlepage"><div><div><h2 class="title"><a id="coro-iter"/>Coroutines as Iterators</h2></div></div></div><p id="N152D8" style="text-indent: 0">
+We can see loop iterators as
+a particular example of the producer–consumer pattern:
+an <a class="indexterm" id="N152DA"/>iterator produces items to be consumed by the loop body.
+Therefore,
+it seems appropriate to use coroutines to write iterators.
+Indeed, coroutines provide a powerful tool for this task.
+Again, the key feature is their ability to turn inside out
+the relationship between caller and callee.
+With this feature, we can write iterators without worrying about
+how to keep state between successive calls.
+</p><p id="N152DE" style="text-indent: 0">
+To illustrate this kind of use,
+let us write an iterator to traverse all <a class="indexterm" id="N152E0"></a>permutations
+of a given array.
+It is not an easy task to write directly such an iterator,
+but it is not so difficult to write
+a recursive function that generates all these permutations.
+The idea is simple:
+put each array element in the last position, in turn,
+and recursively generate all permutations of the remaining elements.
+The code is in <a class="xref" href="ch24.html#permgen" title="Figure 24.2. A function to generate permutations">Figure 24.2, “A function to generate permutations”</a>.
+</p><div class="figure-float"><div class="figure"><a id="permgen"/><p class="title" style="text-indent: 0"><strong>Figure 24.2. A function to generate permutations</strong></p><div class="figure-contents"><pre class="programlisting" id="N152EC">      function permgen (a, n)
+        n = n or #a          -- default for 'n' is size of 'a'
+        if n &lt;= 1 then       -- nothing to change?
+          printResult(a)
+        else
+          for i = 1, n do
+      
+            -- put i-th element as the last one
+            a[n], a[i] = a[i], a[n]
+      
+            -- generate all permutations of the other elements
+            permgen(a, n - 1)
+      
+            -- restore i-th element
+            a[n], a[i] = a[i], a[n]
+          end
+        end
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+To put it to work, we must define an appropriate <code class="literal">printResult</code>
+function and call <code class="literal">permgen</code> with proper arguments:
+</p><pre class="programlisting" id="N152F5">      function printResult (a)
+        for i = 1, #a do io.write(a[i], " ") end
+        io.write("\n")
+      end
+      
+      permgen ({1,2,3,4})
+        --&gt; 2 3 4 1
+        --&gt; 3 2 4 1
+        --&gt; 3 4 2 1
+          ...
+        --&gt; 2 1 3 4
+        --&gt; 1 2 3 4
+</pre><p style="text-indent: 0">
+
+</p><p id="N152F8" style="text-indent: 0">
+After we have the generator ready,
+it is an automatic task to convert it to an iterator.
+First, we change <code class="literal">printResult</code> to <a class="indexterm" id="N152FD"></a><code class="function">yield</code>:
+</p><pre class="programlisting" id="N15305">      function permgen (a, n)
+        n = n or #a
+        if n &lt;= 1 then
+          coroutine.yield(a)
+        else
+          <em class="replaceable"><code>as before</code></em>
+</pre><p style="text-indent: 0">
+Then, we define a <a class="indexterm" id="N1530B"></a>factory that arranges
+for the generator to run inside a coroutine
+and creates the iterator function.
+The iterator simply resumes the coroutine to produce
+the next permutation:
+</p><pre class="programlisting" id="N1530F">      function permutations (a)
+        local co = coroutine.create(function () permgen(a) end)
+        return function ()   -- iterator
+          local code, res = coroutine.resume(co)
+          return res
+        end
+      end
+</pre><p style="text-indent: 0">
+With this machinery in place,
+it is trivial to iterate over all permutations of an array
+with a <a class="indexterm" id="N15312"></a><strong>for</strong> statement:
+</p><pre class="programlisting" id="N1531B">      for p in permutations{"a", "b", "c"} do
+        printResult(p)
+      end
+        --&gt; b c a
+        --&gt; c b a
+        --&gt; c a b
+        --&gt; a c b
+        --&gt; b a c
+        --&gt; a b c
+</pre><p style="text-indent: 0">
+</p><p id="N1531E" style="text-indent: 0">
+The function <code class="literal">permutations</code> uses a common pattern in Lua,
+which packs a call to resume with its corresponding coroutine
+inside a function.
+This pattern is so common that
+Lua provides a special function for it:
+<a class="indexterm" id="N15323"></a><code class="function">coroutine.wrap</code>.
+Like <a class="indexterm" id="N1532C"></a><code class="function">create</code>, <a class="indexterm" id="N15334"></a><code class="function">wrap</code> creates a new coroutine.
+Unlike <a class="indexterm" id="N1533C"></a><code class="function">create</code>,
+<a class="indexterm" id="N15344"></a><code class="function">wrap</code> does not return the coroutine itself;
+instead, it returns a function that, when called,
+resumes the coroutine.
+Unlike the original <a class="indexterm" id="N1534C"></a><code class="function">resume</code>,
+that function does not return an error code as its first result;
+instead, it raises the error in case of error.
+Using <a class="indexterm" id="N15354"></a><code class="function">wrap</code>, we can write <code class="literal">permutations</code> as follows:
+</p><pre class="programlisting" id="N1535F">      function permutations (a)
+        return coroutine.wrap(function () permgen(a) end)
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N15362" style="text-indent: 0">
+Usually, <a class="indexterm" id="N15364"/><code class="function">coroutine.wrap</code> is simpler
+to use than <a class="indexterm" id="N1536C"/><code class="function">coroutine.create</code>.
+It gives us exactly what we need from a coroutine:
+a function to resume it.
+However, it is also less flexible.
+There is no way to check the status of a
+coroutine created with <a class="indexterm" id="N15374"/><code class="function">wrap</code>.
+Moreover, we cannot check for runtime errors.
+</p></div><div class="sect1" title="Event-Driven Programming"><div class="titlepage"><div><div><h2 class="title"><a id="L234"/>Event-Driven Programming</h2></div></div></div><p id="N15380" style="text-indent: 0">
+It may not be obvious at first sight,
+but the typical entanglement created by
+conventional event-driven programming
+is another consequence of the who-is-the-boss problem.
+</p><p id="N15382" style="text-indent: 0">
+In a typical event-driven platform,
+an external entity generates events to our program
+in a so-called <a class="indexterm" id="N15384"/><em>event loop</em> (or <a class="indexterm" id="N1538A"/><em>run loop</em>).
+It is clear who is the boss there,
+and it is not our code.
+Our program becomes a slave of the event loop,
+and that makes it a collection of individual event handlers
+without any apparent connection.
+</p><p id="N15390" style="text-indent: 0">
+To make things a little more concrete,
+let us assume that we have an asynchronous I/O library
+similar to <a class="indexterm" id="N15392"></a><code class="literal">libuv</code>.
+The library has four functions that concern our small example:
+</p><pre class="programlisting" id="N15398">        lib.runloop();
+        lib.readline(stream, callback);
+        lib.writeline(stream, line, callback);
+        lib.stop();
+</pre><p style="text-indent: 0">
+The first function runs the event loop,
+which will process the incoming events
+and call the associated callbacks.
+A typical event-driven program initializes some stuff
+and then calls this function,
+which becomes the <a class="indexterm" id="N1539B"></a>main loop of the application.
+The second function instructs the library to read
+a line of the given stream and,
+when it is done,
+to call the given callback function with the result.
+The third function is similar to the second,
+but for writing a line.
+The last function breaks the event loop,
+usually to finish the program.
+</p><p id="N1539F" style="text-indent: 0">
+<a class="xref" href="ch24.html#async-lib" title="Figure 24.3. An ugly implementation of the asynchronous I/O library">Figure 24.3, “An ugly implementation of the asynchronous I/O library”</a> presents an implementation for
+such a library.
+</p><div class="figure-float"><div class="figure"><a id="async-lib"/><p class="title" style="text-indent: 0"><strong>Figure 24.3. An ugly implementation of the asynchronous I/O library</strong></p><div class="figure-contents"><pre class="programlisting" id="N153A9">      local cmdQueue = {}     -- queue of pending operations
+      
+      local lib = {}
+      
+      function lib.readline (stream, callback)
+        local nextCmd = function ()
+          callback(stream:read())
+        end
+        table.insert(cmdQueue, nextCmd)
+      end
+      
+      function lib.writeline (stream, line, callback)
+        local nextCmd = function ()
+          callback(stream:write(line))
+        end
+        table.insert(cmdQueue, nextCmd)
+      end
+      
+      function lib.stop ()
+        table.insert(cmdQueue, "stop")
+      end
+      
+      function lib.runloop ()
+        while true do
+          local nextCmd = table.remove(cmdQueue, 1)
+          if nextCmd == "stop" then
+            break
+          else
+            nextCmd()       -- perform next operation
+          end
+        end
+      end
+      
+      return lib
+</pre></div></div></div><p style="text-indent: 0">
+
+It is a very ugly implementation.
+Its <span class="quote">“<span class="quote">event queue</span>”</span>
+is in fact a list of pending operations that,
+when performed (synchronously!),
+will generate the events.
+Despite its uglyness,
+it fulfills the previous specification and,
+therefore,
+allows us to test the following examples
+without the need for a real asynchronous library.
+</p><p id="N153AF" style="text-indent: 0">
+Let us now write a trivial program with that library,
+which reads all lines from its input stream into a table
+and writes them to the output stream in reverse order.
+With traditional I/O,
+the program would be like this:
+</p><pre class="programlisting" id="N153B1">      local t = {}
+      local inp = io.input()                 -- input stream
+      local out = io.output()                -- output stream
+      
+      for line in inp:lines() do
+        t[#t + 1] = line
+      end
+      
+      for i = #t, 1, -1 do
+        out:write(t[i], "\n")
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N153B4" style="text-indent: 0">
+Now we rewrite that program
+in an event-driven style on top of
+the asynchronous I/O library;
+the result is in <a class="xref" href="ch24.html#event-1" title="Figure 24.4. Reversing a file in event-driven fashion">Figure 24.4, “Reversing a file in event-driven fashion”</a>.
+</p><div class="figure-float"><div class="figure"><a id="event-1"/><p class="title" style="text-indent: 0"><strong>Figure 24.4. Reversing a file in event-driven fashion</strong></p><div class="figure-contents"><pre class="programlisting" id="N153BE">      local lib = require "async-lib"
+      
+      local t = {}
+      local inp = io.input()
+      local out = io.output()
+      local i
+      
+      -- write-line handler
+      local function putline ()
+        i = i - 1
+        if i == 0 then       -- no more lines?
+          lib.stop()         -- finish the main loop
+        else                 -- write line and prepare next one
+          lib.writeline(out, t[i] .. "\n", putline)
+        end
+      end
+      
+      -- read-line handler
+      local function getline (line)
+        if line then                      -- not EOF?
+          t[#t + 1] = line                -- save line
+          lib.readline(inp, getline)      -- read next one
+        else                              -- end of file
+          i = #t + 1                      -- prepare write loop
+          putline()                       -- enter write loop
+        end
+      end
+      
+      lib.readline(inp, getline)          -- ask to read first line
+      lib.runloop()                       -- run the main loop
+</pre></div></div></div><p style="text-indent: 0">
+
+As is typical in an event-driven scenario,
+all our loops are gone,
+because the <a class="indexterm" id="N153C1"></a>main loop is in the library.
+They got replaced by recursive calls
+disguised as events.
+We could improve things by using <a class="indexterm" id="N153C5"></a>closures
+in a <a class="indexterm" id="N153C9"></a>continuation-passing style,
+but we still could not write our own loops;
+we would have to rewrite them through recursion.
+</p><p id="N153CD" style="text-indent: 0">
+Coroutines allow us to reconcile
+our loops with the event loop.
+The key idea is to run our main code as a coroutine that,
+at each request to the library,
+sets the callback as a function to resume itself and
+then yields.
+<a class="xref" href="ch24.html#event-coro" title="Figure 24.5. Running synchronous code on top of the asynchronous library">Figure 24.5, “Running synchronous code on top of
+                         the asynchronous library”</a> uses this idea to implement a library
+that runs conventional, synchronous code on top of the
+asynchronous I/O library.
+</p><div class="figure-float"><div class="figure"><a id="event-coro"/><p class="title" style="text-indent: 0"><strong>Figure 24.5. Running synchronous code on top of
+                         the asynchronous library</strong></p><div class="figure-contents"><pre class="programlisting" id="N153D7">      local lib = require "async-lib"
+      
+      function run (code)
+        local co = coroutine.wrap(function ()
+          code()
+          lib.stop()     -- finish event loop when done
+        end)
+        co()             -- start coroutine
+        lib.runloop()    -- start event loop
+      end
+      
+      function putline (stream, line)
+        local co = coroutine.running()     -- calling coroutine
+        local callback = (function () coroutine.resume(co) end)
+        lib.writeline(stream, line, callback)
+        coroutine.yield()
+      end
+      
+      function getline (stream, line)
+        local co = coroutine.running()     -- calling coroutine
+        local callback = (function (l) coroutine.resume(co, l) end)
+        lib.readline(stream, callback)
+        local line = coroutine.yield()
+        return line
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+As its name implies,
+the <code class="literal">run</code> function runs the synchronous code,
+which it takes as a parameter.
+It first creates a coroutine to run the given code
+and finish the event loop when it is done.
+Then, it resumes this coroutine
+(which will yield at its first I/O call)
+and then enters the event loop.
+</p><p id="N153DD" style="text-indent: 0">
+The functions <code class="literal">getline</code> and <code class="literal">putline</code>
+simulate synchronous I/O.
+As outlined, both call an appropriate asynchronous function
+passing as the callback a function that resumes the calling coroutine.
+(Note the use of the <a class="indexterm" id="N153E5"/><code class="function">coroutine.running</code> function to access the
+calling coroutine.)
+After that, they yield,
+and the control goes back to the event loop.
+Once the operation completes,
+the event loop calls the callback,
+resuming the coroutine that triggered the operation.
+</p><p id="N153ED" style="text-indent: 0">
+With that library in place,
+we are ready to run synchronous code
+on the top of the asynchronous library.
+As an example,
+the following fragment implements once more
+our reverse-lines example:
+</p><pre class="programlisting" id="N153EF">      run(function ()
+        local t = {}
+        local inp = io.input()
+        local out = io.output()
+      
+        while true do
+          local line = getline(inp)
+          if not line then break end
+          t[#t + 1] = line
+        end
+      
+        for i = #t, 1, -1 do
+          putline(out, t[i] .. "\n")
+        end
+      end)
+</pre><p style="text-indent: 0">
+The code is equal to the original synchronous one,
+except that it uses <code class="literal">get</code>/<code class="literal">putline</code> for I/O
+and runs inside a call to <code class="literal">run</code>.
+Underneath its synchronous structure,
+it actually runs in an event-driven fashion,
+and it is fully compatible with other parts 
+of the program written in a more typical event-driven style.
+</p></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L235"/>Exercises</h2></div></div></div><p id="N153FF" style="text-indent: 0">
+Exercise 24.1:<a id="L236"/> 
+Rewrite the producer–consumer example in <a class="xref" href="ch24.html#who-boss" title="Who Is the Boss?">the section called “Who Is the Boss?”</a>
+using a <a class="indexterm" id="N15407"/><em>producer-driven</em> design,
+where the consumer is the coroutine and
+the producer is the main thread.
+
+
+</p><p id="N1540D" style="text-indent: 0">
+Exercise 24.2:<a id="L237"></a> 
+<a class="link" href="ch06.html#ex_combination">Exercise 6.5</a>
+asked you to write a function that prints all <a class="indexterm" id="N15416"></a>combinations
+of the elements in a given array.
+Use coroutines to transform this function
+into a generator for combinations,
+to be used like here:
+</p><pre class="programlisting" id="N1541A">      for c in combinations({"a", "b", "c"}, 2) do
+        printResult(c)
+      end
+</pre><p style="text-indent: 0">
+
+
+</p><p id="N1541D" style="text-indent: 0">
+Exercise 24.3:<a id="L238"/> 
+In <a class="xref" href="ch24.html#event-coro" title="Figure 24.5. Running synchronous code on top of the asynchronous library">Figure 24.5, “Running synchronous code on top of
+                         the asynchronous library”</a>,
+both the functions <code class="literal">getline</code> and <code class="literal">putline</code>
+create a new closure each time they are called.
+Use <a class="indexterm" id="N1542B"/>memorization to avoid this waste.
+
+
+</p><p id="N1542F" style="text-indent: 0">
+Exercise 24.4:<a id="L239"/> 
+Write a line iterator for the
+coroutine-based library (<a class="xref" href="ch24.html#event-coro" title="Figure 24.5. Running synchronous code on top of the asynchronous library">Figure 24.5, “Running synchronous code on top of
+                         the asynchronous library”</a>),
+so that you can read the file with a <a class="indexterm" id="N15437"/><strong>for</strong> loop.
+
+
+</p><p id="N15440" style="text-indent: 0">
+Exercise 24.5:<a id="L240"/> 
+Can you use the coroutine-based library (<a class="xref" href="ch24.html#event-coro" title="Figure 24.5. Running synchronous code on top of the asynchronous library">Figure 24.5, “Running synchronous code on top of
+                         the asynchronous library”</a>)
+to run multiple threads concurrently?
+What would you have to change?
+
+
+</p><p id="N15448" style="text-indent: 0">
+Exercise 24.6:<a id="ex_transfer"/> 
+Implement a <code class="literal">transfer</code> function in Lua.
+If you think about resume–yield as similar
+to call–return,
+a transfer would be like a goto:
+it suspends the running coroutine
+and resumes any other coroutine,
+given as an argument.
+(Hint: use a kind of dispatch to control your coroutines.
+Then, a transfer would yield to the dispatch signaling the
+next coroutine to run,
+and the dispatch would resume that next coroutine.)
+
+
+</p></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

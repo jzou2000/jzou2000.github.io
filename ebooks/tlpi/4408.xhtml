@@ -1,0 +1,284 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>44.8. A Client-Server Application Using FIFOs</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">44.8. A Client-Server Application Using FIFOs</h3><p class="docText">In
+ this section, we present a simple client-server application that 
+employs FIFOs for IPC. The server provides the (trivial) service of 
+assigning unique sequential numbers to each client that requests them. 
+In the course of discussing this application, we introduce a few 
+concepts and techniques in server design.</p><h4 class="docSection2Title" id="title-ID0E42AM">44.8.1. </h4><h5 class="docSection3Title" id="title-ID0EB3AM">44.8.1.1. Application overview</h5><p class="docText">In the example application, all clients send their requests to the server using a single server FIFO. The header file (Example 44-6) defines the well-known name (<tt>/tmp/seqnum_sv</tt>)
+ that the server uses for its FIFO. This name is fixed, so that all 
+clients know how to contact the server. (In this example application, we
+ create the FIFOs in the <tt>/tmp</tt> directory, since this allows us to conveniently run the programs without change on most systems. However, as noted in Section 38.7, creating files in publicly writable directories such as <tt>/tmp</tt> can lead to various security vulnerabilities and should be avoided in real-world applications.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In client-server applications, we’ll repeatedly encounter the concept of a <span class="docEmphasis">well-known address</span>
+ or name used by a server to make its service visible to clients. Using a
+ well-known address is one solution to the problem of how clients can 
+know where to contact a server. Another possible solution is to provide 
+some kind of name server with which servers can register the names of 
+their services. Each client then contacts the name server to obtain the 
+location of the service it desires. This solution allows the location of
+ servers to be flexible, at the cost of some extra programming effort. 
+Of course, clients and servers then need to know where to contact the 
+name server; typically, it resides at a well-known address.</p><hr noshade="noshade" size="1"/><p class="docText">It
+ is not, however, possible to use a single FIFO to send responses to all
+ clients, since multiple clients would race to read from the FIFO, and 
+possibly read each other’s response messages rather than their own. 
+Therefore, each client creates a unique FIFO that the server uses for 
+delivering the response for that client, and the server needs to know 
+how to find each client’s FIFO. One possible way to do this is for the 
+client to generate its FIFO pathname, and then pass the pathname as part
+ of its request message. Alternatively, the client and server can agree 
+on a convention for constructing a client FIFO pathname, and, as part of
+ its request, the client can pass the server the information required to
+ construct the pathname specific to this client. This latter solution is
+ used in our example. Each client’s FIFO name is built from a template (<tt>CLIENT_FIFO_TEMPLATE</tt>)
+ consisting of a pathname containing the client’s process ID. The 
+inclusion of the process ID provides an easy way of generating a name 
+unique to this client.</p><p class="docText">Figure 44-6 shows how this application uses FIFOs for communication between the client and server processes of our application.</p><p class="docText">The header file (Example 44-6)
+ defines the formats for the request messages sent from clients to the 
+server, and for the response messages sent from the server to clients.</p><p></p><center><h5 class="docFigureTitle">Figure 44-6. Using FIFOs in a single-server, multiple-client application</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_008-15.png"/></p></center><p></p><br/><p class="docText">Recall
+ that the data in pipes and FIFOs is a byte stream; boundaries between 
+multiple messages are not preserved. This means that when multiple 
+messages are being delivered to a single process, such as the server in 
+our example, then the sender and receiver must agree on some convention 
+for separating the messages. Various approaches are possible:</p><ul><li><p class="docList">Terminate each message with a <span class="docEmphasis">delimiter character</span>, such as a newline character. (For an example of this technique, see the <span class="docEmphasis">readLine()</span> function in Example 59-1, in Section 59.3.)
+ In this case, either the delimiter character must be one that never 
+appears as part of the message, or we must adopt a convention for 
+escaping the delimiter if it does occur within the message. For example,
+ if we use a newline delimiter, then the characters \ plus newline could
+ be used to represent a real newline character within the message, while
+ \\ could represent a real \. One drawback of this approach is that the 
+process reading messages must scan data from the FIFO a byte at a time 
+until the delimiter character is found.</p></li><li><p class="docList">Include a <span class="docEmphasis">fixed-size header with a length field</span>
+ in each message specifying the number of bytes in the remaining 
+variable-length component of the message. In this case, the reading 
+process first reads the header from the FIFO, and then uses the header’s
+ length field to determine the number of bytes to read for the remainder
+ of the message. This approach has the advantage of efficiently allowing
+ messages of arbitrary size, but could lead to problems if a malformed 
+message (e.g., bad <span class="docEmphasis">length</span> field) is written to the pipe.</p></li><li><p class="docList">Use <span class="docEmphasis">fixed-length messages</span>,
+ and have the server always read messages of this fixed size. This has 
+the advantage of being simple to program. However, it places an upper 
+limit on our message size and means that some channel capacity is wasted
+ (since short messages must be padded to the fixed length). Furthermore,
+ if one of the clients accidentally or deliberately sends a message that
+ is not of the right length, then all subsequent messages will be out of
+ step; in this situation, the server can’t easily recover.</p></li></ul><p class="docText">These three techniques are illustrated in Figure 44-7. Be aware that for each of these techniques, the total length of each message must be smaller than <tt>PIPE_BUF</tt>
+ bytes in order to avoid the possibility of messages being broken up by 
+the kernel and interleaved with messages from other writers.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In
+ the three techniques described in the main text, a single channel 
+(FIFO) is used for all messages from all clients. An alternative is to 
+use a <span class="docEmphasis">single connection</span>
+ for each message. The sender opens the communication channel, sends its
+ message, and then closes the channel. The reading process knows that 
+the message is complete when it encounters end-of-file. If multiple 
+writers hold a FIFO open, then this approach is not feasible, because 
+the reader won’t see end-of-file when one of the writers closes the 
+FIFO. This approach is, however, feasible when using stream sockets, 
+where a server process creates a unique communication channel for each 
+incoming client connection.</p><hr noshade="noshade" size="1"/><p></p><center><h5 class="docFigureTitle">Figure 44-7. Separating messages in a byte stream</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_004-16.png"/></p></center><p></p><br/><p class="docText">In
+ our example application, we use the third of the techniques described 
+above, with each client sending messages of a fixed size to the server. 
+This message is defined by the <span class="docEmphasis">request</span> structure defined in Example 44-6.
+ Each request to the server includes the client’s process ID, which 
+enables the server to construct the name of the FIFO used by the client 
+to receive a response. The request also contains a field (<span class="docEmphasis">seqLen</span>)
+ specifying how many sequence numbers should be allocated to this 
+client. The response message sent from server to client consists of a 
+single field, <span class="docEmphasis">seqNum</span>, which is the starting value of the range of sequence numbers allocated to this client.</p><h5 class="docExampleTitle" id="title-ID0EVABM">Example 44-6. Header file for <tt>fifo_seqnum_server.c</tt> and <tt>fifo_seqnum_client.c</tt></h5><p></p><div class="box"><pre class="preFixedWidth"><b>pipes/fifo_seqnum.h</b>
+#include &lt;sys/types.h&gt;
+#include &lt;sys/stat.h&gt;
+#include &lt;fcntl.h&gt;
+#include "tlpi_hdr.h"
+
+#define SERVER_FIFO "/tmp/seqnum_sv"
+                                /* Well-known name for server's FIFO */
+#define CLIENT_FIFO_TEMPLATE "/tmp/seqnum_cl.%ld"
+                                /* Template for building client FIFO name */
+#define CLIENT_FIFO_NAME_LEN (sizeof(CLIENT_FIFO_TEMPLATE) + 20)
+                                /* Space required for client FIFO pathname
+                                   (+20 as a generous allowance for the PID) */
+
+struct request {                /* Request (client --&gt; server) */
+    pid_t pid;                  /* PID of client */
+    int seqLen;                 /* Length of desired sequence */
+};
+
+struct response {               /* Response (server --&gt; client) */
+    int seqNum;                 /* Start of sequence */
+};
+     <b>pipes/fifo_seqnum.h</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0EGBBM">44.8.1.2. Server program</h5><p class="docText">Example 44-7 is the code for the server. The server performs the following steps:</p><ul><li><p class="docList">Create the server’s well-known FIFO <img alt="" border="0" id="" src="Images/getfile_003-40.png"/> and open the FIFO for reading <img alt="" border="0" id="" src="Images/getfile_002-42.png"/>.
+ The server must be run before any clients, so that the server FIFO 
+exists by the time a client attempts to open it. The server’s <span class="docEmphasis">open()</span> blocks until the first client opens the other end of the server FIFO for writing.</p></li><li><p class="docList">Open the server’s FIFO once more <img alt="" border="0" id="" src="Images/getfile-81.png"/>,
+ this time for writing. This will never block, since the FIFO has 
+already been opened for reading. This second open is a convenience to 
+ensure that the server doesn’t see end-of-file if all clients close the 
+write end of the FIFO.</p></li><li><p class="docList">Ignore the <tt>SIGPIPE</tt> signal <img alt="" border="0" id="" src="Images/getfile_005-33.png"/>, so that if the server attempts to write to a client FIFO that doesn’t have a reader, then, rather than being sent a <tt>SIGPIPE</tt> signal (which kills a process by default), it receives an <tt>EPIPE</tt> error from the <span class="docEmphasis">write()</span> system call.</p></li><li><p class="docList">Enter a loop that reads and responds to each incoming client request <img alt="" border="0" id="" src="Images/getfile_009-11.png"/>. To send the response, the server constructs the name of the client FIFO <img alt="" border="0" id="" src="Images/getfile_010-8.png"/> and then opens that FIFO <img alt="" border="0" id="" src="Images/getfile_006-24.png"/>.</p></li><li><p class="docList">If the server encounters an error in opening the client FIFO, it abandons that client’s request <img alt="" border="0" id="" src="Images/getfile_007-19.png"/>.</p></li></ul><p class="docText">This is an example of an <span class="docEmphasis">iterative server</span>,
+ in which the server reads and handles each client request before going 
+on to handle the next client. An iterative server design is suitable 
+when each client request can be quickly processed and responded to, so 
+that other client requests are not delayed. An alternative design is a <span class="docEmphasis">concurrent server</span>,
+ in which the main server process employs a separate child process (or 
+thread) to handle each client request. We discuss server design further 
+in Chapter 60.</p><h5 class="docExampleTitle" id="title-ID0ELFBM">Example 44-7. An iterative server using FIFOs</h5><p></p><div class="box"><pre class="preFixedHeight"><b>pipes/fifo_seqnum_server.c</b>
+    #include &lt;signal.h&gt;
+    #include "fifo_seqnum.h"
+
+    int
+    main(int argc, char *argv[])
+    {
+        int serverFd, dummyFd, clientFd;
+        char clientFifo[CLIENT_FIFO_NAME_LEN];
+        struct request req;
+        struct response resp;
+        int seqNum = 0;                     /* This is our "service" */
+
+            /* Create well-known FIFO, and open it for reading */
+
+        umask(0);                           /* So we get the permissions we want */
+<img alt="" border="0" id="" src="Images/getfile_003-41.png"/>    if (mkfifo(SERVER_FIFO, S_IRUSR | S_IWUSR | S_IWGRP) == -1
+                &amp;&amp; errno != EEXIST)
+            errExit("mkfifo %s", SERVER_FIFO);<img alt="" border="0" id="" src="Images/getfile_002-43.png"/>
+    serverFd = open(SERVER_FIFO, O_RDONLY);
+        if (serverFd == -1)
+            errExit("open %s", SERVER_FIFO);
+
+        /* Open an extra write descriptor, so that we never see EOF */
+
+<img alt="" border="0" id="" src="Images/getfile-82.png"/>    dummyFd = open(SERVER_FIFO, O_WRONLY);
+        if (dummyFd == -1)
+            errExit("open %s", SERVER_FIFO);
+
+<img alt="" border="0" id="" src="Images/getfile_005-34.png"/>    if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
+            errExit("signal");
+
+<img alt="" border="0" id="" src="Images/getfile_009-12.png"/>    for (;;) {                          /* Read requests and send responses */
+            if (read(serverFd, &amp;req, sizeof(struct request))
+                    != sizeof(struct request)) {
+                fprintf(stderr, "Error reading request; discarding\n");
+                continue;                   /* Either partial read or error */
+            }
+
+            /* Open client FIFO (previously created by client) */
+
+<img alt="" border="0" id="" src="Images/getfile_010-9.png"/>        snprintf(clientFifo, CLIENT_FIFO_NAME_LEN, CLIENT_FIFO_TEMPLATE,
+                    (long) req.pid);
+<img alt="" border="0" id="" src="Images/getfile_006-25.png"/>        clientFd = open(clientFifo, O_WRONLY);
+            if (clientFd == -1) {           /* Open failed, give up on client */
+                errMsg("open %s", clientFifo);
+<img alt="" border="0" id="" src="Images/getfile_007-20.png"/>            continue;
+            }
+
+            /* Send response and close FIFO */
+
+            resp.seqNum = seqNum;
+            if (write(clientFd, &amp;resp, sizeof(struct response))
+                    != sizeof(struct response))
+                fprintf(stderr, "Error writing to FIFO %s\n", clientFifo);
+            if (close(clientFd) == -1)
+                errMsg("close");
+
+            seqNum += req.seqLen;           /* Update our sequence number */
+        }
+    }
+         <b>pipes/fifo_seqnum_server.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0EOHBM">44.8.1.3. Client program</h5><p class="docText">Example 44-8 is the code for the client. The client performs the following steps:</p><ul><li><p class="docList">Create a FIFO to be used for receiving a response from the server <img alt="" border="0" id="" src="Images/getfile_002-44.png"/>.
+ This is done before sending the request, in order to ensure that the 
+FIFO exists by the time the server attempts to open it and send a 
+response message.</p></li><li><p class="docList">Construct
+ a message for the server containing the client’s process ID and a 
+number (taken from an optional command-line argument) specifying the 
+length of the sequence that the client wishes the server to assign to it
+ <img alt="" border="0" id="" src="Images/getfile_005-35.png"/>. (If no command-line argument is supplied, the default sequence length is 1.)</p></li><li><p class="docList">Open the server FIFO <img alt="" border="0" id="" src="Images/getfile_009-13.png"/> and send the message to the server <img alt="" border="0" id="" src="Images/getfile_010-10.png"/>.</p></li><li><p class="docList">Open the client FIFO <img alt="" border="0" id="" src="Images/getfile_006-26.png"/>, and read and print the server’s response <img alt="" border="0" id="" src="Images/getfile_007-21.png"/>.</p></li></ul><p class="docText">The only other detail of note is the exit handler <img alt="" border="0" id="" src="Images/getfile_003-42.png"/>, established with <span class="docEmphasis">atexit()</span> <img alt="" border="0" id="" src="Images/getfile-83.png"/>, which ensures that the client’s FIFO is deleted when the process exits. Alternatively, we could have simply placed an <span class="docEmphasis">unlink()</span> call immediately after the <span class="docEmphasis">open()</span> of the client FIFO. This would work because, at that point, after they have both performed blocking <span class="docEmphasis">open()</span>
+ calls, the server and the client would each hold open file descriptors 
+for the FIFO, and removing the FIFO name from the file system doesn’t 
+affect these descriptors or the open file descriptions to which they 
+refer.</p><p class="docText">Here is an example of what we see when we run the client and server programs:</p><pre class="preFixedWidth">$ <b>./fifo_seqnum_server &amp; </b>
+[1] 5066
+$ <b>./fifo_seqnum_client 3 </b>                <i> Request a sequence of three numbers</i>
+0                                       <i> Assigned sequence begins at 0</i>
+$ <b>./fifo_seqnum_client 2 </b>                <i> Request a sequence of two numbers</i>
+3                                       <i> Assigned sequence begins at 3</i>
+$ <b>./fifo_seqnum_client </b>                  <i> Request a single number</i>
+5
+
+					  </pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EHLBM">Example 44-8. Client for the sequence-number server</h5><p></p><div class="box"><pre class="preFixedHeight"><b>pipes/fifo_seqnum_client.c</b>
+    #include "fifo_seqnum.h"
+
+    static char clientFifo[CLIENT_FIFO_NAME_LEN];
+
+    static void             /* Invoked on exit to delete client FIFO */
+<img alt="" border="0" id="" src="Images/getfile_003-43.png"/>removeFifo(void)
+    {
+        unlink(clientFifo);
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        int serverFd, clientFd;
+        struct request req;
+        struct response resp;
+
+            if (argc &gt; 1 &amp;&amp; strcmp(argv[1], "--help") == 0)
+            usageErr("%s [seq-len...]\n", argv[0]);
+
+        /* Create our FIFO (before sending request, to avoid a race) */
+
+        umask(0);                   /* So we get the permissions we want */
+<img alt="" border="0" id="" src="Images/getfile_002-45.png"/>    snprintf(clientFifo, CLIENT_FIFO_NAME_LEN, CLIENT_FIFO_TEMPLATE,
+                (long) getpid());
+        if (mkfifo(clientFifo, S_IRUSR | S_IWUSR | S_IWGRP) == -1
+                    &amp;&amp; errno != EEXIST)
+            errExit("mkfifo %s", clientFifo);
+
+<img alt="" border="0" id="" src="Images/getfile-84.png"/>    if (atexit(removeFifo) != 0)
+            errExit("atexit");
+
+        /* Construct request message, open server FIFO, and send request */
+
+<img alt="" border="0" id="" src="Images/getfile_005-36.png"/>    req.pid = getpid();
+        req.seqLen = (argc &gt; 1) ? getInt(argv[1], GN_GT_0, "seq-len") : 1;
+
+<img alt="" border="0" id="" src="Images/getfile_009-14.png"/>    serverFd = open(SERVER_FIFO, O_WRONLY);
+        if (serverFd == -1)
+            errExit("open %s", SERVER_FIFO);
+
+<img alt="" border="0" id="" src="Images/getfile_010-11.png"/>    if (write(serverFd, &amp;req, sizeof(struct request)) !=
+                sizeof(struct request))
+            fatal("Can't write to server");
+
+        /* Open our FIFO, read and display response */
+
+<img alt="" border="0" id="" src="Images/getfile_006-27.png"/>    clientFd = open(clientFifo, O_RDONLY);
+        if (clientFd == -1)
+            errExit("open %s", clientFifo);
+
+<img alt="" border="0" id="" src="Images/getfile_007-22.png"/>    if (read(clientFd, &amp;resp, sizeof(struct response))
+                != sizeof(struct response))
+            fatal("Can't read response from server");
+
+        printf("%d\n", resp.seqNum);
+        exit(EXIT_SUCCESS);
+    }
+         <b>pipes/fifo_seqnum_client.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

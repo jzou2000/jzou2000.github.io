@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>59.11. Client-Server Example (Stream Sockets)</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">59.11. Client-Server Example (Stream Sockets)</h3><p class="docText">We
+ now have enough information to look at a simple client-server 
+application using TCP sockets. The task performed by this application is
+ the same as that performed by the FIFO client-server application 
+presented in Section 44.8: allocating unique sequence numbers (or ranges of sequence numbers) to clients.</p><p class="docText">In
+ order to handle the possibility that integers may be represented in 
+different formats on the server and client hosts, we encode all 
+transmitted integers as strings terminated by a newline, and use our <span class="docEmphasis">readLine()</span> function (Example 59-1) to read these strings.</p><h4 class="docSection2Title" id="title-ID0ENLGM">59.11.1. </h4><h5 class="docSection3Title" id="title-ID0ERLGM">59.11.1.1. Common header file</h5><p class="docText">Both the server and the client include the header file shown in Example 59-5. This file includes various other header files, and defines the TCP port number to be used by the application.</p><h5 class="docSection3Title" id="title-ID0E2LGM">59.11.1.2. Server program</h5><p class="docText">The server program shown in Example 59-6 performs the following steps:</p><ul><li><p class="docList">Initialize the server’s sequence number either to 1 or to the value supplied in the optional command-line argument <img alt="" border="0" id="" src="Images/getfile_006-42.png"/>.</p></li><li><p class="docList">Ignore the <tt>SIGPIPE</tt> signal <img alt="" border="0" id="" src="Images/getfile_011-7.png"/>. This prevents the server from receiving the <tt>SIGPIPE</tt> signal if it tries to write to a socket whose peer has been closed; instead, the <span class="docEmphasis">write()</span> fails with the error <tt>EPIPE</tt>.</p></li><li><p class="docList">Call <span class="docEmphasis">getaddrinfo()</span> <img alt="" border="0" id="" src="Images/getfile_007-31.png"/> to obtain a set of socket address structures for a TCP socket that uses the port number <tt>PORT_NUM</tt>. (Instead of using a hard-coded port number, we would more typically use a service name.) We specify the <tt>AI_PASSIVE</tt> flag <img alt="" border="0" id="" src="Images/getfile_015.png"/> so that the resulting socket will be bound to the wildcard address (Section 58.5).
+ As a result, if the server is run on a multihomed host, it can accept 
+connection requests sent to any of the host’s network addresses.</p></li><li><p class="docList">Enter a loop that iterates through the socket address structures returned by the previous step <img alt="" border="0" id="" src="Images/getfile_010.png"/>. The loop terminates when the program finds an address structure that can be used to successfully create and bind a socket <img alt="" border="0" id="" src="Images/getfile_004-28.png"/>.</p></li><li><p class="docList">Set the <tt>SO_REUSEADDR</tt> option for the socket created in the previous step <img alt="" border="0" id="" src="Images/getfile_009-23.png"/>. We defer discussion of this option until Section 61.10, where we note that a TCP server should usually set this option on its listening socket.</p></li><li><p class="docList">Mark the socket as a listening socket <img alt="" border="0" id="" src="Images/getfile_005-50.png"/>.</p></li><li><p class="docList">Commence an infinite <tt>for</tt> loop <img alt="" border="0" id="" src="Images/getfile_013-4.png"/> that services clients iteratively (Chapter 60).
+ Each client’s request is serviced before the next client’s request is 
+accepted. For each client, the server performs the following steps:</p><ul><li><p class="docList">Accept a new connection <img alt="" border="0" id="" src="Images/getfile_002-63.png"/>. The server passes non-<tt>NULL</tt> pointers for the second and third arguments to <span class="docEmphasis">accept()</span>,
+ in order to obtain the address of the client. The server displays the 
+client’s address (IP address plus port number) on standard output <img alt="" border="0" id="" src="Images/getfile_014.png"/>.</p></li><li><p class="docList">Read the client’s message <img alt="" border="0" id="" src="Images/getfile_012-4.png"/>,
+ which consists of a newline-terminated string specifying how many 
+sequence numbers the client wants. The server converts this string to an
+ integer and stores it in the variable <span class="docEmphasis">reqLen</span> <img alt="" border="0" id="" src="Images/getfile_003-62.png"/>.</p></li><li><p class="docList">Send the current value of the sequence number (<span class="docEmphasis">seqNum</span>) back to the client, encoding it as a newline-terminated string <img alt="" border="0" id="" src="Images/getfile_008-23.png"/>. The client can assume that it has been allocated all of the sequence numbers in the range <span class="docEmphasis">seqNum</span> to <span class="docEmphasis">(seqNum + reqLen - 1)</span>.</p></li><li><p class="docList">Update the value of the server’s sequence number by adding <span class="docEmphasis">reqLen</span> to <span class="docEmphasis">seqNum</span> <img alt="" border="0" id="" src="Images/getfile-119.png"/>.</p></li></ul></li></ul><h5 class="docExampleTitle" id="title-ID0EVWGM">Example 59-5. Header file used by <tt>is_seqnum_sv.c</tt> and <tt>is_seqnum_cl.c</tt></h5><p></p><div class="box"><pre class="preFixedWidth"><b>sockets/is_seqnum.h</b>
+#include &lt;netinet/in.h&gt;
+#include &lt;sys/socket.h&gt;
+#include &lt;signal.h&gt;
+#include "read_line.h"          /* Declaration of readLine() */
+#include "tlpi_hdr.h"
+
+#define PORT_NUM "50000"        /* Port number for server */
+
+#define INT_LEN 30              /* Size of string able to hold largest
+                                   integer (including terminating '\n') */xs
+     <b>sockets/is_seqnum.h</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docExampleTitle" id="title-ID0EGXGM">Example 59-6. An iterative server that uses a stream socket to communicate with clients</h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/is_seqnum_sv.c</b>
+    #define _BSD_SOURCE             /* To get definitions of NI_MAXHOST and
+                                       NI_MAXSERV from &lt;netdb.h&gt; */
+    #include &lt;netdb.h&gt;
+    #include "is_seqnum.h"
+
+    #define BACKLOG 50
+
+    int
+    main(int argc, char *argv[])
+    {
+        uint32_t seqNum;
+        char reqLenStr[INT_LEN];            /* Length of requested sequence */
+        char seqNumStr[INT_LEN];            /* Start of granted sequence */
+        struct sockaddr_storage claddr;
+        int lfd, cfd, optval, reqLen;
+        socklen_t addrlen;
+        struct addrinfo hints;
+        struct addrinfo *result, *rp;
+    #define ADDRSTRLEN (NI_MAXHOST + NI_MAXSERV + 10)
+        char addrStr[ADDRSTRLEN];
+        char host[NI_MAXHOST];
+        char service[NI_MAXSERV];
+
+        if (argc &gt; 1 &amp;&amp; strcmp(argv[1], "--help") == 0)
+            usageErr("%s [init-seq-num]\n", argv[0]);
+<img alt="" border="0" id="" src="Images/getfile_006-43.png"/>    seqNum = (argc &gt; 1) ? getInt(argv[1], 0, "init-seq-num") : 0;
+<img alt="" border="0" id="" src="Images/getfile_011-8.png"/>    if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
+            errExit("signal");
+
+        /* Call getaddrinfo() to obtain a list of addresses that
+           we can try binding to */
+
+        memset(&amp;hints, 0, sizeof(struct addrinfo));
+        hints.ai_canonname = NULL;
+        hints.ai_addr = NULL;
+        hints.ai_next = NULL;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_family = AF_UNSPEC;        /* Allows IPv4 or IPv6 */
+<img alt="" border="0" id="" src="Images/getfile_015.png"/>    hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
+                            /* Wildcard IP address; service name is numeric */
+<img alt="" border="0" id="" src="Images/getfile_007-32.png"/>    if (getaddrinfo(NULL, PORT_NUM, &amp;hints, &amp;result) != 0)
+            errExit("getaddrinfo");
+
+        /* Walk through returned list until we find an address structure
+           that can be used to successfully create and bind a socket */
+
+        optval = 1;
+<img alt="" border="0" id="" src="Images/getfile_010.png"/>    for (rp = result; rp != NULL; rp = rp-&gt;ai_next) {
+            lfd = socket(rp-&gt;ai_family, rp-&gt;ai_socktype, rp-&gt;ai_protocol);
+            if (lfd == -1)
+                continue;                   /* On error, try next address */
+    <img alt="" border="0" id="" src="Images/getfile_009-24.png"/>        if (setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &amp;optval, sizeof(optval))
+                     == -1)
+                 errExit("setsockopt");
+<img alt="" border="0" id="" src="Images/getfile_004-29.png"/>        if (bind(lfd, rp-&gt;ai_addr, rp-&gt;ai_addrlen) == 0)
+                break;                      /* Success */
+
+            /* bind() failed: close this socket and try next address */
+
+            close(lfd);
+        }
+
+        if (rp == NULL)
+            fatal("Could not bind socket to any address");
+<img alt="" border="0" id="" src="Images/getfile_005-51.png"/>    if (listen(lfd, BACKLOG) == -1)
+            errExit("listen");
+
+        freeaddrinfo(result);
+<img alt="" border="0" id="" src="Images/getfile_013-5.png"/>    for (;;) {                 /* Handle clients iteratively */
+
+            /* Accept a client connection, obtaining client's address */
+
+            addrlen = sizeof(struct sockaddr_storage);
+<img alt="" border="0" id="" src="Images/getfile_002-64.png"/>        cfd = accept(lfd, (struct sockaddr *) &amp;claddr, &amp;addrlen);
+            if (cfd == -1) {
+                errMsg("accept");
+                continue;
+            }
+<img alt="" border="0" id="" src="Images/getfile_014.png"/>        if (getnameinfo((struct sockaddr *) &amp;claddr, addrlen,
+                        host, NI_MAXHOST, service, NI_MAXSERV, 0) == 0)
+                snprintf(addrStr, ADDRSTRLEN, "(%s, %s)", host, service);
+            else
+                snprintf(addrStr, ADDRSTRLEN, "(?UNKNOWN?)");
+            printf("Connection from %s\n", addrStr);
+
+            /* Read client request, send sequence number back */
+<img alt="" border="0" id="" src="Images/getfile_012-5.png"/>        if (readLine(cfd, reqLenStr, INT_LEN) &lt;= 0) {
+                close(cfd);
+                continue;                   /* Failed read; skip request */
+            }
+<img alt="" border="0" id="" src="Images/getfile_003-63.png"/>        reqLen = atoi(reqLenStr);
+            if (reqLen &lt;= 0) {              /* Watch for misbehaving clients */
+                close(cfd);
+                continue;                   /* Bad request; skip it */
+            }
+<img alt="" border="0" id="" src="Images/getfile_008-24.png"/>        snprintf(seqNumStr, INT_LEN, "%d\n", seqNum);
+            if (write(cfd, &amp;seqNumStr, strlen(seqNumStr)) != strlen(seqNumStr))
+                fprintf(stderr, "Error on write");
+
+    <img alt="" border="0" id="" src="Images/getfile-120.png"/>        seqNum += reqLen;               /* Update sequence number */
+
+            if (close(cfd) == -1)           /* Close connection */
+                errMsg("close");
+        }
+    }
+          <b>sockets/is_seqnum_sv.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0E11GM">59.11.1.3. Client program</h5><p class="docText">The client program is shown in Example 59-7.
+ This program accepts two arguments. The first argument, which is the 
+name of the host on which the server is running, is mandatory. The 
+optional second argument is the length of the sequence desired by the 
+client. The default length is 1. The client performs the following 
+steps:</p><ul><li><p class="docList">Call <span class="docEmphasis">getaddrinfo()</span> to obtain a set of socket address structures suitable for connecting to a TCP server bound to the specified host <img alt="" border="0" id="" src="Images/getfile_006-44.png"/>. For the port number, the client specifies <tt>PORT_NUM</tt>.</p></li><li><p class="docList">Enter a loop <img alt="" border="0" id="" src="Images/getfile_011-9.png"/>
+ that iterates through the socket address structures returned by the 
+previous step, until the client finds one that can be used to 
+successfully create <img alt="" border="0" id="" src="Images/getfile_015.png"/> and connect <img alt="" border="0" id="" src="Images/getfile_007-33.png"/> a socket to the server. Since the client has not bound its socket, the <span class="docEmphasis">connect()</span> call causes the kernel to assign an ephemeral port to the socket.</p></li><li><p class="docList">Send an integer specifying the length of the client’s desired sequence <img alt="" border="0" id="" src="Images/getfile_010.png"/>. This integer is sent as a newline-terminated string.</p></li><li><p class="docList">Read the sequence number sent back by the server (which is likewise a newline-terminated string) <img alt="" border="0" id="" src="Images/getfile_009-25.png"/> and print it on standard output <img alt="" border="0" id="" src="Images/getfile_004-30.png"/>.</p></li></ul><p class="docText">When we run the server and the client on the same host, we see the following:</p><pre class="preFixedWidth">$ <b>./is_seqnum_sv &amp; </b>
+[1] 4075
+$ <b>./is_seqnum_cl localhost </b>              <i> Client 1: requests 1 sequence number</i>
+Connection from (localhost, 33273)      <i> Server displays client address + port</i>
+Sequence number: 0                      <i> Client displays returned sequence number</i>
+$ <b>./is_seqnum_cl localhost 10 </b>           <i> Client 2: requests 10 sequence numbers</i>
+Connection from (localhost, 33274)
+Sequence number: 1
+$ <b>./is_seqnum_cl localhost </b>              <i> Client 3: requests 1 sequence number</i>
+Connection from (localhost, 33275)
+Sequence number: 11
+
+					  </pre><br/>
+<p class="docText">Next, we demonstrate the use of <span class="docEmphasis">telnet</span> for debugging this application:</p><pre class="preFixedWidth">$ <b>telnet localhost 50000 </b>                <i> Our server uses this port number</i>
+                                        <i> Empty line printed by</i> <span class="docEmphasis">telnet</span>
+Trying 127.0..0.1...
+Connection from (localhost, 33276)
+Connected to localhost.
+Escape character is '^]'.
+<b>1 </b>                                       <i> Enter length of requested sequence</i>
+12                                      <span class="docEmphasis">telnet</span> <i> displays sequence number and</i>
+Connection closed by foreign host.      <i> detects that server closed connection</i>
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In
+ the shell session log, we see that the kernel cycles sequentially 
+through the ephemeral port numbers. (Other implementations exhibit 
+similar behavior.) On Linux, this behavior is the result of an 
+optimization to minimize hash lookups in the kernel’s table of local 
+socket bindings. When the upper limit for these numbers is reached, the 
+kernel recommences allocating an available number starting at the low 
+end of the range (defined by the Linux-specific <tt>/proc/sys/net/ipv4/ip_local_port_range</tt> file).</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0EEBHM">Example 59-7. A client that uses stream sockets</h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/is_seqnum_cl.c</b>
+    #include &lt;netdb.h&gt;
+    #include "is_seqnum.h"
+
+    int
+    main(int argc, char *argv[])
+    {
+        char *reqLenStr;                    /* Requested length of sequence */
+        char seqNumStr[INT_LEN];            /* Start of granted sequence */
+        int cfd;
+        ssize_t numRead;
+        struct addrinfo hints;
+        struct addrinfo *result, *rp;
+
+        if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+            usageErr("%s server-host [sequence-len]\n", argv[0]);
+
+        /* Call getaddrinfo() to obtain a list of addresses that
+           we can try connecting to */
+
+        memset(&amp;hints, 0, sizeof(struct addrinfo));
+        hints.ai_canonname = NULL;
+        hints.ai_addr = NULL;
+        hints.ai_next = NULL;
+        hints.ai_family = AF_UNSPEC;                /* Allows IPv4 or IPv6 */
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_flags = AI_NUMERICSERV;
+<img alt="" border="0" id="" src="Images/getfile_006-45.png"/>    if (getaddrinfo(argv[1], PORT_NUM, &amp;hints, &amp;result) != 0)
+            errExit("getaddrinfo");
+
+        /* Walk through returned list until we find an address structure
+           that can be used to successfully connect a socket */
+<img alt="" border="0" id="" src="Images/getfile_011-10.png"/>    for (rp = result; rp != NULL; rp = rp-&gt;ai_next) {
+<img alt="" border="0" id="" src="Images/getfile_015.png"/>        cfd = socket(rp-&gt;ai_family, rp-&gt;ai_socktype, rp-&gt;ai_protocol);
+            if (cfd == -1)
+                continue;                           /* On error, try next address */
+<img alt="" border="0" id="" src="Images/getfile_007-34.png"/>        if (connect(cfd, rp-&gt;ai_addr, rp-&gt;ai_addrlen) != -1)
+                break;                              /* Success */
+
+                /* Connect failed: close this socket and try next address */
+
+            close(cfd);
+        }
+
+        if (rp == NULL)
+            fatal("Could not connect socket to any address");
+
+        freeaddrinfo(result);
+
+        /* Send requested sequence length, with terminating newline */
+<img alt="" border="0" id="" src="Images/getfile_010.png"/>    reqLenStr = (argc &gt; 2) ? argv[2] : "1";
+        if (write(cfd, reqLenStr, strlen(reqLenStr)) !=  strlen(reqLenStr))
+            fatal("Partial/failed write (reqLenStr)");
+        if (write(cfd, "\n", 1) != 1)
+            fatal("Partial/failed write (newline)");
+
+        /* Read and display sequence number returned by server */
+<img alt="" border="0" id="" src="Images/getfile_009-26.png"/>    numRead = readLine(cfd, seqNumStr, INT_LEN);
+        if (numRead == -1)
+            errExit("readLine");
+        if (numRead == 0)
+            fatal("Unexpected EOF from server");
+<img alt="" border="0" id="" src="Images/getfile_004-31.png"/>    printf("Sequence number: %s", seqNumStr);           /* Includes '\n' */
+
+        exit(EXIT_SUCCESS);                                 /* Closes 'cfd' */
+    }
+          <b>sockets/is_seqnum_cl.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>64.4. Connecting Processes with a Pseudoterminal: ptyFork()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">64.4. Connecting Processes with a Pseudoterminal: <span class="docEmphasis">ptyFork()</span></h3><p class="docText">We
+ are now ready to implement a function that does all of the work of 
+setting up a connection between two processes using a pseudoterminal 
+pair, as shown in Figure 64-2. The <span class="docEmphasis">ptyFork()</span> function creates a child process that is connected to the parent by a pseudoterminal pair.</p><pre class="preFixedWidth">#include "pty_fork.h"
+
+pid_t <b>ptyFork</b>(int *<span class="docEmphasis">masterFd</span>, char *<span class="docEmphasis">slaveName</span>, size_t <span class="docEmphasis">snLen</span>,
+            const struct termios *<span class="docEmphasis">slaveTermios</span>, const struct winsize *<span class="docEmphasis">slaveWS</span>);
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In parent: returns process ID of child on success, or -1 on error; in successfully created child: always returns 0</p><hr noshade="noshade" size="1"/><p class="docText">The implementation of <span class="docEmphasis">ptyFork()</span> is shown in Example 64-2. This function performs the following steps:</p><ul><li><p class="docList">Open a pseudoterminal master using <span class="docEmphasis">ptyMasterOpen()</span> (Example 64-1) <img alt="" border="0" id="" src="Images/getfile_004-37.png"/>.</p></li><li><p class="docList">If the <span class="docEmphasis">slaveName</span> argument is not <tt>NULL</tt>, copy the name of the pseudoterminal slave into this buffer <img alt="" border="0" id="" src="Images/getfile_007-39.png"/>. (If <span class="docEmphasis">slaveName</span> is not <tt>NULL</tt>, then it must point to a buffer of at least <span class="docEmphasis">snLen</span> bytes.) The caller can use this name to update the login accounting files (Chapter 40),
+ if appropriate. Updating the login accounting files would be 
+appropriate for applications that provide login services—for example, <span class="docEmphasis">ssh</span>, <span class="docEmphasis">rlogin</span>, and <span class="docEmphasis">telnet</span>. On the other hand, programs such as <span class="docEmphasis">script(1)</span> (Section 64.6) do not update the login accounting files, because they don’t provide login services.</p></li><li><p class="docList">Call <span class="docEmphasis">fork()</span> to create a child process <img alt="" border="0" id="" src="Images/getfile_011-13.png"/>.</p></li><li><p class="docList">All that the parent does after the <span class="docEmphasis">fork()</span> is to ensure that the file descriptor for the pseudoterminal master is returned to the caller in the integer pointed to by <span class="docEmphasis">masterFd</span> <img alt="" border="0" id="" src="Images/getfile_005-57.png"/>.</p></li><li><p class="docList">After the <span class="docEmphasis">fork()</span>, the child performs the following steps:</p><ul><li><p class="docList">Call <span class="docEmphasis">setsid()</span>, to create a new session (Section 34.3) <img alt="" border="0" id="" src="Images/getfile_006-48.png"/>. The child is the leader of the new session and loses its controlling terminal (if it had one).</p></li><li><p class="docList">Close the file descriptor for the pseudoterminal master, since it is not required in the child <img alt="" border="0" id="" src="Images/getfile_002-71.png"/>.</p></li><li><p class="docList">Open the pseudoterminal slave <img alt="" border="0" id="" src="Images/getfile_008-29.png"/>.
+ Since the child lost its controlling terminal in the previous step, 
+this step causes the pseudoterminal slave to become the controlling 
+terminal for the child.</p></li><li><p class="docList">If the <tt>TIOCSCTTY</tt> macro is defined, perform a <tt>TIOCSCTTY</tt> <span class="docEmphasis">ioctl()</span> operation on the file descriptor for the pseudoterminal slave <img alt="" border="0" id="" src="Images/getfile_003-70.png"/>. This code allows our <span class="docEmphasis">ptyFork()</span> function to work on BSD platforms, where a controlling terminal can be acquired only as a consequence of an explicit <tt>TIOCSCTTY</tt> operation (refer to Section 34.4).</p></li><li><p class="docList">If the <span class="docEmphasis">slaveTermios</span> argument is non-<tt>NULL</tt>, call <span class="docEmphasis">tcsetattr()</span> to set the terminal attributes of the slave to the values in the <span class="docEmphasis">termios</span> structure pointed to by this argument <img alt="" border="0" id="" src="Images/getfile_009-31.png"/>. Use of this argument is a convenience for certain interactive programs (e.g., <span class="docEmphasis">script(1)</span>)
+ that use a pseudoterminal and need to set the attributes of the slave 
+device to be the same as those of the terminal under which the program 
+is run.</p></li><li><p class="docList">If the <span class="docEmphasis">slaveWS</span> argument is non-<tt>NULL</tt>, perform an <span class="docEmphasis">ioctl()</span> <tt>TIOCSWINSZ</tt> operation to set the window size of the pseudoterminal slave to the values in the <span class="docEmphasis">winsize</span> structure pointed to by this argument <img alt="" border="0" id="" src="Images/getfile-129.png"/>. This step is performed for the same reason as the previous step.</p></li><li><p class="docList">Use <span class="docEmphasis">dup2()</span> to duplicate the slave file descriptor to be the standard input, output, and error for the child <img alt="" border="0" id="" src="Images/getfile_010-24.png"/>.
+ At this point, the child can now exec an arbitrary program, and that 
+program can use the standard file descriptors to communicate with the 
+pseudoterminal. The execed program can perform all of the usual 
+terminal-oriented operations that can be performed by a program running 
+on a conventional terminal.</p></li></ul></li></ul><p class="docText">As with <span class="docEmphasis">fork()</span>, <span class="docEmphasis">ptyFork()</span> returns the process ID of the child in the parent process, 0 in the child process, or -1 on error.</p><p class="docText">Eventually, the child process created by <span class="docEmphasis">ptyFork()</span>
+ will terminate. If the parent doesn’t terminate at the same time, then 
+it must wait on the child to eliminate the resulting zombie. However, 
+this step can often be eliminated, since applications that employ 
+pseudoterminals are commonly designed so that the parent does terminate 
+at the same time as the child.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">BSD derivatives provide two related, nonstandard functions for working with pseudoterminals. The first of these is <span class="docEmphasis">openpty()</span>,
+ which opens a pseudoterminal pair, returns the file descriptors for the
+ master and slave, optionally returns the name of the slave device, and 
+optionally sets the terminal attributes and window size from arguments 
+analogous to <span class="docEmphasis">slaveTermios</span> and <span class="docEmphasis">slaveWS</span>. The other function, <span class="docEmphasis">forkpty()</span>, is the same as our <span class="docEmphasis">ptyFork()</span>, except that it doesn’t provide an analog of the <span class="docEmphasis">snLen</span> argument. On Linux, both of these functions are provided by <span class="docEmphasis">glibc</span> and are documented in the <span class="docEmphasis">openpty(3)</span> manual page.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0EEJJM">Example 64-2. Implementation of <span class="docEmphasis">ptyFork()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>pty/pty_fork.c</b>
+    #include &lt;fcntl.h&gt;
+    #include &lt;termios.h&gt;
+    #include &lt;sys/ioctl.h&gt;
+    #include "pty_master_open.h"
+    #include "pty_fork.h"                   /* Declares ptyFork() */
+    #include "tlpi_hdr.h"
+
+    #define MAX_SNAME 1000
+
+    pid_t
+    ptyFork(int *masterFd, char *slaveName, size_t snLen,
+            const struct termios *slaveTermios, const struct winsize *slaveWS)
+    {
+        int mfd, slaveFd, savedErrno;
+        pid_t childPid;
+        char slname[MAX_SNAME];
+
+    <img alt="" border="0" id="" src="Images/getfile_004-38.png"/>    mfd = ptyMasterOpen(slname, MAX_SNAME);
+        if (mfd == -1)
+            return -1;
+
+<img alt="" border="0" id="" src="Images/getfile_007-40.png"/>    if (slaveName != NULL) {            /* Return slave name to caller */
+            if (strlen(slname) &lt; snLen) {
+                strncpy(slaveName, slname, snLen);
+
+            } else {                        /* 'slaveName' was too small */
+                close(mfd);
+                errno = EOVERFLOW;
+                return -1;
+            }
+        }
+
+<img alt="" border="0" id="" src="Images/getfile_011-14.png"/>    childPid = fork();
+
+        if (childPid == -1) {               /* fork() failed */
+            savedErrno = errno;             /* close() might change 'errno' */
+            close(mfd);                     /* Don't leak file descriptors */
+            errno = savedErrno;
+            return -1;
+        }
+
+<img alt="" border="0" id="" src="Images/getfile_005-58.png"/>    if (childPid != 0) {                /* Parent */
+            *masterFd = mfd;                /* Only parent gets master fd */
+            return childPid;                /* Like parent of fork() */
+        }
+
+        /* Child falls through to here */
+
+<img alt="" border="0" id="" src="Images/getfile_006-49.png"/>    if (setsid() == -1)                 /* Start a new session */
+            err_exit("ptyFork:setsid");
+
+<img alt="" border="0" id="" src="Images/getfile_002-72.png"/>    close(mfd);                         /* Not needed in child */
+
+<img alt="" border="0" id="" src="Images/getfile_008-30.png"/>    slaveFd = open(slname, O_RDWR);     /* Becomes controlling tty */
+        if (slaveFd == -1)
+            err_exit("ptyFork:open-slave");
+
+<img alt="" border="0" id="" src="Images/getfile_003-71.png"/>#ifdef TIOCSCTTY                        /* Acquire controlling tty on BSD */
+        if (ioctl(slaveFd, TIOCSCTTY, 0) == -1)
+            err_exit("ptyFork:ioctl-TIOCSCTTY");
+    #endif
+
+<img alt="" border="0" id="" src="Images/getfile_009-32.png"/>    if (slaveTermios != NULL)           /* Set slave tty attributes */
+            if (tcsetattr(slaveFd, TCSANOW, slaveTermios) == -1)
+                err_exit("ptyFork:tcsetattr");
+
+<img alt="" border="0" id="" src="Images/getfile-130.png"/>    if (slaveWS != NULL)                /* Set slave tty window size */
+            if (ioctl(slaveFd, TIOCSWINSZ, slaveWS) == -1)
+                err_exit("ptyFork:ioctl-TIOCSWINSZ");
+
+            /* Duplicate pty slave to be child's stdin, stdout, and stderr */
+
+<img alt="" border="0" id="" src="Images/getfile_010-25.png"/>    if (dup2(slaveFd, STDIN_FILENO) != STDIN_FILENO)
+            err_exit("ptyFork:dup2-STDIN_FILENO");
+        if (dup2(slaveFd, STDOUT_FILENO) != STDOUT_FILENO)
+            err_exit("ptyFork:dup2-STDOUT_FILENO");
+        if (dup2(slaveFd, STDERR_FILENO) != STDERR_FILENO)
+            err_exit("ptyFork:dup2-STDERR_FILENO");
+
+        if (slaveFd &gt; STDERR_FILENO)        /* Safety check */
+            close(slaveFd);                 /* No longer need this fd */
+
+        return 0;                           /* Like child of fork() */
+    }
+          <b>pty/pty_fork.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

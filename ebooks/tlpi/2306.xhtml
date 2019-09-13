@@ -1,0 +1,406 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>23.6. POSIX Interval Timers</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">23.6. POSIX Interval Timers</h3><p class="docText">The classical UNIX interval timers set by <span class="docEmphasis">setitimer()</span> suffer a number of limitations:</p><ul><li><p class="docList">We can set only one timer of each of the three types, <tt>ITIMER_REAL</tt>, <tt>ITIMER_VIRTUAL</tt>, and <tt>ITIMER_PROF</tt>.</p></li><li><p class="docList">The
+ only way of being notified of timer expiration is via delivery of a 
+signal. Furthermore, we can’t change the signal that is generated when 
+the timer expires.</p></li><li><p class="docList">If
+ an interval timer expires multiple times while the corresponding signal
+ is blocked, then the signal handler is called only once. In other 
+words, we have no way of knowing whether there was a <span class="docEmphasis">timeroverrun</span>.</p></li><li><p class="docList">Timers
+ are limited to microsecond resolution. However, some systems have 
+hardware clocks that provide finer resolution than this, and, on such 
+systems, it is desirable to have software access to this greater 
+resolution.</p></li></ul><p class="docText">POSIX.1b defined an API to address these limitations, and this API is implemented in Linux 2.6.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On older Linux systems, an incomplete version of this API was provided via a threads-based implementation in <span class="docEmphasis">glibc</span>. However, this user-space implementation doesn’t provide all of the features described here.</p><hr noshade="noshade" size="1"/><p class="docText">The POSIX timer API divides the life of a timer into the following steps:</p><ul><li><p class="docList">The <span class="docEmphasis">timer_create()</span> system call creates a new timer and defines the method by which it will notify the process when it expires.</p></li><li><p class="docList">The <span class="docEmphasis">timer_settime()</span> system call arms (starts) or disarms (stops) a timer.</p></li><li><p class="docList">The <span class="docEmphasis">timer_delete()</span> system call deletes a timer that is no longer required.</p></li></ul><p class="docText">POSIX timers are not inherited by a child created by <span class="docEmphasis">fork()</span>. They are disarmed and deleted during an <span class="docEmphasis">exec()</span> or on process termination.</p><p class="docText">On Linux, programs using the POSIX timer API must be compiled with the <span class="docEmphasis">-lrt</span> option, in order to link against the <span class="docEmphasis">librt</span> (realtime) library.</p><h4 class="docSection2Title" id="title-ID0EI4BK">23.6.1. Creating a Timer: <span class="docEmphasis">timer_create()</span></h4><p class="docText">The <span class="docEmphasis">timer_create()</span> function creates a new timer that measures time using the clock specified by <span class="docEmphasis">clockid</span>.</p><pre class="preFixedWidth">#define _POSIX_C_SOURCE 199309
+#include &lt;signal.h&gt;
+#include &lt;time.h&gt;
+
+int <b>timer_create</b>(clockid_t <span class="docEmphasis">clockid</span>, struct sigevent *<span class="docEmphasis">evp</span>, timer_t *<span class="docEmphasis">timerid</span>);
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">clockid</span> can specify any of the values shown in Table 23-1, or the <span class="docEmphasis">clockid</span> value returned by <span class="docEmphasis">clock_getcpuclockid()</span> or <span class="docEmphasis">pthread_getcpuclockid()</span>. The <span class="docEmphasis">timerid</span> argument points to a buffer that returns a handle used to refer to the timer in later system calls. This buffer is typed as <span class="docEmphasis">timer_t</span>, which is a data type specified by SUSv3 for representing a timer identifier.</p><p class="docText">The <span class="docEmphasis">evp</span> argument determines how the program is to be notified when the timer expires. It points to a structure of type <span class="docEmphasis">sigevent</span>, defined as follows:</p><pre>union sigval {
+    int   sival_int;              /* Integer value for accompanying data */
+    void *sival_ptr;              /* Pointer value for accompanying data */
+};
+
+struct sigevent {
+    int          sigev_notify;    /* Notification method */
+    int          sigev_signo;     /* Timer expiration signal */
+    union sigval sigev_value;     /* Value accompanying signal or
+                                     passed to thread function */
+    union {
+        pid_t      _tid;          /* ID of thread to be signaled /
+        struct {
+            void (*_function) (union sigval);
+                                  /* Thread notification function */
+            void  *_attribute;    /* Really 'pthread_attr_t *' */
+        } _sigev_thread;
+    } _sigev_un;
+};
+
+#define sigev_notify_function    _sigev_un._sigev_thread._function
+#define sigev_notify_attributes  _sigev_un._sigev_thread._attribute
+#define sigev_notify_thread_id   _sigev_un._tid</pre><br/>
+<p class="docText">The <span class="docEmphasis">sigev_notify</span> field of this structure is set to one of the values shown in Table 23-2.</p><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 23-2. Values for the <span class="docEmphasis">sigev_notify</span> field of the <span class="docEmphasis">sigevent</span> structure</h5></caption><colgroup span="3"><col></col><col></col><col></col></colgroup><thead><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom"><span class="docEmphasis">sigev_notify</span> value</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Notification method</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">SUSv3</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top"><tt>SIGEV_NONE</tt></td><td align="left" class="docTableCell" valign="top">No notification; monitor timer using <span class="docEmphasis">timer_gettime()</span></td><td align="left" class="docTableCell" valign="top">•</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>SIGEV_SIGNAL</tt></td><td align="left" class="docTableCell" valign="top">Send signal <span class="docEmphasis">sigev_signo</span> to process</td><td align="left" class="docTableCell" valign="top">•</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>SIGEV_THREAD</tt></td><td align="left" class="docTableCell" valign="top">Call <span class="docEmphasis">sigev_notify_function</span> as start function of new thread</td><td align="left" class="docTableCell" valign="top">•</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>SIGEV_THREAD_ID</tt></td><td align="left" class="docTableCell" valign="top">Send signal <span class="docEmphasis">sigev_signo</span> to thread <span class="docEmphasis">sigev_notify_thread_id</span></td><td class="docTableCell"> </td></tr></tbody></table><p></p><br/><p class="docText">Further details on the <span class="docEmphasis">sigev_notify</span> field constants, and the fields in the <span class="docEmphasis">sigval</span> structure that are associated with each constant value, are as follows:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SIGEV_NONE</span></span></span></p></dt><dd><p class="docList">Don’t provide notification of timer expiration. The process can still monitor the progress of the timer using <span class="docEmphasis">timer_gettime()</span>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SIGEV_SIGNAL</span></span></span></p></dt><dd><p class="docList">When the timer expires, generate the signal specified in the <span class="docEmphasis">sigev_signo</span> field for the process. The <span class="docEmphasis">sigev_value</span> field specifies data (an integer or a pointer) to accompany the signal (Section 22.8.1). This data can be retrieved via the <span class="docEmphasis">si_value</span> field of the <span class="docEmphasis">siginfo_t</span> structure that is passed to the handler for this signal or returned by a call to <span class="docEmphasis">sigwaitinfo()</span> or <span class="docEmphasis">sigtimedwait()</span>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SIGEV_THREAD</span></span></span></p></dt><dd><p class="docList">When the timer expires, call the function specified in the <span class="docEmphasis">sigev_notify_function</span> field. This function is invoked <span class="docEmphasis">as if</span>
+ it were the start function in a new thread. The “as if ” wording is 
+from SUSv3, and allows an implementation to generate the notifications 
+for a periodic timer either by having each notification delivered to a 
+new unique thread or by having the notifications delivered in series to a
+ single new thread. The <span class="docEmphasis">sigev_notify_attributes</span> field can be specified as <tt>NULL</tt> or as a pointer to a <span class="docEmphasis">pthread_attr_t</span> structure that defines attributes for the thread (Section 29.8). The union <span class="docEmphasis">sigval</span> value specified in <span class="docEmphasis">sigev_value</span> is passed as the sole argument of the function.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SIGEV_THREAD_ID</span></span></span></p></dt><dd><p class="docList">This is similar to <tt>SIGEV_SIGNAL</tt>, but the signal is sent to the thread whose thread ID matches <span class="docEmphasis">sigev_notify_thread_id</span>. This thread must be in the same process as the calling thread. (With <tt>SIGEV_SIGNAL</tt>
+ notification, a signal is queued to the process as a whole, and, if 
+there are multiple threads in the process, the signal will be delivered 
+to an arbitrarily selected thread in the process.) The <span class="docEmphasis">sigev_notify_thread_id</span> field can be set to the value returned by <span class="docEmphasis">clone()</span> or the value returned by <span class="docEmphasis">gettid()</span>. The <tt>SIGEV_THREAD_ID</tt> flag is intended for use by threading libraries. (It requires a threading implementation that employs the <tt>CLONE_THREAD</tt> option, described in Section 28.2.1. The modern NPTL threading implementation employs <tt>CLONE_THREAD</tt>, but the older LinuxThreads threading implementation does not.)</p></dd></dl><p class="docText">All of the above constants are specified in SUSv3, except for <tt>SIGEV_THREAD_ID</tt>, which is Linux-specific.</p><p class="docText">The <span class="docEmphasis">evp</span> argument may be specified as <tt>NULL</tt>, which is equivalent to specifying <span class="docEmphasis">sigev_notify</span> as <tt>SIGEV_SIGNAL</tt>, <span class="docEmphasis">sigev_signo</span> as <tt>SIGALRM</tt> (this may be different on other systems, since SUSv3 merely says “a default signal number”), and <span class="docEmphasis">sigev_value.sival_int</span> as the timer ID.</p><p class="docText">As
+ currently implemented, the kernel preallocates one queued realtime 
+signal structure for each POSIX timer that is created using <span class="docEmphasis">timer_create()</span>.
+ The intent of this preallocation is to ensure that at least one such 
+structure is available for queuing a signal when the timer expires. This
+ means that the number of POSIX timers that may be created is subject to
+ the limitations on the number of realtime signals that can be queued 
+(refer to Section 22.8).</p><h4 class="docSection2Title" id="title-ID0EAKCK">23.6.2. Arming and Disarming a Timer: <span class="docEmphasis">timer_settime()</span></h4><p class="docText">Once we have created a timer, we can arm (start) or disarm (stop) it using <span class="docEmphasis">timer_settime()</span>.</p><pre class="preFixedWidth">#define _POSIX_C_SOURCE 199309
+#include &lt;time.h&gt;
+
+int <b>timer_settime</b>(timer_t <span class="docEmphasis">timerid</span>, int <span class="docEmphasis">flags</span>, const struct itimerspec *<span class="docEmphasis">value</span>,
+                  struct itimerspec *<span class="docEmphasis">old_value</span>);
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">timerid</span> argument of <span class="docEmphasis">timer_settime()</span> is a timer handle returned by a previous call to <span class="docEmphasis">timer_create()</span>.</p><p class="docText">The <span class="docEmphasis">value</span> and <span class="docEmphasis">old_value</span> arguments are analogous to the <span class="docEmphasis">setitimer()</span> arguments of the same name: <span class="docEmphasis">value</span> specifies the new settings for the timer, and <span class="docEmphasis">old_value</span> is used to return the previous timer settings (see the description of <span class="docEmphasis">timer_gettime()</span> below). If we are not interested in the previous settings, we can specify <span class="docEmphasis">old_value</span> as <tt>NULL</tt>. The <span class="docEmphasis">value</span> and <span class="docEmphasis">old_value</span> arguments are pointers to <span class="docEmphasis">itimerspec</span> structures, defined as follows:</p><pre>struct itimerspec {
+    struct timespec it_interval;    /* Interval for periodic timer */
+    struct timespec it_value;       /* First expiration */
+};</pre><br/>
+<p class="docText">Each of the fields of the <span class="docEmphasis">itimerspec</span> structure is in turn a structure of type <span class="docEmphasis">timespec</span><a name="seconds and"></a>, which specifies time values as a number of seconds and nanoseconds:</p><pre>struct timespec {
+    time_t tv_sec;                  /* Seconds */
+    long   tv_nsec;                 /* Nanoseconds */
+};</pre><br/>
+<p class="docText">The <span class="docEmphasis">it_value</span> field specifies when the timer will first expire. If either subfield of <span class="docEmphasis">it_interval</span> is nonzero, then this is a periodic timer that, after the initial expiry specified by <span class="docEmphasis">it_value</span>, will expire with the frequency specified in these subfields. If both subfields of <span class="docEmphasis">it_interval</span> are 0, this timer expires just once.</p><p class="docText">If <span class="docEmphasis">flags</span> is specified as 0, then <span class="docEmphasis">value.it_value</span> is interpreted relative to the clock value at the time of the call to <span class="docEmphasis">timer_settime()</span> (i.e., like <span class="docEmphasis">setitimer()</span>). If <span class="docEmphasis">flags</span> is specified as <tt>TIMER_ABSTIME</tt>, then <span class="docEmphasis">value.it_value</span>
+ is interpreted as an absolute time (i.e., measured from the clock’s 
+zero point). If that time has already passed on the clock, the timer 
+expires immediately.</p><p class="docText">To arm a timer, we make a call to <span class="docEmphasis">timer_settime()</span> in which either or both of the subfields of <span class="docEmphasis">value.it_value</span> are nonzero. If the timer was previously armed, <span class="docEmphasis">timer_settime()</span> replaces the previous settings.</p><p class="docText">If the timer value and interval are not multiples of the resolution of the corresponding clock (as returned by <span class="docEmphasis">clock_getres()</span>), these values are rounded up to the next multiple of the resolution.</p><p class="docText">On each expiration of the timer, the process is notified using the method defined in the <span class="docEmphasis">timer_create()</span> call that created this timer. If the <span class="docEmphasis">it_interval</span> structure contains nonzero values, these values are used to reload the <span class="docEmphasis">it_value</span> structure.</p><p class="docText">To disarm a timer, we make a call to <span class="docEmphasis">timer_settime()</span> specifying both fields of <span class="docEmphasis">value.it_value</span> as 0.</p><h4 class="docSection2Title" id="title-ID0EEQCK">23.6.3. Retrieving the Current Value of a Timer: <span class="docEmphasis">timer_gettime()</span></h4><p class="docText">The <span class="docEmphasis">timer_gettime()</span> system call returns the interval and remaining time for the POSIX timer identified by <span class="docEmphasis">timerid</span>.</p><pre>#define _POSIX_C_SOURCE 199309
+#include &lt;time.h&gt;
+
+int <b>timer_gettime</b>(timer_t <span class="docEmphasis">timerid</span>, struct itimerspec *<span class="docEmphasis">curr_value</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The interval and the time until the next expiration of the timer are returned in the <span class="docEmphasis">itimerspec</span> structure pointed to by <span class="docEmphasis">curr_value</span>. The <span class="docEmphasis">curr_value.it_value</span> field returns the time until next timer expiration, even if this timer was established as an absolute timer using <tt>TIMER_ABSTIME</tt>.</p><p class="docText">If both fields of the returned <span class="docEmphasis">curr_value.it_value</span> structure are 0, then the timer is currently disarmed. If both fields of the returned <span class="docEmphasis">curr_value.it_interval</span> structure are 0, then the timer expires just once, at the time given in <span class="docEmphasis">curr_value.it_value</span>.</p><h4 class="docSection2Title" id="title-ID0EHTCK">23.6.4. Deleting a Timer: <span class="docEmphasis">timer_delete()</span></h4><p class="docText">Each
+ POSIX timer consumes a small amount of system resources. Therefore, 
+when we have finished using a timer, we should free these resources by 
+using <span class="docEmphasis">timer_delete()</span> to remove the timer.</p><pre>#define _POSIX_C_SOURCE 199309
+#include &lt;time.h&gt;
+
+int <b>timer_delete</b>(timer_t <span class="docEmphasis">timerid</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">timerid</span> argument is a handle returned by a previous call to <span class="docEmphasis">timer_create()</span>.
+ If the timer was armed, then it is automatically disarmed before 
+removal. If there is already a pending signal from an expiration of this
+ timer, that signal remains pending. (SUSv3 leaves this point 
+unspecified, so other UNIX implementations may behave differently.) 
+Timers are deleted automatically when a process terminates.</p><h4 class="docSection2Title" id="title-ID0EJUCK">23.6.5. Notification via a Signal</h4><p class="docText">If we elect to receive timer notifications via a signal, then we can accept the signal via a signal handler, or by calling <span class="docEmphasis">sigwaitinfo()</span> or <span class="docEmphasis">sigtimedwait()</span>. Both mechanisms allow the receiving process to obtain a <span class="docEmphasis">siginfo_t</span> structure (Section 21.4) that provides further information about the signal. (To take advantage of this feature in a signal handler, we specify the <tt>SA_SIGINFO</tt> flag when establishing the handler.) The following fields are set in the <span class="docEmphasis">siginfo_t</span> structure:</p><ul><li><p class="docList"><span class="docEmphasis">si_signo</span>: This field contains the signal generated by this timer.</p></li><li><p class="docList"><span class="docEmphasis">si_code</span>: This field is set to <tt>SI_TIMER</tt>, indicating that this signal was generated because of the expiration of a POSIX timer.</p></li><li><p class="docList"><span class="docEmphasis">si_value</span>: This field is set to the value that was supplied in <span class="docEmphasis">evp.sigev_value</span> when the timer was created using <span class="docEmphasis">timer_create()</span>. Specifying different <span class="docEmphasis">evp.sigev_value</span> values provides a means of distinguishing expirations of multiple timers that deliver the same signal.</p></li></ul><p class="docText">When calling <span class="docEmphasis">timer_create()</span>, <span class="docEmphasis">evp.sigev_value.sival_ptr</span> is typically assigned the address of the <span class="docEmphasis">timerid</span> argument given in the same call (see Example 23-5). This allows the signal handler (or the <span class="docEmphasis">sigwaitinfo()</span> call) to obtain the ID of the timer that generated the signal. (Alternatively, <span class="docEmphasis">evp.sigev_value.sival_ptr</span> may be assigned the address of a structure that contains the <span class="docEmphasis">timerid</span> given to <span class="docEmphasis">timer_create()</span>.)</p><p class="docText">Linux also supplies the following nonstandard field in the <span class="docEmphasis">siginfo_t</span> structure:</p><ul><li><p class="docList"><span class="docEmphasis">si_overrun</span>: This field contains the overrun count for this timer (described in Section 23.6.6).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Linux also supplies another nonstandard field: <span class="docEmphasis">si_timerid</span>.
+ This field contains an identifier that is used internally by the system
+ to identify the timer (it is not the same as the ID returned by <span class="docEmphasis">timer_create()</span>). It is not useful to applications.</p><hr noshade="noshade" size="1"/></li></ul><p class="docText">Example 23-5 demonstrates the use of signals as the notification mechanism for a POSIX timer.</p><h5 class="docExampleTitle" id="title-ID0EJ1CK">Example 23-5. POSIX timer notification using a signal</h5><p></p><div class="box"><pre class="preFixedHeight"><b>timers/ptmr_sigev_signal.c</b>
+    #define _POSIX_C_SOURCE 199309
+    #include &lt;signal.h&gt;
+    #include &lt;time.h&gt;
+    #include "curr_time.h"                  /* Declares currTime() */
+    #include "itimerspec_from_str.h"        /* Declares itimerspecFromStr() */
+    #include "tlpi_hdr.h"
+
+    #define TIMER_SIG SIGRTMAX              /* Our timer notification signal */
+
+    static void
+<img alt="" border="0" id="" src="Images/getfile_003-11.png"/> handler(int sig, siginfo_t *si, void *uc)
+    {
+        timer_t *tidptr;
+
+        tidptr = si-&gt;si_value.sival_ptr;
+
+        /* UNSAFE: This handler uses non-async-signal-safe functions
+           (printf(); see Section 21.1.2) */
+
+            printf("[%s] Got signal %d\n", currTime("%T"), sig);
+        printf("    *sival_ptr         = %ld\n", (long) *tidptr);
+        printf("    timer_getoverrun() = %d\n", timer_getoverrun(*tidptr));
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        struct itimerspec ts;
+        struct sigaction  sa;
+        struct sigevent   sev;
+        timer_t *tidlist;
+        int j;
+
+        if (argc &lt; 2)
+            usageErr("%s secs[/nsecs][:int-secs[/int-nsecs]]...\n", argv[0]);
+
+        tidlist = calloc(argc - 1, sizeof(timer_t));
+        if (tidlist == NULL)
+            errExit("malloc");
+
+        /* Establish handler for notification signal */
+
+        sa.sa_flags = SA_SIGINFO;
+        sa.sa_sigaction = handler;
+        sigemptyset(&amp;sa.sa_mask);
+<img alt="" border="0" id="" src="Images/getfile_002-11.png"/>    if (sigaction(TIMER_SIG, &amp;sa, NULL) == -1)
+            errExit("sigaction");
+
+        /* Create and start one timer for each command-line argument */
+
+        sev.sigev_notify = SIGEV_SIGNAL;    /* Notify via signal */
+        sev.sigev_signo = TIMER_SIG;        /* Notify using this signal */
+
+        for (j = 0; j &lt; argc - 1; j++) {
+<img alt="" border="0" id="" src="Images/getfile-38.png"/>        itimerspecFromStr(argv[j + 1], &amp;ts);
+
+            sev.sigev_value.sival_ptr = &amp;tidlist[j];
+                    /* Allows handler to get ID of this timer */
+<img alt="" border="0" id="" src="Images/getfile_005-7.png"/>        if (timer_create(CLOCK_REALTIME, &amp;sev, &amp;tidlist[j]) == -1)
+                errExit("timer_create");
+            printf("Timer ID: %ld (%s)\n", (long) tidlist[j], argv[j + 1]);
+<img alt="" border="0" id="" src="Images/getfile_007-2.png"/>        if (timer_settime(tidlist[j], 0, &amp;ts, NULL) == -1)
+                errExit("timer_settime");
+        }
+<img alt="" border="0" id="" src="Images/getfile_008.png"/>    for (;;)                            /* Wait for incoming timer signals */
+            pause();
+    }
+          <b>timers/ptmr_sigev_signal.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Each of the command-line arguments of the program in Example 23-5
+ specifies the initial value and interval for a timer. The syntax of 
+these arguments is described in the program’s “usage” message and 
+demonstrated in the shell session below. This program performs the 
+following steps:</p><ul><li><p class="docList">Establish a handler for the signal that is used for timer notifications <img alt="" border="0" id="" src="Images/getfile_002-12.png"/>.</p></li><li><p class="docList">For each command-line argument, create <img alt="" border="0" id="" src="Images/getfile_005-8.png"/> and arm <img alt="" border="0" id="" src="Images/getfile_007-3.png"/> a POSIX timer that uses the <tt>SIGEV_SIGNAL</tt> notification mechanism. The <span class="docEmphasis">itimerspecFromStr()</span> function that we use to convert <img alt="" border="0" id="" src="Images/getfile-39.png"/>the command-line arguments to <span class="docEmphasis">itimerspec</span> structures is shown in Example 23-6.</p></li><li><p class="docList">On each timer expiration, the signal specified in <span class="docEmphasis">sev.sigev_signo</span> will be delivered to the process. The handler for this signal displays the value that was supplied in <span class="docEmphasis">sev.sigev_value.sival_ptr</span> (i.e., the timer ID, <span class="docEmphasis">tidlist[j]</span>) and the overrun value for the timer <img alt="" border="0" id="" src="Images/getfile_003-12.png"/>.</p></li><li><p class="docList">Having created and armed the timers, wait for timer expirations by executing a loop that repeatedly calls <span class="docEmphasis">pause()</span><img alt="" border="0" id="" src="Images/getfile_008.png"/>.</p></li></ul><p class="docText">Example 23-6 shows the function that converts each of the command-line arguments for the program in Example 23-5 into a corresponding <span class="docEmphasis">itimerspec</span>
+ structure. The format of the string arguments interpreted by this 
+function is shown in a comment at the top of the listing (and 
+demonstrated in the shell session below).</p><h5 class="docExampleTitle" id="title-ID0E45CK">Example 23-6. Converting time-plus-interval string to an <span class="docEmphasis">itimerspec</span> value</h5><p></p><div class="box"><pre class="preFixedHeight"><b>timers/itimerspec_from_str.c</b>
+#define_POSIX_C_SOURCE 199309
+#include &lt;string.h&gt;
+#include &lt;stdlib.h&gt;
+#include "itimerspec_from_str.h"        /* Declares function defined here */
+
+/* Convert a string of the following form to an itimerspec structure:
+   "value.sec[/value.nanosec][:interval.sec[/interval.nanosec]]".
+   Optional components that are omitted cause 0 to be assigned to the
+   corresponding structure fields. */
+
+void
+itimerspecFromStr(char *str, struct itimerspec *tsp)
+{
+    char *cptr, *sptr;
+
+    cptr = strchr(str, ':');
+    if (cptr != NULL)
+        *cptr = '\0';
+
+    sptr = strchr(str, '/');
+    if (sptr != NULL)
+        *sptr = '\0';
+
+    tsp-&gt;it_value.tv_sec = atoi(str);
+    tsp-&gt;it_value.tv_nsec = (sptr != NULL) ? atoi(sptr + 1) : 0;
+
+    if (cptr == NULL) {
+        tsp-&gt;it_interval.tv_sec = 0;
+        tsp-&gt;it_interval.tv_nsec = 0;
+    } else {
+        sptr = strchr(cptr + 1, '/');
+        if (sptr != NULL)
+            *sptr = '\0';
+        tsp-&gt;it_interval.tv_sec = atoi(cptr + 1);
+        tsp-&gt;it_interval.tv_nsec = (sptr != NULL) ? atoi(sptr + 1) : 0;
+    }
+}
+     <b>timers/itimerspec_from_str.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">We demonstrate the use of the program in Example 23-5 in the following shell session, creating a single timer with an initial timer expiry of 2 seconds and an interval of 5 seconds.</p><pre class="preFixedWidth">$ <b>./ptmr_sigev_signal 2:5 </b>
+Timer ID: 134524952 (2:5)
+[15:54:56] Got signal 64                  SIGRTMAX <i> is signal 64 on this system</i>
+    *sival_ptr         = 134524952        <span class="docEmphasis">sival_ptr</span> <i> points to the variable</i> <span class="docEmphasis">tid</span>
+    timer_getoverrun() = 0
+[15:55:01] Got signal 64
+    *sival_ptr         = 134524952
+    timer_getoverrun() = 0
+<i> Type Control-Z to suspend the process</i>
+[1]+  Stopped       ./ptmr_sigev_signal 2:5
+
+					  </pre><br/>
+<p class="docText">After suspending the 
+program, we pause for a few seconds, allowing several timer expirations 
+to occur before we resume the program:</p><pre>$ <b>fg </b>
+./ptmr_sigev_signal 2:5
+[15:55:34] Got signal 64
+    *sival_ptr         = 134524952
+    timer_getoverrun() = 5
+<i> Type Control-C to kill the program</i></pre><br/>
+<p class="docText">The last line of program 
+output shows that five timer overruns occurred, meaning that six timer 
+expirations occurred since the previous signal delivery.</p><h4 class="docSection2Title" id="title-ID0EMADK">23.6.6. Timer Overruns</h4><p class="docText">Suppose that we have chosen to receive notification of timer expiration via delivery of a signal (i.e., <span class="docEmphasis">sigev_notify</span> is <tt>SIGEV_SIGNAL</tt>).
+ Suppose further that the timer expires multiple times before the 
+associated signal is caught or accepted. This could occur as the result 
+of a delay before the process is next scheduled. Alternatively, it could
+ occur because delivery of the associated signal was blocked, either 
+explicitly via <span class="docEmphasis">sigprocmask()</span>, or implicitly during the execution of the handler for the signal. How do we know that such <span class="docEmphasis">timer overruns</span> have happened?</p><p class="docText">We
+ might suppose that using a realtime signal would help solve this 
+problem, since multiple instances of a realtime signal are queued. 
+However, this approach turns out to be unworkable, because there are 
+limits on the number of realtime signals that can be queued. Therefore, 
+the POSIX.1b committee decided on a different approach: if we choose to 
+receive timer notification via a signal, then multiple instances of the 
+signal are never queued, even if we use a realtime signal. Instead, 
+after receiving the signal (either via a signal handler or by using <span class="docEmphasis">sigwaitinfo()</span>), we can fetch the <span class="docEmphasis">timer overrun count</span>,
+ which is the number of extra timer expirations that occurred between 
+the time the signal was generated and the time it was received. For 
+example, if the timer has expired three times since the last signal was 
+received, then the overrun count is 2.</p><p class="docText">After receiving a timer signal, we can obtain the timer overrun count in two ways:</p><ul><li><p class="docList">Call <span class="docEmphasis">timer_getoverrun()</span>, which we describe below. This is the SUSv3-specified way of obtaining the overrun count.</p></li><li><p class="docList">Use the value in the <span class="docEmphasis">si_overrun</span> field of the <span class="docEmphasis">siginfo_t</span> structure returned with the signal. This approach saves the overhead of the <span class="docEmphasis">timer_getoverrun()</span> system call, but is a nonportable Linux extension.</p></li></ul><p class="docText">The
+ timer overrun count is reset each time we receive the timer signal. If 
+the timer expired just once since the timer signal was handled or 
+accepted, then the overrun count will be 0 (i.e., there were no 
+overruns).</p><pre>#define _POSIX_C_SOURCE 199309
+#include &lt;time.h&gt;
+
+int <b>timer_getoverrun</b>(timer_t <span class="docEmphasis">timerid</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns timer overrun count on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">timer_getoverrun()</span> function returns the overrun count for the timer specified by its <span class="docEmphasis">timerid</span> argument.</p><p class="docText">The <span class="docEmphasis">timer_getoverrun()</span> function is one of those specified as being async-signal-safe in SUSv3 (Table 21-1, in Section 21.1.2.4), so it is safe to call it from within a signal handler.</p><h4 class="docSection2Title" id="title-ID0E3CDK">23.6.7. Notification via a Thread</h4><p class="docText">The <tt>SIGEV_THREAD</tt>
+ flag allows a program to obtain notification of timer expiration via 
+the invocation of a function in a separate thread. Understanding this 
+flag requires knowledge of POSIX threads that we present later, in Chapter 29 and Chapter 30.
+ Readers unfamiliar with POSIX threads may want to read those chapters 
+before examining the example program that we present in this section.</p><p class="docText">Example 23-7 demonstrates the use of <tt>SIGEV_THREAD</tt>. This program takes the same command-line arguments as the program in Example 23-5. The program performs the following steps:</p><ul><li><p class="docList">For each command-line argument, the program creates <img alt="" border="0" id="" src="Images/getfile_008.png"/> and arms <img alt="" border="0" id="" src="Images/getfile_006-4.png"/> a POSIX timer that uses the <tt>SIGEV_THREAD</tt> notification mechanism <img alt="" border="0" id="" src="Images/getfile-40.png"/>.</p></li><li><p class="docList">Each time this timer expires, the function specified by <span class="docEmphasis">sev.sigev_notify_function</span> <img alt="" border="0" id="" src="Images/getfile_005-9.png"/> will be invoked in a separate thread. When this function is invoked, it receives the value specified in <span class="docEmphasis">sev.sigev_value.sival_ptr</span> as an argument. We assign the address of the timer ID (<span class="docEmphasis">tidlist[j]</span>) to this field <img alt="" border="0" id="" src="Images/getfile_007-4.png"/> so that the notification function can obtain the ID of the timer that caused its invocation.</p></li><li><p class="docList">Having created and armed all of the timers, the main program enters a loop that waits for timer expirations <img alt="" border="0" id="" src="Images/getfile_004-4.png"/>. Each time through the loop, the program uses <span class="docEmphasis">pthread_cond_wait()</span> to wait for a condition variable (<span class="docEmphasis">cond</span>) to be signaled by the thread that is handling a timer notification.</p></li><li><p class="docList">The <span class="docEmphasis">threadFunc()</span> function is invoked on each timer expiration <img alt="" border="0" id="" src="Images/getfile_003-13.png"/>. After printing a message, it increments the value of the global variable <span class="docEmphasis">expireCnt</span>. To allow for the possibility of timer overruns, the value returned by <span class="docEmphasis">timer_getoverrun()</span> is also added to <span class="docEmphasis">expireCnt</span>. (We explained timer overruns in Section 23.6.6 in relation to the <tt>SIGEV_SIGNAL</tt> notification mechanism. Timer overruns can also come into play with the <tt>SIGEV_THREAD</tt>
+ mechanism, because a timer might expire multiple times before the 
+notification function is invoked.) The notification function also 
+signals the condition variable <span class="docEmphasis">cond</span> so that the main program knows to check that a timer has expired <img alt="" border="0" id="" src="Images/getfile_002-13.png"/>.</p></li></ul><p class="docText">The following shell session log demonstrates the use of the program in Example 23-7.
+ In this example, the program creates two timers: one with an initial 
+expiry of 5 seconds and an interval of 5 seconds, and the other with an 
+initial expiration of 10 seconds and an interval of 10 seconds.</p><pre class="preFixedHeight">$ <b>./ptmr_sigev_thread 5:5 10:10 </b>
+Timer ID: 134525024 (5:5)
+Timer ID: 134525080 (10:10)
+[13:06:22] Thread notify
+    timer ID=134525024
+    timer_getoverrun()=0
+main(): count = 1
+[13:06:27] Thread notify
+    timer ID=134525080
+    timer_getoverrun()=0
+main(): count = 2
+[13:06:27] Thread notify
+    timer ID=134525024
+    timer_getoverrun()=0
+main(): count = 3
+<i> Type Control-Z to suspend the program</i>
+[1]+  Stopped       ./ptmr_sigev_thread 5:5 10:10
+$ <b>fg </b>                                      <i> Resume execution</i>
+./ptmr_sigev_thread 5:5 10:10
+[13:06:45] Thread notify
+    timer ID=134525024
+    timer_getoverrun()=2                  <i> There were timer overruns</i>
+main(): count = 6
+[13:06:45] Thread notify
+    timer ID=134525080
+    timer_getoverrun()=0
+main(): count = 7
+<i> Type Control-C to kill the program</i>
+
+					  </pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EPJDK">Example 23-7. POSIX timer notification using a thread function</h5><p></p><div class="box"><pre class="preFixedHeight"><b>timers/ptmr_sigev_thread.c</b>
+    #include &lt;signal.h&gt;
+    #include &lt;time.h&gt;
+    #include &lt;pthread.h&gt;
+    #include "curr_time.h"              /* Declaration of currTime() */
+    #include "tlpi_hdr.h"
+    #include "itimerspec_from_str.h"    /* Declares itimerspecFromStr() */
+
+    static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
+    static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+    static int expireCnt = 0;           /* Number of expirations of all timers */
+
+    static void                         /* Thread notification function */
+<img alt="" border="0" id="" src="Images/getfile_003-14.png"/> threadFunc(union sigval sv)
+    {
+        timer_t *tidptr;
+        int s;
+
+        tidptr = sv.sival_ptr;
+
+        printf("[%s] Thread notify\n", currTime("%T"));
+        printf("    timer ID=%ld\n", (long) *tidptr);
+        printf("    timer_getoverrun()=%d\n", timer_getoverrun(*tidptr));
+
+        /* Increment counter variable shared with main thread and signal
+           condition variable to notify main thread of the change. */
+
+        s = pthread_mutex_lock(&amp;mtx);
+        if (s != 0)
+            errExitEN(s, "pthread_mutex_lock");
+
+        expireCnt += 1 + timer_getoverrun(*tidptr);
+
+        s = pthread_mutex_unlock(&amp;mtx);
+        if (s != 0)
+            errExitEN(s, "pthread_mutex_unlock");
+<img alt="" border="0" id="" src="Images/getfile_002-14.png"/>    s = pthread_cond_signal(&amp;cond);
+        if (s != 0)
+            errExitEN(s, "pthread_cond_signal");
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        struct sigevent sev;
+        struct itimerspec ts;
+        timer_t *tidlist;
+        int s, j;
+
+            if (argc &lt; 2)
+            usageErr("%s secs[/nsecs][:int-secs[/int-nsecs]]...\n", argv[0]);
+
+        tidlist = calloc(argc - 1, sizeof(timer_t));
+        if (tidlist == NULL)
+            errExit("malloc");
+<img alt="" border="0" id="" src="Images/getfile-41.png"/>    sev.sigev_notify = SIGEV_THREAD;            /* Notify via thread */
+<img alt="" border="0" id="" src="Images/getfile_005-10.png"/>    sev.sigev_notify_function = threadFunc;     /* Thread start function */
+        sev.sigev_notify_attributes = NULL;
+                /* Could be pointer to pthread_attr_t structure */
+
+        /* Create and start one timer for each command-line argument */
+
+        for (j = 0; j &lt; argc - 1; j++) {
+            itimerspecFromStr(argv[j + 1], &amp;ts);
+<img alt="" border="0" id="" src="Images/getfile_007-5.png"/>        sev.sigev_value.sival_ptr = &amp;tidlist[j];
+                    /* Passed as argument to threadFunc() */
+<img alt="" border="0" id="" src="Images/getfile_008.png"/>        if (timer_create(CLOCK_REALTIME, &amp;sev, &amp;tidlist[j]) == -1)
+                errExit("timer_create");
+            printf("Timer ID: %ld (%s)\n", (long) tidlist[j], argv[j + 1]);
+<img alt="" border="0" id="" src="Images/getfile_006-5.png"/>        if (timer_settime(tidlist[j], 0, &amp;ts, NULL) == -1)
+                errExit("timer_settime");
+        }
+
+        /* The main thread waits on a condition variable that is signaled
+           on each invocation of the thread notification function. We
+           print a message so that the user can see that this occurred. */
+
+        s = pthread_mutex_lock(&amp;mtx);
+        if (s != 0)
+            errExitEN(s, "pthread_mutex_lock");
+<img alt="" border="0" id="" src="Images/getfile_004-5.png"/>    for (;;) {
+            s = pthread_cond_wait(&amp;cond, &amp;mtx);
+            if (s != 0)
+                errExitEN(s, "pthread_cond_wait");
+            printf("main(): expireCnt = %d\n", expireCnt);
+        }
+    }
+
+          <b>timers/ptmr_sigev_thread.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

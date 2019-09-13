@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>48.5. Location of Shared Memory in Virtual Memory</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">48.5. Location of Shared Memory in Virtual Memory</h3><p class="docText">In Section 6.3,
+ we considered the layout of the various parts of a process in virtual 
+memory. It is useful to revisit this topic in the context of attaching 
+System V shared memory segments. If we follow the recommended approach 
+of allowing the kernel to choose where to attach a shared memory 
+segment, then (on the x86-32 architecture) the memory layout appears as 
+shown in Figure 48-2,
+ with the segment being attached in the unallocated space between the 
+upwardly growing heap and the downwardly growing stack. To allow space 
+for heap and stack growth, shared memory segments are attached starting 
+at the virtual address <tt>0x40000000</tt>. Mapped mappings (Chapter 49) and shared libraries (Chapter 41 and Chapter 42)
+ are also placed in this area. (There is some variation in the default 
+location at which shared memory mappings and memory segments are placed,
+ depending on the kernel versions and the setting of the process’s <tt>RLIMIT_STACK</tt> resource limit.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The address <tt>0x40000000</tt> is defined as the kernel constant <tt>TASK_UNMAPPED_BASE</tt>. It is possible to change this address by defining this constant with a different value and rebuilding the kernel.</p><p class="docText">A shared memory segment (or memory mapping) can be placed at an address below <tt>TASK_UNMAPPED_BASE</tt>, if we employ the unrecommended approach of explicitly specifying an address when calling <span class="docEmphasis">shmat()</span> (or <span class="docEmphasis">mmap()</span>).</p><hr noshade="noshade" size="1"/><p class="docText">Using the Linux-specific <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/maps</tt>
+ file, we can see the location of the shared memory segments and shared 
+libraries mapped by a program, as we demonstrate in the shell session 
+below.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Starting with kernel 2.6.14, Linux also provides the <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/smaps</tt>
+ file, which exposes more information about the memory consumption of 
+each of a process’s mappings. For further details, see the <span class="docEmphasis">proc(5)</span> manual page.</p><hr noshade="noshade" size="1"/><p></p><center><h5 class="docFigureTitle">Figure 48-2. Locations of shared memory, memory mappings, and shared libraries (x86-32)</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_004-25.png"/></p></center><p></p><br/><p class="docText">In the shell session below, we employ three programs that are not shown in this chapter, but are provided in the <tt>svshm</tt> subdirectory in the source code distribution for this book. These programs perform the following tasks:</p><ul><li><p class="docList">The <tt>svshm_create.c</tt>
+ program creates a shared memory segment. This program takes the same 
+command-line options as the corresponding programs that we provide for 
+message queues (Example 46-1, in Section 46.1) and semaphores, but includes an additional argument that specifies the size of the segment.</p></li><li><p class="docList">The <tt>svshm_attach.c</tt>
+ program attaches the shared memory segments identified by its 
+command-line arguments. Each of these arguments is a colon-separated 
+pair of numbers consisting of a shared memory identifier and an attach 
+address. Specifying 0 for the attach address means that the system 
+should choose the address. The program displays the address at which the
+ memory is actually attached. For informational purposes, the program 
+also displays the value of the SHMLBA constant and the process ID of the
+ process running the program.</p></li><li><p class="docList">The <tt>svshm_rm.c</tt> program deletes the shared memory segments identified by its command-line arguments.</p></li></ul><p class="docText">We begin the shell session by creating two shared memory segments (100 kB and 3200 kB in size):</p><pre>$ <b>./svshm_create -p 102400</b>
+9633796
+$ <b>./svshm_create -p 3276800</b>
+9666565
+$ <b>./svshm_create -p 102400</b>
+1015817
+$ <b>./svshm_create -p 3276800</b>
+1048586</pre><br/>
+<p class="docText">We then start a program that attaches these two segments at addresses chosen by the kernel:</p><pre>$ <b>./svshm_attach 9633796:0 9666565:0</b>
+SHMLBA = 4096 (0x1000), PID = 9903
+1: 9633796:0 ==&gt; 0xb7f0d000
+2: 9666565:0 ==&gt; 0xb7bed000
+Sleeping 5 seconds</pre><br/>
+<p class="docText">The output above shows the 
+addresses at which the segments were attached. Before the program 
+completes sleeping, we suspend it, and then examine the contents of the 
+corresponding <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/maps</tt> file:</p><pre><span class="docEmphasis">Type Control-Z to suspend program</span>
+[1]+  Stopped           ./svshm_attach 9633796:0 9666565:0
+$ <b>cat /proc/9903/maps</b></pre><br/>
+<p class="docText">The output produced by the <span class="docEmphasis">cat</span> command is shown in Example 48-4.</p><h5 class="docExampleTitle" id="title-ID0EFZCM">Example 48-4. Example of contents of <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/maps</tt></h5><p></p><div class="box"><pre>$ <b>cat /proc/9903/maps</b>
+<img alt="" border="0" id="" src="Images/getfile_005-43.png"/>
+    08048000-0804a000 r-xp 00000000 08:05 5526989  /home/mtk/svshm_attach
+    0804a000-0804b000 r--p 00001000 08:05 5526989  /home/mtk/svshm_attach
+    0804b000-0804c000 rw-p 00002000 08:05 5526989  /home/mtk/svshm_attach
+<img alt="" border="0" id="" src="Images/getfile_002-54.png"/> b7bed000-b7f0d000 rw-s 00000000 00:09 9666565  /SYSV00000000 (deleted)
+    b7f0d000-b7f26000 rw-s 00000000 00:09 9633796  /SYSV00000000 (deleted)
+    b7f26000-b7f27000 rw-p b7f26000 00:00 0
+<img alt="" border="0" id="" src="Images/getfile-96.png"/> b7f27000-b8064000 r-xp 00000000 08:06 122031   /lib/libc-2.8.so
+    b8064000-b8066000 r--p 0013d000 08:06 122031   /lib/libc-2.8.so
+    b8066000-b8067000 rw-p 0013f000 08:06 122031   /lib/libc-2.8.so
+    b8067000-b806b000 rw-p b8067000 00:00 0
+    b8082000-b8083000 rw-p b8082000 00:00 0
+<img alt="" border="0" id="" src="Images/getfile_003-52.png"/> b8083000-b809e000 r-xp 00000000 08:06 122125   /lib/ld-2.8.so
+    b809e000-b809f000 r--p 0001a000 08:06 122125   /lib/ld-2.8.so
+    b809f000-b80a0000 rw-p 0001b000 08:06 122125   /lib/ld-2.8.so
+<img alt="" border="0" id="" src="Images/getfile_006-36.png"/> bfd8a000-bfda0000 rw-p bffea000 00:00 0        [stack]
+<img alt="" border="0" id="" src="Images/getfile_007.png"/> ffffe000-fffff000 r-xp 00000000 00:00 0        [vdso]</pre><br/>
+</div><p></p><p class="docText">In the output from <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/maps</tt> shown in Example 48-4, we can see the following:</p><ul><li><p class="docList">Three lines for the main program, <span class="docEmphasis">shm_attach</span>. These correspond to the text and data segments of the program <img alt="" border="0" id="" src="Images/getfile_005-44.png"/>. The second of these lines is for a read-only page holding the string constants used by the program.</p></li><li><p class="docList">Two lines for the attached System V shared memory segments <img alt="" border="0" id="" src="Images/getfile_002-55.png"/>.</p></li><li><p class="docList">Lines corresponding to the segments for two shared libraries. One of these is the standard C library (<tt>libc</tt>-<span class="docEmphasis">version</span>.<tt>so</tt>) <img alt="" border="0" id="" src="Images/getfile-97.png"/>. The other is the dynamic linker (<tt>ld</tt>-<span class="docEmphasis">version</span>.<tt>so</tt>), which we describe in Section 41.4.3 <img alt="" border="0" id="" src="Images/getfile_003-53.png"/>.</p></li><li><p class="docList">A line labeled <tt>[stack]</tt>. This corresponds to the process stack <img alt="" border="0" id="" src="Images/getfile_006-37.png"/>.</p></li><li><p class="docList">A line containing the tag <tt>[vdso]</tt> <img alt="" border="0" id="" src="Images/getfile_007.png"/>. This is an entry for the <span class="docEmphasis">linux-gate</span> virtual dynamic shared object (DSO). This entry appears only in kernels since 2.6.12. See http://www.trilithium.com/johan/2005/08/linux-gate/ for further information about this entry.</p></li></ul><p class="docText">The following columns are shown in each line of <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/maps</tt>, in order from left to right:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">A
+ pair of hyphen-separated numbers indicating the virtual address range 
+(in hexadecimal) at which the memory segment is mapped. The second of 
+these numbers is the address of the next byte <span class="docEmphasis">after</span> the end of the segment.</p></div></li><li><div style="font-weight:normal"><p class="docList">Protection and flags for this memory segment. The first three letters indicate the protection of the segment: read (<tt>r</tt>), write (<tt>w</tt>), and execute (<tt>x</tt>). A hyphen (<tt>-</tt>)
+ in place of any of these letters indicates that the corresponding 
+protection is disabled. The final letter indicates the mapping flag for 
+the memory segment; it is either private (<tt>p</tt>) or shared (<tt>s</tt>). For an explanation of these flags, see the description of the <tt>MAP_PRIVATE</tt> and <tt>MAP_SHARED</tt> flags in Section 49.2. (A System V shared memory segment is always marked shared.)</p></div></li><li><div style="font-weight:normal"><p class="docList">The
+ hexadecimal offset (in bytes) of the segment within the corresponding 
+mapped file. The meanings of this and the following two columns will 
+become clearer when we describe the <span class="docEmphasis">mmap()</span> system call in Chapter 49. For a System V shared memory segment, the offset is always 0.</p></div></li><li><div style="font-weight:normal"><p class="docList">The device number (major and minor IDs) of the device on which the corresponding mapped file is located.</p></div></li><li><div style="font-weight:normal"><p class="docList">The i-node number of the mapped file, or, for System V shared memory segments, the identifier for the segment.</p></div></li><li><div style="font-weight:normal"><p class="docList">The
+ filename or other identifying tag associated with this memory segment. 
+For a System V shared memory segment, this consists of the string <tt>SYSV</tt> concatenated with the <span class="docEmphasis">shmget() key</span> of the segment (expressed in hexadecimal). In this example, <tt>SYSV</tt> is followed by zeros because we created the segments using the key <tt>IPC_PRIVATE</tt> (which has the value 0). The string <tt>(deleted)</tt> that appears after the <tt>SYSV</tt>
+ field for a System V shared memory segment is an artifact of the 
+implementation of shared memory segments. Such segments are created as 
+mapped files in an invisible <span class="docEmphasis">tmpfs</span> file system (Section 14.10),
+ and then later unlinked. Shared anonymous memory mappings are 
+implemented in the same manner. (We describe mapped files and shared 
+anonymous memory mappings in Chapter 49.)</p></div></li></ol></div>
+</div>
+</body>
+</html>

@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>60.3. A Concurrent TCP echo Server</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">60.3. A Concurrent TCP <span class="docEmphasis">echo</span> Server</h3><p class="docText">The TCP <span class="docEmphasis">echo</span> service also operates on port 7. The TCP <span class="docEmphasis">echo</span>
+ server accepts a connection and then loops continuously, reading all 
+transmitted data and sending it back to the client on the same socket. 
+The server continues reading until it detects end-of-file, at which 
+point it closes its socket (so that the client sees end-of-file if it is
+ still reading from its socket).</p><p class="docText">Since
+ the client may send an indefinite amount of data to the server (and 
+thus servicing the client may take an indefinite amount of time), a 
+concurrent server design is appropriate, so that multiple clients can be
+ simultaneously served. The server implementation is shown in Example 60-4. (We show an implementation of a client for this service in Section 61.2.) Note the following points about the implementation:</p><ul><li><p class="docList">The server becomes a daemon by calling the <span class="docEmphasis">becomeDaemon()</span> function shown in Section 37.2.</p></li><li><p class="docList">To shorten this program, we employ the Internet domain sockets library shown in Example 59-9 (page 1228).</p></li><li><p class="docList">Since
+ the server creates a child process for each client connection, we must 
+ensure that zombies are reaped. We do this within a <tt>SIGCHLD</tt> handler.</p></li><li><p class="docList">The main body of the server consists of a <tt>for</tt> loop that accepts a client connection and then uses <span class="docEmphasis">fork()</span> to create a child process that invokes the <span class="docEmphasis">handleRequest()</span> function to handle that client. In the meantime, the parent continues around the <tt>for</tt> loop to accept the next client connection.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In
+ a real-world application, we would probably include some code in our 
+server to place an upper limit on the number of child processes that the
+ server could create, in order to prevent an attacker from attempting a 
+remote fork bomb by using the service to create so many processes on the
+ system that it becomes unusable. We could impose this limit by adding 
+extra code in the server to count the number of children currently 
+executing (this count would be incremented after a successful <span class="docEmphasis">fork()</span> and decremented as each child was reaped in the <tt>SIGCHLD</tt>
+ handler). If the limit on the number of children were reached, we could
+ then temporarily stop accepting connections (or alternatively, accept 
+connections and then immediately close them).</p><hr noshade="noshade" size="1"/></li><li><p class="docList">After each <span class="docEmphasis">fork()</span>, the file descriptors for the listening and connected sockets are duplicated in the child (Section 24.2.1).
+ This means that both the parent and the child could communicate with 
+the client using the connected socket. However, only the child needs to 
+perform such communication, and so the parent closes the file descriptor
+ for the connected socket immediately after the <span class="docEmphasis">fork()</span>.
+ (If the parent did not do this, then the socket would never actually be
+ closed; furthermore, the parent would eventually run out of file 
+descriptors.) Since the child doesn’t accept new connections, it closes 
+its duplicate of the file descriptor for the listening socket.</p></li><li><p class="docList">Each child process terminates after handling a single client.</p></li></ul><h5 class="docExampleTitle" id="title-ID0EQZGM">Example 60-4. A concurrent server that implements the TCP <span class="docEmphasis">echo</span> service</h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/is_echo_sv.c</b>
+#include &lt;signal.h&gt;
+#include &lt;syslog.h&gt;
+#include &lt;sys/wait.h&gt;
+#include "become_daemon.h"
+#include "inet_sockets.h"       /* Declarations of inet*() socket functions */
+#include "tlpi_hdr.h"
+
+#define SERVICE "echo"          /* Name of TCP service */
+#define BUF_SIZE 4096
+
+static void             /* SIGCHLD handler to reap dead child processes */
+grimReaper(int sig)
+{
+    int savedErrno;             /* Save 'errno' in case changed here */
+
+    savedErrno = errno;
+    while (waitpid(-1, NULL, WNOHANG) &gt; 0)
+        continue;
+    errno = savedErrno;
+}
+
+/* Handle a client request: copy socket input back to socket */
+
+static void
+handleRequest(int cfd)
+{
+    char buf[BUF_SIZE];
+    ssize_t numRead;
+
+    while ((numRead = read(cfd, buf, BUF_SIZE)) &gt; 0) {
+        if (write(cfd, buf, numRead) != numRead) {
+            syslog(LOG_ERR, "write() failed: %s", strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    if (numRead == -1) {
+        syslog(LOG_ERR, "Error from read(): %s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+}
+
+int
+main(int argc, char *argv[])
+{
+    int lfd, cfd;               /* Listening and connected sockets */
+    struct sigaction sa;
+
+    if (becomeDaemon(0) == -1)
+        errExit("becomeDaemon");
+
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sa.sa_handler = grimReaper;
+    if (sigaction(SIGCHLD, &amp;sa, NULL) == -1) {
+        syslog(LOG_ERR, "Error from sigaction(): %s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    lfd = inetListen(SERVICE, 10, NULL);
+    if (lfd == -1) {
+        syslog(LOG_ERR, "Could not create server socket (%s)", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    for (;;) {
+        cfd = accept(lfd, NULL, NULL);  /* Wait for connection */
+        if (cfd == -1) {
+            syslog(LOG_ERR, "Failure in accept(): %s", strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+
+        /* Handle each client request in a new child process */
+
+        switch (fork()) {
+        case -1:
+            syslog(LOG_ERR, "Can't create child (%s)", strerror(errno));
+            close(cfd);                 /* Give up on this client */
+            break;                      /* May be temporary; try next client */
+
+        case 0:                         /* Child */
+            close(lfd);                 /* Unneeded copy of listening socket */
+            handleRequest(cfd);
+            _exit(EXIT_SUCCESS);
+
+        default:                        /* Parent */
+            close(cfd);                 /* Unneeded copy of connected socket */
+            break;                      /* Loop to accept next connection */
+        }
+    }
+}
+     <b>sockets/is_echo_sv.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

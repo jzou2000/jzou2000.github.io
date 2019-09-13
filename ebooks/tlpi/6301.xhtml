@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>63.1. Overview</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">63.1. Overview</h3><p class="docText">Most
+ of the programs that we have presented so far in this book employ an 
+I/O model under which a process performs I/O on just one file descriptor
+ at a time, and each I/O system call blocks until the data is 
+transferred. For example, when reading from a pipe, a <span class="docEmphasis">read()</span> call normally blocks if no data is currently present in the pipe, and a <span class="docEmphasis">write()</span>
+ call blocks if there is insufficient space in the pipe to hold the data
+ to be written. Similar behavior occurs when performing I/O on various 
+other types of files, including FIFOs and sockets.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Disk files are a special case. As described in Chapter 13, the kernel employs the buffer cache to speed disk I/O requests. Thus, a <span class="docEmphasis">write()</span>
+ to a disk returns as soon as the requested data has been transferred to
+ the kernel buffer cache, rather than waiting until the data is written 
+to disk (unless the <tt>O_SYNC</tt> flag was specified when opening the file). Correspondingly, a <span class="docEmphasis">read()</span>
+ transfers data from the buffer cache to a user buffer, and if the 
+required data is not in the buffer cache, then the kernel puts the 
+process to sleep while a disk read is performed.</p><hr noshade="noshade" size="1"/><p class="docText">The
+ traditional blocking I/O model is sufficient for many applications, but
+ not all. In particular, some applications need to able to do one or 
+both of the following:</p><ul><li><p class="docList">Check whether I/O is possible on a file descriptor without blocking if it is not possible.</p></li><li><p class="docList">Monitor multiple file descriptors to see if I/O is possible on any of them.</p></li></ul><p class="docText">We
+ have already encountered two techniques that can be used to partially 
+address these needs: nonblocking I/O and the use of multiple processes 
+or threads.</p><p class="docText">We described nonblocking I/O in some detail in Section 5.9 and Section 44.9. If we place a file descriptor in nonblocking mode by enabling the <tt>O_NONBLOCK</tt>
+ open file status flag, then an I/O system call that can’t be 
+immediately completed returns an error instead of blocking. Nonblocking 
+I/O can be employed with pipes, FIFOs, sockets, terminals, 
+pseudoterminals, and some other types of devices.</p><p class="docText">Nonblocking
+ I/O allows us to periodically check (“poll”) whether I/O is possible on
+ a file descriptor. For example, we can make an input file descriptor 
+nonblocking, and then periodically perform nonblocking reads. If we need
+ to monitor multiple file descriptors, then we mark them all 
+nonblocking, and poll each of them in turn. However, polling in this 
+manner is usually undesirable. If polling is done only infrequently, 
+then the latency before an application responds to an I/O event may be 
+unacceptably long; on the other hand, polling in a tight loop wastes CPU
+ time.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In this chapter, we use the word <span class="docEmphasis">poll</span> in two distinct ways. One of these is as the name of the I/O multiplexing system call, <span class="docEmphasis">poll()</span>. In the other use, we mean “performing a nonblocking check on the status of a file descriptor.”</p><hr noshade="noshade" size="1"/><p class="docText">If
+ we don’t want a process to block when performing I/O on a file 
+descriptor, we can instead create a new process to perform the I/O. The 
+parent process can then carry on to perform other tasks, while the child
+ process blocks until the I/O is complete. If we need to handle I/O on 
+multiple file descriptors, we can create one child for each descriptor. 
+The problems with this approach are expense and complexity. Creating and
+ maintaining processes places a load on the system, and, typically, the 
+child processes will need to use some form of IPC to inform the parent 
+about the status of I/O operations.</p><p class="docText">Using
+ multiple threads instead of processes is less demanding of resources, 
+but the threads will probably still need to communicate information to 
+one another about the status of I/O operations, and the programming can 
+be complex, especially if we are using thread pools to minimize the 
+number of threads used to handle large numbers of simultaneous clients. 
+(One place where threads can be particularly useful is if the 
+application needs to call a third-party library that performs blocking 
+I/O. An application can avoid blocking in this case by making the 
+library call in a separate thread.)</p><p class="docText">Because
+ of the limitations of both nonblocking I/O and the use of multiple 
+threads or processes, one of the following alternatives is often 
+preferable:</p><ul><li><p class="docList"><span class="docEmphasis">I/O multiplexing</span> allows a process to simultaneously monitor multiple file descriptors to find out whether I/O is possible on any of them. The <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> system calls perform I/O multiplexing.</p></li><li><p class="docList"><span class="docEmphasis">Signal-driven I/O</span>
+ is a technique whereby a process requests that the kernel send it a 
+signal when input is available or data can be written on a specified 
+file descriptor. The process can then carry on performing other 
+activities, and is notified when I/O becomes possible via receipt of the
+ signal. When monitoring large numbers of file descriptors, 
+signal-driven I/O provides significantly better performance than <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>.</p></li><li><p class="docList">The <span class="docEmphasis">epoll</span> API is a Linux-specific feature that first appeared in Linux 2.6. Like the I/O multiplexing APIs, the <span class="docEmphasis">epoll</span>
+ API allows a process to monitor multiple file descriptors to see if I/O
+ is possible on any of them. Like signal-driven I/O, the <span class="docEmphasis">epoll</span> API provides much better performance when monitoring large numbers of file descriptors.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In
+ the remainder of this chapter, we’ll generally frame the discussion of 
+the above techniques in terms of processes. However, these techniques 
+can also be employed in multithreaded applications.</p><hr noshade="noshade" size="1"/><p class="docText">In effect, I/O multiplexing, signal-driven I/O, and <span class="docEmphasis">epoll</span>
+ are all methods of achieving the same result—monitoring one or, 
+commonly, several file descriptors simultaneously to see if they are <span class="docEmphasis">ready</span>
+ to perform I/O (to be precise, to see whether an I/O system call could 
+be performed without blocking). The transition of a file descriptor into
+ a ready state is triggered by some type of I/O <span class="docEmphasis">event</span>,
+ such as the arrival of input, the completion of a socket connection, or
+ the availability of space in a previously full socket send buffer after
+ TCP transmits queued data to the socket peer. Monitoring multiple file 
+descriptors is useful in applications such as network servers that must 
+simultaneously monitor multiple client sockets, or applications that 
+must simultaneously monitor input from a terminal and a pipe or socket.</p><p class="docText">Note
+ that none of these techniques performs I/O. They merely tell us that a 
+file descriptor is ready. Some other system call must then be used to 
+actually perform the I/O.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">One
+ I/O model that we don’t describe in this chapter is POSIX asynchronous 
+I/O (AIO). POSIX AIO allows a process to queue an I/O operation to a 
+file and then later be notified when the operation is complete. The 
+advantage of POSIX AIO is that the initial I/O call returns immediately,
+ so that the process is not tied up waiting for data to be transferred 
+to the kernel or for the operation to complete. This allows the process 
+to perform other tasks in parallel with the I/O (which may include 
+queuing further I/O requests). For certain types of applications, POSIX 
+AIO can provide useful performance benefits. Currently, Linux provides a
+ threads-based implementation of POSIX AIO within <span class="docEmphasis">glibc</span>.
+ At the time of writing, work is ongoing toward providing an in-kernel 
+implementation of POSIX AIO, which should provide better scaling 
+performance. POSIX AIO is described in [Gallmeister, 1995], [Robbins 
+&amp; Robbins, 2003], and the <span class="docEmphasis">aio(7)</span> manual page.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0EMHIM">63.1.1. </h4><h5 class="docSection3Title" id="title-ID0EQHIM">63.1.1.1. Which technique?</h5><p class="docText">During
+ the course of this chapter, we’ll consider the reasons we may choose 
+one of these techniques rather than another. In the meantime, we 
+summarize a few points:</p><ul><li><p class="docList">The <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>
+ system calls are long-standing interfaces that have been present on 
+UNIX systems for many years. Compared to the other techniques, their 
+primary advantage is portability. Their main disadvantage is that they 
+don’t scale well when monitoring large numbers (hundreds or thousands) 
+of file descriptors.</p></li><li><p class="docList">The key advantage of the <span class="docEmphasis">epoll</span>
+ API is that it allows an application to efficiently monitor large 
+numbers of file descriptors. Its primary disadvantage is that it is a 
+Linux-specific API.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Some other UNIX implementations provide (nonstandard) mechanisms similar to <span class="docEmphasis">epoll</span>. For example, Solaris provides the special <tt>/dev/poll</tt> file (described in the Solaris <span class="docEmphasis">poll(7d)</span> manual page), and some of the BSDs provide the <span class="docEmphasis">kqueue</span> API (which provides a more general-purpose monitoring facility than <span class="docEmphasis">epoll</span>). [Stevens et al., 2004] briefly describes these two mechanisms; a longer discussion of <span class="docEmphasis">kqueue</span> can be found in [Lemon, 2001].</p><hr noshade="noshade" size="1"/></li><li><p class="docList">Like <span class="docEmphasis">epoll</span>, signal-driven I/O allows an application to efficiently monitor large numbers of file descriptors. However, <span class="docEmphasis">epoll</span> provides a number of advantages over signal-driven I/O:</p><ul><li><p class="docList">We avoid the complexities of dealing with signals.</p></li><li><p class="docList">We can specify the kind of monitoring that we want to perform (e.g., ready for reading or ready for writing).</p></li><li><p class="docList">We can select either level-triggered or edge-triggered notification (described in Section 63.1.1).</p></li></ul><p class="docList">Furthermore,
+ taking full advantage of signal-driven I/O requires the use of 
+nonportable, Linux-specific features, and if we do this, signal-driven 
+I/O is no more portable than <span class="docEmphasis">epoll</span>.</p></li></ul><p class="docText">Because, on the one hand, <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span> are more portable, while signal-driven I/O and <span class="docEmphasis">epoll</span>
+ deliver better performance, for some applications, it can be worthwhile
+ writing an abstract software layer for monitoring file descriptor 
+events. With such a layer, portable programs can employ <span class="docEmphasis">epoll</span> (or a similar API) on systems that provide it, and fall back to the use of <span class="docEmphasis">select()</span> or <span class="docEmphasis">poll()</span> on other systems.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">libevent</span>
+ library is a software layer that provides an abstraction for monitoring
+ file descriptor events. It has been ported to a number of UNIX systems.
+ As its underlying mechanism, <span class="docEmphasis">libevent</span> can (transparently) employ any of the techniques described in this chapter: <span class="docEmphasis">select()</span>, <span class="docEmphasis">poll()</span>, signal-driven I/O, or <span class="docEmphasis">epoll</span>, as well as the Solaris specific <tt>/dev/poll</tt> interface or the BSD <span class="docEmphasis">kqueue</span> interface. (Thus, <span class="docEmphasis">libevent</span> also serves as an example of how to use each of these techniques.) Written by Niels Provos, <span class="docEmphasis">libevent</span> is available at http://monkey.org/~provos/libevent/.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0E1KIM">63.1.2. Level-Triggered and Edge-Triggered Notification</h4><p class="docText">Before
+ discussing the various alternative I/O mechanisms in detail, we need to
+ distinguish two models of readiness notification for a file descriptor:</p><ul><li><p class="docList"><span class="docEmphasis">Level-triggered notification</span>: A file descriptor is considered to be ready if it is possible to perform an I/O system call without blocking.</p></li><li><p class="docList"><span class="docEmphasis">Edge-triggered notification</span>: Notification is provided if there is I/O activity (e.g., new input) on a file descriptor since it was last monitored.</p></li></ul><p class="docText">Table 63-1 summarizes the notification models employed by I/O multiplexing, signal-driven I/O, and <span class="docEmphasis">epoll</span>. The <span class="docEmphasis">epoll</span>
+ API differs from the other two I/O models in that it can employ both 
+level-triggered notification (the default) and edge-triggered 
+notification.</p><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 63-1. Use of level-triggered and edge-triggered notification models</h5></caption><colgroup span="3"><col></col><col></col><col></col></colgroup><thead><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">I/O model</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Level-triggered?</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Edge-triggered?</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top"><span class="docEmphasis">select()</span>, <span class="docEmphasis">poll()</span></td><td align="left" class="docTableCell" valign="top">•</td><td class="docTableCell"> </td></tr><tr><td align="left" class="docTableCell" valign="top">Signal-driven I/O</td><td class="docTableCell"> </td><td align="left" class="docTableCell" valign="top">•</td></tr><tr><td align="left" class="docTableCell" valign="top"><span class="docEmphasis">epoll</span></td><td align="left" class="docTableCell" valign="top">•</td><td align="left" class="docTableCell" valign="top">•</td></tr></tbody></table><p></p><br/><p class="docText">Details
+ of the differences between these two notification models will become 
+clearer during the course of the chapter. For now, we describe how the 
+choice of notification model affects the way we design a program.</p><p class="docText">When
+ we employ level-triggered notification, we can check the readiness of a
+ file descriptor at any time. This means that when we determine that a 
+file descriptor is ready (e.g., it has input available), we can perform 
+some I/O on the descriptor, and then repeat the monitoring operation to 
+check if the descriptor is still ready (e.g., it still has more input 
+available), in which case we can perform more I/O, and so on. In other 
+words, because the level-triggered model allows us to repeat the I/O 
+monitoring operation at any time, it is not necessary to perform as much
+ I/O as possible (e.g., read as many bytes as possible) on the file 
+descriptor (or even perform any I/O at all) each time we are notified 
+that a file descriptor is ready.</p><p class="docText">By
+ contrast, when we employ edge-triggered notification, we receive 
+notification only when an I/O event occurs. We don’t receive any further
+ notification until another I/O event occurs. Furthermore, when an I/O 
+event is notified for a file descriptor, we usually don’t know how much 
+I/O is possible (e.g., how many bytes are available for reading). 
+Therefore, programs that employ edge-triggered notification are usually 
+designed according to the following rules:</p><ul><li><p class="docList">After
+ notification of an I/O event, the program should—at some point—perform 
+as much I/O as possible (e.g., read as many bytes as possible) on the 
+corresponding file descriptor. If the program fails to do this, then it 
+might miss the opportunity to perform some I/O, because it would not be 
+aware of the need to operate on the file descriptor until another I/O 
+event occurred. This could lead to spurious data loss or blockages in a 
+program. We said “at some point,” because sometimes it may not be 
+desirable to perform all of the I/O immediately after we determine that 
+the file descriptor is ready. The problem is that we may starve other 
+file descriptors of attention if we perform a large amount of I/O on one
+ file descriptor. We consider this point in more detail when we describe
+ the edge-triggered notification model for <span class="docEmphasis">epoll</span> in Section 63.4.6.</p></li><li><p class="docList">If
+ the program employs a loop to perform as much I/O as possible on the 
+file descriptor, and the descriptor is marked as blocking, then 
+eventually an I/O system call will block when no more I/O is possible. 
+For this reason, each monitored file descriptor is normally placed in 
+nonblocking mode, and after notification of an I/O event, I/O operations
+ are performed repeatedly until the relevant system call (e.g., <span class="docEmphasis">read()</span> or <span class="docEmphasis">write()</span>) fails with the error <tt>EAGAIN</tt> or <tt>EWOULDBLOCK</tt>.</p></li></ul><h4 class="docSection2Title" id="title-ID0E3OIM">63.1.3. Employing Nonblocking I/O with Alternative I/O Models</h4><p class="docText">Nonblocking I/O (the <tt>O_NONBLOCK</tt>
+ flag) is often used in conjunction with the I/O models described in 
+this chapter. Some examples of why this can be useful are the following:</p><ul><li><p class="docList">As
+ explained in the previous section, nonblocking I/O is usually employed 
+in conjunction with I/O models that provide edge-triggered notification 
+of I/O events.</p></li><li><p class="docList">If
+ multiple processes (or threads) are performing I/O on the same open 
+file descriptions, then, from a particular process’s point of view, a 
+descriptor’s readiness may change between the time the descriptor was 
+notified as being ready and the time of the subsequent I/O call. 
+Consequently, a blocking I/O call could block, thus preventing the 
+process from monitoring other file descriptors. (This can occur for all 
+of the I/O models that we describe in this chapter, regardless of 
+whether they employ level-triggered or edge-triggered notification.)</p></li><li><p class="docList">Even after a level-triggered API such as <span class="docEmphasis">select()</span> or <span class="docEmphasis">poll()</span>
+ informs us that a file descriptor for a stream socket is ready for 
+writing, if we write a large enough block of data in a single <span class="docEmphasis">write()</span> or <span class="docEmphasis">send()</span>, then the call will nevertheless block.</p></li><li><p class="docList">In rare cases, level-triggered APIs such as <span class="docEmphasis">select()</span> and <span class="docEmphasis">poll()</span>
+ can return spurious readiness notifications—they can falsely inform us 
+that a file descriptor is ready. This could be caused by a kernel bug or
+ be expected behavior in an uncommon scenario.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Section
+ 16.6 of [Stevens et al., 2004] describes one example of spurious 
+readiness notifications on BSD systems for a listening socket. If a 
+client connects to a server’s listening socket and then resets the 
+connection, a <span class="docEmphasis">select()</span> performed by the server between these two events will indicate the listening socket as being readable, but a subsequent <span class="docEmphasis">accept()</span> that is performed after the client’s reset will block.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

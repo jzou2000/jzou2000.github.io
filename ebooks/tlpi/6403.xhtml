@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>64.3. Opening a Master: ptyMasterOpen()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">64.3. Opening a Master: <span class="docEmphasis">ptyMasterOpen()</span></h3><p class="docText">We now present a function, <span class="docEmphasis">ptyMasterOpen()</span>,
+ that employs the functions described in the previous sections to open a
+ pseudoterminal master and obtain the name of the corresponding 
+pseudoterminal slave. Our reasons for providing such a function are 
+twofold:</p><ul><li><p class="docList">Most programs perform these steps in exactly the same way, so it is convenient to encapsulate them in a single function.</p></li><li><p class="docList">Our <span class="docEmphasis">ptyMasterOpen()</span>
+ function hides all of the details that are specific to UNIX 98 
+pseudoterminals. In Section 64.8, we present a reimplementation of this 
+function that uses BSD-style pseudoterminals. All of the code that we 
+present in the remainder of this chapter can work with either of these 
+implementations.</p></li></ul><pre>#include "pty_master_open.h"
+
+int <b>ptyMasterOpen</b>(char *<span class="docEmphasis">slaveName</span>, size_t <span class="docEmphasis">snLen</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns file descriptor on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">ptyMasterOpen()</span> function opens an unused pseudoterminal master, calls <span class="docEmphasis">grantpt()</span> and <span class="docEmphasis">unlockpt()</span> on it, and copies the name of the corresponding pseudoterminal slave into the buffer pointed to by <span class="docEmphasis">slaveName</span>. The caller must specify the amount of space available in this buffer in the argument <span class="docEmphasis">snLen</span>. We show the implementation of this function in Example 64-1.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">It would be equally possible to omit the use of the <span class="docEmphasis">slaveName</span> and <span class="docEmphasis">snLen</span> arguments, and have the caller of <span class="docEmphasis">ptyMasterOpen()</span> call <span class="docEmphasis">ptsname()</span> directly in order to obtain the name of the pseudoterminal slave. However, we employ the <span class="docEmphasis">slaveName</span> and <span class="docEmphasis">snLen</span> arguments because BSD pseudoterminals don’t provide an equivalent of the <span class="docEmphasis">ptsname()</span> function, and our implementation of the equivalent function for BSD-style pseudoterminals (Example 64-4) encapsulates the BSD technique for obtaining the name of the slave.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0EQ5IM">Example 64-1. Implementation of <span class="docEmphasis">ptyMasterOpen()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>pty/pty_master_open.c</b>
+#define _XOPEN_SOURCE 600
+#include &lt;stdlib.h&gt;
+#include &lt;fcntl.h&gt;
+#include "pty_master_open.h"            /* Declares ptyMasterOpen() */
+#include "tlpi_hdr.h"
+
+int
+ptyMasterOpen(char *slaveName, size_t snLen)
+{
+    int masterFd, savedErrno;
+    char *p;
+
+    masterFd = posix_openpt(O_RDWR | O_NOCTTY); /* Open pty master */
+    if (masterFd == -1)
+        return -1;
+
+    if (grantpt(masterFd) == -1) {              /* Grant access to slave pty */
+        savedErrno = errno;
+        close(masterFd);                        /* Might change 'errno' */
+        errno = savedErrno;
+        return -1;
+    }
+
+    if (unlockpt(masterFd) == -1) {             /* Unlock slave pty */
+        savedErrno = errno;
+        close(masterFd);                        /* Might change 'errno' */
+        errno = savedErrno;
+        return -1;
+    }
+
+    p = ptsname(masterFd);                      /* Get slave pty name */
+    if (p == NULL) {
+        savedErrno = errno;
+        close(masterFd);                        /* Might change 'errno' */
+        errno = savedErrno;
+        return -1;
+    }
+
+    if (strlen(p) &lt; snLen) {
+        strncpy(slaveName, p, snLen);
+    } else {                    /* Return an error if buffer too small */
+        close(masterFd);
+        errno = EOVERFLOW;
+        return -1;
+    }
+
+    return masterFd;
+}
+      <b>pty/pty_master_open.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

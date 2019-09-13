@@ -1,0 +1,554 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 13. Bits and Bytes</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 13. Bits and Bytes"><div class="titlepage"><div><h1><span class="partLabel">13</span> Bits and Bytes</h1></div></div><p id="N12ADC" style="text-indent: 0">
+Lua handles binary data similarly to text.
+A string in Lua can contain any bytes,
+and almost all library functions that handle strings
+can handle arbitrary bytes.
+We can even do <a class="indexterm" id="N12ADE"/>pattern matching on <a class="indexterm" id="N12AE2"/>binary data.
+On top of that,
+Lua 5.3 introduced extra facilities to
+manipulate binary data:
+besides integer numbers,
+it brought bitwise operators and functions to
+pack and unpack binary data.
+In this chapter,
+we will cover these and other facilities for handling
+binary data in Lua.
+</p><div class="sect1" title="Bitwise Operators"><div class="titlepage"><div><div><h2 class="title"><a id="sc_bitwise"/>Bitwise Operators</h2></div></div></div><p id="N12AEA" style="text-indent: 0">
+Starting with version 5.3,
+Lua offers a standard set of <a class="indexterm" id="N12AEC"></a>bitwise operators on numbers.
+Unlike arithmetic operations,
+bitwise operators only work on integer values.
+The bitwise operators are
+<code class="literal">&amp;</code> (bitwise AND),<a class="indexterm" id="N12AF3"></a>
+<code class="literal">|</code> (bitwise OR),<a class="indexterm" id="N12AFA"></a>
+<code class="literal">~</code> (bitwise exclusive-OR),<a class="indexterm" id="N12B01"></a>
+<code class="literal">&gt;&gt;</code> (logical <a class="indexterm" id="N12B08"></a>right shift),<a class="indexterm" id="N12B0C"></a>
+<code class="literal">&lt;&lt;</code> (<a class="indexterm" id="N12B13"></a>left shift),
+and the unary <code class="literal">~</code> (bitwise NOT).
+(Note that, in several languages,
+the exclusive-OR operator is denoted by <code class="literal">^</code>.
+In Lua, <code class="literal">^</code> means exponentiation.)
+</p><pre class="programlisting" id="N12B20">      &gt; string.format("%x", 0xff &amp; 0xabcd)    --&gt; cd
+      &gt; string.format("%x", 0xff | 0xabcd)    --&gt; abff
+      &gt; string.format("%x", 0xaaaa ~ -1)      --&gt; ffffffffffff5555
+      &gt; string.format("%x", ~0)               --&gt; ffffffffffffffff
+</pre><p style="text-indent: 0">
+(Several examples in this chapter
+will use <a class="indexterm" id="N12B23"></a><code class="function">string.format</code> to show results in hexadecimal.)
+</p><p id="N12B2B" style="text-indent: 0">
+All bitwise operators work on all bits of integers.
+In Standard Lua,
+that means 64 bits.
+That can be a problem when implementing
+algorithms that assume 32-bit integers
+(e.g., the cryptographic hash SHA-2).
+However, it is not difficult to perform 32-bit integer manipulation.
+Except for the right-shift operation,
+all bitwise operations on 64 bits
+agree with the same operations on 32 bits,
+if we simply ignore the higher half bits.
+The same is true for addition, subtraction,
+and multiplication.
+So, all we have to do to operate on 32-bit integers
+is to erase the higher 32 bits of an integer
+before a right shift.
+(We seldom do divisions on that kind of computations.)
+</p><p id="N12B2D" style="text-indent: 0">
+Both shift operators fill with zeros the vacant bits.
+This is usually called <a class="indexterm" id="N12B2F"/>logical shifts.
+Lua does not offer an <a class="indexterm" id="N12B33"/>arithmetic right shift,
+which fills vacant bits with the signal bit.
+We can perform the equivalent to arithmetic shifts with
+a floor division by an appropriate power of two.
+(For instance, <code class="literal">x // 16</code> is the same as an arithmetic
+shift by four.)
+</p><p id="N12B3A" style="text-indent: 0">
+Negative displacements shift in the other direction,
+that is, <code class="literal">a &gt;&gt; n</code> is the same as <code class="literal">a &lt;&lt; -n</code>:
+</p><pre class="programlisting" id="N12B42">      &gt; string.format("%x", 0xff &lt;&lt; 12)    --&gt; ff000
+      &gt; string.format("%x", 0xff &gt;&gt; -12)   --&gt; ff000
+</pre><p style="text-indent: 0">
+If the displacement is equal to or larger than
+the number of bits in the integer representation
+(64 in Standard Lua, 32 in Small Lua),
+the result is zero,
+as all bits are shifted out of the result:
+</p><pre class="programlisting" id="N12B45">      &gt; string.format("%x", -1 &lt;&lt; 80)    --&gt; 0
+</pre><p style="text-indent: 0">
+</p></div><div class="sect1" title="Unsigned Integers"><div class="titlepage"><div><div><h2 class="title"><a id="L135"/>Unsigned Integers</h2></div></div></div><p id="N12B4C" style="text-indent: 0">
+The representation of integers uses one bit to store the signal.
+Therefore, the maximum integer that we can represent with 64-bit integers
+is <em>2<sup>63</sup> - 1</em>, instead of <em>2<sup>64</sup> - 1</em>.
+Usually, this difference is irrelevant,
+as <em>2<sup>63</sup> - 1</em> is quite large already.
+However, sometimes we cannot waste a bit for the signal,
+because we are either handling external data with <a class="indexterm" id="N12B60"/>unsigned integers
+or implementing some algorithm that needs integers with all their 64 bits.
+Moreover,
+in Small Lua the difference can be quite significant.
+For instance,
+if we use a 32-bit signed integer as a position in a file,
+we are limited to 2 GB files;
+an unsigned integer doubles that limit.
+</p><p id="N12B64" style="text-indent: 0">
+Lua does not offer explicit support for <a class="indexterm" id="N12B66"/>unsigned integers.
+Nevertheless,
+with some care,
+it is not difficult to handle unsigned integers in Lua,
+as we will see now.
+</p><p id="N12B6A" style="text-indent: 0">
+We can write constants larger than <em>2<sup>63</sup> - 1</em> directly,
+despite appearances:
+</p><pre class="programlisting" id="N12B72">      &gt; x = 13835058055282163712         -- 3 &lt;&lt; 62
+      &gt; x                                --&gt; -4611686018427387904
+</pre><p style="text-indent: 0">
+The problem here is not the constant,
+but the way Lua prints it:
+the standard way to print numbers interprets them as signed integers.
+We can use the <code class="literal">%u</code> or <code class="literal">%x</code> options in <a class="indexterm" id="N12B7B"></a><code class="function">string.format</code>
+to see integers as unsigned:
+</p><pre class="programlisting" id="N12B83">      &gt; string.format("%u", x)           --&gt; 13835058055282163712
+      &gt; string.format("0x%X", x)         --&gt; 0xC000000000000000
+</pre><p style="text-indent: 0">
+</p><p id="N12B86" style="text-indent: 0">
+Due to the way signed integers are represented
+(<a class="indexterm" id="N12B88"></a>two’s complement),
+the operations of addition, subtraction, and multiplication
+work the same way for signed and unsigned integers:
+</p><pre class="programlisting" id="N12B8C">      &gt; string.format("%u", x)             --&gt; 13835058055282163712
+      &gt; string.format("%u", x + 1)         --&gt; 13835058055282163713
+      &gt; string.format("%u", x - 1)         --&gt; 13835058055282163711
+</pre><p style="text-indent: 0">
+(With such a large value,
+multiplying <code class="literal">x</code> even by two would overflow,
+so we did not include that operation in the example.)
+</p><p id="N12B92" style="text-indent: 0">
+Order operators work differently for signed and <a class="indexterm" id="N12B94"></a>unsigned integers.
+The problem appears when we compare two integers with a difference
+in the higher bit.
+For signed integers,
+the integer with that bit set is the smaller,
+because it represents a negative number:
+</p><pre class="programlisting" id="N12B98">      &gt; 0x7fffffffffffffff &lt; 0x8000000000000000    --&gt; false
+</pre><p style="text-indent: 0">
+This result is clearly incorrect if we regard
+both integers as unsigned.
+So, we need a different operation to compare unsigned integers.
+Lua 5.3 provides <a class="indexterm" id="N12B9B"></a><code class="function">math.ult</code> (<a class="indexterm" id="N12BA3"></a><em>unsigned less than</em>) for
+that need:
+</p><pre class="programlisting" id="N12BA9">      &gt; math.ult(0x7fffffffffffffff, 0x8000000000000000)   --&gt; true
+</pre><p style="text-indent: 0">
+Another way to do the comparison is to flip the signal bit of
+both operands before doing a signed comparison:
+</p><pre class="programlisting" id="N12BAC">      &gt; mask = 0x8000000000000000
+      &gt; (0x7fffffffffffffff ~ mask) &lt; (0x8000000000000000 ~ mask)
+        --&gt; true
+</pre><p style="text-indent: 0">
+</p><p id="N12BAF" style="text-indent: 0">
+Unsigned division is also different from its signed version.
+<a class="xref" href="ch13.html#udiv" title="Figure 13.1. Unsigned division">Figure 13.1, “Unsigned division”</a> shows an algorithm for unsigned division.
+</p><div class="figure-float"><div class="figure"><a id="udiv"/><p class="title" style="text-indent: 0"><strong>Figure 13.1. Unsigned division</strong></p><div class="figure-contents"><pre class="programlisting" id="N12BB9">      function udiv (n, d)
+        if d &lt; 0 then
+          if math.ult(n, d) then return 0
+          else return 1
+          end
+        end
+        local q = ((n &gt;&gt; 1) // d) &lt;&lt; 1
+        local r = n - q * d
+        if not math.ult(r, d) then q = q + 1 end
+        return q
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+The first test (<code class="literal">d &lt; 0</code>) is equivalent to testing whether <code class="literal">d</code>
+is larger than <em>2<sup>63</sup></em>.
+In that case, the quotient can only be 1
+(if <code class="literal">n</code> is equal to or larger than <code class="literal">d</code>)
+or 0.
+Otherwise,
+we do the equivalent of dividing the dividend by two,
+then dividing the result by the divisor,
+and then multiplying the result by two.
+The right shift is equivalent to an unsigned division by two;
+the result will be a non-negative signed integer.
+The subsequent left shift corrects the quotient,
+undoing this previous division.
+</p><p id="N12BCD" style="text-indent: 0">
+In general, <code class="literal">floor(floor(n / 2) / d) * 2</code>
+(the computation done by the algorithm)
+is not equal to <code class="literal">floor(((n / 2) / d) * 2)</code>
+(the correct result).
+However, it is not difficult to prove that the difference is at most one.
+So, the algorithm computes the rest of the division
+(in the variable <code class="literal">r</code>)
+and checks whether it is greater than the divisor:
+if so, it corrects the quotient (adding one to it)
+and it is done.
+</p><p id="N12BD8" style="text-indent: 0">
+Converting an <a class="indexterm" id="N12BDA"></a>unsigned integer to/from a float needs some adjustments.
+To convert an unsigned integer to a float,
+we can convert it as a signed integer and correct the result
+with a modulo operator:
+</p><pre class="programlisting" id="N12BDE">      &gt; u = 11529215046068469760          -- an example
+      &gt; f = (u + 0.0) % 2^64
+      &gt; string.format("%.0f", f)          --&gt; 11529215046068469760
+</pre><p style="text-indent: 0">
+The value of <code class="literal">u + 0.0</code> is -6917529027641081856,
+because the standard conversion sees <code class="literal">u</code> as a signed integer.
+The modulo operation brings the value back
+to the range of unsigned integers.
+(In real code we do not need the addition,
+because the modulo with a float would do the conversion anyway.)
+</p><p id="N12BE7" style="text-indent: 0">
+To convert from a float to an <a class="indexterm" id="N12BE9"></a>unsigned integer,
+we can use the following code:
+</p><pre class="programlisting" id="N12BED">      &gt; f = 0xA000000000000000.0             -- an example
+      &gt; u = math.tointeger(((f + 2^63) % 2^64) - 2^63)
+      &gt; string.format("%x", u)               --&gt; a000000000000000
+</pre><p style="text-indent: 0">
+The addition transforms a value greater than <em>2<sup>63</sup></em>
+in a value greater than <em>2<sup>64</sup></em>.
+The modulo operator then projects this value
+to the range <em>[0,2<sup>63</sup>)</em>,
+and the subtraction makes it a <span class="quote">“<span class="quote">negative</span>”</span> value
+(that is, a value with the highest bit set).
+For a value smaller than <em>2<sup>63</sup></em>,
+the addition keeps it smaller than <em>2<sup>64</sup></em>,
+the modulo operator does not affect it,
+and the subtraction restores its original value.
+</p></div><div class="sect1" title="Packing and Unpacking Binary Data"><div class="titlepage"><div><div><h2 class="title"><a id="L136"/>Packing and Unpacking Binary Data</h2></div></div></div><p id="N12C11" style="text-indent: 0">
+Lua 5.3 also introduced functions for converting between
+binary data and basic values (numbers and strings).
+The function <a class="indexterm" id="N12C13"/><code class="function">string.pack</code> <span class="quote">“<span class="quote">packs</span>”</span> values into a binary string;
+<a class="indexterm" id="N12C1E"/><code class="function">string.unpack</code> extracts those values from the string.
+</p><p id="N12C26" style="text-indent: 0">
+Both <a class="indexterm" id="N12C28"></a><code class="function">string.pack</code> and <a class="indexterm" id="N12C30"></a><code class="function">string.unpack</code> get
+as their first argument a format string,
+which describes how the data is packed.
+Each letter in this string describes how to pack/unpack one value;
+see the following example:
+</p><pre class="programlisting" id="N12C38">      &gt; s = string.pack("iii", 3, -27, 450)
+      &gt; #s                             --&gt; 12
+      &gt; string.unpack("iii", s)        --&gt; 3   -27   450   13
+</pre><p style="text-indent: 0">
+This call to <a class="indexterm" id="N12C3B"></a><code class="function">string.pack</code> creates a string with the
+binary codes of three integers (according to the description <code class="literal">"iii"</code>),
+each encoding its corresponding argument.
+The string length will be three times the native size of an integer
+(3 times 4 bytes in my machine).
+The call to <a class="indexterm" id="N12C46"></a><code class="function">string.unpack</code> decodes three integers
+(again according to <code class="literal">"iii"</code>) from the given string and
+returns the decoded values.
+</p><p id="N12C51" style="text-indent: 0">
+The function <a class="indexterm" id="N12C53"></a><code class="function">string.unpack</code> also returns the position in the string
+after the last item read, to simplify iterations.
+(This explains the 13 in the results of the last example.)
+Accordingly,
+it accepts an optional third argument,
+which tells where to start reading.
+For instance, the next example prints all
+strings packed inside a given string:
+</p><pre class="programlisting" id="N12C5B">      s = "hello\0Lua\0world\0"
+      local i = 1
+      while i &lt;= #s do
+        local res
+        res, i = string.unpack("z", s, i)
+        print(res)
+      end
+        --&gt; hello
+        --&gt; Lua
+        --&gt; world
+</pre><p style="text-indent: 0">
+As we will see, the <code class="literal">z</code> option means a zero-terminated string,
+so that the call to <code class="literal">unpack</code> extracts the string
+at position <code class="literal">i</code> from <code class="literal">s</code> and returns that string plus the
+next position for the loop.
+</p><p id="N12C6A" style="text-indent: 0">
+There are several options for coding an integer,
+each corresponding to a native integer size:
+<code class="literal">b</code> (<code class="literal">char</code>), <code class="literal">h</code> (<code class="literal">short</code>),
+<code class="literal">i</code> (<code class="literal">int</code>), and <code class="literal">l</code> (<code class="literal">long</code>);
+the option <code class="literal">j</code> uses the size of a Lua integer.
+To use a fixed, machine-independent size,
+we can suffix the <code class="literal">i</code> option with a number from one to 16.
+For instance, <code class="literal">i7</code> will produce seven-byte integers.
+All sizes check for overflows:
+</p><pre class="programlisting" id="N12C8D">      &gt; x = string.pack("i7", 1 &lt;&lt; 54)
+      &gt; string.unpack("i7", x)             --&gt; 18014398509481984   8
+      &gt; x = string.pack("i7", -(1 &lt;&lt; 54))
+      &gt; string.unpack("i7", x)             --&gt; -18014398509481984  8
+      &gt; x = string.pack("i7", 1 &lt;&lt; 55)
+      stdin:1: bad argument #2 to 'pack' (integer overflow)
+</pre><p style="text-indent: 0">
+</p><p id="N12C90" style="text-indent: 0">
+We can pack and unpack integers wider than native Lua integers but,
+when unpacking, their actual values must fit into Lua integers:
+</p><pre class="programlisting" id="N12C92">      &gt; x = string.pack("i12", 2^61)
+      &gt; string.unpack("i12", x)      --&gt; 2305843009213693952    13
+      &gt; x = "aaaaaaaaaaaa"           -- fake a large 12-byte number
+      &gt; string.unpack("i12", x)
+      stdin:1: 12-byte integer does not fit into Lua Integer
+</pre><p style="text-indent: 0">
+</p><p id="N12C95" style="text-indent: 0">
+Each integer option has an upper-case version
+corresponding to an unsigned integer of the same size:
+</p><pre class="programlisting" id="N12C97">      &gt; s = "\xFF"
+      &gt; string.unpack("b", s)       --&gt; -1    2
+      &gt; string.unpack("B", s)       --&gt; 255   2
+</pre><p style="text-indent: 0">
+Moreover, unsigned integers have an extra option
+<code class="literal">T</code> for <a class="indexterm" id="N12C9D"></a><code class="literal">size_t</code>.
+(The <code class="literal">size_t</code> type in ISO C is an unsigned integer
+larger enough to hold the size of any object.)
+</p><p id="N12CA6" style="text-indent: 0">
+We can pack strings in three representations:
+zero-terminated strings,
+fixed-length strings,
+and strings with explicit length.
+Zero-terminated strings use the <code class="literal">z</code> option.
+For fixed-length strings,
+we use the option <code class="literal">c<em class="replaceable"><code>n</code></em></code>,
+where <code class="literal">n</code> is the number of bytes in the packed string.
+The last option for strings stores the string
+preceded by its length.
+In that case, the option has the format <code class="literal">s<code class="literal">n</code></code>,
+where <code class="literal">n</code> is the size of the unsigned integer used
+to store the length.
+For instance, the option <code class="literal">s1</code> stores the string length in one byte:
+</p><pre class="programlisting" id="N12CBE">      s = string.pack("s1", "hello")
+      for i = 1, #s do print((string.unpack("B", s, i))) end
+        --&gt; 5                           (length)
+        --&gt; 104                         ('h')
+        --&gt; 101                         ('e')
+        --&gt; 108                         ('l')
+        --&gt; 108                         ('l')
+        --&gt; 111                         ('o')
+</pre><p style="text-indent: 0">
+Lua raises an error if the length does not fit into the given size.
+We can also use a pure <code class="literal">s</code> as the option;
+in that case, the length is stored as a <code class="literal">size_t</code>,
+which is large enough to hold the length of any string.
+(In 64-bit machines,
+<code class="literal">size_t</code> usually is an eight-byte unsigned integer,
+which may be a waste of space for small strings.)
+</p><p id="N12CCA" style="text-indent: 0">
+For floating-point numbers,
+there are three options:
+<code class="literal">f</code> for single precision,
+<code class="literal">d</code> for double precision,
+and <code class="literal">n</code> for a Lua float.
+</p><p id="N12CD5" style="text-indent: 0">
+The format string also has options to control the <a class="indexterm" id="N12CD7"></a>endianess
+and the <a class="indexterm" id="N12CDB"></a>alignment of the binary data.
+By default,
+a format uses the machine’s native <a class="indexterm" id="N12CDF"></a>endianess.
+The <code class="literal">&gt;</code> option turns all subsequent encodings
+in that format to big endian,
+or <a class="indexterm" id="N12CE6"></a><em>network byte order</em>:
+</p><pre class="programlisting" id="N12CEC">      s = string.pack("&gt;i4", 1000000)
+      for i = 1, #s do print((string.unpack("B", s, i))) end
+        --&gt; 0
+        --&gt; 15
+        --&gt; 66
+        --&gt; 64
+</pre><p style="text-indent: 0">
+The <code class="literal">&lt;</code> option turns to little endian:
+</p><pre class="programlisting" id="N12CF2">      s = string.pack("&lt;i2 i2", 500, 24)
+      for i = 1, #s do print((string.unpack("B", s, i))) end
+        --&gt; 244
+        --&gt; 1
+        --&gt; 24
+        --&gt; 0
+</pre><p style="text-indent: 0">
+Finally, the <code class="literal">=</code> option turns back to the default
+machine’s native <a class="indexterm" id="N12CF8"></a>endianess.
+</p><p id="N12CFC" style="text-indent: 0">
+For <a class="indexterm" id="N12CFE"/>alignment,
+the <code class="literal">!<em class="replaceable"><code>n</code></em></code> option forces data to align at indices
+that are multiples of <code class="literal">n</code>.
+More specifically,
+if the item is smaller than <code class="literal">n</code>,
+it is aligned at its own size;
+otherwise, it is aligned at <code class="literal">n</code>.
+For instance, suppose we start the format string with <code class="literal">!4</code>.
+Then,
+one-byte integers will be written in indices multiple of one
+(that is, any index),
+two-byte integers will be written in indices multiple of two,
+and four-byte or larger integers
+will be written in indices multiple of four.
+The <code class="literal">!</code> option (without a number) sets the <a class="indexterm" id="N12D16"/>alignment to the
+machine’s native alignment.
+</p><p id="N12D1A" style="text-indent: 0">
+The function <a class="indexterm" id="N12D1C"/><code class="function">string.pack</code> does the <a class="indexterm" id="N12D24"/>alignment by adding zeros to
+the resulting string until the index has a proper value.
+The function <a class="indexterm" id="N12D28"/><code class="function">string.unpack</code> simply skips the padding when
+reading the string.
+Alignment only works for powers of two:
+if we set the <a class="indexterm" id="N12D30"/>alignment to four
+and try to manipulate a three-byte integer,
+Lua will raise an error.
+</p><p id="N12D34" style="text-indent: 0">
+Any format string works as if prefixed by <code class="literal">"=!1"</code>,
+which means native <a class="indexterm" id="N12D39"/>endianess and
+no <a class="indexterm" id="N12D3D"/>alignment (as every index is a multiple of one).
+We can change the endianess and the alignment at any point
+during the translation.
+</p><p id="N12D41" style="text-indent: 0">
+If needed,
+we can add padding manually.
+The option <code class="literal">x</code> means one byte of padding;
+<a class="indexterm" id="N12D46"/><code class="function">string.pack</code> adds a zero byte to the resulting string;
+<a class="indexterm" id="N12D4E"/><code class="function">string.unpack</code> skips one byte from the subject string.
+</p></div><div class="sect1" title="Binary files"><div class="titlepage"><div><div><h2 class="title"><a id="L137"/>Binary files</h2></div></div></div><p id="N12D5A" style="text-indent: 0">
+The functions <a class="indexterm" id="N12D5C"/><code class="function">io.input</code> and <a class="indexterm" id="N12D64"/><code class="function">io.output</code>
+always open a file in <a class="indexterm" id="N12D6C"/><em>text mode</em>.
+In <a class="indexterm" id="N12D72"/>POSIX,
+there is no difference between binary files and text files.
+In some systems like <a class="indexterm" id="N12D76"/>Windows, however,
+we must open <a class="indexterm" id="N12D7A"/>binary files in a special way,
+using the letter <code class="literal">b</code> in the mode string of <a class="indexterm" id="N12D81"/><code class="function">io.open</code>.
+</p><p id="N12D89" style="text-indent: 0">
+Typically,
+we read <a class="indexterm" id="N12D8B"></a>binary data either with the <code class="literal">"a"</code> pattern,
+that reads the whole file, or with the pattern <em class="replaceable"><code>n</code></em>,
+that reads <em class="replaceable"><code>n</code></em> bytes.
+(Lines make no sense in a binary file.)
+As a simple example,
+the following program converts a text file from
+<a class="indexterm" id="N12D98"></a>Windows format to <a class="indexterm" id="N12D9C"></a>POSIX format
+—that is, it translates sequences of
+carriage return–newlines to newlines:
+</p><pre class="programlisting" id="N12DA0">      local inp = assert(io.open(arg[1], "rb"))
+      local out = assert(io.open(arg[2], "wb"))
+      
+      local data = inp:read("a")
+      data = string.gsub(data, "\r\n", "\n")
+      out:write(data)
+      
+      assert(out:close())
+</pre><p style="text-indent: 0">
+It cannot use the standard I/O streams (<code class="literal">stdin</code>/<code class="literal">stdout</code>),
+because these streams are open in text mode.
+Instead, it assumes that the names of the input file and the output
+file are arguments to the program.
+We can call this program with the following command line:
+</p><pre class="programlisting" id="N12DA9">      &gt; lua prog.lua file.dos file.unix
+</pre><p style="text-indent: 0">
+</p><p id="N12DAC" style="text-indent: 0">
+As another example, the following program prints all strings
+found in a binary file:
+</p><pre class="programlisting" id="N12DAE">      local f = assert(io.open(arg[1], "rb"))
+      local data = f:read("a")
+      local validchars = "[%g%s]"
+      local pattern = "(" .. string.rep(validchars, 6) .. "+)\0"
+      for w in string.gmatch(data, pattern) do
+        print(w)
+      end
+</pre><p style="text-indent: 0">
+The program assumes that a string is any zero-terminated
+sequence of six or more valid characters,
+where a valid character is any character accepted by the pattern
+<code class="literal">validchars</code>.
+In our example,
+this pattern comprises the printable characters.
+We use <a class="indexterm" id="N12DB4"></a><code class="function">string.rep</code> and concatenation to create a
+pattern that matches all sequences of
+six or more <code class="literal">validchars</code> ended by a zero.
+The parentheses in the pattern capture the string
+without the zero.
+</p><p id="N12DBF" style="text-indent: 0">
+Our last example is a program to make a <a class="indexterm" id="N12DC1"></a>dump of a binary file,
+showing its contents in hexadecimal.
+<a class="xref" href="ch13.html#dumpingdump" title="Figure 13.2. Dumping the dump program">Figure 13.2, “Dumping the <code class="literal">dump</code> program”</a> shows the result of applying
+this program to itself on a <a class="indexterm" id="N12DC8"></a>POSIX machine.
+</p><div class="figure-float"><div class="figure"><a id="dumpingdump"/><p class="title" style="text-indent: 0"><strong>Figure 13.2. Dumping the <code class="literal">dump</code> program</strong></p><div class="figure-contents"><pre class="programlisting" id="N12DD4">      6C 6F 63 61 6C 20 66 20 3D 20 61 73 73 65 72 74  local f = assert
+      28 69 6F 2E 6F 70 65 6E 28 61 72 67 5B 31 5D 2C  (io.open(arg[1],
+      20 22 72 62 22 29 29 0A 6C 6F 63 61 6C 20 62 6C   "rb")).local bl
+      6F 63 6B 73 69 7A 65 20 3D 20 31 36 0A 66 6F 72  ocksize = 16.for
+      20 62 79 74 65 73 20 69 6E 20 66 3A 6C 69 6E 65   bytes in f:line
+        ...
+      25 63 22 2C 20 22 2E 22 29 0A 20 20 69 6F 2E 77  %c", ".").  io.w
+      72 69 74 65 28 22 20 22 2C 20 62 79 74 65 73 2C  rite(" ", bytes,
+      20 22 5C 6E 22 29 0A 65 6E 64 0A 0A               "\n").end..
+</pre></div></div></div><p style="text-indent: 0">
+
+The complete program is here:
+</p><pre class="programlisting" id="N12DD7">      local f = assert(io.open(arg[1], "rb"))
+      local blocksize = 16
+      for bytes in f:lines(blocksize) do
+        for i = 1, #bytes do
+          local b = string.unpack("B", bytes, i)
+          io.write(string.format("%02X ", b))
+        end
+        io.write(string.rep("   ", blocksize - #bytes))
+        bytes = string.gsub(bytes, "%c", ".")
+        io.write(" ", bytes, "\n")
+      end
+</pre><p style="text-indent: 0">
+Again, the first program argument is the input file name;
+the output is regular text,
+so it can go to the standard output.
+The program reads the file in chunks of 16 bytes.
+For each chunk,
+it writes the hexadecimal representation of each byte,
+and then it writes the chunk as text,
+changing control characters to dots.
+We use <a class="indexterm" id="N12DDA"></a><code class="function">string.rep</code> to fill with blanks the last line
+(which in general will not have exactly 16 bytes),
+keeping the alignment.
+</p></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L138"/>Exercises</h2></div></div></div><p id="N12DE6" style="text-indent: 0">
+Exercise 13.1:<a id="L139"/> 
+Write a function to compute the modulo operation for unsigned integers.
+
+
+</p><p id="N12DEB" style="text-indent: 0">
+Exercise 13.2:<a id="L140"/> 
+Implement different ways to compute the number of bits
+in the representation of a Lua integer.
+
+
+</p><p id="N12DF0" style="text-indent: 0">
+Exercise 13.3:<a id="L141"/> 
+How can you test whether a given integer is a power of two?
+
+
+</p><p id="N12DF5" style="text-indent: 0">
+Exercise 13.4:<a id="L142"/> 
+Write a function to compute the Hamming weight of a given integer.
+(The <a class="indexterm" id="N12DFA"/><em class="firstterm">Hamming weight</em> of a number is the number of ones in its
+binary representation.)
+
+
+</p><p id="N12E01" style="text-indent: 0">
+Exercise 13.5:<a id="L143"/> 
+Write a function to test whether
+the binary representation of a given integer is a <a class="indexterm" id="N12E06"/>palindrome.
+
+
+</p><p id="N12E0A" style="text-indent: 0">
+Exercise 13.6:<a id="L144"></a> 
+Implement a <a class="indexterm" id="N12E0F"></a><em>bit array</em> in Lua.
+It should support the following operations:
+</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem"><p id="N12E17" style="text-indent: 0"><code class="literal">newBitArray(n)</code> (creates an array with <code class="literal">n</code> bits),</p></li><li class="listitem"><p id="N12E1F" style="text-indent: 0"><code class="literal">setBit(a, n, v)</code>
+(assigns the Boolean value <code class="literal">v</code> to
+bit <code class="literal">n</code> of array <code class="literal">a</code>),</p></li><li class="listitem"><p id="N12E2D" style="text-indent: 0"><code class="literal">testBit(a, n)</code> (returns a Boolean with the value
+of bit <code class="literal">n</code>).</p></li></ul></div><p style="text-indent: 0">
+
+
+</p><p id="N12E35" style="text-indent: 0">
+Exercise 13.7:<a id="L145"></a> 
+Suppose we have a binary file with a sequence of records,
+each one with the following format:
+</p><pre class="programlisting" id="N12E3A">      struct Record {
+        int x;
+        char[3] code;
+        float value;
+      };
+</pre><p style="text-indent: 0">
+Write a program that reads that file and
+prints the sum of the <code class="literal">value</code> fields.
+
+
+</p></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

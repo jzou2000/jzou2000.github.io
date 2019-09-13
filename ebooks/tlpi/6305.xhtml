@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>63.5. Waiting on Signals and File Descriptors</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">63.5. Waiting on Signals and File Descriptors</h3><p class="docText">Sometimes,
+ a process needs to simultaneously wait for I/O to become possible on 
+one of a set of file descriptors or for the delivery of a signal. We 
+might attempt to perform such an operation using <span class="docEmphasis">select()</span>, as shown in Example 63-7.</p><h5 class="docExampleTitle" id="title-ID0EHUIM">Example 63-7. Incorrect method of unblocking signals and calling <span class="docEmphasis">select()</span></h5><p></p><div class="box"><pre class="preFixedHeight">sig_atomic_t gotSig = 0;
+
+void
+handler(int sig)
+{
+    gotSig = 1;
+}
+
+int
+main(int argc, char *argv[])
+{
+    struct sigaction sa;
+    ...
+
+    sa.sa_sigaction = handler;
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGUSR1, &amp;sa, NULL) == -1)
+        errExit("sigaction");
+
+    /* What if the signal is delivered now? */
+
+    ready = select(nfds, &amp;readfds, NULL, NULL, NULL);
+    if (ready &gt; 0) {
+        printf("%d file descriptors ready\n", ready);
+    } else if (ready == -1 &amp;&amp; errno == EINTR) {
+        if (gotSig)
+            printf("Got signal\n");
+    } else {
+        /* Some other error */
+    }
+
+    ...
+}
+
+					  </pre><br/>
+</div><p></p><p class="docText">The problem with this code is that if the signal (<tt>SIGUSR1</tt> in this example) arrives after establishing the handler but before <span class="docEmphasis">select()</span> is called, then the <span class="docEmphasis">select()</span> call will nevertheless block. (This is a form of race condition.) We now look at some solutions to this problem.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Since
+ version 2.6.27, Linux provides a further technique that can be used to 
+simultaneously wait on signals and file descriptors: the <span class="docEmphasis">signalfd</span>
+ mechanism described in Section 22.11. Using this mechanism, we can 
+receive signals via a file descriptor that is monitored (along with 
+other file descriptors) using <span class="docEmphasis">select()</span>, <span class="docEmphasis">poll()</span>, or <span class="docEmphasis">epoll_wait()</span>.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0EJVIM">63.5.1. The <span class="docEmphasis">pselect()</span> System Call</h4><p class="docText">The <span class="docEmphasis">pselect()</span> system call performs a similar task to <span class="docEmphasis">select()</span>. The main semantic difference is an additional argument, <span class="docEmphasis">sigmask</span>, that specifies a set of signals to be unmasked while the call is blocked.</p><pre>#include &lt;sys/select.h&gt;
+
+int <b>pselect</b>(int <span class="docEmphasis">nfds</span>, fd_set *<span class="docEmphasis">readfds</span>, fd_set *<span class="docEmphasis">writefds</span>, fd_set *<span class="docEmphasis">exceptfds</span>,
+            struct timespec *<span class="docEmphasis">timeout</span>, const sigset_t *<span class="docEmphasis">sigmask</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of ready file descriptors, 0 on timeout, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">More precisely, suppose we have the following <span class="docEmphasis">pselect()</span> call:</p><pre>ready = pselect(nfds, &amp;readfds, &amp;writefds, &amp;exceptfds, timeout, &amp;sigmask);</pre><br/>
+<p class="docText">This call is equivalent to <span class="docEmphasis">atomically</span> performing the following steps:</p><pre>sigset_t origmask;
+
+sigprocmask(SIG_SETMASK, &amp;sigmask, &amp;origmask);
+ready = select(nfds, &amp;readfds, &amp;writefds, &amp;exceptfds, timeout);
+sigprocmask(SIG_SETMASK, &amp;origmask, NULL);        /* Restore signal mask */</pre><br/>
+<p class="docText">Using <span class="docEmphasis">pselect()</span>, we can recode the first part of the body of our main program in Example 63-7 as shown in Example 63-8.</p><p class="docText">Aside from the <span class="docEmphasis">sigmask</span> argument, <span class="docEmphasis">select()</span> and <span class="docEmphasis">pselect()</span> differ in the following ways:</p><ul><li><p class="docList">The <span class="docEmphasis">timeout</span> argument to <span class="docEmphasis">pselect()</span> is a <span class="docEmphasis">timespec</span> structure (Section 23.4.2), which allows the timeout to be specified with nanosecond (instead of microsecond) precision.</p></li><li><p class="docList">SUSv3 explicitly states that <span class="docEmphasis">pselect()</span> doesn’t modify the <span class="docEmphasis">timeout</span> argument on return.</p></li></ul><p class="docText">If we specify the <span class="docEmphasis">sigmask</span> argument of <span class="docEmphasis">pselect()</span> as <tt>NULL</tt>, then <span class="docEmphasis">pselect()</span> is equivalent to <span class="docEmphasis">select()</span> (i.e., it performs no manipulation of the process signal mask), except for the differences just noted.</p><p class="docText">The <span class="docEmphasis">pselect()</span>
+ interface is an invention of POSIX.1g, and is nowadays incorporated in 
+SUSv3. It is not available on all UNIX implementations, and was added to
+ Linux only in kernel 2.6.16.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Previously, a <span class="docEmphasis">pselect()</span> library function was provided by <span class="docEmphasis">glibc</span>,
+ but this implementation didn’t provide the atomicity guarantees that 
+are required for the correct operation of the call. Such guarantees can 
+be provided only by a kernel implementation of <span class="docEmphasis">pselect()</span>.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0EF1IM">Example 63-8. Using <span class="docEmphasis">pselect()</span></h5><p></p><div class="box"><pre>sigset_t emptyset, blockset;
+    struct sigaction sa;
+
+    sigemptyset(&amp;blockset);
+    sigaddset(&amp;blockset, SIGUSR1);
+
+    if (sigprocmask(SIG_BLOCK, &amp;blockset, NULL) == -1)
+        errExit("sigprocmask");
+
+    sa.sa_sigaction = handler;
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    if (sigaction(SIGUSR1, &amp;sa, NULL) == -1)
+        errExit("sigaction");
+
+    sigemptyset(&amp;emptyset);
+    ready = pselect(nfds, &amp;readfds, NULL, NULL, NULL, &amp;emptyset);
+    if (ready == -1)
+        errExit("pselect");</pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0EN1IM">63.5.1.1. The <span class="docEmphasis">ppoll()</span> and <span class="docEmphasis">epoll_pwait()</span> system calls</h5><p class="docText">Linux 2.6.16 also added a new, nonstandard system call, <span class="docEmphasis">ppoll()</span>, whose relationship to <span class="docEmphasis">poll()</span> is analogous to the relationship of <span class="docEmphasis">pselect()</span> to <span class="docEmphasis">select()</span>. Similarly, starting with kernel 2.6.19, Linux also includes <span class="docEmphasis">epoll_pwait()</span>, providing an analogous extension to <span class="docEmphasis">epoll_wait()</span>. See the <span class="docEmphasis">ppoll(2)</span> and <span class="docEmphasis">epoll_pwait(2)</span> manual pages for details.</p><h4 class="docSection2Title" id="title-ID0E42IM">63.5.2. The Self-Pipe Trick</h4><p class="docText">Since <span class="docEmphasis">pselect()</span>
+ is not widely implemented, portable applications must employ other 
+strategies to avoid race conditions when simultaneously waiting for 
+signals and calling <span class="docEmphasis">select()</span> on a set of file descriptors. One common solution is the following:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Create a pipe, and mark its read and write ends as nonblocking.</p></div></li><li><div style="font-weight:normal"><p class="docList">As well as monitoring all of the other file descriptors that are of interest, include the read end of the pipe in the <span class="docEmphasis">readfds</span> set given to <span class="docEmphasis">select()</span>.</p></div></li><li><div style="font-weight:normal"><p class="docList">Install
+ a handler for the signal that is of interest. When this signal handler 
+is called, it writes a byte of data to the pipe. Note the following 
+points about the signal handler:</p><ul><li><p class="docList">The
+ write end of the pipe was marked as nonblocking in the first step to 
+prevent the possibility that signals arrive so rapidly that repeated 
+invocations of the signal handler fill the pipe, with the result that 
+the signal handler’s <span class="docEmphasis">write()</span>
+ (and thus the process itself) is blocked. (It doesn’t matter if a write
+ to a full pipe fails, since the previous writes will already have 
+indicated the delivery of the signal.)</p></li><li><p class="docList">The
+ signal handler is installed after creating the pipe, in order to 
+prevent the race condition that would occur if a signal was delivered 
+before the pipe was created.</p></li><li><p class="docList">It is safe to use <span class="docEmphasis">write()</span> inside the signal handler, because it is one of the async-signal-safe functions listed in Table 21-1, in Section 21.1.2.3.</p></li></ul></div></li><li><div style="font-weight:normal"><p class="docList">Place the <span class="docEmphasis">select()</span>
+ call in a loop, so that it is restarted if interrupted by a signal 
+handler. (Restarting in this fashion is not strictly necessary; it 
+merely means that we can check for the arrival of a signal by inspecting
+ <span class="docEmphasis">readfds</span>, rather than checking for an <tt>EINTR</tt> error return.)</p></div></li><li><div style="font-weight:normal"><p class="docList">On successful completion of the <span class="docEmphasis">select()</span> call, we can determine whether a signal arrived by checking if the file descriptor for the read end of the pipe is set in <span class="docEmphasis">readfds</span>.</p></div></li><li><div style="font-weight:normal"><p class="docList">Whenever
+ a signal has arrived, read all bytes that are in the pipe. Since 
+multiple signals may arrive, employ a loop that reads bytes until the 
+(nonblocking) <span class="docEmphasis">read()</span> fails with the error <tt>EAGAIN</tt>. After draining the pipe, perform whatever actions must be taken in response to delivery of the signal.</p></div></li></ol></div><p class="docText">This technique is commonly known as the <span class="docEmphasis">self-pipe trick</span>, and code demonstrating this technique is shown in Example 63-9.</p><p class="docText">Variations on this technique can equally be employed with <span class="docEmphasis">poll()</span> and <span class="docEmphasis">epoll_wait()</span>.</p><h5 class="docExampleTitle" id="title-ID0E15IM">Example 63-9. Using the self-pipe trick</h5><p></p><div class="box"><pre class="preFixedHeight"><span class="docEmphasis">from</span> <b>altio/self_pipe.c</b>
+static int pfd[2];                      /* File descriptors for pipe */
+
+static void
+handler(int sig)
+{
+    int savedErrno;                     /* In case we change 'errno' */
+
+    savedErrno = errno;
+    if (write(pfd[1], "x", 1) == -1 &amp;&amp; errno != EAGAIN)
+        errExit("write");
+    errno = savedErrno;
+}
+
+int
+main(int argc, char *argv[])
+{
+    fd_set readfds;
+    int ready, nfds, flags;
+    struct timeval timeout;
+    struct timeval *pto;
+    struct sigaction sa;
+    char ch;
+
+    /* ... Initialize 'timeout', 'readfds', and 'nfds' for select() */
+
+    if (pipe(pfd) == -1)
+        errExit("pipe");
+
+    FD_SET(pfd[0], &amp;readfds);           /* Add read end of pipe to 'readfds' */
+    nfds = max(nfds, pfd[0] + 1);       /* And adjust 'nfds' if required */
+
+    flags = fcntl(pfd[0], F_GETFL);
+    if (flags == -1)
+        errExit("fcntl-F_GETFL");
+    flags |= O_NONBLOCK;                /* Make read end nonblocking */
+    if (fcntl(pfd[0], F_SETFL, flags) == -1)
+        errExit("fcntl-F_SETFL");
+
+    flags = fcntl(pfd[1], F_GETFL);
+    if (flags == -1)
+        errExit("fcntl-F_GETFL");
+    flags |= O_NONBLOCK;                /* Make write end nonblocking */
+    if (fcntl(pfd[1], F_SETFL, flags) == -1)
+        errExit("fcntl-F_SETFL");
+
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = SA_RESTART;           /* Restart interrupted read()s */
+    sa.sa_handler = handler;
+    if (sigaction(SIGINT, &amp;sa, NULL) == -1)
+        errExit("sigaction");
+
+    while ((ready = select(nfds, &amp;readfds, NULL, NULL, pto)) == -1 &amp;&amp;
+            errno == EINTR)
+        continue;                       /* Restart if interrupted by signal */
+    if (ready == -1)                    /* Unexpected error */
+        errExit("select");
+
+    if (FD_ISSET(pfd[0], &amp;readfds)) {   /* Handler was called */
+        printf("A signal was caught\n");
+
+        for (;;) {                      /* Consume bytes from pipe */
+            if (read(pfd[0], &amp;ch, 1) == -1) {
+                if (errno == EAGAIN)
+                    break;              /* No more bytes */
+                else
+                    errExit("read");    /* Some other error */
+            }
+
+            /* Perform any actions that should be taken in response to signal */
+        }
+    }
+
+    /* Examine file descriptor sets returned by select() to see
+       which other file descriptors are ready */
+
+}
+      <span class="docEmphasis">from</span> <b>altio/self_pipe.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

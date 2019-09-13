@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>22.10. Synchronously Waiting for a Signal</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">22.10. Synchronously Waiting for a Signal</h3><p class="docText">In Section 22.9, we saw how to use a signal handler plus <span class="docEmphasis">sigsuspend()</span>
+ to suspend execution of a process until a signal is delivered. However,
+ the need to write a signal handler and to handle the complexities of 
+asynchronous delivery makes this approach cumbersome for some 
+applications. Instead, we can use the <span class="docEmphasis">sigwaitinfo()</span> system call to synchronously <span class="docEmphasis">accept</span> a signal.</p><pre>#define _POSIX_C_SOURCE 199309
+#include &lt;signal.h&gt;
+
+int <b>sigwaitinfo</b>(const sigset_t *<span class="docEmphasis">set</span>, siginfo_t *<span class="docEmphasis">info</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns signal number on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">sigwaitinfo()</span> system call suspends execution of the process until one of the signals in the signal set pointed to by <span class="docEmphasis">set</span> is delivered. If one of the signals in <span class="docEmphasis">set</span> is already pending at the time of the call, <span class="docEmphasis">sigwaitinfo()</span>
+ returns immediately. The delivered signal is removed from the process’s
+ list of pending signals, and the signal number is returned as the 
+function result. If the <span class="docEmphasis">info</span> argument is not <tt>NULL</tt>, then it points to a <span class="docEmphasis">siginfo_t</span> structure that is initialized to contain the same information provided to a signal handler taking a <span class="docEmphasis">siginfo_t</span> argument (Section 21.4).</p><p class="docText">The delivery order and queuing characteristics of signals accepted by <span class="docEmphasis">sigwaitinfo()</span>
+ are the same as for signals caught by a signal handler; that is, 
+standard signals are not queued, and realtime signals are queued and 
+delivered lowest signal number first.</p><p class="docText">As well as saving us the extra baggage of writing a signal handler, waiting for signals using <span class="docEmphasis">sigwaitinfo()</span> is somewhat faster than the combination of a signal handler plus <span class="docEmphasis">sigsuspend()</span> (see Exercise 22-3).</p><p class="docText">It usually makes sense to use <span class="docEmphasis">sigwaitinfo()</span>
+ only in conjunction with blocking the set of signals for which we were 
+interested in waiting. (We can fetch a pending signal with <span class="docEmphasis">sigwaitinfo()</span>
+ even while that signal is blocked.) If we fail to do this and a signal 
+arrives before the first, or between successive calls to <span class="docEmphasis">sigwaitinfo()</span>, then the signal will be handled according to its current disposition.</p><p class="docText">An example of the use of <span class="docEmphasis">sigwaitinfo()</span> is shown in Example 22-6.
+ This program first blocks all signals, then delays for the number of 
+seconds specified in its optional command-line argument. This allows 
+signals to be sent to the program before <span class="docEmphasis">sigwaitinfo()</span>. The program then loops continuously using <span class="docEmphasis">sigwaitinfo()</span> to accept incoming signals, until <tt>SIGINT</tt> or <tt>SIGTERM</tt> is received.</p><p class="docText">The following shell session log demonstrates the use of the program in Example 22-6. We run the program in the background, specifying that it should delay 60 seconds before calling <span class="docEmphasis">sigwaitinfo()</span>, and then send it two signals:</p><pre>$ <b>./t_sigwaitinfo 60 &amp; </b>
+./t_sigwaitinfo: PID is 3837
+./t_sigwaitinfo: signals blocked
+./t_sigwaitinfo: about to delay 60 seconds
+[1] 3837
+$ <b>./t_sigqueue 3837 43 100 </b>                  <i> Send signal 43</i>
+./t_sigqueue: PID is 3839, UID is 1000
+$ <b>./t_sigqueue 3837 42 200 </b>                  <i> Send signal 42</i>
+./t_sigqueue: PID is 3840, UID is 1000</pre><br/>
+<p class="docText">Eventually, the program completes its sleep interval, and the <span class="docEmphasis">sigwaitinfo()</span> loop accepts the queued signals. (We see a shell prompt mixed with the next line of the program’s output because the <span class="docEmphasis">t_sigwaitinfo</span>
+ program is writing output from the background.) As with realtime 
+signals caught with a handler, we see that signals are delivered lowest 
+number first, and that the <span class="docEmphasis">siginfo_t</span> structure passed to the signal handler allows us to obtain the process ID and user ID of the sending process:</p><pre>$ ./t_sigwaitinfo: finished delay
+got signal: 42
+    si_signo=42, si_code=-1 (SI_QUEUE), si_value=200
+    si_pid=3840, si_uid=1000
+got signal: 43
+    si_signo=43, si_code=-1 (SI_QUEUE), si_value=100
+    si_pid=3839, si_uid=1000</pre><br/>
+<p class="docText">We continue, using the shell <span class="docEmphasis">kill</span> command to send a signal to the process. This time, we see that the <span class="docEmphasis">si_code</span> field is set to <tt>SI_USER</tt> (instead of <tt>SI_QUEUE</tt>):</p><pre class="preFixedWidth"><i> Press Enter to see next shell prompt</i>
+$ <b>echo $$ </b>                                   <i> Display PID of shell</i>
+3744
+$ <b>kill -USR1 3837 </b>                           <i> Shell sends</i> SIGUSR1 <i> using</i> kill()
+$ got signal: 10                            <i> Delivery of SIGUSR1</i>
+    si_signo=10, si_code=0 (SI_USER), si_value=100
+    si_pid=3744, si_uid=1000                <i> 3744 is PID of shell</i>
+<i> Press Enter to see next shell prompt</i>
+$ <b>kill %1 </b>                                   <i> Terminate program with</i> SIGTERM
+$
+<i> Press Enter to see notification of background job termination</i>
+[1]+  Done                    ./t_sigwaitinfo 60
+
+					  </pre><br/>
+<p class="docText">In the output for the accepted <tt>SIGUSR1</tt> signal, we see that the <span class="docEmphasis">si_value</span> field has the value 100. This is the value to which the field was initialized by the preceding signal that was sent using <span class="docEmphasis">sigqueue()</span>. We noted earlier that the <span class="docEmphasis">si_value</span> field contains valid information only for signals sent using <span class="docEmphasis">sigqueue()</span>.</p><h5 class="docExampleTitle" id="title-ID0EFSBK">Example 22-6. Synchronously waiting for a signal with <span class="docEmphasis">sigwaitinfo()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>signals/t_sigwaitinfo.c</b>
+#define _GNU_SOURCE
+#include &lt;string.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;time.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int sig;
+    siginfo_t si;
+    sigset_t allSigs;
+
+    if (argc &gt; 1 &amp;&amp; strcmp(argv[1], "--help") == 0)
+        usageErr("%s [delay-secs]\n", argv[0]);
+
+    printf("%s: PID is %ld\n", argv[0], (long) getpid());
+
+    /* Block all signals (except SIGKILL and SIGSTOP) */
+
+    sigfillset(&amp;allSigs);
+    if (sigprocmask(SIG_SETMASK, &amp;allSigs, NULL) == -1)
+        errExit("sigprocmask");
+    printf("%s: signals blocked\n", argv[0]);
+
+    if (argc &gt; 1) {             /* Delay so that signals can be sent to us */
+        printf("%s: about to delay %s seconds\n", argv[0], argv[1]);
+        sleep(getInt(argv[1], GN_GT_0, "delay-secs"));
+        printf("%s: finished delay\n", argv[0]);
+    }
+
+    for (;;) {                  /* Fetch signals until SIGINT (^C) or SIGTERM */
+        sig = sigwaitinfo(&amp;allSigs, &amp;si);
+        if (sig == -1)
+            errExit("sigwaitinfo");
+
+        if (sig == SIGINT || sig == SIGTERM)
+            exit(EXIT_SUCCESS);
+
+        printf("got signal: %d (%s)\n", sig, strsignal(sig));
+        printf("    si_signo=%d, si_code=%d (%s), si_value=%d\n",
+                si.si_signo, si.si_code,
+                (si.si_code == SI_USER) ? "SI_USER" :
+                    (si.si_code == SI_QUEUE) ? "SI_QUEUE" : "other",
+                si.si_value.sival_int);
+        printf("    si_pid=%ld, si_uid=%ld\n",
+                (long) si.si_pid, (long) si.si_uid);
+    }
+}
+      <b>signals/t_sigwaitinfo.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The <span class="docEmphasis">sigtimedwait()</span> system call is a variation on <span class="docEmphasis">sigwaitinfo()</span>. The only difference is that <span class="docEmphasis">sigtimedwait()</span> allows us to specify a time limit for waiting.</p><pre>#define _POSIX_C_SOURCE 199309
+#include &lt;signal.h&gt;
+
+int <b>sigtimedwait</b>(const sigset_t *<span class="docEmphasis">set</span>, siginfo_t *<span class="docEmphasis">info</span>,
+                 const struct timespec *<span class="docEmphasis">timeout</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns signal number on success, or -1 on error or timeout (<tt>EAGAIN</tt>)</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">timeout</span> argument specifies the maximum time that <span class="docEmphasis">sigtimedwait()</span> should wait for a signal. It is a pointer to a structure of the following type:</p><pre>struct timespec {
+    time_t tv_sec;      /* Seconds ('time_t' is an integer type) */
+    long   tv_nsec;     /* Nanoseconds */
+};</pre><br/>
+<p class="docText">The fields of the <span class="docEmphasis">timespec</span> structure are filled in to specify the maximum number of seconds and nanoseconds that <span class="docEmphasis">sigtimedwait()</span>
+ should wait. Specifying both fields of the structure as 0 causes an 
+immediate timeout—that is, a poll to check if any of the specified set 
+of signals is pending. If the call times out without a signal being 
+delivered, <span class="docEmphasis">sigtimedwait()</span> fails with the error <tt>EAGAIN</tt>.</p><p class="docText">If the <span class="docEmphasis">timeout</span> argument is specified as <tt>NULL</tt>, then <span class="docEmphasis">sigtimedwait()</span> is exactly equivalent to <span class="docEmphasis">sigwaitinfo()</span>. SUSv3 leaves the meaning of a <tt>NULL</tt> <span class="docEmphasis">timeout</span> unspecified, and some UNIX implementations instead interpret this as a poll request that returns immediately.</p>
+</div>
+</body>
+</html>

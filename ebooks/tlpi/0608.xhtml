@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>6.8. Performing a Nonlocal Goto: setjmp() and long jmp()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">6.8. Performing a Nonlocal Goto: <span class="docEmphasis">setjmp()</span> and <span class="docEmphasis">long jmp()</span></h3><p class="docText">The <span class="docEmphasis">setjmp()</span> and <span class="docEmphasis">longjmp()</span> library functions are used to perform a <span class="docEmphasis">nonlocal goto</span>. The term <span class="docEmphasis">nonlocal</span> refers to the fact that the target of the goto is a location somewhere outside the currently executing function.</p><p class="docText">Like many programming languages, C includes the <tt>goto</tt>
+ statement, which is open to endless abuse in making programs difficult 
+to read and maintain, and is occasionally useful to make a program 
+simpler, faster, or both.</p><p class="docText">One restriction of C’s <tt>goto</tt>
+ is that it is not possible to jump out of the current function into 
+another function. However, such functionality can occasionally be 
+useful. Consider the following common scenario in error handling: during
+ a deeply nested function call, we encounter an error that should be 
+handled by abandoning the current task, returning through multiple 
+function calls, and then continuing execution in some much higher 
+function (perhaps even <span class="docEmphasis">main()</span>).
+ To do this, we could have each function return a status value that is 
+checked and appropriately handled by its caller. This is perfectly 
+valid, and, in many cases, the desirable method for handling this kind 
+of scenario. However, in some cases, coding would be simpler if we could
+ jump from the middle of the nested function call back to one of the 
+functions that called it (the immediate caller, or the caller of the 
+caller, and so on). This is the functionality that <span class="docEmphasis">setjmp()</span> and <span class="docEmphasis">longjmp()</span> provide.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The restriction that a <tt>goto</tt>
+ can’t be used to jump between functions in C exists because all C 
+functions reside at the same scope level (i.e., there is no nesting of 
+function declarations in standard C, although <span class="docEmphasis">gcc</span>
+ does permit this as an extension). Thus, given two functions, X and Y, 
+the compiler has no way of knowing whether a stack frame for function X 
+might be on the stack at the time Y is invoked, and thus whether a <tt>goto</tt> from function Y to function X would be possible. In languages such as Pascal, where function declarations can be nested, and a <tt>goto</tt>
+ from a nested function to a function that encloses it is permitted, the
+ static scope of a function allows the compiler to determine some 
+information about the dynamic scope of the function. Thus, if function Y
+ is lexically nested within function X, then the compiler knows that a 
+stack frame for X must already be on the stack at the time Y is invoked,
+ and can generate code for a <tt>goto</tt> from function Y to somewhere within function X.</p><hr noshade="noshade" size="1"/><pre>#include &lt;setjmp.h&gt;
+
+int <b>setjmp</b>(jmp_buf <span class="docEmphasis">env</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on initial call, nonzero on return via <span class="docEmphasis">longjmp()</span></p><hr noshade="noshade" size="1"/><pre>void <b>longjmp</b>(jmp_buf <span class="docEmphasis">env</span>, int <span class="docEmphasis">val</span>);</pre><br/>
+<p class="docText">Calling <span class="docEmphasis">setjmp()</span> establishes a target for a later jump performed by <span class="docEmphasis">longjmp()</span>. This target is exactly the point in the program where the <span class="docEmphasis">setjmp()</span> call occurred. From a programming point of view, after the <span class="docEmphasis">longjmp()</span>, it looks exactly as though we have just returned from the <span class="docEmphasis">setjmp()</span>
+ call for a second time. The way in which we distinguish the second 
+“return” from the initial return is by the integer value returned by <span class="docEmphasis">setjmp()</span>. The initial <span class="docEmphasis">setjmp()</span> returns 0, while the later “faked” return supplies whatever value is specified in the <span class="docEmphasis">val</span> argument of the <span class="docEmphasis">longjmp()</span> call. By using different values for the <span class="docEmphasis">val</span> argument, we can distinguish jumps to the same target from different points in the program.</p><p class="docText">Specifying the <span class="docEmphasis">val</span> argument to <span class="docEmphasis">longjmp()</span> as 0 would, if unchecked, cause the faked return from <span class="docEmphasis">setjmp()</span> to look as though it were the initial return. For this reason, if <span class="docEmphasis">val</span> is specified as 0, <span class="docEmphasis">longjmp()</span> actually uses the value 1.</p><p class="docText">The <span class="docEmphasis">env</span> argument used by both functions supplies the glue enabling the jump to be accomplished. The <span class="docEmphasis">setjmp()</span> call saves various information about the current process environment into <span class="docEmphasis">env</span>. This allows the <span class="docEmphasis">longjmp()</span> call, which must specify the same <span class="docEmphasis">env</span> variable, to perform the fake return. Since the <span class="docEmphasis">setjmp()</span> and <span class="docEmphasis">longjmp()</span> calls are in different functions (otherwise, we could use a simple <tt>goto</tt>), <span class="docEmphasis">env</span> is declared globally or, less commonly, passed as a function argument.</p><p class="docText">Along with other information, <span class="docEmphasis">env</span> stores a copy of the <span class="docEmphasis">program counter</span> register (which points to the currently executing machine-language instruction) and the <span class="docEmphasis">stack pointer</span> register (which marks the top of the stack) at the time of the call to <span class="docEmphasis">setjmp()</span>. This information enables the subsequent <span class="docEmphasis">longjmp()</span> call to accomplish two key steps:</p><ul><li><p class="docList">Strip off the stack frames for all of the intervening functions on the stack between the function calling <span class="docEmphasis">longjmp()</span> and the function that previously called <span class="docEmphasis">setjmp()</span>.
+ This procedure is sometimes called “unwinding the stack,” and is 
+accomplished by resetting the stack pointer register to the value saved 
+in the <span class="docEmphasis">env</span> argument.</p></li><li><p class="docList">Reset the program counter register so that the program continues execution from the location of the initial <span class="docEmphasis">setjmp()</span> call. Again, this is accomplished using the value saved in <span class="docEmphasis">env</span>.</p></li></ul><h4 class="docSection2Title" id="title-ID0ENYBG">6.8.1. </h4><h5 class="docSection3Title" id="title-ID0ERYBG">6.8.1.1. Example program</h5><p class="docText">Example 6-5 demonstrates the use of <span class="docEmphasis">setjmp()</span> and <span class="docEmphasis">longjmp()</span>. This program sets up a jump target with an initial call to <span class="docEmphasis">setjmp()</span>. The subsequent <tt>switch</tt> (on the value returned by <span class="docEmphasis">setjmp()</span>) is the means of detecting whether we have just completed the initial return from <span class="docEmphasis">setjmp()</span> or whether we have arrived back after a <span class="docEmphasis">longjmp()</span>. In the case of a 0 return—meaning we have just done the initial <span class="docEmphasis">setjmp()</span>—we call <span class="docEmphasis">f1()</span>, which either immediately calls <span class="docEmphasis">longjmp()</span> or goes on to call <span class="docEmphasis">f2()</span>, depending on the value of <span class="docEmphasis">argc</span> (i.e., the number of command-line arguments). If <span class="docEmphasis">f2()</span> is reached, it does an immediate <span class="docEmphasis">longjmp()</span>. A <span class="docEmphasis">longjmp()</span> from either function takes us back to the point of the <span class="docEmphasis">setjmp()</span> call. We use different <span class="docEmphasis">val</span> arguments in the two <span class="docEmphasis">longjmp()</span> calls, so that the <tt>switch</tt> statement in <span class="docEmphasis">main()</span> can determine the function from which the jump occurred and print a suitable message.</p><p class="docText">When we run the program in Example 6-5 without any command-line arguments, this is what we see:</p><pre>$ <b>./longjmp</b>
+
+Calling f1() after initial setjmp()
+We jumped back from f1()</pre><br/>
+<p class="docText">Specifying a command-line argument causes the jump to occur from <span class="docEmphasis">f 2()</span>:</p><pre>$ <b>./longjmp x</b>
+
+Calling f1() after initial setjmp()
+We jumped back from f2()</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EA2BG">Example 6-5. Demonstrate the use of <span class="docEmphasis">setjmp()</span> and <span class="docEmphasis">longjmp()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>proc/longjmp.c</b>
+#include &lt;setjmp.h&gt;
+#include "tlpi_hdr.h"
+
+static jmp_buf env;
+
+static void
+f2(void)
+{
+    longjmp(env, 2);
+}
+
+static void
+f1(int argc)
+{
+    if (argc == 1)
+        longjmp(env, 1);
+    f2();
+}
+
+int
+main(int argc, char *argv[])
+{
+    switch (setjmp(env)) {
+    case 0:     /* This is the return after the initial setjmp() */
+        printf("Calling f1() after initial setjmp()\n");
+        f1(argc);               /* Never returns... */
+        break;                  /* ... but this is good form */
+
+    case 1:
+        printf("We jumped back from f1()\n");
+        break;
+
+    case 2:
+        printf("We jumped back from f2()\n");
+        break;
+    }
+
+    exit(EXIT_SUCCESS);
+}
+     <b>proc/longjmp.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0EP2BG">6.8.1.2. Restrictions on the use of <span class="docEmphasis">setjmp()</span></h5><p class="docText">SUSv3 and C99 specify that a call to <span class="docEmphasis">setjmp()</span> may appear only in the following contexts:</p><ul><li><p class="docList">as the entire controlling expression of a selection or iteration statement (<tt>if</tt>, <tt>switch</tt>, <tt>while</tt>, and so on);</p></li><li><p class="docList">as the operand of a unary <tt>!</tt> (<span class="docEmphasis">not</span>) operator, where the resulting expression is the entire controlling expression of a selection or iteration statement;</p></li><li><p class="docList">as part of a comparison operation (<tt>==</tt>, <tt>!=</tt>, <tt>&lt;</tt>,
+ and so on), where the other operand is an integer constant expression 
+and the resulting expression is the entire controlling expression of a 
+selection or iteration statement; or</p></li><li><p class="docList">as a free-standing function call that is not embedded inside some larger expression.</p></li></ul><p class="docText">Note
+ that the C assignment statement doesn’t figure in the list above. A 
+statement of the following form is not standards-conformant:</p><pre>s = setjmp(env);                    /* WRONG! */</pre><br/>
+<p class="docText">These restrictions are specified because an implementation of <span class="docEmphasis">setjmp()</span>
+ as a conventional function can’t be guaranteed to have enough 
+information to be able to save the values of all registers and temporary
+ stack locations used in an enclosing expression so that they could then
+ be correctly restored after a <span class="docEmphasis">longjmp()</span>. Thus, it is permitted to call <span class="docEmphasis">setjmp()</span> only inside expressions simple enough not to require temporary storage.</p><h5 class="docSection3Title" id="title-ID0EE5BG">6.8.1.3. Abusing <span class="docEmphasis">longjmp()</span></h5><p class="docText">If the <span class="docEmphasis">env</span> buffer is declared global to all functions (which is typical), then it is possible to execute the following sequence of steps:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Call a function <span class="docEmphasis">x()</span> that uses <span class="docEmphasis">setjmp()</span> to establish a jump target in the global variable <span class="docEmphasis">env</span>.</p></div></li><li><div style="font-weight:normal"><p class="docList">Return from function <span class="docEmphasis">x()</span>.</p></div></li><li><div style="font-weight:normal"><p class="docList">Call a function <span class="docEmphasis">y()</span> that does a <span class="docEmphasis">longjmp()</span> using <span class="docEmphasis">env</span>.</p></div></li></ol></div><p class="docText">This is a serious error. We can’t do a <span class="docEmphasis">longjmp()</span> into a function that has already returned. Considering what <span class="docEmphasis">longjmp()</span>
+ tries to do to the stack—it attempts to unwind the stack back to a 
+frame that no longer exists—leads us to realize that chaos will result. 
+If we are lucky, our program will simply crash. However, depending on 
+the state of the stack, other possibilities include infinite call-return
+ loops and the program behaving as though it really did return from a 
+function that was not currently executing. (In a multithreaded program, a
+ similar abuse is to call <span class="docEmphasis">longjmp()</span> in a different thread from that in which <span class="docEmphasis">setjmp()</span> was called.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">SUSv3 says that if <span class="docEmphasis">longjmp()</span>
+ is called from within a nested signal handler (i.e., a handler that was
+ invoked while the handler for another signal was executing), then the 
+program behavior is undefined.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EGAAI">6.8.1.4. Problems with optimizing compilers</h5><p class="docText">Optimizing
+ compilers may rearrange the order of instructions in a program and 
+store certain variables in CPU registers, rather than RAM. Such 
+optimizations generally rely on the run-time flow of control reflecting 
+the lexical structure of the program. Since jump operations performed 
+via <span class="docEmphasis">setjmp()</span> and <span class="docEmphasis">longjmp()</span>
+ are established and executed at run time, and are not reflected in the 
+lexical structure of the program, a compiler optimizer is unable to take
+ them into account when performing its task. Furthermore, the semantics 
+of some ABI implementations require <span class="docEmphasis">longjmp()</span> to restore copies of the CPU registers saved by the earlier <span class="docEmphasis">setjmp()</span> call. This means that optimized variables may end up with incorrect values as a consequence of a <span class="docEmphasis">longjmp()</span> operation. We can see an example of this by examining the behavior of the program in Example 6-6.</p><h5 class="docExampleTitle" id="title-ID0EPBAI">Example 6-6. A demonstration of the interaction of compiler optimization and <span class="docEmphasis">longjmp()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>proc/setjmp_vars.c</b>
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;setjmp.h&gt;
+
+static jmp_buf env;
+
+static void
+doJump(int nvar, int rvar, int vvar)
+{
+    printf("Inside doJump(): nvar=%d rvar=%d vvar=%d\n", nvar, rvar, vvar);
+    longjmp(env, 1);
+}
+
+int
+main(int argc, char *argv[])
+{
+    int nvar;
+    register int rvar;          /* Allocated in register if possible */
+    volatile int vvar;          /* See text */
+
+    nvar = 111;
+    rvar = 222;
+    vvar = 333;
+
+    if (setjmp(env) == 0) {     /* Code executed after setjmp() */
+        nvar = 777;
+        rvar = 888;
+        vvar = 999;
+        doJump(nvar, rvar, vvar);
+
+    } else {                    /* Code executed after longjmp() */
+
+        printf("After longjmp(): nvar=%d rvar=%d vvar=%d\n", nvar, rvar, vvar);
+    }
+
+    exit(EXIT_SUCCESS);
+}
+
+      <b>proc/setjmp_vars.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">When we compile the program in Example 6-6 normally, we see the expected output:</p><pre>$ <b>cc -o setjmp_vars setjmp_vars.c</b>
+
+$ <b>./setjmp_vars</b>
+
+Inside doJump(): nvar=777 rvar=888 vvar=999
+After longjmp(): nvar=777 rvar=888 vvar=999</pre><br/>
+<p class="docText">However, when we compile with optimization, we get the following unexpected results:</p><pre>$ <b>cc -O -o setjmp_vars setjmp_vars.c</b>
+
+$ <b>./setjmp_vars</b>
+
+Inside doJump(): nvar=777 rvar=888 vvar=999
+After longjmp(): nvar=111 rvar=222 vvar=999</pre><br/>
+<p class="docText">Here, we see that after the <span class="docEmphasis">longjmp()</span>, <span class="docEmphasis">nvar</span> and <span class="docEmphasis">rvar</span> have been reset to their values at the time of the <span class="docEmphasis">setjmp()</span> call. This has occurred because the code reorganization performed by the optimizer has been confused as a consequence of the <span class="docEmphasis">longjmp()</span>.
+ Any local variables that are candidates for optimization may be subject
+ to this sort of problem; this generally means pointer variables and 
+variables of any of the simple types <span class="docEmphasis">char</span>, <span class="docEmphasis">int</span>, <span class="docEmphasis">float</span>, and <span class="docEmphasis">long</span>.</p><p class="docText">We can prevent such code reorganization by declaring variables as <tt>volatile</tt>, which tells the optimizer not to optimize them. In the preceding program output, we see that the variable <span class="docEmphasis">vvar</span>, which was declared <tt>volatile</tt>, was correctly handled, even when we compiled with optimization.</p><p class="docText">Since different compilers do different types of optimizations, portable programs should employ the <tt>volatile</tt> keyword with all of the local variables of the aforementioned types in the function that calls <span class="docEmphasis">setjmp()</span>.</p><p class="docText">If we specify the <span class="docEmphasis">-Wextra</span> (<span class="docEmphasis">extra warnings</span>) option to the GNU C compiler, it produces the following helpful warning for the <tt>setjmp_vars.c</tt> program:</p><pre class="preFixedWidth">$ <b>cc -Wall -Wextra -O -o setjmp_vars setjmp_vars.c</b>
+
+setjmp_vars.c: In function `main':
+setjmp_vars.c:17: warning: variable `nvar' might be clobbered by `longjmp' or `vfork'
+setjmp_vars.c:18: warning: variable `rvar' might be clobbered by `longjmp' or `vfork'
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">It is instructive to look at the assembler output produced when compiling the <tt>setjmp_vars.c</tt> program both with and without optimization. The <span class="docEmphasis">cc -S</span> command produces a file with the extension <span class="docEmphasis">.s</span> containing the generated assembler code for a program.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EYEAI">6.8.1.5. Avoid <span class="docEmphasis">setjmp()</span> and <span class="docEmphasis">long jmp()</span> where possible</h5><p class="docText">If <tt>goto</tt>
+ statements are capable of rendering a program difficult to read, then 
+nonlocal gotos can make things an order of magnitude worse, since they 
+can transfer control between any two functions in a program. For this 
+reason, <span class="docEmphasis">setjmp()</span> and <span class="docEmphasis">longjmp()</span>
+ should be used sparingly. It is often worth the extra work in design 
+and coding to come up with a program that avoids their use, because the 
+program will be more readable and possibly more portable. Having said 
+that, we revisit variants of these functions (<span class="docEmphasis">sigsetjmp()</span> and <span class="docEmphasis">siglongjmp()</span>, described in Section 21.2.1) when we discuss signals, since they are occasionally useful when writing signal handlers.</p>
+</div>
+</body>
+</html>

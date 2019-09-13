@@ -1,0 +1,575 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 15. Data Files and Serialization</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 15. Data Files and Serialization"><div class="titlepage"><div><h1><span class="partLabel">15</span> Data Files and Serialization</h1></div></div><p id="N130CA" style="text-indent: 0">
+<a class="indexterm" id="N130CC"/>
+When dealing with data files,
+it is usually much easier to write the data than to read it back.
+When we write a file,
+we have full control of what is going on.
+When we read a file, on the other hand,
+we do not know what to expect.
+Besides all the kinds of data that a correct file can contain,
+a robust program should also handle bad files gracefully.
+Therefore,
+coding robust input routines is always difficult.
+In this chapter, we will see how we can use Lua to eliminate
+all code for reading data from our programs,
+simply by writing the data in an appropriate format.
+More specifically, we write data as Lua programs that,
+when run, rebuild the data.
+</p><p id="N130D0" style="text-indent: 0">
+<a class="indexterm" id="N130D2"/>
+Data description has been one of the main applications
+of Lua since its creation in 1993.
+At that time, the main alternative for a textual
+data-description language would be <a class="indexterm" id="N130D6"/>SGML.
+For many people (including us),
+<a class="indexterm" id="N130DA"/>SGML is bloated and complex.
+In 1998, some people simplified it to create <a class="indexterm" id="N130DE"/>XML,
+which in our view is still bloated and complex.
+Other people shared our view,
+and some of them created <a class="indexterm" id="N130E2"/>JSON (in 2001).
+JSON is based on Javascript
+and quite similar to restricted Lua data files.
+On the one hand,
+JSON has a big advantage of being an international standard,
+and several languages (including Lua) have libraries
+to manipulate JSON files.
+On the other hand,
+Lua files are trivial to read and more flexible.
+</p><p id="N130E6" style="text-indent: 0">
+Using a full programming language for data description
+is surely flexible,
+but it brings two problems.
+One is security,
+as <span class="quote">“<span class="quote">data</span>”</span> files can run amok inside our program.
+We can solve that by running the file in a <a class="indexterm" id="N130EB"/>sandbox,
+which we will discuss in <a class="xref" href="ch25.html#sc_sandbox" title="Sandboxing">the section called “Sandboxing”</a>.
+</p><p id="N130F2" style="text-indent: 0">
+The other problem is performance.
+Lua not only runs fast, but it also compiles fast.
+For instance, in <a class="indexterm" id="N130F4"/>my new machine,
+Lua 5.3 reads, compiles, and runs a program with ten million assignments
+in four seconds,
+using 240 MB.
+For comparison,
+Perl 5.18 takes 21 seconds and 6 GB,
+Python 2.7 and Python 3.4 trash the machine,
+Node.js 0.10.25 gives an <span class="quote">“<span class="quote">out of memory</span>”</span> error after eight seconds,
+and Rhino 1.7 also gives an <span class="quote">“<span class="quote">out of memory</span>”</span> error,
+after six minutes.
+</p><div class="sect1" title="Data Files"><div class="titlepage"><div><div><h2 class="title"><a id="L158"/>Data Files</h2></div></div></div><p id="N13102" style="text-indent: 0">
+Table constructors provide an
+interesting alternative for file formats.
+With a little extra work when writing data,
+reading becomes trivial.
+The technique is to write our data file as Lua code that,
+when run, rebuilds the data into the program.
+With table constructors,
+these chunks can look remarkably like a plain data file.
+</p><p id="N13104" style="text-indent: 0">
+Let us see an example to make things clear.
+If our data file is in a predefined format,
+such as <a class="indexterm" id="N13106"></a>CSV (<a class="indexterm" id="N1310A"></a>Comma-Separated Values) or <a class="indexterm" id="N1310E"></a>XML,
+we have little choice.
+However, if we are going to create the file for our own use,
+we can use Lua constructors as our format.
+In this format, we represent each data record as a Lua constructor.
+Instead of writing in our data file something like
+</p><pre class="programlisting" id="N13112">      Donald E. Knuth,Literate Programming,CSLI,1992
+      Jon Bentley,More Programming Pearls,Addison-Wesley,1990
+</pre><p style="text-indent: 0">
+we write this:
+</p><pre class="programlisting" id="N13115">      Entry{"Donald E. Knuth",
+            "Literate Programming",
+            "CSLI",
+            1992}
+      
+      Entry{"Jon Bentley",
+            "More Programming Pearls",
+            "Addison-Wesley",
+            1990}
+</pre><p style="text-indent: 0">
+Remember that <code class="literal">Entry{<em class="replaceable"><code>code</code></em>}</code> is the same as
+<code class="literal">Entry({<em class="replaceable"><code>code</code></em>})</code>, that is,
+a call to some function <code class="literal">Entry</code> with a table as its single argument.
+So, that previous piece of data is a Lua program.
+To read that file,
+we only need to run it,
+with a sensible definition for <code class="literal">Entry</code>.
+For instance, the following program counts the number
+of entries in a data file:
+</p><pre class="programlisting" id="N1312A">      local count = 0
+      function Entry () count = count + 1 end
+      dofile("data")
+      print("number of entries: " .. count)
+</pre><p style="text-indent: 0">
+The next program collects in a set
+the names of all authors found in the file,
+and then prints them:
+</p><pre class="programlisting" id="N1312D">      local authors = {}      -- a set to collect authors
+      function Entry (b) authors[b[1]] = true end
+      dofile("data")
+      for name in pairs(authors) do print(name) end
+</pre><p style="text-indent: 0">
+Note the event-driven approach in these program fragments:
+the function <code class="literal">Entry</code> acts as a callback function,
+which is called during the <a class="indexterm" id="N13133"></a><code class="function">dofile</code> for each entry in
+the data file.
+
+</p><p id="N13139" style="text-indent: 0">
+When file size is not a big concern,
+we can use name-value pairs for our representation:<sup>[<a href="#ftn.N1313B" id="N1313B" class="footnote">15</a>]</sup>
+</p><pre class="programlisting" id="N13143">      Entry{
+        author = "Donald E. Knuth",
+        title = "Literate Programming",
+        publisher = "CSLI",
+        year = 1992
+      }
+      
+      Entry{
+        author = "Jon Bentley",
+        title = "More Programming Pearls",
+        year = 1990,
+        publisher = "Addison-Wesley",
+      }
+</pre><p style="text-indent: 0">
+This format is what we call a <a class="indexterm" id="N13146"></a><em class="firstterm">self-describing data</em> format,
+because each piece of data has attached to it a
+short description of its meaning.
+Self-describing data are more readable (by humans, at least)
+than <a class="indexterm" id="N1314D"></a>CSV or other compact notations;
+they are easy to edit by hand, when necessary;
+and they allow us to make small modifications in the
+basic format without having to change the data file.
+For instance,
+if we add a new field we need only a
+small change in the reading program,
+so that it supplies a default value when the field is absent.
+</p><p id="N13151" style="text-indent: 0">
+With the name-value format,
+our program to collect authors becomes this:
+</p><pre class="programlisting" id="N13153">      local authors = {}      -- a set to collect authors
+      function Entry (b) authors[b.author] = true end
+      dofile("data")
+      for name in pairs(authors) do print(name) end
+</pre><p style="text-indent: 0">
+Now the order of fields is irrelevant.
+Even if some entries do not have an author,
+we have to adapt only the function <code class="literal">Entry</code>:
+</p><pre class="programlisting" id="N13159">      function Entry (b)
+        authors[b.author or "unknown"] = true
+      end
+</pre><p style="text-indent: 0">
+</p></div><div class="sect1" title="Serialization"><div class="titlepage"><div><div><h2 class="title"><a id="L159"/>Serialization</h2></div></div></div><p id="N13160" style="text-indent: 0">
+<a class="indexterm" id="N13162"/>
+Frequently we need to serialize some data,
+that is, to convert the data into a stream of bytes or characters,
+so that we can save it into a file or send it through a network
+connection.
+We can represent serialized data as Lua code
+in such a way that, when we run the code,
+it reconstructs the saved values into the reading program.
+
+</p><p id="N13166" style="text-indent: 0">
+Usually, if we want to restore the value of a global variable,
+our chunk will be something like <code class="literal">varname = <em class="replaceable"><code>exp</code></em></code>,
+where <em class="replaceable"><code>exp</code></em> is the Lua code to create the value.
+The <code class="literal">varname</code> is the easy part,
+so let us see how to write the code that creates a value.
+For a numeric value, the task is easy:
+</p><pre class="programlisting" id="N13173">      function serialize (o)
+        if type(o) == "number" then
+          io.write(tostring(o))
+        else <em class="replaceable"><code>other cases</code></em>
+        end
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N13179" style="text-indent: 0">
+By writing a float in decimal format, however,
+we risk losing some precision.
+We can use a hexadecimal format to avoid this problem.
+With format (<code class="literal">"%a"</code>),
+the read float will have exactly the same bits of the original one.
+Moreover, since Lua 5.3 we should distinguish between
+integers and floats,
+so that they can be restored with the correct subtype:
+</p><pre class="programlisting" id="N1317E">      local fmt = {integer = "%d", float = "%a"}
+      
+      function serialize (o)
+        if type(o) == "number" then
+          io.write(string.format(fmt[math.type(o)], o))
+        else <em class="replaceable"><code>other cases</code></em>
+</pre><p style="text-indent: 0">
+</p><p id="N13184" style="text-indent: 0">
+For a string value,
+a naive approach would be something like this:
+</p><pre class="programlisting" id="N13186">      if type(o) == "string" then
+        io.write("'", o, "'")
+</pre><p style="text-indent: 0">
+However, if the string contains special characters
+(such as quotes or newlines)
+the resulting code will not be a valid Lua program.
+</p><p id="N13189" style="text-indent: 0">
+You may be tempted to solve this problem changing quotes:
+</p><pre class="programlisting" id="N1318B">      if type(o) == "string" then
+        io.write("[[", o, "]]")
+</pre><p style="text-indent: 0">
+Beware of <a class="indexterm" id="N1318E"></a>code injection!
+If a malicious user manages to direct your
+program to save something like
+<code class="literal">" ]]..os.execute('rm *')..[[ "</code>
+(for instance, she can supply this string as her address),
+your final chunk will be like this one:
+</p><pre class="programlisting" id="N13195">      varname = [[ ]]..os.execute('rm *')..[[ ]]
+</pre><p style="text-indent: 0">
+You will have a bad surprise trying to load this <span class="quote">“<span class="quote">data</span>”</span>.
+</p><p id="N1319B" style="text-indent: 0">
+A simple way to quote a string in a secure way
+is with the option <code class="literal">"%q"</code> from <a class="indexterm" id="N131A0"></a><code class="function">string.format</code>.
+This option was designed to save the string
+in a way that it can be safely read back by Lua.
+It surrounds the string with double quotes
+and properly escapes double quotes, newlines,
+and some other characters inside the string:
+</p><pre class="programlisting" id="N131A8">      a = 'a "problematic" \\string'
+      print(string.format("%q", a))    --&gt; "a \"problematic\" \\string"
+</pre><p style="text-indent: 0">
+
+Using this feature, our <code class="literal">serialize</code> function now looks like this:
+</p><pre class="programlisting" id="N131AE">      function serialize (o)
+        if type(o) == "number" then
+          io.write(string.format(fmt[math.type(o)], o))
+        elseif type(o) == "string" then
+          io.write(string.format("%q", o))
+        else <em class="replaceable"><code>other cases</code></em>
+        end
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N131B4" style="text-indent: 0">
+Lua 5.3.3 extended the format option <code class="literal">"%q"</code>
+to work also with numbers (plus nil and Booleans),
+again writing them in a proper way to be read back by Lua.
+(In particular, it formats floats in hexadecimal,
+to ensure full precision.)
+Thus, since that version,
+we can simplify and extend <code class="literal">serialize</code> even more:
+</p><pre class="programlisting" id="N131BC">      function serialize (o)
+        local t = type(o)
+        if t == "number" or t == "string" or t == "boolean" or
+           t == "nil" then
+          io.write(string.format("%q", o))
+        else <em class="replaceable"><code>other cases</code></em>
+        end
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N131C2" style="text-indent: 0">
+Another way to save strings is the notation
+<code class="literal">[=[...]=]</code> for long strings.
+However, this notation is mainly intended for hand-written code,
+where we do not want to change a <a class="indexterm" id="N131C7"/>literal string in any way.
+In automatically generated code,
+it is easier to escape problematic characters,
+as the option <code class="literal">"%q"</code> from <a class="indexterm" id="N131CE"/><code class="function">string.format</code> does.
+</p><p id="N131D6" style="text-indent: 0">
+If you nevertheless want to use the long-string notation for
+automatically generated code,
+you must take care of some details.
+The first one is that you must
+choose a proper number of equals signs.
+A good proper number is one more than the maximum that appears in
+the original string.
+Because strings containing long sequences
+of equals signs are common
+(e.g., comments delimiting parts of a source code),
+we should limit our attention to sequences of equals signs
+enclosed by square bracket.
+The second detail is that Lua always ignores a newline
+at the beginning of a long string;
+a simple way to avoid this problem is to add
+always a newline to be ignored.
+</p><p id="N131D8" style="text-indent: 0">
+The function <code class="literal">quote</code> in <a class="xref" href="ch15.html#quote" title="Figure 15.1. Quoting arbitrary literal strings">Figure 15.1, “Quoting arbitrary literal strings”</a>
+is the result of our previous remarks.
+</p><div class="figure-float"><div class="figure"><a id="quote"/><p class="title" style="text-indent: 0"><strong>Figure 15.1. Quoting arbitrary literal strings</strong></p><div class="figure-contents"><pre class="programlisting" id="N131E5">      function quote (s)
+        -- find maximum length of sequences of equals signs
+        local n = -1
+        for w in string.gmatch(s, "]=*%f[%]]") do
+          n = math.max(n, #w - 1)   -- -1 to remove the ']'
+        end
+      
+        -- produce a string with 'n' plus one equals signs
+        local eq = string.rep("=", n + 1)
+      
+        -- build quoted string
+        return string.format(" [%s[\n%s]%s] ", eq, s, eq)
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+It takes an arbitrary string and
+returns it formatted as a long string.
+The call to <a class="indexterm" id="N131E8"></a><code class="function">gmatch</code> creates an iterator to
+traverse all occurrences of the pattern  ’<code class="literal">]=*%f[%]]</code>’
+(that is, a closing square bracket followed by
+a sequence of zero or more equals signs followed
+by a frontier with a closing square bracket)
+in the string <code class="literal">s</code>.
+For each occurrence,
+the loop updates <code class="literal">n</code> with
+the maximum number of equals signs so far.
+After the loop, we use <a class="indexterm" id="N131F9"></a><code class="function">string.rep</code>
+to replicate an equals sign <code class="literal">n + 1</code> times,
+which is one more than the maximum occurring in the string.
+Finally, <a class="indexterm" id="N13204"></a><code class="function">string.format</code> encloses <code class="literal">s</code> with pairs of
+brackets with the correct number of equals signs in between
+and adds extra spaces around the quoted string plus a newline at
+the beginning of the enclosed string.
+</p><p id="N1320F" style="text-indent: 0">
+(We might be tempted to use the simpler pattern  ’<code class="literal">]=*]</code>’,
+which does not use a frontier pattern for the second square bracket,
+but there is a subtlety here.
+Suppose the subject is <code class="literal">"]=]==]"</code>.
+The first match is <code class="literal">"]=]"</code>.
+After it, what is left in the string is <code class="literal">"==]"</code>,
+and so there is no other match;
+in the end of the loop, <code class="literal">n</code> would be one instead of two.
+The frontier pattern does not consume the bracket,
+so that it remains in the subject for the following matches.)
+</p><div class="sect2" title="Saving tables without cycles"><div class="titlepage"><div><div><h3 class="title"><a id="no-cycles"/>Saving tables without cycles</h3></div></div></div><p id="N13224" style="text-indent: 0">
+Our next (and harder) task is to save tables.
+There are several ways to save them,
+according to what assumptions we make about
+the table structure.
+No single algorithm seems appropriate for all cases.
+Simple tables not only can use simpler algorithms,
+but also the output can be shorter and clearer.
+</p><p id="N13226" style="text-indent: 0">
+Our first attempt is in <a class="xref" href="ch15.html#cd_serialize" title="Figure 15.2. Serializing tables without cycles">Figure 15.2, “Serializing tables without cycles”</a>.
+</p><div class="figure-float"><div class="figure"><a id="cd_serialize"/><p class="title" style="text-indent: 0"><strong>Figure 15.2. Serializing tables without cycles</strong></p><div class="figure-contents"><pre class="programlisting" id="N13230">      function serialize (o)
+        local t = type(o)
+        if t == "number" or t == "string" or t == "boolean" or
+           t == "nil" then
+          io.write(string.format("%q", o))
+        elseif t == "table" then
+          io.write("{\n")
+          for k,v in pairs(o) do
+            io.write("  ", k, " = ")
+            serialize(v)
+            io.write(",\n")
+          end
+          io.write("}\n")
+        else
+          error("cannot serialize a " .. type(o))
+        end
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+Despite its simplicity,
+that function does a reasonable job.
+It even handles nested tables
+(that is, tables within other tables),
+as long as the table structure is a tree
+—that is, there are no shared subtables and no cycles.
+(A small aesthetic improvement would be
+to indent nested tables;
+see <a class="link" href="ch15.html#ex_serialize">Exercise 15.1</a>.)
+</p><p id="N13237" style="text-indent: 0">
+The previous function assumes that all keys in a table
+are valid identifiers.
+If a table has numeric keys,
+or string keys that are not syntactic valid Lua identifiers,
+we are in trouble.
+A simple way to solve this difficulty is to use the
+following code to write each key:
+</p><pre class="programlisting" id="N13239">      io.write(string.format(" [%s] = ", serialize(k)))
+</pre><p style="text-indent: 0">
+With this change, we improve the robustness of our function,
+at the cost of the aesthetics of the resulting file.
+Consider the next call:
+</p><pre class="programlisting" id="N1323C">      serialize{a=12, b='Lua', key='another "one"'}
+</pre><p style="text-indent: 0">
+The result of this call
+using the first version of <code class="literal">serialize</code> is this:
+</p><pre class="programlisting" id="N13242">      {
+        a = 12,
+        b = "Lua",
+        key = "another \"one\"",
+      }
+</pre><p style="text-indent: 0">
+Compare it with the result using the second version:
+</p><pre class="programlisting" id="N13245">      {
+        ["a"] = 12,
+        ["b"] = "Lua",
+        ["key"] = "another \"one\"",
+      }
+</pre><p style="text-indent: 0">
+We can have both robustness and aesthetics
+by testing for each case
+whether it needs the square brackets;
+again, we will leave this improvement as an exercise.
+</p></div><div class="sect2" title="Saving tables with cycles"><div class="titlepage"><div><div><h3 class="title"><a id="L160"/>Saving tables with cycles</h3></div></div></div><p id="N1324C" style="text-indent: 0">
+To handle tables with generic topology
+(i.e., with cycles and shared subtables)
+we need a different approach.
+Constructors cannot create such tables,
+so we will not use them.
+To represent cycles we need names,
+so our next function will get as arguments the
+value to be saved plus its name.
+Moreover, we must keep track of the names of the tables
+already saved,
+to reuse them when we detect a cycle.
+We will use an extra table for this tracking.
+This table will have previously saved tables as indices
+and their names as the associated values.
+</p><p id="N1324E" style="text-indent: 0">
+The resulting code is in <a class="xref" href="ch15.html#save" title="Figure 15.3. Saving tables with cycles">Figure 15.3, “Saving tables with cycles”</a>.
+</p><div class="figure-float"><div class="figure"><a id="save"/><p class="title" style="text-indent: 0"><strong>Figure 15.3. Saving tables with cycles</strong></p><div class="figure-contents"><pre class="programlisting" id="N13258">      function basicSerialize (o)
+        -- assume 'o' is a number or a string
+        return string.format("%q", o)
+      end
+      
+      function save (name, value, saved)
+        saved = saved or {}                 -- initial value
+        io.write(name, " = ")
+        if type(value) == "number" or type(value) == "string" then
+          io.write(basicSerialize(value), "\n")
+        elseif type(value) == "table" then
+          if saved[value] then              -- value already saved?
+            io.write(saved[value], "\n")    -- use its previous name
+          else
+            saved[value] = name             -- save name for next time
+            io.write("{}\n")                -- create a new table
+            for k,v in pairs(value) do      -- save its fields
+              k = basicSerialize(k)
+              local fname = string.format("%s[%s]", name, k)
+              save(fname, v, saved)
+            end
+          end
+        else
+          error("cannot save a " .. type(value))
+        end
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+We keep the restriction that the tables we want to save
+have only strings and numbers as keys.
+The function <code class="literal">basicSerialize</code> serializes these basic types,
+returning the result.
+The next function, <code class="literal">save</code>, does the hard work.
+The <code class="literal">saved</code> parameter is the table that keeps track of
+tables already saved.
+As an example, suppose we build a table like this:
+</p><pre class="programlisting" id="N13264">      a = {x=1, y=2; {3,4,5}}
+      a[2] = a    -- cycle
+      a.z = a[1]  -- shared subtable
+</pre><p style="text-indent: 0">
+The call <code class="literal">save("a", a)</code> will save it as follows:
+</p><pre class="programlisting" id="N1326A">      a = {}
+      a[1] = {}
+      a[1][1] = 3
+      a[1][2] = 4
+      a[1][3] = 5
+      
+      a[2] = a
+      a["y"] = 2
+      a["x"] = 1
+      a["z"] = a[1]
+</pre><p style="text-indent: 0">
+The actual order of these assignments may vary,
+as it depends on a table traversal.
+Nevertheless, the algorithm ensures
+that any node needed
+in a new definition is already defined.
+</p><p id="N1326D" style="text-indent: 0">
+If we want to save several values with shared parts,
+we can make the calls to <code class="literal">save</code> them using
+the same <code class="literal">saved</code> table.
+For instance, assume the following two tables:
+</p><pre class="programlisting" id="N13275">      a = {{"one", "two"}, 3}
+      b = {k = a[1]}
+</pre><p style="text-indent: 0">
+If we save them independently,
+the result will not have common parts.
+However,
+if we use the same <code class="literal">saved</code> table for both calls to <code class="literal">save</code>,
+then the result will share common parts:
+</p><pre class="programlisting" id="N1327E">      local t = {}
+      save("a", a, t)
+      save("b", b, t)
+      
+        --&gt; a = {}
+        --&gt; a[1] = {}
+        --&gt; a[1][1] = "one"
+        --&gt; a[1][2] = "two"
+        --&gt; a[2] = 3
+        --&gt; b = {}
+        --&gt; b["k"] = a[1]
+</pre><p style="text-indent: 0">
+</p><p id="N13281" style="text-indent: 0">
+As is usual in Lua,
+there are several other alternatives.
+Among them,
+we can save a value without giving it a global name
+(instead, the chunk builds a local value and returns it),
+we can use the list syntax when possible
+(see the exercises for this chapter),
+and so on.
+Lua gives you the tools;
+you build the mechanisms.
+</p></div></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L161"/>Exercises</h2></div></div></div><p id="N13287" style="text-indent: 0">
+Exercise 15.1:<a id="ex_serialize"/> 
+Modify the code in <a class="xref" href="ch15.html#cd_serialize" title="Figure 15.2. Serializing tables without cycles">Figure 15.2, “Serializing tables without cycles”</a>
+so that it indents nested tables.
+(Hint:
+add an extra parameter to
+<code class="literal">serialize</code> with the indentation string.)
+
+
+</p><p id="N13292" style="text-indent: 0">
+Exercise 15.2:<a id="L162"/> 
+Modify the code of the previous exercise
+so that it uses the syntax <code class="literal">["<em class="replaceable"><code>key</code></em>"]=<em class="replaceable"><code>value</code></em></code>,
+as suggested in <a class="xref" href="ch15.html#no-cycles" title="Saving tables without cycles">the section called “Saving tables without cycles”</a>.
+
+
+</p><p id="N132A2" style="text-indent: 0">
+Exercise 15.3:<a id="L163"/> 
+Modify the code of the previous exercise
+so that it uses the syntax <code class="literal">["<em class="replaceable"><code>key</code></em>"]=<em class="replaceable"><code>value</code></em></code>
+only when necessary
+(that is, when the key is a string but not a valid identifier).
+
+
+</p><p id="N132AF" style="text-indent: 0">
+Exercise 15.4:<a id="L164"/> 
+Modify the code of the previous exercise
+so that it uses the constructor syntax for lists
+whenever possible.
+For instance,
+it should serialize the table <code class="literal">{14, 15, 19}</code>
+as <code class="literal">{14, 15, 19}</code>,
+not as <code class="literal">{[1] = 14, [2] = 15, [3] = 19}</code>.
+(Hint:
+start by saving the values of the keys 1, 2, ...,
+as long as they are not nil.
+Take care not to save them again when traversing
+the rest of the table.)
+
+
+</p><p id="N132BD" style="text-indent: 0">
+Exercise 15.5:<a id="L165"/> 
+The approach of avoiding constructors
+when saving tables with cycles is too radical.
+It is possible to save the table in a more pleasant format
+using constructors for the simple case,
+and to use assignments later only to fix sharing and loops.
+Reimplement the function <code class="literal">save</code> (<a class="xref" href="ch15.html#save" title="Figure 15.3. Saving tables with cycles">Figure 15.3, “Saving tables with cycles”</a>) using this approach.
+Add to it all the goodies that you have implemented
+in the previous exercises
+(indentation, record syntax, and list syntax).
+
+
+</p></div><div class="footnotes"><br/><hr/><div class="footnote"><p id="N1313C" style="text-indent: 0"><sup>[<a href="#N1313B" id="ftn.N1313B" class="para">15</a>] </sup>If this format reminds you of <a class="indexterm" id="N1313E"/>BibTeX,
+it is not a coincidence.
+BibTeX was one of the inspirations
+for the constructor syntax in Lua.</p></div></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

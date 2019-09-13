@@ -1,0 +1,393 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Generator Concurrency</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <section data-type="chapter" xmlns:epub="http://www.idpf.org/2007/ops" epub:type="chapter" data-pdf-bookmark="Chapter 4. Generators">
+  <div class="epub__chapter" id="chapter-4-generators">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<section data-type="sect1" data-pdf-bookmark="Generator Concurrency"><div class="epub__sect1" id="generator-concurrency">
+<h1>Generator Concurrency</h1>
+
+<p>As we discussed in both Chapter 1 and earlier in this chapter, two
+simultaneously running “processes” can cooperatively interleave their
+operations, and many times this can <em>yield</em> (pun intended) very powerful
+asynchrony expressions.</p>
+
+<p>Frankly, our earlier examples of concurrency interleaving of multiple
+generators showed how to make it really confusing. But we hinted that
+there’s places where this capability is quite useful.</p>
+
+<p>Recall a scenario we looked at in Chapter 1, where two different
+simultaneous Ajax response handlers needed to coordinate with each other
+to make sure that the data communication was not a race condition. We
+slotted the responses into the <code>res</code> array like this:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">function</code> <code class="epub__nx">response</code><code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__k">if</code> <code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">.</code><code class="epub__nx">url</code> <code class="epub__o">==</code> <code class="epub__s2">"http://some.url.1"</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+        <code class="epub__nx">res</code><code class="epub__p">[</code><code class="epub__mi">0</code><code class="epub__p">]</code> <code class="epub__o">=</code> <code class="epub__nx">data</code><code class="epub__p">;</code>
+    <code class="epub__p">}</code>
+    <code class="epub__k">else</code> <code class="epub__k">if</code> <code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">.</code><code class="epub__nx">url</code> <code class="epub__o">==</code> <code class="epub__s2">"http://some.url.2"</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+        <code class="epub__nx">res</code><code class="epub__p">[</code><code class="epub__mi">1</code><code class="epub__p">]</code> <code class="epub__o">=</code> <code class="epub__nx">data</code><code class="epub__p">;</code>
+    <code class="epub__p">}</code>
+<code class="epub__p">}</code></pre>
+
+<p>But how can we use multiple generators concurrently for this scenario?</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__c1">// `request(..)` is a Promise-aware Ajax utility</code>
+
+<code class="epub__kd">var</code> <code class="epub__nx">res</code> <code class="epub__o">=</code> <code class="epub__p">[];</code>
+
+<code class="epub__kd">function</code> <code class="epub__o">*</code><code class="epub__nx">reqData</code><code class="epub__p">(</code><code class="epub__nx">url</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__nx">res</code><code class="epub__p">.</code><code class="epub__nx">push</code><code class="epub__p">(</code>
+        <code class="epub__k">yield</code> <code class="epub__nx">request</code><code class="epub__p">(</code> <code class="epub__nx">url</code> <code class="epub__p">)</code>
+    <code class="epub__p">);</code>
+<code class="epub__p">}</code></pre>
+<div data-type="note" epub:type="note"><h6>Note</h6>
+<p>We’re going to use two instances of the <code>*reqData(..)</code> generator
+here, but there’s no difference to running a single instance of two
+different generators; both approaches are reasoned about identically.
+We’ll see two different generators coordinating in just a bit.</p>
+</div>
+
+<p>Instead of having to manually sort out <code>res[0]</code> and <code>res[1]</code>
+assignments, we’ll use coordinated ordering so that <code>res.push(..)</code>
+properly slots the values in the expected and predictable order. The
+expressed logic thus should feel a bit cleaner.</p>
+
+<p>But how will we actually orchestrate this interaction? First, let’s just
+do it manually, with Promises:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">var</code> <code class="epub__nx">it1</code> <code class="epub__o">=</code> <code class="epub__nx">reqData</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.1"</code> <code class="epub__p">);</code>
+<code class="epub__kd">var</code> <code class="epub__nx">it2</code> <code class="epub__o">=</code> <code class="epub__nx">reqData</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.2"</code> <code class="epub__p">);</code>
+
+<code class="epub__kd">var</code> <code class="epub__nx">p1</code> <code class="epub__o">=</code> <code class="epub__nx">it1</code><code class="epub__p">.</code><code class="epub__nx">next</code><code class="epub__p">();</code>
+<code class="epub__kd">var</code> <code class="epub__nx">p2</code> <code class="epub__o">=</code> <code class="epub__nx">it2</code><code class="epub__p">.</code><code class="epub__nx">next</code><code class="epub__p">();</code>
+
+<code class="epub__nx">p1</code>
+<code class="epub__p">.</code><code class="epub__nx">then</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">){</code>
+    <code class="epub__nx">it1</code><code class="epub__p">.</code><code class="epub__nx">next</code><code class="epub__p">(</code> <code class="epub__nx">data</code> <code class="epub__p">);</code>
+    <code class="epub__k">return</code> <code class="epub__nx">p2</code><code class="epub__p">;</code>
+<code class="epub__p">}</code> <code class="epub__p">)</code>
+<code class="epub__p">.</code><code class="epub__nx">then</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">){</code>
+    <code class="epub__nx">it2</code><code class="epub__p">.</code><code class="epub__nx">next</code><code class="epub__p">(</code> <code class="epub__nx">data</code> <code class="epub__p">);</code>
+<code class="epub__p">}</code> <code class="epub__p">);</code></pre>
+
+<p><code>*reqData(..)</code>’s two instances are both started to make their Ajax
+requests, then paused with <code>yield</code>. Then we choose to resume the first
+instance when <code>p1</code> resolves, and then <code>p2</code>’s resolution will restart the
+second instance. In this way, we use Promise orchestration to ensure
+that <code>res[0]</code> will have the first response and <code>res[1]</code> will have the
+second response.</p>
+
+<p>But frankly, this is awfully manual, and it doesn’t really let the
+generators orchestrate themselves, which is where the true power can
+lie. Let’s try it a different way:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__c1">// `request(..)` is a Promise-aware Ajax utility</code>
+
+<code class="epub__kd">var</code> <code class="epub__nx">res</code> <code class="epub__o">=</code> <code class="epub__p">[];</code>
+
+<code class="epub__kd">function</code> <code class="epub__o">*</code><code class="epub__nx">reqData</code><code class="epub__p">(</code><code class="epub__nx">url</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__kd">var</code> <code class="epub__nx">data</code> <code class="epub__o">=</code> <code class="epub__k">yield</code> <code class="epub__nx">request</code><code class="epub__p">(</code> <code class="epub__nx">url</code> <code class="epub__p">);</code>
+
+    <code class="epub__c1">// transfer control</code>
+    <code class="epub__k">yield</code><code class="epub__p">;</code>
+
+    <code class="epub__nx">res</code><code class="epub__p">.</code><code class="epub__nx">push</code><code class="epub__p">(</code> <code class="epub__nx">data</code> <code class="epub__p">);</code>
+<code class="epub__p">}</code>
+
+<code class="epub__kd">var</code> <code class="epub__nx">it1</code> <code class="epub__o">=</code> <code class="epub__nx">reqData</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.1"</code> <code class="epub__p">);</code>
+<code class="epub__kd">var</code> <code class="epub__nx">it2</code> <code class="epub__o">=</code> <code class="epub__nx">reqData</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.2"</code> <code class="epub__p">);</code>
+
+<code class="epub__kd">var</code> <code class="epub__nx">p1</code> <code class="epub__o">=</code> <code class="epub__nx">it</code><code class="epub__p">.</code><code class="epub__nx">next</code><code class="epub__p">();</code>
+<code class="epub__kd">var</code> <code class="epub__nx">p2</code> <code class="epub__o">=</code> <code class="epub__nx">it</code><code class="epub__p">.</code><code class="epub__nx">next</code><code class="epub__p">();</code>
+
+<code class="epub__nx">p1</code><code class="epub__p">.</code><code class="epub__nx">then</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">){</code>
+    <code class="epub__nx">it1</code><code class="epub__p">.</code><code class="epub__nx">next</code><code class="epub__p">(</code> <code class="epub__nx">data</code> <code class="epub__p">);</code>
+<code class="epub__p">}</code> <code class="epub__p">);</code>
+
+<code class="epub__nx">p2</code><code class="epub__p">.</code><code class="epub__nx">then</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">){</code>
+    <code class="epub__nx">it2</code><code class="epub__p">.</code><code class="epub__nx">next</code><code class="epub__p">(</code> <code class="epub__nx">data</code> <code class="epub__p">);</code>
+<code class="epub__p">}</code> <code class="epub__p">);</code>
+
+<code class="epub__nx">Promise</code><code class="epub__p">.</code><code class="epub__nx">all</code><code class="epub__p">(</code> <code class="epub__p">[</code><code class="epub__nx">p1</code><code class="epub__p">,</code><code class="epub__nx">p2</code><code class="epub__p">]</code> <code class="epub__p">)</code>
+<code class="epub__p">.</code><code class="epub__nx">then</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__p">(){</code>
+    <code class="epub__nx">it1</code><code class="epub__p">.</code><code class="epub__nx">next</code><code class="epub__p">();</code>
+    <code class="epub__nx">it2</code><code class="epub__p">.</code><code class="epub__nx">next</code><code class="epub__p">();</code>
+<code class="epub__p">}</code> <code class="epub__p">);</code></pre>
+
+<p>OK, this is a bit better (though still manual!), because now the two
+instances of <code>*reqData(..)</code> run truly concurrently, and (at least for
+the first part) independently.</p>
+
+<p>In the previous snippet, the second instance was not given its data
+until after the first instance was totally finished. But here, both
+instances receive their data as soon as their respective responses come
+back, and then each instance does another <code>yield</code> for control transfer
+purposes. We then choose what order to resume them in the
+<code>Promise.all([ .. ])</code> handler.</p>
+
+<p>What may not be as obvious is that this approach hints at an easier form
+for a reusable utility, because of the symmetry. We can do even better.
+Let’s imagine using a utility called <code>runAll(..)</code>:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__c1">// `request(..)` is a Promise-aware Ajax utility</code>
+
+<code class="epub__kd">var</code> <code class="epub__nx">res</code> <code class="epub__o">=</code> <code class="epub__p">[];</code>
+
+<code class="epub__nx">runAll</code><code class="epub__p">(</code>
+    <code class="epub__kd">function</code><code class="epub__o">*</code><code class="epub__p">(){</code>
+        <code class="epub__kd">var</code> <code class="epub__nx">p1</code> <code class="epub__o">=</code> <code class="epub__nx">request</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.1"</code> <code class="epub__p">);</code>
+
+        <code class="epub__c1">// transfer control</code>
+        <code class="epub__k">yield</code><code class="epub__p">;</code>
+
+        <code class="epub__nx">res</code><code class="epub__p">.</code><code class="epub__nx">push</code><code class="epub__p">(</code> <code class="epub__k">yield</code> <code class="epub__nx">p1</code> <code class="epub__p">);</code>
+    <code class="epub__p">},</code>
+    <code class="epub__kd">function</code><code class="epub__o">*</code><code class="epub__p">(){</code>
+        <code class="epub__kd">var</code> <code class="epub__nx">p2</code> <code class="epub__o">=</code> <code class="epub__nx">request</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.2"</code> <code class="epub__p">);</code>
+
+        <code class="epub__c1">// transfer control</code>
+        <code class="epub__k">yield</code><code class="epub__p">;</code>
+
+        <code class="epub__nx">res</code><code class="epub__p">.</code><code class="epub__nx">push</code><code class="epub__p">(</code> <code class="epub__k">yield</code> <code class="epub__nx">p2</code> <code class="epub__p">);</code>
+    <code class="epub__p">}</code>
+<code class="epub__p">);</code></pre>
+<div data-type="note" epub:type="note"><h6>Note</h6>
+<p>We’re not including a code listing for <code>runAll(..)</code> as it is not
+only long enough to bog down the text, but is an extension of the logic
+we’ve already implemented in <code>run(..)</code> earlier. So, as a good
+supplementary exercise for the reader, try your hand at evolving the
+code from <code>run(..)</code> to work like the imagined <code>runAll(..)</code>. Also, my
+<em>asynquence</em> library provides a previously mentioned <code>runner(..)</code>
+utility with this kind of capability already built in, and will be
+discussed in Appendix A of this book.</p>
+</div>
+
+<p>Here’s how the processing inside <code>runAll(..)</code> would operate:</p>
+<ol>
+<li>
+<p>The first generator gets a promise for the first Ajax response from
+<code>"http://some.url.1"</code>, then <code>yield</code>s control back to the <code>runAll(..)</code>
+utility.</p>
+</li>
+<li>
+<p>The second generator runs and does the same for
+<code>"http://some.url.2"</code>, <code>yield</code>ing control back to the <code>runAll(..)</code>
+utility.</p>
+</li>
+<li>
+<p>The first generator resumes, and then <code>yield</code>s out its promise <code>p1</code>.
+The <code>runAll(..)</code> utility does the same in this case as our previous
+<code>run(..)</code>, in that it waits on that promise to resolve, then resumes the
+same generator (no control transfer!). When <code>p1</code> resolves, <code>runAll(..)</code>
+resumes the first generator again with that resolution value, and then
+<code>res[0]</code> is given its value. When the first generator then finishes,
+that’s an implicit transfer of <span class="epub__keep-together">control</span>.</p>
+</li>
+<li>
+<p>The second generator resumes, <code>yield</code>s out its promise <code>p2</code>, and
+waits for it to resolve. Once it does, <code>runAll(..)</code> resumes the second
+generator with that value, and <code>res[1]</code> is set.</p>
+</li>
+
+</ol>
+
+<p>In this running example, we use an outer variable called <code>res</code> to store
+the results of the two different Ajax responses—our
+concurrency coordination makes that possible.</p>
+
+<p>But it might be quite helpful to further extend <code>runAll(..)</code> to provide
+an inner variable space for the multiple generator instances to <em>share</em>,
+such as an empty object we’ll call <code>data</code> below. Also, it could take
+non-Promise values that are <code>yield</code>ed and hand them off to the next
+generator.</p>
+
+<p>Consider:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__c1">// `request(..)` is a Promise-aware Ajax utility</code>
+
+<code class="epub__nx">runAll</code><code class="epub__p">(</code>
+    <code class="epub__kd">function</code><code class="epub__o">*</code><code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">){</code>
+        <code class="epub__nx">data</code><code class="epub__p">.</code><code class="epub__nx">res</code> <code class="epub__o">=</code> <code class="epub__p">[];</code>
+
+        <code class="epub__c1">// transfer control (and message pass)</code>
+        <code class="epub__kd">var</code> <code class="epub__nx">url1</code> <code class="epub__o">=</code> <code class="epub__k">yield</code> <code class="epub__s2">"http://some.url.2"</code><code class="epub__p">;</code>
+
+        <code class="epub__kd">var</code> <code class="epub__nx">p1</code> <code class="epub__o">=</code> <code class="epub__nx">request</code><code class="epub__p">(</code> <code class="epub__nx">url1</code> <code class="epub__p">);</code> <code class="epub__c1">// "http://some.url.1"</code>
+
+        <code class="epub__c1">// transfer control</code>
+        <code class="epub__k">yield</code><code class="epub__p">;</code>
+
+        <code class="epub__nx">data</code><code class="epub__p">.</code><code class="epub__nx">res</code><code class="epub__p">.</code><code class="epub__nx">push</code><code class="epub__p">(</code> <code class="epub__k">yield</code> <code class="epub__nx">p1</code> <code class="epub__p">);</code>
+    <code class="epub__p">},</code>
+    <code class="epub__kd">function</code><code class="epub__o">*</code><code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">){</code>
+        <code class="epub__c1">// transfer control (and message pass)</code>
+        <code class="epub__kd">var</code> <code class="epub__nx">url2</code> <code class="epub__o">=</code> <code class="epub__k">yield</code> <code class="epub__s2">"http://some.url.1"</code><code class="epub__p">;</code>
+
+        <code class="epub__kd">var</code> <code class="epub__nx">p2</code> <code class="epub__o">=</code> <code class="epub__nx">request</code><code class="epub__p">(</code> <code class="epub__nx">url2</code> <code class="epub__p">);</code> <code class="epub__c1">// "http://some.url.2"</code>
+
+        <code class="epub__c1">// transfer control</code>
+        <code class="epub__k">yield</code><code class="epub__p">;</code>
+
+        <code class="epub__nx">data</code><code class="epub__p">.</code><code class="epub__nx">res</code><code class="epub__p">.</code><code class="epub__nx">push</code><code class="epub__p">(</code> <code class="epub__k">yield</code> <code class="epub__nx">p2</code> <code class="epub__p">);</code>
+    <code class="epub__p">}</code>
+<code class="epub__p">);</code></pre>
+
+<p>In this formulation, the two generators are not just coordinating
+control transfer, but actually communicating with each other, both
+through <code>data.res</code> and the <code>yield</code>ed messages that trade <code>url1</code> and
+<code>url2</code> values. That’s incredibly powerful!</p>
+
+<p>Such realization also serves as a conceptual base for a more
+sophisticated asynchrony technique called Communicating Sequential
+Processes (CSP), which is covered in Appendix B of this book.</p>
+</div></section>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</div>
+</section>
+
+
+</body>
+</html>

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>55.6. Running Just One Instance of a Program</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">55.6. Running Just One Instance of a Program</h3><p class="docText">Some
+ programs—in particular, many daemons—need to ensure that only one 
+instance of the program is running on the system at a time. A common 
+method of doing this is to have the daemon create a file in a standard 
+directory and place a write lock on it. The daemon holds the file lock 
+for the duration of its execution and deletes the file just before 
+terminating. If another instance of the daemon is started, it will fail 
+to obtain a write lock on the file. Consequently, it will realize that 
+another instance of the daemon must already be running, and terminate.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Many
+ network servers use an alternative convention of assuming that a server
+ instance is already running if the well-known socket port to which the 
+server binds is already in use (Section 61.10).</p><hr noshade="noshade" size="1"/><p class="docText">The <tt>/var/run</tt>
+ directory is the usual location for such lock files. Alternatively, the
+ location of the file may be specified by a line in the daemon’s 
+configuration file.</p><p class="docText">Conventionally, a daemon writes its own process ID into the lock file, and hence the file is often named with an extension <tt>.pid</tt> (for example, <span class="docEmphasis">syslogd</span> creates the file <tt>/var/run/syslogd.pid</tt>).
+ This is useful if some application needs to find the process ID of the 
+daemon. It also allows an extra sanity check—we can verify whether that 
+process ID exists using <span class="docEmphasis">kill(pid, 0)</span>,
+ as described in Section 20.5. (In older UNIX implementations that did 
+not provide file locking, this was used as an imperfect, but usually 
+practicable, way of assessing whether an instance of the daemon really 
+was still running, or whether an earlier instance had simply failed to 
+delete the file before terminating.)</p><p class="docText">There are many minor variations in the code used to create and lock a process ID lock file. Example 55-4 is based on ideas presented in [Stevens, 1999] and provides a function, <span class="docEmphasis">createPidFile()</span>, that encapsulates the steps described above. We would typically call this function with a line such as the following:</p><pre>if (createPidFile("mydaemon", "/var/run/mydaemon.pid", 0) == -1)
+    errExit("createPidFile");</pre><br/>
+<p class="docText">One subtlety in the <span class="docEmphasis">createPidFile()</span> function is the use of <span class="docEmphasis">ftruncate()</span>
+ to erase any previous string in the lock file. This is done because the
+ last instance of the daemon may have failed to delete the file, perhaps
+ because of a system crash. In this case, if the process ID of the new 
+daemon instance is small, we might otherwise not completely overwrite 
+the previous contents of the file. For example, if our process ID is 
+789, then we would write just <tt>789\n</tt> to the file, but a previous daemon instance might have written <tt>12345\n</tt>. If we did not truncate the file, then the resulting content would be <tt>789\n5\n</tt>. Erasing any existing string may not be strictly necessary, but it is tidier and removes any potential for confusion.</p><p class="docText">The <span class="docEmphasis">flags</span> argument can specify the constant <tt>CPF_CLOEXEC</tt>, which causes <span class="docEmphasis">createPidFile()</span> to set the close-on-exec flag (Section 27.4) for the file descriptor. This is useful for servers that restart themselves by calling <span class="docEmphasis">exec()</span>. If the file descriptor was not closed during the <span class="docEmphasis">exec()</span>, then the restarted server would think that a duplicate instance of the server is already running.</p><h5 class="docExampleTitle" id="title-ID0EWBFM">Example 55-4. Creating a PID lock file to ensure just one instance of a program is started</h5><p></p><div class="box"><pre class="preFixedHeight"><b>filelock/create_pid_file.c</b>
+#include &lt;sys/stat.h&gt;
+#include &lt;fcntl.h&gt;
+#include "region_locking.h"             /* For lockRegion() */
+#include "create_pid_file.h"            /* Declares createPidFile() and
+                                           defines CPF_CLOEXEC */
+#include "tlpi_hdr.h"
+
+#define BUF_SIZE 100            /* Large enough to hold maximum PID as string */
+
+/* Open/create the file named in 'pidFile', lock it, optionally set the
+   close-on-exec flag for the file descriptor, write our PID into the file,
+   and (in case the caller is interested) return the file descriptor
+   referring to the locked file. The caller is responsible for deleting
+   'pidFile' file (just) before process termination. 'progName' should be the
+   name of the calling program (i.e., argv[0] or similar), and is used only for
+   diagnostic messages. If we can't open 'pidFile', or we encounter some other
+   error, then we print an appropriate diagnostic and terminate. */
+
+int
+createPidFile(const char *progName, const char *pidFile, int flags)
+{
+    int fd;
+    char buf[BUF_SIZE];
+
+    fd = open(pidFile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    if (fd == -1)
+        errExit("Could not open PID file %s", pidFile);
+
+    if (flags &amp; CPF_CLOEXEC) {
+
+        /* Set the close-on-exec file descriptor flag */
+
+        flags = fcntl(fd, F_GETFD);                     /* Fetch flags */
+        if (flags == -1)
+            errExit("Could not get flags for PID file %s", pidFile);
+
+        flags |= FD_CLOEXEC;                            /* Turn on FD_CLOEXEC */
+
+        if (fcntl(fd, F_SETFD, flags) == -1)            /* Update flags */
+            errExit("Could not set flags for PID file %s", pidFile);
+    }
+
+    if (lockRegion(fd, F_WRLCK, SEEK_SET, 0, 0) == -1) {
+        if (errno  == EAGAIN || errno == EACCES)
+            fatal("PID file '%s' is locked; probably "
+                     "'%s' is already running", pidFile, progName);
+        else
+            errExit("Unable to lock PID file '%s'", pidFile);
+    }
+
+    if (ftruncate(fd, 0) == -1)
+        errExit("Could not truncate PID file '%s'", pidFile);
+
+    snprintf(buf, BUF_SIZE, "%ld\n", (long) getpid());
+    if (write(fd, buf, strlen(buf)) != strlen(buf))
+        fatal("Writing to PID file '%s'", pidFile);
+
+    return fd;
+}
+    <b>filelock/create_pid_file.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

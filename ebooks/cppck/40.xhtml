@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 40. RAII</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 40. RAII</h2>
+		
+<p class="docText">The
+ C++ community has a long and proud tradition of inscrutable 
+abbreviations and odd names for techniques. RAII manages to attain both 
+oddness and inscrutability. RAII stands for “resource acquisition is 
+initialization.” (No, not “initialization is resource acquisition,” as 
+some would have it. If you’re going to be odd, you’ve got to go all the 
+way or the whole thing falls flat.)</p>
+		
+<p class="docText">RAII is a simple 
+technique that harnesses C++’s notion of object lifetime to control 
+program resources like memory, file handles, network connections, audit 
+trails, or whatever. The basic technique is simple. If you want to keep 
+track of an important resource, create an object and associate the 
+resource’s lifetime with the object’s lifetime. In that way, you can use
+ C++’s sophisticated object management facilities to manage resources. 
+In its simplest form, we create an object whose constructor seizes a 
+resource and whose destructor frees the resource.</p>
+		
+<div class="docText">
+  <pre>class Resource { ... };
+class ResourceHandle {
+  public:
+    explicit ResourceHandle( Resource *aResource )
+        : r_(aResource) {} // seize resource
+    ~ResourceHandle()
+        { delete r_; } // release resource
+    Resource *get()
+        { return r_; } // access resource
+  private:
+    ResourceHandle( const ResourceHandle &amp; );
+    ResourceHandle &amp;operator =( const ResourceHandle &amp; );
+    Resource *r_;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The nice thing about a <tt>ResourceHandle</tt>
+ object is that, if it is declared as a local member of a function, as a
+ function argument, or as a static, we are guaranteed to get a 
+destructor call and recover the resource to which it refers.
+ This is an important property if we want to keep track of our important
+ resources in the face of slapdash maintenance or propagating 
+exceptions. Consider some simple code that doesn’t employ RAII:</p>
+		
+<div class="docText">
+  <pre>				<span class="docEmphMark">void f() {                                        </span>
+				<span class="docEmphMark">    Resource *rh = new Resource;                  </span>
+				<span class="docEmphMark">    //...                                         </span>
+				<span class="docEmphMark">    if( iFeelLikeIt() ) // bad maintenance        </span>
+				<span class="docEmphMark">        return;                                   </span>
+				<span class="docEmphMark">    //...                                         </span>
+				<span class="docEmphMark">    g(); // exception?                            </span>
+				<span class="docEmphMark">    delete rh; // do we always get here?          </span>
+				<span class="docEmphMark">}                                                 </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">It may be that the original version of this function was safe, and the resource to which <tt>rh</tt>
+ referred was always recovered. However, over time such code tends to 
+break, as less experienced maintainers insert early returns, call 
+functions that can throw an exception, or otherwise avoid the resource 
+recovery code at the end of the function. Use of RAII results in a 
+function that is both simpler and more robust:</p>
+		
+<div class="docText">
+  <pre>void f() {
+    ResourceHandle rh( new Resource );
+    //...
+    if( iFeelLikeIt() ) // no problem!
+        return;
+    //...
+    g(); // exception? no problem!
+    // rh destructor performs deletion!
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The only time you’re 
+not guaranteed a destructor call when using RAII is if the resource 
+handle is allocated on the heap, since the destructor will be called 
+only if the object is deleted explicitly. (In the interests of full 
+disclosure, there are also edge cases where <tt>abort</tt> or <tt>exit</tt> is called and an iffy situation that can occur if a thrown exception is never caught.)</p>
+		
+<div class="docText">
+  <pre>				<span class="docEmphMark">ResourceHandle *rhp =                                               </span>
+				<span class="docEmphMark">    new ResourceHandle(new Resource); // bad idea!                  </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">RAII
+ is such a pervasive technique in C++ programming that it’s hard to find
+ a library component or significant block of code that does not employ 
+it in some fashion. Note that we have a very broad definition of 
+“resource” that can be controlled via RAII. In addition to resources 
+that are essentially hunks of memory (buffers, strings, container 
+implementations, and the like), we can use RAII to control system 
+resources like file handles, semaphores, and network connections, as 
+well as less glamorous things like login sessions, graphical shapes, or 
+zoo animals.</p>
+		
+<p class="docText">Consider the following class:</p>
+		
+<div class="docText">
+  <pre>class Trace {
+  public:
+    Trace( const char *msg ) : msg_(msg)
+        { std::cout &lt;&lt; "Entering " &lt;&lt; msg_ &lt;&lt; std::endl; }
+    ~Trace()
+        { std::cout &lt;&lt; "Leaving " &lt;&lt; msg_ &lt;&lt; std::endl; }
+  private:
+    std::string msg_;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">In the case of <tt>Trace</tt>,
+ the resource we’re controlling is a message to be printed when a scope 
+is exited. It’s instructive to observe the behavior of a variety of <tt>Trace</tt> objects (automatic, static, local, and global) by following their lifetimes under various types of control flow.</p>
+		
+<div class="docText">
+  <pre>void f() {
+    Trace tracer( "f" ); // print "entering" message
+    ResourceHandle rh( new Resource ); // seize resource
+    //...
+    if( iFeelLikeIt() ) // no problem!
+        return;
+    //...
+    g(); // exception? no problem!
+    // rh destructor performs deletion!
+    // tracer destructor prints exiting message!
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The code above also 
+illustrates an important invariant of constructor and destructor 
+structure activation: The activations form a stack. That is, we declared
+ and initialized <tt>tracer</tt> before <tt>rh</tt>, so we are guaranteed that <tt>rh</tt>will be destroyed before <tt>tracer</tt>
+ (last initialized, first destroyed). More generally, whenever we 
+declare a sequence of objects, these objects will be initialized at 
+runtime in a specific order and eventually destroyed in the inverse 
+order. That order of destruction will not vary even in the event of an 
+impromptu <tt>return</tt>, a propagating exception, an unusual <tt>switch</tt>, or an evil <tt>goto</tt>. (If you find this to be a dubious claim, I encourage you to play with the <tt>Trace</tt>
+ class. Very instructive.) This property is particularly important for 
+resource acquisition and release, since it is generally the case that 
+resources must be seized in a particular order and released in the 
+inverse order. For example, a network connection must be opened before 
+an audit message is sent, and a closing audit message must be sent 
+before the connection is closed.</p>
+		
+<p class="docText">This stack-based 
+behavior extends even into the initialization and destruction of 
+individual objects. An object’s constructor initializes its base class 
+subobjects in the order they’re declared, followed by its data members 
+in the order that they’re declared. Then (and only then) is the body of 
+the constructor executed. Now we know how the object’s destructor will 
+behave. Backward. First the destructor body is executed, then the 
+object’s data members are destroyed in the inverse order of their 
+declaration, and finally the object’s base class subobjects are 
+destroyed in the inverse order of their declaration. In case it’s not 
+obvious by this point, this stack-like behavior is really handy for 
+seizing and releasing an object’s required resources.</p>
+		
+
+
+</body>
+</html>

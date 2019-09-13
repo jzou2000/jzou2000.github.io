@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Wrappers</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Wrappers</h3>
+<p class="docText">C++ provides several <span class="docEmphasis">wrappers</span> or <span class="docEmphasis">adapters</span>. These are objects used to provide a more uniform or more appropriate interface for other programming elements. For example, Chapter 16 described <tt>bind1st</tt> and <tt>bind2nd</tt>,
+ which adapt functions with two parameters to match up with STL 
+algorithms that expect functions with one parameter to be supplied as an
+ argument. C++11 provides additional wrappers. They include the <tt>bind</tt> template, which provides a more flexible alternative to <tt>bind1st</tt> and <tt>bind2nd</tt>, the <tt>mem_fn</tt> template, which allows a member function to pass as a regular function, the <tt>reference_wrappe</tt>r template allows you to create an object that acts like reference but which can be copied, and the <tt>function</tt> wrapper, which provides a way to handle several function-like forms uniformly.</p>
+<p class="docText">Let’s look more closely at one example of wrapper, the <tt>function</tt> wrapper, and at the problem it addresses.</p>
+
+<h4 class="docSection2Title" id="title-ID0E32AM">The <tt>function</tt> Wrapper and Template Inefficiencies</h4>
+<p class="docText">Consider the following line of code:</p>
+<div class="docText"><pre>answer = ef(q);</pre></div><br/>
+<p class="docText">What is <tt>ef</tt>? It could 
+be the name of a function. It could be a pointer to a function. It could
+ be a function object. It could be a name assigned to a lambda 
+expression. These all are examples of <span class="docEmphasis">callable types</span>. The abundance of callable types can lead to template inefficiencies. To see this, let’s examine a simple case.</p>
+<p class="docText">First, let’s define some templates in a header file, as shown in Listing 18.6.</p>
+<p class="docText"></p><h5 class="docExampleTitle" id="title-ID0EC4AM">Listing 18.6. <tt>somedefs.h</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// somedefs.h
+#include &lt;iostream&gt;
+
+template &lt;typename T, typename F&gt;
+T use_f(T v, F f)
+{
+    static int count = 0;
+    count++;
+    std::cout &lt;&lt; "  use_f count = " &lt;&lt; count
+              &lt;&lt; ", &amp;count = " &lt;&lt; &amp;count &lt;&lt; std::endl;
+    return f(v);
+}
+
+class Fp
+{
+private:
+    double z_;
+public:
+    Fp(double z = 1.0) : z_(z) {}
+    double operator()(double p) { return z_*p; }
+};
+
+class Fq
+{
+private:
+    double z_;
+public:
+    Fq(double z = 1.0) : z_(z) {}
+    double operator()(double q) { return z_+ q; }
+};
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">The <tt>use_f()</tt> template uses the parameter f to represent a callable type:</p>
+<div class="docText"><pre>return f(v);</pre></div><br/>
+<p class="docText">Next the program in Listing 18.7 calls the <tt>use_f()</tt> template function six times.</p>
+<h5 class="docExampleTitle" id="title-ID0EA6AM">Listing 18.7. <tt>callable.cpp</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// callable.cpp -- callable types and templates
+#include "somedefs.h"
+#include &lt;iostream&gt;
+
+double dub(double x) {return 2.0*x;}
+double square(double x) {return x*x;}
+
+int main()
+{
+    using std::cout;
+    using std::endl;
+
+    double y = 1.21;
+    cout &lt;&lt; "Function pointer dub:\n";
+    cout &lt;&lt; "  " &lt;&lt; use_f(y, dub) &lt;&lt; endl;
+    cout &lt;&lt; "Function pointer square:\n";
+    cout &lt;&lt; "  " &lt;&lt; use_f(y, square) &lt;&lt; endl;
+    cout &lt;&lt; "Function object Fp:\n";
+    cout &lt;&lt; "  " &lt;&lt; use_f(y, Fp(5.0)) &lt;&lt; endl;
+    cout &lt;&lt; "Function object Fq:\n";
+    cout &lt;&lt; "  " &lt;&lt; use_f(y, Fq(5.0)) &lt;&lt; endl;
+    cout &lt;&lt; "Lambda expression 1:\n";
+    cout &lt;&lt; "  " &lt;&lt; use_f(y, [](double u) {return u*u;}) &lt;&lt; endl;
+    cout &lt;&lt; "Lambda expression 2:\n";
+    cout &lt;&lt; "  " &lt;&lt; use_f(y, [](double u) {return u+u/2.0;}) &lt;&lt; endl;
+    return 0;
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">The template parameter <tt>T</tt> is set to type <tt>double</tt> for each call. What about template parameter <tt>F</tt>? Each time the actual argument is something that takes a type <tt>double</tt> argument and returns a type <tt>double</tt> value, so it might seem that <tt>F</tt> would be the same type for all six calls to <tt>use_f()</tt> and that the template would be instantiated just once. But as the following sample output shows, that belief is naïve:</p>
+<div class="docText"><pre>Function pointer dub:
+  use_f count = 1, &amp;count = 0x402028
+  2.42
+Function pointer square:
+  use_f count = 2, &amp;count = 0x402028
+  1.1
+Function object Fp:
+  use_f count = 1, &amp;count = 0x402020
+  6.05
+Function object Fq:
+  use_f count = 1, &amp;count = 0x402024
+  6.21
+Lambda expression 1:
+  use_f count = 1, &amp;count = 0x405020
+  1.4641
+Lambda expression 2:
+  use_f count = 1, &amp;count = 0x40501c
+  1.815</pre></div><br/>
+<p class="docText">The template function <tt>use_f()</tt> has a static member <tt>count</tt>,
+ and we can use its address to see how many instantiations are made. 
+There are five distinct addresses, so there must have been five distinct
+ instantiations of the <tt>use_f()</tt> template.</p>
+<p class="docText">To see what is happening, consider how the compiler determines the type for the <tt>F</tt> template parameter. First, look at this call:</p>
+<div class="docText"><pre>use_f(y, dub);</pre></div><br/>
+<p class="docText">Here <tt>dub</tt> is the name of a function that takes a <tt>double</tt> argument and returns a <tt>double</tt> value. The name of a function is a pointer, hence the parameter <tt>F</tt> becomes type <tt>double (*)(double)</tt>, a pointer to a function with a <tt>double</tt> argument and a <tt>double</tt> return value.</p>
+<p class="docText">The next call is this:</p>
+<div class="docText"><pre>use_f(y, square);</pre></div><br/>
+<p class="docText">Again, the second argument is type <tt>double (*)(double)</tt>, so this call uses the same instantiation of <tt>use_f()</tt> as the first call.</p>
+<p class="docText">The next two calls to <tt>use_f()</tt> have objects as second arguments, so <tt>F</tt> becomes type <tt>Fp</tt> and <tt>Fq</tt> respectively, so we get two new instantiations for these values of <tt>F</tt>. Finally, the last two calls set <tt>F</tt> to whatever types the compiler uses for lambda expressions.</p>
+
+<h4 class="docSection2Title" id="title-ID0EQDBM">Fixing the Problem</h4>
+<p class="docText">The function wrapper lets you rewrite the program so that it uses just one instantiation of <tt>use_f()</tt> instead of five. Note that the function pointers, function objects, and lambda expressions in Listing 18.7 share a common behavior—each takes one type <tt>double</tt> argument and each returns a type <tt>double</tt> value. We can say that each has the same <span class="docEmphasis">call signature</span>,
+ which is described by the return type followed by a comma-separated 
+list of parameter types enclosed in a pair of parentheses. Thus, these 
+six examples all have <tt>double(double)</tt> as the call signature.</p>
+<p class="docText">The <tt>function</tt> template, declared in the <tt>functional</tt>
+ header file, specifies an object in terms of a call signature, and it 
+can be used to wrap a function pointer, function object, or lambda 
+expression having the same call signature. For example, the following 
+declaration creates a <tt>function</tt> object <tt>fdci</tt> that takes a <tt>char</tt> and an <tt>int</tt> argument and returns type <tt>double</tt>:</p>
+<div class="docText"><pre>std::function&lt;double(char, int)&gt; fdci;</pre></div><br/>
+<p class="docText">You can then assign to <tt>fdci</tt> any function pointer, function object, or lambda expression that takes type <tt>char</tt> and <tt>int</tt> arguments and returns type <tt>double</tt>.</p>
+<p class="docText">The various callable arguments in Listing 18.7 all have the same call signature – <tt>double(double)</tt>. So to fix Listing 18.7 and reduce the number of instantiations, we can use <tt>function&lt;double(double)&gt;</tt> to create six wrappers for the six functions, functors, and lambdas. Then all six calls to <tt>use_f()</tt> can be made with the same type (<tt>function&lt;double(double)&gt;</tt>) for <tt>F</tt>, resulting in just one instantiation. Listing 18.8 shows the result.</p>
+<p class="docText"></p><h5 class="docExampleTitle" id="title-ID0EMGBM">Listing 18.8. <tt>wrapped.cpp</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">//wrapped.cpp -- using a function wrapper as an argument
+#include "somedefs.h"
+#include &lt;iostream&gt;
+#include &lt;functional&gt;
+
+double dub(double x) {return 2.0*x;}
+double square(double x) {return x*x;}
+
+int main()
+{
+    using std::cout;
+    using std::endl;
+    using std::function;
+
+    double y = 1.21;
+    function&lt;double(double)&gt; ef1 = dub;
+    function&lt;double(double)&gt; ef2 = square;
+    function&lt;double(double)&gt; ef3 = Fq(10.0);
+    function&lt;double(double)&gt; ef4 = Fp(10.0);
+    function&lt;double(double)&gt; ef5 =  [](double u) {return u*u;};
+    function&lt;double(double)&gt; ef6 =  [](double u) {return u+u/2.0;};
+    cout &lt;&lt; "Function pointer dub:\n";
+    cout &lt;&lt; "  " &lt;&lt; use_f(y, ef1) &lt;&lt; endl;
+    cout &lt;&lt; "Function pointer square:\n";
+    cout &lt;&lt; "  " &lt;&lt; use_f(y, ef2) &lt;&lt; endl;
+    cout &lt;&lt; "Function object Fp:\n";
+    cout &lt;&lt; "  " &lt;&lt; use_f(y, ef3) &lt;&lt; endl;
+    cout &lt;&lt; "Function object Fq:\n";
+    cout &lt;&lt; "  " &lt;&lt; use_f(y, ef4) &lt;&lt; endl;
+    cout &lt;&lt; "Lambda expression 1:\n";
+    cout &lt;&lt; "  " &lt;&lt; use_f(y, ef5) &lt;&lt; endl;
+    cout &lt;&lt; "Lambda expression 2:\n";
+    cout &lt;&lt; "  " &lt;&lt; use_f(y,ef6) &lt;&lt; endl;
+    return 0;
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Here is a sample output:</p>
+<div class="docText"><pre>Function pointer dub:
+  use_f count = 1, &amp;count = 0x404020
+  2.42
+Function pointer sqrt:
+  use_f count = 2, &amp;count = 0x404020
+  1.1
+Function object Fp:
+  use_f count = 3, &amp;count = 0x404020
+  11.21
+Function object Fq:
+  use_f count = 4, &amp;count = 0x404020
+  12.1
+Lambda expression 1:
+  use_f count = 5, &amp;count = 0x404020
+  1.4641
+Lambda expression 2:
+  use_f count = 6, &amp;count = 0x404020
+  1.815</pre></div><br/>
+<p class="docText">As you can see from the output, there is just one address for <tt>count</tt>, and the value of <tt>count</tt> shows <tt>use_f()</tt> has been called six times. So we now have just one instantiation invoked six times, reducing the size of the executable code.</p>
+
+<h4 class="docSection2Title" id="title-ID0ESIBM">Further Options</h4>
+<p class="docText">Let’s look at a couple more things you can do using <tt>function</tt>. First, we don’t actually have to declare six <tt>function&lt;double(double)&gt;</tt> objects in Listing 18.8. Instead, we can use a temporary <tt>function&lt;double(double)&gt;</tt> object as an argument to the <tt>use_f()</tt> function:</p>
+<div class="docText"><pre class="preFixedWidth">typedef function&lt;double(double)&gt; fdd; // simplify the type declaration
+cout &lt;&lt; use_f(y, fdd(dub)) &lt;&lt; endl;   // create and initialize object to dub
+cout &lt;&lt; use_f(y, fdd(square)) &lt;&lt; endl;
+...
+
+					  </pre></div><br/>
+<p class="docText">Second, Listing 18.8 adapts the second arguments in <tt>use_f()</tt> to match the formal parameter <tt>f</tt>. Another approach is to adapt the type of the formal parameter <tt>f</tt> to match the original arguments. This can be done by using a function wrapper object as the second parameter for the <tt>use_f()</tt> template definition. We can define <tt>use_f()</tt> this way:</p>
+<div class="docText"><pre>#include &lt;functional&gt;
+template &lt;typename T&gt;
+T use_f(T v,  std::function&lt;T(T)&gt; f)   // f call signature is T(T)
+{
+    static int count = 0;
+    count++;
+    std::cout &lt;&lt; "  use_f count = " &lt;&lt; count
+              &lt;&lt; ", &amp;count = " &lt;&lt; &amp;count &lt;&lt; std::endl;
+    return f(v);
+}</pre></div><br/>
+<p class="docText">Then the function calls can look like this:</p>
+<div class="docText"><pre>cout &lt;&lt; "  " &lt;&lt; use_f&lt;double&gt;(y, dub) &lt;&lt; endl;
+...
+cout &lt;&lt; "  " &lt;&lt; use_f&lt;double&gt;(y, Fp(5.0)) &lt;&lt; endl;
+...
+cout &lt;&lt; "  " &lt;&lt; use_f&lt;double&gt;(y, [](double u) {return u*u;}) &lt;&lt; endl;</pre></div><br/>
+<p class="docText">The arguments <tt>dub</tt>, <tt>Fp(5.0</tt>), etc., are not themselves type <tt>function&lt;double(double)&gt;</tt>, and so the calls use <tt>&lt;double&gt;</tt> after <tt>use_f</tt> to indicate the desired specialization. Thus <tt>T</tt> is set to <tt>double</tt>, and <tt>std::function&lt;T(T)&gt;</tt> becomes <tt>std::function&lt;double(double)&gt;</tt>.</p>
+</div>
+</body>
+</html>

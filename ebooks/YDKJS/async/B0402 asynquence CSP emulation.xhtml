@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>asynquence CSP emulation</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <section data-type="appendix" xmlns:epub="http://www.idpf.org/2007/ops" epub:type="appendix" data-pdf-bookmark="Appendix B. Advanced Async Patterns">
+  <div class="epub__appendix" id="appendix-b-advanced-async-patterns">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<section data-type="sect1" data-pdf-bookmark="Communicating Sequential Processes (CSP)"><div class="epub__sect1" id="communicating-sequential-processes-csp">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<section data-type="sect2" data-pdf-bookmark="asynquence CSP emulation"><div class="epub__sect2" id="asynquence-csp-emulation">
+<h2>asynquence CSP emulation</h2>
+
+<p>Because we’ve been discussing async patterns here in the context of my
+<em>asynquence</em> library, you might be interested to see that we can fairly
+easily add an emulation layer on top of <code>ASQ#runner(..)</code> generator
+handling as a nearly perfect porting of the CSP API and behavior. This
+emulation layer ships as an optional part of the “asynquence-contrib”
+package alongside <em>asynquence</em>.</p>
+
+<p>Very similar to the <code>state(..)</code> helper from earlier, <code>ASQ.csp.go(..)</code>
+takes a generator—in go/core.async terms, it’s known as a goroutine—and adapts it to use with <code>ASQ#runner(..)</code> by returning a new
+generator.</p>
+
+<p>Instead of being passed a <code>token</code>, your goroutine receives an initially
+created channel (<code>ch</code>) that all goroutines in this run will share.
+You can create more channels (which is often quite helpful!) with
+<code>ASQ.csp.chan(..)</code>.</p>
+
+<p>In CSP, we model all asynchrony in terms of blocking on channel
+messages, rather than blocking waiting for a Promise/sequence/thunk to
+complete.</p>
+
+<p>So, instead of <code>yield</code>ing the Promise returned from <code>request(..)</code>,
+<code>request(..)</code> should return a channel that you <code>take(..)</code> a value from.
+In other words, a single-value channel is roughly equivalent in this
+context/usage to a Promise/sequence.</p>
+
+<p>Let’s first make a channel-aware version of <code>request(..)</code>:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">function</code> <code class="epub__nx">request</code><code class="epub__p">(</code><code class="epub__nx">url</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__kd">var</code> <code class="epub__nx">ch</code> <code class="epub__o">=</code> <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">channel</code><code class="epub__p">();</code>
+    <code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__nx">url</code> <code class="epub__p">).</code><code class="epub__nx">then</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__p">(</code><code class="epub__nx">content</code><code class="epub__p">){</code>
+        <code class="epub__c1">// `putAsync(..)` is a version of `put(..)` that</code>
+        <code class="epub__c1">// can be used outside of a generator. It returns</code>
+        <code class="epub__c1">// a promise for the operation's completion. We</code>
+        <code class="epub__c1">// don't use that promise here, but we could if</code>
+        <code class="epub__c1">// we needed to be notified when the value had</code>
+        <code class="epub__c1">// been `take(..)`n.</code>
+        <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">putAsync</code><code class="epub__p">(</code> <code class="epub__nx">ch</code><code class="epub__p">,</code> <code class="epub__nx">content</code> <code class="epub__p">);</code>
+    <code class="epub__p">}</code> <code class="epub__p">);</code>
+    <code class="epub__k">return</code> <code class="epub__nx">ch</code><code class="epub__p">;</code>
+<code class="epub__p">}</code></pre>
+
+<p>From Chapter 3, “promisory” is a Promise-producing utility,
+“thunkory” from Chapter 4 is a thunk-producing utility, and finally, in
+Appendix A we invented “sequory” for a sequence-producing utility.</p>
+
+<p>Naturally, we need to coin a symmetric term here for a channel-producing
+utility. So let’s unsurprisingly call it a “chanory” (“channel” + “factory”). As an exercise for the reader, try your hand at defining a
+<code>channelify(..)</code> utility similar to <code>Promise.wrap(..)</code>/<code>promisify(..)</code>
+(Chapter 3), <code>thunkify(..)</code> (Chapter 4), and <code>ASQ.wrap(..)</code> (Appendix A).</p>
+
+<p>Now consider the concurrent Ajax example using <em>asynquence</em>-flavored CSP:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__nx">ASQ</code><code class="epub__p">()</code>
+<code class="epub__p">.</code><code class="epub__nx">runner</code><code class="epub__p">(</code>
+    <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">go</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__o">*</code><code class="epub__p">(</code><code class="epub__nx">ch</code><code class="epub__p">){</code>
+        <code class="epub__k">yield</code> <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">put</code><code class="epub__p">(</code> <code class="epub__nx">ch</code><code class="epub__p">,</code> <code class="epub__s2">"http://some.url.2"</code> <code class="epub__p">);</code>
+
+        <code class="epub__kd">var</code> <code class="epub__nx">url1</code> <code class="epub__o">=</code> <code class="epub__k">yield</code> <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">take</code><code class="epub__p">(</code> <code class="epub__nx">ch</code> <code class="epub__p">);</code>
+        <code class="epub__c1">// "http://some.url.1"</code>
+
+        <code class="epub__kd">var</code> <code class="epub__nx">res1</code> <code class="epub__o">=</code> <code class="epub__k">yield</code> <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">take</code><code class="epub__p">(</code> <code class="epub__nx">request</code><code class="epub__p">(</code> <code class="epub__nx">url1</code> <code class="epub__p">)</code> <code class="epub__p">);</code>
+
+        <code class="epub__k">yield</code> <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">put</code><code class="epub__p">(</code> <code class="epub__nx">ch</code><code class="epub__p">,</code> <code class="epub__nx">res1</code> <code class="epub__p">);</code>
+    <code class="epub__p">}</code> <code class="epub__p">),</code>
+    <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">go</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__o">*</code><code class="epub__p">(</code><code class="epub__nx">ch</code><code class="epub__p">){</code>
+        <code class="epub__kd">var</code> <code class="epub__nx">url2</code> <code class="epub__o">=</code> <code class="epub__k">yield</code> <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">take</code><code class="epub__p">(</code> <code class="epub__nx">ch</code> <code class="epub__p">);</code>
+        <code class="epub__c1">// "http://some.url.2"</code>
+
+        <code class="epub__k">yield</code> <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">put</code><code class="epub__p">(</code> <code class="epub__nx">ch</code><code class="epub__p">,</code> <code class="epub__s2">"http://some.url.1"</code> <code class="epub__p">);</code>
+
+        <code class="epub__kd">var</code> <code class="epub__nx">res2</code> <code class="epub__o">=</code> <code class="epub__k">yield</code> <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">take</code><code class="epub__p">(</code> <code class="epub__nx">request</code><code class="epub__p">(</code> <code class="epub__nx">url2</code> <code class="epub__p">)</code> <code class="epub__p">);</code>
+        <code class="epub__kd">var</code> <code class="epub__nx">res1</code> <code class="epub__o">=</code> <code class="epub__k">yield</code> <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">take</code><code class="epub__p">(</code> <code class="epub__nx">ch</code> <code class="epub__p">);</code>
+
+        <code class="epub__c1">// pass along results to next sequence step</code>
+        <code class="epub__nx">ch</code><code class="epub__p">.</code><code class="epub__nx">buffer_size</code> <code class="epub__o">=</code> <code class="epub__mi">2</code><code class="epub__p">;</code>
+        <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">put</code><code class="epub__p">(</code> <code class="epub__nx">ch</code><code class="epub__p">,</code> <code class="epub__nx">res1</code> <code class="epub__p">);</code>
+        <code class="epub__nx">ASQ</code><code class="epub__p">.</code><code class="epub__nx">csp</code><code class="epub__p">.</code><code class="epub__nx">put</code><code class="epub__p">(</code> <code class="epub__nx">ch</code><code class="epub__p">,</code> <code class="epub__nx">res2</code> <code class="epub__p">);</code>
+    <code class="epub__p">}</code> <code class="epub__p">)</code>
+<code class="epub__p">)</code>
+<code class="epub__p">.</code><code class="epub__nx">val</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__p">(</code><code class="epub__nx">res1</code><code class="epub__p">,</code><code class="epub__nx">res2</code><code class="epub__p">){</code>
+    <code class="epub__c1">// `res1` comes from "http://some.url.1"</code>
+    <code class="epub__c1">// `res2` comes from "http://some.url.2"</code>
+<code class="epub__p">}</code> <code class="epub__p">);</code></pre>
+
+<p>The message passing that trades the URL strings between the two
+goroutines is pretty straightforward. The first goroutine makes an Ajax
+request to the first URL, and that response is put onto the <code>ch</code>
+channel. The second goroutine makes an Ajax request to the second URL,
+then gets the first response <code>res1</code> off the <code>ch</code> channel. At that point,
+both responses <code>res1</code> and <code>res2</code> are completed and ready.</p>
+
+<p>If there are any remaining values in the <code>ch</code> channel at the end of the
+goroutine run, they will be passed along to the next step in the
+sequence. So, to pass out message(s) from the final goroutine, <code>put(..)</code>
+them into <code>ch</code>. As shown, to avoid the blocking of those final
+<code>put(..)</code>s, we switch <code>ch</code> into buffering mode by setting its
+<code>buffer_size</code> to <code>2</code> (default: <code>0</code>).</p>
+<div data-type="note" epub:type="note"><h6>Note</h6>
+<p>See many more examples of using <em>asynquence</em>-flavored CSP on this gist.</p>
+</div>
+</div></section>
+
+
+
+
+
+</div></section>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</div>
+</section>
+
+
+</body>
+</html>

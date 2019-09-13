@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>38.2. Operate with Least Privilege</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">38.2. Operate with Least Privilege</h3><p class="docText">A
+ set-user-ID (or set-group-ID) program typically requires privileges 
+only to perform certain operations. While the program (especially one 
+assuming superuser privileges) is performing other work, it should 
+disable these privileges. When privileges will never again be required, 
+they should be dropped permanently. In other words, the program should 
+always operate with the <span class="docEmphasis">least privilege</span>
+ required to accomplish the tasks that it is currently performing. The 
+saved set-user-ID facility was designed for this purpose (Section 9.4).</p><h4 class="docSection2Title" id="title-ID0E4RGK">38.2.1. </h4><h5 class="docSection3Title" id="title-ID0EBSGK">38.2.1.1. Hold privileges only while they are required</h5><p class="docText">In a set-user-ID program, we can use the following sequence of <span class="docEmphasis">seteuid()</span> calls to temporarily drop and then reacquire privileges:</p><pre>uid_t orig_euid;
+
+orig_euid = geteuid();
+if (seteuid(getuid()) == -1)            /* Drop privileges */
+    errExit("seteuid");
+
+/* Do unprivileged work */
+
+if (seteuid(orig_euid) == -1)           /* Reacquire privileges */
+    errExit("seteuid");
+
+/* Do privileged work */</pre><br/>
+<p class="docText">The first call makes the 
+effective user ID of the calling process the same as its real ID. The 
+second call restores the effective user ID to the value held in the 
+saved set-user-ID.</p><p class="docText">For set-group-ID programs, the saved set-group-ID saves the program’s initial effective group ID, and <span class="docEmphasis">setegid()</span> is used to drop and reacquire privilege. We describe <span class="docEmphasis">seteuid()</span>, <span class="docEmphasis">setegid()</span>, and other similar system calls mentioned in the following recommendations in Chapter 9 and summarize them in Table 9-1 (in Section 9.7.5).</p><p class="docText">The
+ safest practice is to drop privileges immediately on program startup, 
+and then temporarily reacquire them as needed at later points in the 
+program. If, at a certain point, privileges will never be required 
+again, then the program should drop them irreversibly, by ensuring that 
+the saved set-user-ID is also changed. This eliminates the possibility 
+of the program being tricked into reacquiring privilege, perhaps via the
+ stack-crashing technique described in Section 38.9.</p><h5 class="docSection3Title" id="title-ID0EPTGK">38.2.1.2. Drop privileges permanently when they will never again be required</h5><p class="docText">If
+ a set-user-ID or set-group-ID program finishes all tasks that require 
+privileges, then it should drop its privileges permanently in order to 
+eliminate any security risk that could occur because the program is 
+compromised by a bug or other unexpected behavior. Dropping privileges 
+permanently is accomplished by resetting all process user (group) IDs to
+ the same value as the real (group) ID.</p><p class="docText">From a set-user-ID-<span class="docEmphasis">root</span> program whose effective user ID is currently 0, we can reset all user IDs using the following code:</p><pre>if (setuid(getuid()) == -1)
+    errExit("setuid");</pre><br/>
+<p class="docText">However, the above code does <span class="docEmphasis">not</span>
+ reset the saved set-user-ID if the effective user ID of the calling 
+process is currently nonzero: when called from a program whose effective
+ user ID is nonzero, <span class="docEmphasis">setuid()</span> changes only the effective user ID (Section 9.7.1). In other words, in a set-user-ID-<span class="docEmphasis">root</span> program, the following sequence doesn’t permanently drop the user ID 0:</p><pre>/* Initial UIDs:    real=1000 effective=0 saved=0 */
+
+/* 1. Usual call to temporarily drop privilege */
+
+orig_euid = geteuid();
+if (seteuid(getuid() == -1)
+    errExit("seteuid");
+
+/* UIDs changed to: real=1000 effective=1000 saved=0 */
+
+/* 2. Looks like the right way to permanently drop privilege (WRONG!) */
+
+if (setuid(getuid() == -1)
+    errExit("setuid");
+
+/* UIDs unchanged:  real=1000 effective=1000 saved=0 */</pre><br/>
+<p class="docText">Instead, we must regain privilege prior to dropping it permanently, by inserting the following call between steps 1 and 2 above:</p><pre>if (seteuid(orig_euid) == -1)
+    errExit("seteuid");</pre><br/>
+<p class="docText">On the other hand, if we have a set-user-ID program owned by a user other than <span class="docEmphasis">root</span>, then, because <span class="docEmphasis">setuid()</span> is insufficient to change the saved set-user-ID, we must use either <span class="docEmphasis">setreuid()</span> or <span class="docEmphasis">setresuid()</span> to permanently drop the privileged identifier. For example, we could achieve the desired result using <span class="docEmphasis">setreuid()</span>, as follows:</p><pre>if (setreuid(getuid(), getuid()) == -1)
+    errExit("setreuid");</pre><br/>
+<p class="docText">This code relies on a feature of the Linux implementation of <span class="docEmphasis">setreuid()</span>: if the first (<span class="docEmphasis">ruid</span>)
+ argument is not -1, then the saved set-user-ID is also set to the same 
+value as the (new) effective user ID. SUSv3 doesn’t specify this 
+feature, but many other implementations behave the same way as Linux. 
+SUSv4 does specify this feature.</p><p class="docText">The <span class="docEmphasis">setregid()</span> or <span class="docEmphasis">setresgid()</span>
+ system call must likewise be used to permanently drop a privileged 
+group ID in a set-group-ID program, since, when the effective user ID of
+ a program is nonzero, <span class="docEmphasis">setgid()</span> changes only the effective group ID of the calling process.</p><h5 class="docSection3Title" id="title-ID0EBWGK">38.2.1.3. General points on changing process credentials</h5><p class="docText">In
+ the preceding pages, we described techniques for temporarily and 
+permanently dropping privileges. We now add a few general points 
+regarding the use of these techniques:</p><ul><li><p class="docList">The
+ semantics of some of the system calls that change process credentials 
+vary across systems. Furthermore, the semantics of some of these system 
+calls vary depending on whether or not the caller is privileged 
+(effective user ID of 0). For details, see Chapter 9, and especially Section 9.7.4. Because of these variations, [Tsafrir et al., 2008] recommends that applications should use system-specific <span class="docEmphasis">nonstandard</span>
+ system calls for changing process credentials, since, in many cases, 
+these nonstandard system calls provide simpler and more consistent 
+semantics than their standard counterparts. On Linux, this would 
+translate to using <span class="docEmphasis">setresuid()</span> and <span class="docEmphasis">setresgid()</span>
+ to change user and group credentials. Although these system calls are 
+not present on all systems, their use is likely to be less prone to 
+error. ([Tsafrir et al., 2008] proposes a library of functions that make
+ credential changes using what they consider to be the best interfaces 
+available on each platform.)</p></li><li><p class="docList">On
+ Linux, even if the caller has an effective user ID of 0, system calls 
+for changing credentials may not behave as expected if the program has 
+explicitly manipulated its capabilities. For example, if the <tt>CAP_SETUID</tt>
+ capability has been disabled, then attempts to change process user IDs 
+will fail or, even worse, silently change only some of the requested 
+user IDs.</p></li><li><p class="docList">Because
+ of the possibilities listed in the two preceding points, it is highly 
+recommended practice (see, for example, [Tsafrir et al., 2008]) to not 
+only check that a credential-changing system call has succeeded, but 
+also to verify that the change occurred as expected. For example, if we 
+are temporarily dropping or reacquiring a privileged user ID using <span class="docEmphasis">seteuid()</span>, then we should follow that call with a <span class="docEmphasis">geteuid()</span>
+ call that verifies that the effective user ID is what we expect. 
+Similarly, if we are dropping a privileged user ID permanently, then we 
+should verify that the real user ID, effective user ID, and saved 
+set-user-ID have all been successfully changed to the unprivileged user 
+ID. Unfortunately, while there are standard system calls for retrieving 
+the real and effective IDs, there are no standard system calls for 
+retrieving the saved set IDs. Linux and a few other systems provide <span class="docEmphasis">getresuid()</span> and <span class="docEmphasis">getresgid()</span> for this purpose; on some other systems, we may need to employ techniques such as parsing information in <tt>/proc</tt> files.</p></li><li><p class="docList">Some
+ credential changes can be made only by processes with an effective user
+ ID of 0. Therefore, when changing multiple IDs—supplementary group IDs,
+ group IDs, and user IDs—we should drop the privileged effective user ID
+ last when dropping privileged IDs. Conversely, we should raise the 
+privileged effective user ID first when raising privileged IDs.</p></li></ul>
+</div>
+</body>
+</html>

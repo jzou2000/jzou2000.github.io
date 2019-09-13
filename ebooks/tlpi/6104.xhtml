@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>61.4. The sendfile() System Call</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">61.4. The <span class="docEmphasis">sendfile()</span> System Call</h3><p class="docText">Applications
+ such as web servers and file servers frequently need to transfer the 
+unaltered contents of a disk file through a (connected) socket. One way 
+to do this would be a loop of the following form:</p><pre>while ((n = read(diskfilefd, buf, BUZ_SIZE)) &gt; 0)
+    write(sockfd, buf, n);</pre><br/>
+<p class="docText">For many applications, such a 
+loop is perfectly acceptable. However, if we frequently transfer large 
+files via a socket, this technique is inefficient. In order to transmit 
+the file, we must use two system calls (possibly multiple times within a
+ loop): one to copy the file contents from the kernel buffer cache into 
+user space, and the other to copy the user-space buffer back to kernel 
+space in order to be transmitted via the socket. This scenario is shown 
+on the left side of Figure 61-1.
+ Such a two-step process is wasteful if the application doesn’t perform 
+any processing of the file contents before transmitting them. The <span class="docEmphasis">sendfile()</span> system call is designed to eliminate this inefficiency. When an application calls <span class="docEmphasis">sendfile()</span>, the file contents are transferred directly to the socket, without passing through user space, as shown on the right side of Figure 61-1. This is referred to as a <span class="docEmphasis">zero-copy transfer</span>.</p><p></p><center><h5 class="docFigureTitle">Figure 61-1. Transferring the contents of a file to a socket</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-121.png"/></p></center><p></p><br/><pre>#include &lt;sys/sendfile.h&gt;
+
+ssize_t <b>sendfile</b>(int <span class="docEmphasis">out_fd</span>, int <span class="docEmphasis">in_fd</span>, off_t *<span class="docEmphasis">offset</span>, size_t <span class="docEmphasis">count</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of bytes transferred, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">sendfile()</span> system call transfers bytes from the file referred to by the descriptor <span class="docEmphasis">in_fd</span> to the file referred to by the descriptor <span class="docEmphasis">out_fd</span>. The <span class="docEmphasis">out_fd</span> descriptor must refer to a socket. The <span class="docEmphasis">in_fd</span> argument must refer to a file to which <span class="docEmphasis">mmap()</span> can be applied; in practice, this usually means a regular file. This somewhat restricts the use of <span class="docEmphasis">sendfile()</span>. We can use it to pass data from a file to a socket, but not vice versa. And we can’t use <span class="docEmphasis">sendfile()</span> to pass data directly from one socket to another.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Performance benefits could also be obtained if <span class="docEmphasis">sendfile()</span> could be used to transfer bytes between two regular files. On Linux 2.4 and earlier, <span class="docEmphasis">out_fd</span>
+ could refer to a regular file. Some reworking of the underlying 
+implementation meant that this possibility disappeared in the 2.6 
+kernel. However, this feature may be reinstated in a future kernel 
+version.</p><hr noshade="noshade" size="1"/><p class="docText">If <span class="docEmphasis">offset</span> is not <tt>NULL</tt>, then it should point to an <span class="docEmphasis">off_t</span> value that specifies the starting file offset from which bytes should be transferred from <span class="docEmphasis">in_fd</span>.
+ This is a value-result argument. On return, it contains the offset of 
+the next byte following the last byte that was transferred from <span class="docEmphasis">in_fd</span>. In this case, <span class="docEmphasis">sendfile()</span> doesn’t change the file offset for <span class="docEmphasis">in_fd</span>.</p><p class="docText">If <span class="docEmphasis">offset</span> is <tt>NULL</tt>, then bytes are transferred from <span class="docEmphasis">in_fd</span> starting at the current file offset, and the file offset is updated to reflect the number of bytes transferred.</p><p class="docText">The <span class="docEmphasis">count</span> argument specifies the number of bytes to be transferred. If end-of-file is encountered before <span class="docEmphasis">count</span> bytes are transferred, only the available bytes are transferred. On success, <span class="docEmphasis">sendfile()</span> returns the number of bytes actually transferred.</p><p class="docText">SUSv3 doesn’t specify <span class="docEmphasis">sendfile()</span>. Versions of <span class="docEmphasis">sendfile()</span> are available on some other UNIX implementations, but the argument list is typically different from the version on Linux.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Starting with kernel 2.6.17, Linux provides three new (nonstandard) system calls—<span class="docEmphasis">splice()</span>, <span class="docEmphasis">vmsplice()</span>, and <span class="docEmphasis">tee()</span>—that provide a superset of the functionality of <span class="docEmphasis">sendfile()</span>. See the manual pages for details.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0E3HHM">61.4.1. </h4><h5 class="docSection3Title" id="title-ID0EAIHM">61.4.1.1. The <tt>TCP_CORK</tt> socket option</h5><p class="docText">To further improve the efficiency of TCP applications using <span class="docEmphasis">sendfile()</span>, it is sometimes useful to employ the Linux-specific <tt>TCP_CORK</tt>
+ socket option. As an example, consider a web server delivering a page 
+in response to a request by a web browser. The web server’s response 
+consists of two parts: HTTP headers, perhaps output using <span class="docEmphasis">write()</span>, followed by the page data, perhaps output using <span class="docEmphasis">sendfile()</span>. In this scenario, normally <span class="docEmphasis">two</span>
+ TCP segments are transmitted: the headers are sent in the first (rather
+ small) segment, and then the page data is sent in a second segment. 
+This is an inefficient use of network bandwidth. It probably also 
+creates unnecessary work for both the sending and the receiving TCP, 
+since in many cases the HTTP headers and the page data would be small 
+enough to fit inside a single TCP segment. The <tt>TCP_CORK</tt> option is designed to address this inefficiency.</p><p class="docText">When the <tt>TCP_CORK</tt>
+ option is enabled on a TCP socket, all subsequent output is buffered 
+into a single TCP segment until either the upper limit on the size of a 
+segment is reached, the <tt>TCP_CORK</tt> option
+ is disabled, the socket is closed, or a maximum of 200 milliseconds 
+passes from the time that the first corked byte is written. (The timeout
+ ensures that the corked data is transmitted if the application forgets 
+to disable the <tt>TCP_CORK</tt> option.)</p><p class="docText">We enable and disable the <tt>TCP_CORK</tt> option using the <span class="docEmphasis">setsockopt()</span> system call (Section 61.9). The following code (which omits error checking) demonstrates the use of <tt>TCP_CORK</tt> for our hypothetical HTTP server example:</p><pre>int optval;
+
+/* Enable TCP_CORK option on 'sockfd' - subsequent TCP output is corked
+   until this option is disabled. */
+
+optval = 1;
+setsockopt(sockfd, IPPROTO_TCP, TCP_CORK, &amp;optval, sizeof(optval));
+
+write(sockfd, ...);                     /* Write HTTP headers */
+sendfile(sockfd, ...);                  /* Send page data */
+
+/* Disable TCP_CORK option on 'sockfd' - corked output is now transmitted
+   in a single TCP segment. */
+
+optval = 0
+setsockopt(sockfd, IPPROTO_TCP, TCP_CORK, &amp;optval, sizeof(optval));</pre><br/>
+<p class="docText">We could avoid the 
+possibility of two segments being transmitted by building a single data 
+buffer within our application, and then transmitting that buffer with a 
+single <span class="docEmphasis">write()</span>. (Alternatively, we could use <span class="docEmphasis">writev()</span> to combine two distinct buffers in a single output operation.) However, if we want to combine the zero-copy efficiency of <span class="docEmphasis">sendfile()</span> with the ability to include a header as part of the first segment of transmitted file data, then we need to use <tt>TCP_CORK</tt>.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In Section 61.3, we noted that the <tt>MSG_MORE</tt> flag provides similar functionality to <tt>TCP_CORK</tt>, but on a per-system-call basis. This is not necessarily an advantage. It is possible to set the <tt>TCP_CORK</tt> option on the socket, and then exec a program that performs output on the inherited file descriptor without being aware of the <tt>TCP_CORK</tt> option. By contrast, the use of <tt>MSG_MORE</tt> requires explicit changes to the source code of a program.</p><hr noshade="noshade" size="1"/><p class="docText">FreeBSD provides an option similar to <tt>TCP_CORK</tt> in the form of <tt>TCP_NOPUSH</tt>.</p>
+</div>
+</body>
+</html>

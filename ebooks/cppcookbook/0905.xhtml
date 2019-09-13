@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 9.4. Making Member Functions Exception-Safe</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 9.4. Making Member Functions Exception-Safe</h3>
+
+<h4 class="docSection2Title" id="title-ID0EQNCI">Problem</h4>
+<p class="docText">You are writing a member
+
+
+ function and you need it to uphold the
+basic and strong exception-safety guarantees, namely that it
+won't leak resources and it won't
+leave the object in an invalid state if an exception is thrown.</p>
+
+<h4 class="docSection2Title" id="title-ID0EROCI">Solution</h4>
+<p class="docText">Be aware of what operations can throw exceptions and do them first,
+usually in a <tt>try</tt>/<tt>catch</tt> block.
+Once the code that can throw exceptions is done executing, then you
+can update the object state. Example 9-4 offers one
+way to make a member function exception-safe.</p>
+<h5 class="docExampleTitle" id="title-ID0ECPCI">Example 9-4. An exception-safe member function</h5><p></p><div class="box">
+<pre class="preFixedHeight">class Message {
+
+public:
+   Message(int bufSize = DEFAULT_BUF_SIZE) :
+      bufSize_(bufSize),
+      initBufSize_(bufSize),
+      msgSize_(0),
+      buf_(NULL) {
+      buf_ = new char[bufSize];
+   }
+
+  ~Message( ) {
+      delete[] buf_;
+   }
+
+   // Append character data
+   void appendData(int len, const char* data) {
+      if (msgSize_+len &gt; MAX_SIZE) {
+         throw out_of_range("Data size exceeds maximum size.");
+      }
+      if (msgSize_+len &gt; bufSize_) {
+
+         int newBufSize = bufSize_;
+         while ((newBufSize *= 2) &lt; msgSize_+len);
+
+         char* p = new char[newBufSize];    // Allocate memory
+                                            // for new buffer
+
+         copy(buf_, buf_+msgSize_, p);      // Copy old data
+         copy(data, data+len, p+msgSize_);  // Copy new data
+
+         msgSize_ += len;
+         bufSize_ = newBufSize;
+
+         delete[] buf_;  // Get rid of old buffer and point to new
+         buf_ = p;
+      }
+      else {
+         copy(data, data+len, buf_+msgSize_);
+         msgSize_ += len;
+      }
+   }
+
+   // Copy the data out to the caller's buffer
+   int getData(int maxLen, char* data) {
+      if (maxLen &lt; msgSize_) {
+         throw out_of_range("This data is too big for your buffer.");
+      }
+      copy(buf_, buf_+msgSize_, data);
+      return(msgSize_);
+   }
+
+private:
+   Message(const Message&amp; orig) {}           // We will come to these
+   Message&amp; operator=(const Message&amp; rhs) {} // in Recipe 9.5
+   int bufSize_;
+   int initBufSize_;
+   int msgSize_;
+   char* buf_;
+};
+
+					  </pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0ERPCI">Discussion</h4>
+<p class="docText">The class <tt>Message</tt>
+
+in Example 9-4 is a class for holding character
+data; you might use such a thing to wrap text or binary data as it is
+passed from one system to another. The member function of interest
+here is <tt>appendData</tt>, which appends the
+caller's data to the data already in the buffer,
+growing the buffer if necessary. It upholds the strong
+exception-safety guarantee, though it may not be clear at first
+glance why this is the case.</p>
+<p class="docText">Look at this part of <tt>appendData</tt>:</p>
+<pre>if (msgSize_+len &gt; bufSize_) {
+
+   int newBufSize = bufSize_;
+   while ((newBufSize *= 2) &lt; msgSize_+len);
+
+   char* p = new char[newBufSize];</pre><br/>
+<p class="docText">The point of this block of code is to grow the buffer. I grow the
+size of the buffer by doubling it until it's big
+enough. This piece of code is safe because the only part that can
+throw an exception is the call to <tt>new</tt>, and I
+don't update the object state or allocate any other
+resources before that happens. It will throw
+<tt>bad_alloc</tt> if the operating system is unable to
+allocate the requested piece of memory.</p>
+<p class="docText">If the memory is allocated successfully, then I can start updating
+the state of the object by copying the data and updating the member
+variables:</p>
+<pre>   copy(buf_, buf_+msgSize_, p);
+   copy(data, data+len, p+msgSize_);
+
+   msgSize_ += len;
+   bufSize_ = newBufSize;
+
+   delete[] buf_;
+   buf_ = p;</pre><br/>
+<p class="docText">None of these operations can throw exceptions, so we are in the
+clear. (This is only because the data in the buffer is a sequence of
+chars; see the discussion that follows Example 9-5
+for further explanation.)</p>
+<p class="docText">This solution is simple, and it is the general strategy for making
+member functions strongly exception-safe: Do everything that might
+throw an exception first, then, when all of the dangerous work is
+over with, take a deep breath and update the object state.
+<tt>appendData</tt> just uses a temporary variable to hold
+the new buffer size. This solves the problem with the buffer size,
+but does it truly uphold the basic guarantee of not leaking
+resources? Yes, but barely.</p>
+<p class="docText"><tt>copy</tt> calls <tt>operator=</tt> on each
+element in the sequence that it is copying. In Example 9-4, each element is a <tt>char</tt>, so
+we are safe because a single assignment of one character to another
+can't <tt>throw</tt> anything. But I said,
+barely, because you shouldn't let the safety of this
+special case make you think an exception will never come out of
+<tt>copy</tt>.</p>
+<p class="docText">Imagine for a moment that instead of a narrow character buffer, you
+have to write a <tt>Message</tt> class that can contain an
+array of anything. You might write it as a class template to look
+like Example 9-5.</p>
+<h5 class="docExampleTitle" id="title-ID0EFSCI">Example 9-5. A generic message class</h5><p></p><div class="box">
+<pre class="preFixedHeight">template&lt;typename T&gt;
+class MessageGeneric {
+
+public:
+   MessageGeneric(int bufSize = DEFAULT_BUF_SIZE) :
+      bufSize_(bufSize),
+      initBufSize_(bufSize),
+      msgSize_(0),
+      buf_(new T[bufSize]) {}
+
+  ~MessageGeneric( ) {
+      delete[] buf_;
+   }
+
+   void appendData(int len, const T* data) {
+      if (msgSize_+len &gt; MAX_SIZE) {
+         throw out_of_range("Data size exceeds maximum size.");
+      }
+      if (msgSize_+len &gt; bufSize_) {
+
+         int newBufSize = bufSize_;
+         while ((newBufSize *= 2) &lt; msgSize_+len);
+
+         T* p = new T[newBufSize];
+
+         copy(buf_, buf_+msgSize_, p);     // Can these throw?
+         copy(data, data+len, p+msgSize_);
+
+         msgSize_ += len;
+         bufSize_ = newBufSize;
+
+         delete[] buf_;  // Get rid of old buffer and point to new
+         buf_ = p;
+      }
+      else {
+         copy(data, data+len, buf_+msgSize_);
+         msgSize_ += len;
+      }
+   }
+
+   // Copy the data out to the caller's buffer
+   int getData(int maxLen, T* data) {
+      if (maxLen &lt; msgSize_) {
+         throw out_of_range("This data is too big for your buffer.");
+      }
+      copy(buf_, buf_+msgSize_, data);
+      return(msgSize_);
+   }
+
+private:
+   MessageGeneric(const MessageGeneric&amp; orig) {}
+   MessageGeneric&amp; operator=(const MessageGeneric&amp; rhs) {}
+   int bufSize_;
+   int initBufSize_;
+   int msgSize_;
+   T* buf_;
+};
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Now you have to be more careful, because you can't
+make assumptions about the target type. For example, how do you know
+that <tt>T::operator=</tt> won't
+<tt>throw</tt>? You don't, so you have to
+be prepared for that possibility.</p>
+<p class="docText">Wrap the calls to copy in a try block:</p>
+<pre>try {
+   copy(buf_, buf_+msgSize_, p);
+   copy(data, data+len, p+msgSize_);
+}
+catch(...) {   // I don't care what was thrown; all I know
+   delete[] p; // is that I have to clean up after myself,
+   throw;      // then rethrow.
+}</pre><br/>
+<p class="docText">Since you are catching any type that is thrown with the ellipsis
+operator, you can rest assured that if
+<tt>T::operator=</tt>
+<tt>throw</tt>s, you will
+catch it and be able to clean up the heap memory you just allocated.</p>
+<p class="docText">Strictly speaking, <tt>copy</tt> doesn't
+actually throw anything, <tt>T::operator=</tt> does. This
+is because <tt>copy</tt> (and the rest of the algorithms in
+the standard library) are generally
+<span class="docEmphasis">exception-neutral</span>, which means that if whatever
+it is invoking throws an exception, it will propagate it to the
+caller and not eat it (<tt>catch</tt> it and not
+re<tt>throw</tt>). It reserves the right to
+<tt>catch</tt> exceptions, do some clean-up, then
+re<tt>throw</tt> them, but ultimately anything that is
+thrown by a class or function the standard library is using will find
+its way to the caller.</p>
+<p class="docText">Making your member functions exception-safe is tedious work. It
+requires that you consider all possible points where an exception can
+be thrown and that you deal with them the right way. When can an
+exception be thrown? Anywhere a function call is made. Operators for
+native data types can't <tt>throw</tt>,
+and destructors should <span class="docEmphasis">never</span>
+<tt>throw</tt>, but anything else, be it a standalone
+function, member function, operator, constructor, and so on, is a
+potential source of an exception. Examples Example 9-5 and Example 9-6 provide
+examples that use a narrow scope of exceptions. The classes contain
+very few member variables, and the behavior of the class is discrete.
+As the number of member functions and variables increase, and you
+introduce inheritance and virtual functions, remaining strongly
+exception-safe becomes more challenging.</p>
+<p class="docText">Finally, as with most application requirements, you only need to be
+as exception-safe as you need to be. In other words, if you are
+writing a dialog-based wizard for generating web pages, your
+development schedule will probably preclude the necessary research
+and testing for making it strongly exception-safe. Thus, it may be
+acceptable to your client for users to encounter the occasional,
+ambiguous error message, "Unknown error,
+aborting." On the other hand, if you are writing
+software that controls the angle of a helicopter rotor, your client
+will probably push for more safety assurances than the occasional
+"Unknown error, aborting"
+
+
+ message.</p>
+</div>
+</body>
+</html>

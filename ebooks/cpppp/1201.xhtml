@@ -1,0 +1,666 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Dynamic Memory and Classes</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Dynamic Memory and Classes</h3>
+<p class="docText">What would you like for 
+breakfast, lunch, and dinner for the next month? How many ounces of milk
+ for dinner on the 3rd day? How many raisins in your cereal for 
+breakfast on the 15th day? If you’re like most people, you’d rather 
+postpone some of those decisions until the actual mealtimes. Part of the
+ strategy in C++ is to take the same attitude toward memory allocation, 
+letting the program decide about memory during runtime rather than 
+during compile time. That way, memory use can depend on the needs of a 
+program instead of on a rigid set of storage-class rules. Remember that 
+to gain dynamic control of memory, C++ utilizes the <tt>new</tt> and <tt>delete</tt>
+ operators. Unhappily, using these operators with classes can pose some 
+new programming problems. As you’ll see, destructors can become 
+necessary instead of merely ornamental. And sometimes you have to 
+overload an assignment operator to get a program to behave properly. 
+We’ll look into these matters now.</p>
+
+<h4 class="docSection2Title" id="title-ID0EXRBK">A Review Example and Static Class Members</h4>
+<p class="docText">We haven’t used <tt>new</tt> and <tt>delete</tt>
+ for a while, so let’s review them with a short program. While we’re at 
+it, let’s look at a new storage class: the static class member. The 
+vehicle will be a <tt>StringBad</tt> class, later to be superseded by the slightly more able <tt>String</tt> class. (You’ve already seen the standard C++ <tt>string</tt> class, and you’ll learn more about it in Chapter 16, “The <tt>string</tt> Class and the Standard Template Library.” Meanwhile, the humble <tt>StringBad</tt> and <tt>String</tt>
+ classes in this chapter provide some insight into what underlies such a
+ class. A lot of programming techniques go into providing such a 
+friendly interface.)</p>
+<p class="docText"><tt>StringBad</tt> and <tt>String</tt> class objects will hold a pointer to a string and a value representing the string length. We’ll use the <tt>StringBad</tt> and <tt>String</tt> classes primarily to give an inside look at how <tt>new</tt>, <tt>delete</tt>, and <tt>static</tt>
+ class members operate. For that reason, the constructors and 
+destructors will display messages when called so that you can follow the
+ action. Also we’ll omit several useful member and friend functions, 
+such as overloaded <tt>++</tt> and <tt>&gt;&gt;</tt>
+ operators and a conversion function, in order to simplify the class 
+interface. (But rejoice! The review questions for this chapter give you 
+the opportunity to add those useful support functions.) Listing 12.1 shows the class declaration.</p>
+<p class="docText"></p><h5 class="docExampleTitle" id="title-ID0EUTBK">Listing 12.1. <tt>strngbad.h</tt></h5><p></p><div class="box">
+<pre>// strngbad.h -- flawed string class definition
+#include &lt;iostream&gt;
+#ifndef STRNGBAD_H_
+#define STRNGBAD_H_
+class StringBad
+{
+private:
+    char * str;                // pointer to string
+    int len;                   // length of string
+    static int num_strings;    // number of objects
+public:
+    StringBad(const char * s); // constructor
+    StringBad();               // default constructor
+    ~StringBad();              // destructor
+// friend function
+    friend std::ostream &amp; operator&lt;&lt;(std::ostream &amp; os,
+                       const StringBad &amp; st);
+};
+#endif</pre><br/>
+</div><p></p>
+<p class="docText">Why call the class <tt>StringBad</tt>? This is to remind you that <tt>StringBad</tt>
+ is an example under development. It’s the first stage of developing a 
+class by using dynamic memory allocation, and it does the obvious things
+ correctly; for example, it uses <tt>new</tt> and <tt>delete</tt>
+ correctly in the constructors and destructor. It doesn’t really do bad 
+things, but the design omits doing some additional good things that are 
+necessary but not at all obvious. Seeing the problems the class has 
+should help you understand and remember the non-obvious changes you will
+ make later, when you convert it to the more functional <tt>String</tt> class.</p>
+<p class="docText">You should note two points about this declaration. First, it uses a pointer-to-<tt>char</tt> instead of a <tt>char</tt>
+ array to represent a name. This means that the class declaration does 
+not allocate storage space for the string itself. Instead, it uses <tt>new</tt>
+ in the constructors to allocate space for the string. This arrangement 
+avoids straitjacketing the class declaration with a predefined limit to 
+the string size.</p>
+<p class="docText">Second, the definition declares the <tt>num_strings</tt> member as belonging to the <tt>static</tt> storage class. A <span class="docEmphasis">static class member</span>
+ has a special property: A program creates only one copy of a static 
+class variable, regardless of the number of objects created. That is, a 
+static member is shared among all objects of that class, much as a phone
+ number might be shared among all members of a family. If, say, you 
+create 10 <tt>StringBad</tt> objects, there would be 10 <tt>str</tt> members and 10 <tt>len</tt> members, but just 1 shared <tt>num_strings</tt> member (see Figure 12.1). This is convenient for data that should be private to a class but that should have the same value for all class objects. The <tt>num_strings</tt> member, for example, is intended to keep track of the number of objects created.</p>
+<p class="docText"></p><p></p><center>
+<h5 class="docFigureTitle">Figure 12.1. A static data member.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="451" id="" src="Images/getfile-35.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<p class="docText">By the way, Listing 12.1 uses the <tt>num_strings</tt>
+ member as a convenient means of illustrating static data members and as
+ a device to point out potential programming problems. In general, a 
+string class doesn’t need such a member.</p>
+<p class="docText">Take a look at the implementation of the class methods in Listing 12.2. Notice how it handles using a pointer and a static member.</p>
+<h5 class="docExampleTitle" id="title-ID0EOZBK">Listing 12.2. <tt>strngbad.cpp</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// strngbad.cpp -- StringBad class methods
+#include &lt;cstring&gt;                    // string.h for some
+#include "strngbad.h"
+using std::cout;
+
+// initializing static class member
+int StringBad::num_strings = 0;
+
+// class methods
+
+// construct StringBad from C string
+StringBad::StringBad(const char * s)
+{
+    len = std::strlen(s);             // set size
+    str = new char[len + 1];          // allot storage
+    std::strcpy(str, s);              // initialize pointer
+    num_strings++;                    // set object count
+    cout &lt;&lt; num_strings &lt;&lt; ": \"" &lt;&lt; str
+         &lt;&lt; "\" object created\n";    // For Your Information
+}
+
+StringBad::StringBad()                // default constructor
+{
+    len = 4;
+    str = new char[4];
+    std::strcpy(str, "C++");          // default string
+    num_strings++;
+    cout &lt;&lt; num_strings &lt;&lt; ": \"" &lt;&lt; str
+         &lt;&lt; "\" default object created\n";  // FYI
+}
+
+StringBad::~StringBad()               // necessary destructor
+{
+    cout &lt;&lt; "\"" &lt;&lt; str &lt;&lt; "\" object deleted, ";    // FYI
+    --num_strings;                    // required
+    cout &lt;&lt; num_strings &lt;&lt; " left\n"; // FYI
+    delete [] str;                    // required
+}
+
+std::ostream &amp; operator&lt;&lt;(std::ostream &amp; os, const StringBad &amp; st)
+{
+    os &lt;&lt; st.str;
+    return os;
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">First, notice the following statement from Listing 12.2:</p>
+<div class="docText"><pre>int StringBad::num_strings = 0;</pre></div><br/>
+<p class="docText">This statement initializes the static <tt>num_strings</tt> member to <tt>0</tt>.
+ Note that you cannot initialize a static member variable inside the 
+class declaration. That’s because the declaration is a description of 
+how memory is to be allocated but it doesn’t allocate memory. You 
+allocate and initialize memory by creating an object using that format. 
+In the case of a static class member, you initialize the static member 
+independently, with a separate statement outside the class declaration. 
+That’s because the static class member is stored separately rather than 
+as part of an object. Note that the initialization statement gives the 
+type and uses the scope operator, but it doesn’t use the static keyword.</p>
+<p class="docText">This
+ initialization goes in the methods file, not in the class declaration 
+file. That’s because the class declaration is in a header file, and a 
+program may include a header file in several other files. That would 
+result in multiple copies of the initialization statement, which is an 
+error.</p>
+<p class="docText">The exception to the noninitialization of a static data member inside the class declaration (see Chapter 10, “Objects and Classes”) is if the static data member is a <tt>const</tt> of integral or enumeration type.</p>
+<div class="docNote"><p class="docNoteTitle">Note</p>
+<p class="docText">A static data member is 
+declared in the class declaration and is initialized in the file 
+containing the class methods. The scope operator is used in the 
+initialization to indicate to which class the static member belongs. 
+However, if the static member is a <tt>const</tt> integral type or an enumeration type, it can be initialized in the class declaration itself.</p>
+</div><br/>
+<p class="docText">Next, notice that each constructor contains the expression <tt>num_strings++</tt>. This ensures that each time a program creates a new object, the shared variable <tt>num_strings</tt> increases by one, keeping track of the total number of <tt>String</tt> objects. Also the destructor contains the expression <tt>--num_strings</tt>. Thus, the <tt>String</tt> class also keeps track of deleted objects, keeping the value of the <tt>num_strings</tt> member current.</p>
+<p class="docText">Now look at the first constructor in Listing 12.2, which initializes a <tt>String</tt> object with a regular C string:</p>
+<div class="docText"><pre>StringBad::StringBad(const char * s)
+{
+    len = std::strlen(s);          // set size
+    str = new char[len + 1];       // allot storage
+    std::strcpy(str, s);           // initialize pointer
+    num_strings++;                 // set object count
+    cout &lt;&lt; num_strings &lt;&lt; ": \"" &lt;&lt; str
+         &lt;&lt; "\" object created\n"; // For Your Information
+}</pre></div><br/>
+<p class="docText">Recall that the class <tt>str</tt>
+ member is just a pointer, so the constructor has to provide the memory 
+for holding a string. You can pass a string pointer to the constructor 
+when you initialize an object:</p>
+<div class="docText"><pre>String boston("Boston");</pre></div><br/>
+<p class="docText">The constructor must then 
+allocate enough memory to hold the string, and then it must copy the 
+string to that location. Let’s go through the process step-by-step.</p>
+<p class="docText">First, the function initializes the <tt>len</tt> member, using the <tt>strlen()</tt> function to compute the length of the string. Next, it uses <tt>new</tt> to allocate sufficient space to hold the string, and then it assigns the address of the new memory to the <tt>str</tt> member. (Recall that <tt>strlen()</tt> returns the length of a string, not counting the terminating null character, so the constructor adds one to <tt>len</tt> to allow space for the string, including the null character.)</p>
+<p class="docText">Next, the constructor uses <tt>strcpy()</tt>
+ to copy the passed string into the new memory. Then it updates the 
+object count. Finally, to help you monitor what’s going on, the 
+constructor displays the current number of objects and the string stored
+ in the object. This feature will come in handy later when we 
+deliberately lead the <tt>Stringbad</tt> class into trouble.</p>
+<p class="docText">To understand this 
+approach, you should realize that the string is not stored in the 
+object. The string is stored separately, in heap memory, and the object 
+merely stores information that tells where to find the string.</p>
+<p class="docText">Note that you do not use this:</p>
+<div class="docText"><pre>str = s;  // not the way to go</pre></div><br/>
+<p class="docText">This merely stores the address without making a copy of the string.</p>
+<p class="docText">The default constructor behaves similarly, except that it provides a default string of <tt>"C++"</tt>.</p>
+<p class="docText">The destructor contains the example’s most important addition to the handling of classes:</p>
+<div class="docText"><pre>StringBad::~StringBad()               // necessary destructor
+{
+    cout &lt;&lt; "\"" &lt;&lt; str &lt;&lt; "\" object deleted, ";    // FYI
+    --num_strings;                    // required
+    cout &lt;&lt; num_strings &lt;&lt; " left\n"; // FYI
+    delete [] str;                    // required
+}</pre></div><br/>
+<p class="docText">The destructor begins by announcing when the destructor gets called. This part is informative but not essential. However, the <tt>delete</tt> statement is vital. Recall that the <tt>str</tt> member points to memory allocated with <tt>new</tt>. When a <tt>StringBad</tt> object expires, the <tt>str</tt> pointer expires. But the memory <tt>str</tt> pointed to remains allocated unless you use <tt>delete</tt>
+ to free it. Deleting an object frees the memory occupied by the object 
+itself, but it does not automatically free memory pointed to by pointers
+ that were object members. For that, you must use the destructor. By 
+placing the <tt>delete</tt> statement in the destructor, you ensure that the memory that a constructor allocates with <tt>new</tt> is freed when the object expires.</p>
+<div class="docNote"><p class="docNoteTitle">Warning</p>
+<p class="docText">Whenever you use <tt>new</tt> in a constructor to allocate memory, you should use <tt>delete</tt> in the corresponding destructor to free that memory. If you use <tt>new []</tt> (with brackets), then you should use <tt>delete []</tt> (with brackets).</p>
+</div><br/>
+<p class="docText">Listing 12.3, which is taken from a program under development at <span class="docEmphasis">The Daily Vegetable</span>, illustrates when and how the <tt>StringBad</tt>
+ constructors and destructors work. The program places the object 
+declarations within an inner block because the destructor is called when
+ execution exits the block in which an object is defined. Without the 
+inner block, the destructors would be called after execution exits <tt>main()</tt>,
+ which would prevent you in some environments from seeing the destructor
+ messages before the execution window closes. Be sure to compile Listing 12.2 along with Listing 12.3.</p>
+<p class="docText"></p><h5 class="docExampleTitle" id="title-ID0E1ECK">Listing 12.3. <tt>vegnews.cpp</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// vegnews.cpp -- using new and delete with classes
+// compile with strngbad.cpp
+#include &lt;iostream&gt;
+using std::cout;
+#include "strngbad.h"
+
+void callme1(StringBad &amp;);  // pass by reference
+void callme2(StringBad);    // pass by value
+
+int main()
+{
+    using std::endl;
+    {
+        cout &lt;&lt; "Starting an inner block.\n";
+        StringBad headline1("Celery Stalks at Midnight");
+        StringBad headline2("Lettuce Prey");
+        StringBad sports("Spinach Leaves Bowl for Dollars");
+        cout &lt;&lt; "headline1: " &lt;&lt; headline1 &lt;&lt; endl;
+        cout &lt;&lt; "headline2: " &lt;&lt; headline2 &lt;&lt; endl;
+        cout &lt;&lt; "sports: " &lt;&lt; sports &lt;&lt; endl;
+        callme1(headline1);
+        cout &lt;&lt; "headline1: " &lt;&lt; headline1 &lt;&lt; endl;
+        callme2(headline2);
+        cout &lt;&lt; "headline2: " &lt;&lt; headline2 &lt;&lt; endl;
+        cout &lt;&lt; "Initialize one object to another:\n";
+        StringBad sailor = sports;
+        cout &lt;&lt; "sailor: " &lt;&lt; sailor &lt;&lt; endl;
+        cout &lt;&lt; "Assign one object to another:\n";
+        StringBad knot;
+        knot = headline1;
+        cout &lt;&lt; "knot: " &lt;&lt; knot &lt;&lt; endl;
+        cout &lt;&lt; "Exiting the block.\n";
+    }
+    cout &lt;&lt; "End of main()\n";
+
+    return 0;
+}
+
+void callme1(StringBad &amp; rsb)
+{
+    cout &lt;&lt; "String passed by reference:\n";
+    cout &lt;&lt; "    \"" &lt;&lt; rsb &lt;&lt; "\"\n";
+}
+
+void callme2(StringBad sb)
+{
+    cout &lt;&lt; "String passed by value:\n";
+    cout &lt;&lt; "    \"" &lt;&lt; sb &lt;&lt; "\"\n";
+}
+
+					  </pre><br/>
+</div><p></p>
+<div class="docNote"><p class="docNoteTitle">Note</p>
+<p class="docText">This first draft of a design for <tt>StringBad</tt>
+ has some deliberate flaws that make the exact output undefined. Some 
+compilers I used, for example, produced versions that aborted before 
+completing. However, although the output details may differ, the basic 
+problems and solutions (soon to be revealed!) are the same.</p>
+</div><br/>
+<p class="docText">Here is the output produced after compiling the program in Listing 12.3 with the Borland C++ 5.5 command-line compiler:</p>
+<div class="docText"><pre class="preFixedHeight">Starting an inner block.
+1: "Celery Stalks at Midnight" object created
+2: "Lettuce Prey" object created
+3: "Spinach Leaves Bowl for Dollars" object created
+headline1: Celery Stalks at Midnight
+headline2: Lettuce Prey
+sports: Spinach Leaves Bowl for Dollars
+String passed by reference:
+    "Celery Stalks at Midnight"
+headline1: Celery Stalks at Midnight
+String passed by value:
+    "Lettuce Prey"
+"Lettuce Prey" object deleted, 2 left
+headline2: Dû°
+Initialize one object to another:
+sailor: Spinach Leaves Bowl for Dollars
+Assign one object to another:
+3: "C++" default object created
+knot: Celery Stalks at Midnight
+Exiting the block.
+"Celery Stalks at Midnight" object deleted, 2 left
+"Spinach Leaves Bowl for Dollars" object deleted, 1 left
+"Spinach Leaves Bowl for Doll8" object deleted, 0 left
+"@g" object deleted, -1 left
+"-|" object deleted, -2 left
+End of main()
+
+					  </pre></div><br/>
+<p class="docText">The various nonstandard characters that appear in the output will vary from system to system; they are one of the signs that <tt>StringBad</tt>
+ deserves to be called bad. Another sign is the negative object count. 
+Newer compiler/operating system combinations typically abort the program
+ just before displaying the line about having -1 objects left, and some 
+of them report a General Protection Fault (GPF). A GPF indicates that a 
+program tried to access a memory location forbidden to it; this is 
+another bad sign.</p>
+
+<h5 class="docSection3Title" id="title-ID0E3GCK">Program Notes</h5>
+<p class="docText">The program in Listing 12.3
+ starts out fine, but it staggers to a strange and ultimately disastrous
+ conclusion. Let’s begin by looking at the good parts. The constructor 
+announces that it has created three <tt>StringBad</tt> objects, it numbers them, and the program uses the overloaded <tt>&lt;&lt;</tt> operator to list them:</p>
+<div class="docText"><pre>1: "Celery Stalks at Midnight" object created
+2: "Lettuce Prey" object created
+3: "Spinach Leaves Bowl for Dollars" object created
+headline1: Celery Stalks at Midnight
+headline2: Lettuce Prey
+sports: Spinach Leaves Bowl for Dollars</pre></div><br/>
+<p class="docText">Then the program passes <tt>headline1</tt> to the <tt>callme1()</tt> function and redisplays <tt>headline1</tt> after the call. Here’s the code:</p>
+<div class="docText"><pre>callme1(headline1);
+cout &lt;&lt; "headline1: " &lt;&lt; headline1 &lt;&lt; endl;</pre></div><br/>
+<p class="docText">And here’s the result:</p>
+<div class="docText"><pre>String passed by reference:
+    "Celery Stalks at Midnight"
+headline1: Celery Stalks at Midnight</pre></div><br/>
+<p class="docText">This section of code seems to work fine, too.</p>
+<p class="docText">But then the program executes the following code:</p>
+<div class="docText"><pre>callme2(headline2);
+cout &lt;&lt; "headline2: " &lt;&lt; headline2 &lt;&lt; endl;</pre></div><br/>
+<p class="docText">Here, <tt>callme2()</tt> passes <tt>headline2</tt> by value instead of by reference, and the result indicates a serious problem:</p>
+<div class="docText"><pre>String passed by value:
+    "Lettuce Prey"
+"Lettuce Prey" object deleted, 2 left
+headline2: Dû°</pre></div><br/>
+<p class="docText">First, passing <tt>headline2</tt>
+ as a function argument somehow causes the destructor to be called. 
+Second, although passing by value is supposed to protect the original 
+argument from change, the function messes up the original string beyond 
+recognition, and some nonstandard characters get displayed. (The exact 
+text displayed will depend on what happens to sitting in memory.)</p>
+<p class="docText">Even worse, look at the end of the output when the destructor gets called automatically for each of the objects created earlier:</p>
+<div class="docText"><pre>Exiting the block.
+"Celery Stalks at Midnight" object deleted, 2 left
+"Spinach Leaves Bowl for Dollars" object deleted, 1 left
+"Spinach Leaves Bowl for Doll8" object deleted, 0 left
+"@g" object deleted, -1 left
+"-|" object deleted, -2 left
+End of main()</pre></div><br/>
+<p class="docText">Because
+ automatic storage objects are deleted in an order opposite to that in 
+which they are created, the first three objects deleted are <tt>knots</tt>, <tt>sailor</tt>, and <tt>sport</tt>. The <tt>knots</tt> and <tt>sailor</tt> deletions look okay, but for <tt>sport</tt>, <tt>Dollars</tt> has become <tt>Doll8</tt>. The only thing the program does with <tt>sport</tt> is use it to initialize <tt>sailor</tt>, but that act appears to have altered <tt>sport</tt>. And the last two objects deleted, <tt>headline2</tt> and <tt>headline1</tt>,
+ are unrecognizable. Something messes up these strings before they are 
+deleted. Also the counting is bizarre. How can there be -2 objects left?</p>
+<p class="docText">Actually, the peculiar 
+counting is a clue. Every object is constructed once and destroyed once,
+ so the number of constructor calls should equal the number of 
+destructor calls. Because the object count (<tt>num_strings</tt>) is decremented two times more than it is incremented, a constructor that doesn’t increment <tt>num_strings</tt> must be creating two objects. The class definition declares and defines two constructors (both of which increment <tt>num_strings</tt>), but it turns out that the program uses three constructors! For example, consider this line:</p>
+<div class="docText"><pre>StringBad sailor = sports;</pre></div><br/>
+<p class="docText">What constructor is used here? Not the default constructor, and not the constructor with a <tt>const char *</tt> parameter. Remember, initialization using this form is another syntax for the following:</p>
+<div class="docText"><pre>StringBad sailor = StringBad(sports); //constructor using sports</pre></div><br/>
+<p class="docText">Because <tt>sports</tt> is type <tt>StringBad</tt>, a matching constructor could have this prototype:</p>
+<div class="docText"><pre>StringBad(const StringBad &amp;);</pre></div><br/>
+<p class="docText">And it turns out that the compiler automatically generates this constructor (called a <span class="docEmphasis">copy constructor</span>
+ because it makes a copy of an object) if you initialize one object to 
+another. The automatic version would not know about updating the <tt>num_strings</tt>
+ static variable, so it would mess up the counting scheme. Indeed, all 
+the problems exhibited by this example stem from member functions that 
+the compiler generates automatically, so let’s look at that topic now.</p>
+
+<h4 class="docSection2Title" id="title-ID0EMOCK">Special Member Functions</h4>
+<p class="docText">The problems with the <tt>StringBad</tt> class stem from <span class="docEmphasis">special member functions</span>. These are member functions that are defined automatically. In the case of <tt>StringBad</tt>,
+ the behavior of these member functions is inappropriate to this 
+particular class design. In particular, C++ automatically provides the 
+following member functions:</p>
+<ul><li><p class="docList">A default constructor if you define no constructors</p></li><li><p class="docList">A default destructor if you don’t define one</p></li><li><p class="docList">A copy constructor if you don’t define one</p></li><li><p class="docList">An assignment operator if you don’t define one</p></li><li><p class="docList">An address operator if you don’t define one</p></li></ul>
+<p class="docText">More precisely, the compiler
+ generates definitions for the last three items if a program uses 
+objects in such a way as to require them. For example, if you assign one
+ object to another, the program provides a definition for the assignment
+ operator.</p>
+<p class="docText">It turns out that the implicit copy constructor and the implicit assignment operator cause the <tt>StringBad</tt> class problems.</p>
+<p class="docText">The implicit address operator returns the address of the invoking object (that is, the value of the <tt>this</tt>
+ pointer). That’s fine for our purposes, and we won’t discuss this 
+member function further. The default destructor does nothing, and we 
+won’t discuss it, either, other than to point out that the class has 
+already provided a substitute for it. But the others do warrant more 
+discussion.</p>
+<p class="docText">C++11 provides two more special member functions—the <span class="docEmphasis">move constructor</span> and the <span class="docEmphasis">move assignment operator</span>. Chapter 18, “Visiting with the New C++ Standard,” discusses these further.</p>
+
+<h5 class="docSection3Title" id="title-ID0E3SCK">Default Constructors</h5>
+<p class="docText">If you fail to provide any constructors at all, C++ provides you with a default constructor. For example, suppose you define a <tt>Klunk</tt> class and omit any constructors. In this case, the compiler supplies the following default:</p>
+<div class="docText"><pre>Klunk::Klunk() { }  // implicit default constructor</pre></div><br/>
+<p class="docText">That is, it supplies a constructor (the <span class="docEmphasis">defaulted</span>
+ default constructor) that takes no arguments and that does nothing. 
+It’s needed because creating an object always invokes a constructor:</p>
+<div class="docText"><pre>Klunk lunk;  // invokes default constructor</pre></div><br/>
+<p class="docText">The default constructor makes <tt>lunk</tt> like an ordinary automatic variable; that is, its value at initialization is unknown.</p>
+<p class="docText">After you define any 
+constructor, C++ doesn’t bother to define a default constructor. If you 
+want to create objects that aren’t initialized explicitly, you then have
+ to define a default constructor explicitly. It’s a constructor with no 
+arguments, but you can use it to set particular values:</p>
+<div class="docText"><pre>Klunk::Klunk()  // explicit default constructor
+{
+    klunk_ct = 0;
+    ...
+}</pre></div><br/>
+<p class="docText">A constructor with arguments still can be a default constructor if all its arguments have default values. For example, the <tt>Klunk</tt> class could have the following inline constructor:</p>
+<div class="docText"><pre>Klunk(int n = 0) { klunk_ct = n; }</pre></div><br/>
+<p class="docText">However, you can have only one default constructor. That is, you can’t do this:</p>
+<div class="docText"><pre>Klunk() { klunk_ct = 0 }             // constructor #1
+Klunk(int n = 0) { klunk_ct = n; }   // ambiguous constructor #2</pre></div><br/>
+<p class="docText">Why is this ambiguous? Consider the following two declarations:</p>
+<div class="docText"><pre>Klunk kar(10);    // clearly matches Klunt(int n)
+Klunk bus;        // could match either constructor</pre></div><br/>
+<p class="docText">The second declaration matches constructor #1 (no argument), but it also matches constructor #2 (using the default argument <tt>0</tt>). This will cause the compiler to issue an error message.</p>
+
+<h5 class="docSection3Title" id="title-ID0EHZCK">Copy Constructors</h5>
+<p class="docText">A copy constructor is used to
+ copy an object to a newly created object. That is, it’s used during 
+initialization, including passing function arguments by value and not 
+during ordinary assignment. A copy constructor for a class normally has 
+this prototype:</p>
+<div class="docText"><pre><span class="docEmphasis">Class_name</span>(const <span class="docEmphasis">Class_name</span> &amp;);</pre></div><br/>
+<p class="docText">Note that it takes a constant reference to a class object as its argument. For example, a copy constructor for the <tt>String</tt> class would have this prototype:</p>
+<div class="docText"><pre>StringBad(const StringBad &amp;);</pre></div><br/>
+<p class="docText">You must know two things about a copy constructor: when it’s used and what it does.</p>
+
+<h5 class="docSection4Title" id="title-ID0EK1CK">When a Copy Constructor Is Used</h5>
+<p class="docText">A copy constructor is 
+invoked whenever a new object is created and initialized to an existing 
+object of the same kind. This happens in several situations. The most 
+obvious situation is when you explicitly initialize a new object to an 
+existing object. For example, given that <tt>motto</tt> is a <tt>StringBad</tt> object, the following four defining declarations invoke a copy constructor:</p>
+<div class="docText"><pre>StringBad ditto(motto);  // calls StringBad(const StringBad &amp;)
+StringBad metoo = motto; // calls StringBad(const StringBad &amp;)
+StringBad also = StringBad(motto);
+                         // calls StringBad(const StringBad &amp;)
+StringBad * pStringBad = new StringBad(motto);
+                         // calls StringBad(const StringBad &amp;)</pre></div><br/>
+<p class="docText">Depending on the implementation, the middle two declarations may use a copy constructor directly to create <tt>metoo</tt> and <tt>also</tt>, or they may use a copy constructor to generate temporary objects whose contents are then assigned to <tt>metoo</tt> and <tt>also</tt>. The last example initializes an anonymous object to <tt>motto</tt> and assigns the address of the new object to the <tt>pstring</tt> pointer.</p>
+<p class="docText">Less obviously, a compiler 
+uses a copy constructor whenever a program generates copies of an 
+object. In particular, it’s used when a function passes an object by 
+value (as <tt>callme2()</tt> does in Listing 12.3) or when a function returns an object. Remember, passing by
+ value means creating a copy of the original variable. A compiler also 
+uses a copy constructor whenever it generates temporary objects. For 
+example, a compiler might generate a temporary <tt>Vector</tt> object to hold an intermediate result when adding three <tt>Vector</tt>
+ objects. Compilers vary as to when they generate temporary objects, but
+ all invoke a copy constructor when passing objects by value and when 
+returning them. In particular, this function call in Listing 12.3 invokes a copy constructor:</p>
+<div class="docText"><pre>callme2(headline2);</pre></div><br/>
+<p class="docText">The program uses a copy constructor to initialize <tt>sb</tt>, the formal <tt>StringBad</tt>-type parameter for the <tt>callme2()</tt> function.</p>
+<p class="docText">By the way, the fact 
+that passing an object by value involves invoking a copy constructor is a
+ good reason for passing by reference instead. That saves the time of 
+invoking the constructor and the space for storing the new object.</p>
+
+<h5 class="docSection4Title" id="title-ID0EIADK">What a Default Copy Constructor Does</h5>
+<p class="docText">The default copy constructor performs a member-by-member copy of the nonstatic members (<span class="docEmphasis">memberwise copying</span>, also sometimes called <span class="docEmphasis">shallow copying</span>). Each member is copied by value. In Listing 12.3, the statement</p>
+<div class="docText"><pre>StringBad sailor = sports;</pre></div><br/>
+<p class="docText">amounts to the following (aside from the fact that it doesn’t compile because access to private members is not allowed):</p>
+<div class="docText"><pre>StringBad sailor;
+sailor.str = sports.str;
+sailor.len = sports.len;</pre></div><br/>
+<p class="docText">If a member is itself a class
+ object, the copy constructor for that class is used to copy one member 
+object to another. Static members, such as <tt>num_strings</tt>, are unaffected because they belong to the class as a whole instead of to individual objects. Figure 12.2 illustrates the action of an implicit copy constructor.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 12.2. An inside look at memberwise copying.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="565" id="" src="Images/getfile_002-21.jpg" width="500"/><p></p>
+</center><p></p><br/>
+
+<h4 class="docSection2Title" id="title-ID0EPCDK">Back to Stringbad: Where the Copy Constructor Goes Wrong</h4>
+<p class="docText">You are now in a position to understand the twofold weirdness of Listing 12.3.
+ (Let’s assume that the output is the one shown after the listing.) The 
+first weirdness is that the program output indicates two more objects 
+destroyed than constructed. The explanation is that the program does 
+create two additional objects, using the default copy constructor. The 
+copy constructor is used to initialize the formal parameter of <tt>callme2()</tt> when that function is called, and it is used to initialize the object <tt>sailor</tt> to <tt>sports</tt>.
+ The default copy constructor doesn’t vocalize its activities, so it 
+doesn’t announce its creations, and it doesn’t increment the <tt>num_strings</tt>
+ counter. However, the destructor does update the count, and it’s 
+invoked upon the demise of all objects, regardless of how they were 
+constructed. This weirdness is a problem because it means the program 
+doesn’t keep an accurate object count. The solution is to provide an 
+explicit copy constructor that does update the count:</p>
+<div class="docText"><pre>StringBad::StringBad(const String &amp; s)
+{
+    num_strings++;
+    ...// important stuff to go here
+}</pre></div><br/>
+<div class="docNote"><p class="docNoteTitle">Tip</p>
+<p class="docText">If your class has a static data
+ member whose value changes when new objects are created, you should 
+provide an explicit copy constructor that handles the accounting.</p>
+</div><br/>
+<p class="docText">The second weirdness is the more subtle and dangerous. One symptom is the garbled string contents:</p>
+<div class="docText"><pre>headline2: Dû°</pre></div><br/>
+<p class="docText">The cause is that the implicit copy constructor copies by value. Consider Listing 12.3, for example. The effect, recall, is this:</p>
+<div class="docText"><pre>sailor.str = sport.str;</pre></div><br/>
+<p class="docText">This does not copy the string; it copies the pointer to a string. That is, after <tt>sailor</tt> is initialized to <tt>sports</tt>, you wind up with two pointers to the same string. That’s not a problem when the <tt>operator&lt;&lt;()</tt> function uses the pointer to display the string. It <span class="docEmphasis">is</span> a problem when the destructor is called. Recall that the <tt>StringBad</tt> destructor frees the memory pointed to by the <tt>str</tt> pointer. The effect of destroying <tt>sailor</tt> is this:</p>
+<div class="docText"><pre>delete [] sailor.str;    // delete the string that ditto.str points to</pre></div><br/>
+<p class="docText">The <tt>sailor.str</tt> pointer points to <tt>"Spinach Leaves Bowl for Dollars"</tt> because it is assigned the value of <tt>sports.str</tt>, which points to that string. So the <tt>delete</tt> statement frees the memory occupied by the string <tt>"Spinach Leaves Bowl for Dollars"</tt>.</p>
+<p class="docText">Next, the effect of destroying <tt>sports</tt> is this:</p>
+<div class="docText"><pre>delete [] sports.str;   // effect is undefined</pre></div><br/>
+<p class="docText">Here, <tt>sports.str</tt> points to the same memory location that has already been freed by the destructor for <tt>sailor</tt>, and this results in undefined, possibly harmful, behavior. In the case of Listing 12.3, the program produces mangled strings, which is usually a sign of memory mismanagement.</p>
+<p class="docText">Another disturbing symptom 
+is that attempting to delete the same memory twice can cause the program
+ to abort. Microsoft Visual C++ 2010 (debug mode), for example, displays
+ an error message window saying “Debug Assertion Failed!”, and g++ 4.4.1
+ on Linux reports “double free or corruption” and aborts. Other systems 
+might provide different messages or even no message, but the same evil 
+lurks within the programs.</p>
+
+<h5 class="docSection3Title" id="title-ID0ENIDK">Fixing the Problem by Defining an Explicit Copy Constructor</h5>
+<p class="docText">The cure for the problems in the class design is to make a <span class="docEmphasis">deep copy</span>.
+ That is, rather than just copy the address of the string, the copy 
+constructor should duplicate the string and assign the address of the 
+duplicate to the <tt>str</tt> member. That 
+way, each object gets its own string rather than referring to another 
+object’s string. And each call of the destructor frees a different 
+string rather than making duplicate attempts at freeing the same string.
+ Here’s how you can code the <tt>String</tt> copy constructor:</p>
+<div class="docText"><pre>StringBad::StringBad(const StringBad &amp; st)
+{
+    num_strings++;             // handle static member update
+    len = st.len;              // same length
+    str = new char [len + 1];  // allot space
+    std::strcpy(str, st.str);  // copy string to new location
+    cout &lt;&lt; num_strings &lt;&lt; ": \"" &lt;&lt; str
+         &lt;&lt; "\" object created\n"; // For Your Information
+}</pre></div><br/>
+<p class="docText">What makes defining the copy constructor necessary is the fact that some class members are <tt>new</tt>-initialized pointers to data rather than the data themselves. Figure 12.3 illustrates deep copying.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 12.3. An inside look at deep copying.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="554" id="" src="Images/getfile_003-7.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<div class="docNote"><p class="docNoteTitle">Caution</p>
+<p class="docText">If a class contains members that are pointers initialized by <tt>new</tt>,
+ you should define a copy constructor that copies the pointed-to data 
+instead of copying the pointers themselves. This is termed <span class="docEmphasis">deep copying</span>. The alternative form of copying (<span class="docEmphasis">memberwise</span>, or <span class="docEmphasis">shallow</span>, <span class="docEmphasis">copying</span>)
+ just copies pointer values. A shallow copy is just that—the shallow 
+“scraping off” of pointer information for copying, rather than the 
+deeper “mining” required to copy the constructs referred to by the 
+pointers.</p>
+</div><br/>
+
+<h4 class="docSection2Title" id="title-ID0EZNDK">More <tt>Stringbad</tt> Problems: Assignment Operators</h4>
+<p class="docText">Not all the problems in Listing 12.3
+ can be blamed on the default copy constructor; you have to look at the 
+default assignment operator, too. Just as ANSI C allows structure 
+assignment, C++ allows class object assignment. It does so by 
+automatically overloading an assignment operator for a class. This 
+operator has the following prototype:</p>
+<div class="docText"><pre><span class="docEmphasis">Class_name</span> &amp; <span class="docEmphasis">Class_name</span>::operator=(const <span class="docEmphasis">Class_name</span> &amp;);</pre></div><br/>
+<p class="docText">That is, it takes and returns a reference to an object of the class. For example, here’s the prototype for the <tt>StringBad</tt> class:</p>
+<div class="docText"><pre>StringBad &amp; StringBad::operator=(const StringBad &amp;);</pre></div><br/>
+
+<h5 class="docSection3Title" id="title-ID0EFPDK">When an Assignment Operator Is Used and What It Does</h5>
+<p class="docText">An overloaded assignment operator is used when you assign one object to another existing object:</p>
+<div class="docText"><pre>StringBad headline1("Celery Stalks at Midnight");
+...
+StringBad knot;
+knot = headline1;   // assignment operator invoked</pre></div><br/>
+<p class="docText">An assignment operator is not necessarily used when initializing an object:</p>
+<div class="docText"><pre>StringBad metoo = knot; // use copy constructor, possibly assignment, too</pre></div><br/>
+<p class="docText">Here <tt>metoo</tt> is a newly created object being initialized to <tt>knot</tt>’s
+ values; hence, the copy constructor is used. However, as mentioned 
+before, implementations have the option of handling this statement in 
+two steps: using the copy constructor to create a temporary object and 
+then using assignment to copy the values to the new object. That is, 
+initialization always invokes a copy constructor, and forms using the <tt>=</tt> operator may also invoke an assignment operator.</p>
+<p class="docText">Like a copy constructor, an
+ implicit implementation of an assignment operator performs a 
+member-to-member copy. If a member is itself an object of some class, 
+the program uses the assignment operator defined for that class to do 
+the copying for that particular member. Static data members are 
+unaffected.</p>
+
+<h5 class="docSection3Title" id="title-ID0ELQDK">Where <tt>Stringbad</tt> Assignment Goes Wrong</h5>
+<p class="docText">Listing 12.3 assigns <tt>headline1</tt> to <tt>knot</tt>:</p>
+<div class="docText"><pre>knot = headline1;</pre></div><br/>
+<p class="docText">When the destructor is called for <tt>knot</tt>, it displays this message:</p>
+<div class="docText"><pre>"Celery Stalks at Midnight" object deleted, 2 left</pre></div><br/>
+<p class="docText">When the destructor is called for <tt>headline1</tt>, it displays this message:</p>
+<div class="docText"><pre>"-|" object deleted, -2 left</pre></div><br/>
+<p class="docText">(Many implementations abort before getting this far.)</p>
+<p class="docText">Here you see the same 
+problem that the implicit copy constructor caused: corrupted data. Once 
+again, the problem is memberwise copying, which causes both <tt>headline1.str</tt> and <tt>knot.str</tt> to point to the same address. Thus, when the destructor is called for <tt>knot</tt>, it deletes the string <tt>"Celery Stalks at Midnight"</tt>, and when it’s called for <tt>headline1</tt>,
+ it attempts to delete the previously deleted string. As mentioned 
+earlier, the effect of attempting to delete previously deleted data is 
+undefined, so it may change the memory contents, and it may cause a 
+program to abort. As some like to point out, if the effect of a 
+particular operation is undefined, your compiler can do anything it 
+wants, including displaying the Declaration of Independence or freeing 
+your hard disk of unsightly files. Of course, it would be a rare thing 
+for a compiler writer to take the time to include such frivolous or 
+destructive behavior.</p>
+
+<h5 class="docSection3Title" id="title-ID0E3VDK">Fixing Assignment</h5>
+<p class="docText">The solution for the problems 
+created by an inappropriate default assignment operator is to provide 
+your own assignment operator definition, one that makes a deep copy. The
+ implementation is similar to that of the copy constructor, but there 
+are some differences:</p>
+<ul><li><p class="docList">Because the target object may already refer to previously allocated data, the function should use <tt>delete []</tt> to free former obligations.</p></li><li><p class="docList">The
+ function should protect against assigning an object to itself; 
+otherwise, the freeing of memory described previously could erase the 
+object’s contents before they are reassigned.</p></li><li><p class="docList">The function returns a reference to the invoking object.</p></li></ul>
+<p class="docText">By returning an object, the function can emulate the way ordinary assignment for built-in types can be chained. That is, if <tt>S0</tt>, <tt>S1</tt>, and <tt>S2</tt> are <tt>StringBad</tt> objects, you can write the following:</p>
+<div class="docText"><pre>S0 = S1 = S2;</pre></div><br/>
+<p class="docText">In function notation, this becomes the following:</p>
+<div class="docText"><pre>S0.operator=(S1.operator=(S2));</pre></div><br/>
+<p class="docText">Thus, the return value of <tt>S1.operator=(S2)</tt> becomes the argument of the <tt>S0.operator=()</tt> function. Because the return value is a reference to a <tt>String</tt> object, it is the correct argument type.</p>
+<p class="docText">Here’s how you could write an assignment operator for the <tt>StringBad</tt> class:</p>
+<div class="docText"><pre>StringBad &amp; StringBad::operator=(const StringBad &amp; st)
+{
+    if (this == &amp;st)           // object assigned to itself
+        return *this;          // all done
+    delete [] str;             // free old string
+    len = st.len;
+    str = new char [len + 1];  // get space for new string
+    std::strcpy(str, st.str);  // copy the string
+    return *this;              // return reference to invoking object
+}</pre></div><br/>
+<p class="docText">First, the code checks for self-assignment. It does so by seeing if the address of the right-hand side of the assignment (<tt>&amp;s</tt>) is the same as the address of the receiving object (<tt>this</tt>). If so, the program returns <tt>*this</tt> and terminates. You may recall from Chapter 10 that the assignment operator is one of the operators that can be overloaded only by a class member function.</p>
+<p class="docText">Otherwise, the function proceeds to free the memory that <tt>str</tt> pointed to. The reason for this is that shortly thereafter <tt>str</tt> will be assigned the address of a new string. If you don’t first apply the <tt>delete</tt>
+ operator, the previous string will remain in memory. Because the 
+program no longer has a pointer to the old string, that memory will be 
+wasted.</p>
+<p class="docText">Next, the program proceeds like a
+ copy constructor, allocating enough space for the new string and then 
+copying the string from the right-hand object to the new location.</p>
+<p class="docText">When it is finished, the program returns <tt>*this</tt> and terminates.</p>
+<p class="docText">Assignment does not create a new object, so you don’t have to adjust the value of the static data member <tt>num_strings</tt>.</p>
+<p class="docText">Adding the copy constructor and the assignment operator described previously to the <tt>StringBad</tt> class clears up all the problems. Here, for example, are the last few lines of output after these changes have been made:</p>
+<div class="docText"><pre>End of main()
+"Celery Stalks at Midnight" object deleted, 4 left
+"Spinach Leaves Bowl for Dollars" object deleted, 3 left
+"Spinach Leaves Bowl for Dollars" object deleted, 2 left
+"Lettuce Prey" object deleted, 1 left
+"Celery Stalks at Midnight" object deleted, 0 left</pre></div><br/>
+<p class="docText">The object counting is correct now, and none of the strings have been mangled.</p>
+</div>
+</body>
+</html>

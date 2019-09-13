@@ -1,0 +1,805 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 33. Threads and States</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 33. Threads and States"><div class="titlepage"><div><h1><span class="partLabel">33</span> Threads and States</h1></div></div><p id="N171F8" style="text-indent: 0">
+Lua does not support true <a class="indexterm" id="N171FA"/>multithreading,
+that is, preemptive threads sharing memory.
+There are two reasons for this lack of support.
+The first reason is that <a class="indexterm" id="N171FE"/>ISO C does not offer it,
+and so there is no portable way to implement this mechanism in Lua.
+The second and stronger reason is that we do not think
+multithreading is a good idea for Lua.
+</p><p id="N17202" style="text-indent: 0">
+Multithreading was developed for low-level programming.
+Synchronization mechanisms like <a class="indexterm" id="N17204"/>semaphores and <a class="indexterm" id="N17208"/>monitors
+were proposed in the context of operating systems
+(and seasoned programmers),
+not application programs.
+It is very hard to find and correct bugs related to multithreading,
+and several of these bugs can lead to security breaches.
+Moreover, multithreading can lead to performance penalties
+related to the need of synchronization in some critical
+parts of a program, such as the memory allocator.
+</p><p id="N1720C" style="text-indent: 0">
+The problems with multithreading arise from the combination
+of preemption with shared memory,
+so we can avoid them either using non-preemptive threads or
+not sharing memory.
+Lua offers support for both.
+Lua <a class="indexterm" id="N1720E"/>threads (also known as <a class="indexterm" id="N17212"/>coroutines) are collaborative,
+and therefore avoid the problems created by
+unpredictable thread switching.
+<a class="indexterm" id="N17216"/>Lua states share no memory,
+and therefore form a good base for <a class="indexterm" id="N1721A"/>parallelism in Lua.
+We will cover both options in this chapter.
+</p><div class="sect1" title="Multiple Threads"><div class="titlepage"><div><div><h2 class="title"><a id="L306"/>Multiple Threads</h2></div></div></div><p id="N17222" style="text-indent: 0">
+A <a class="indexterm" id="N17224"/><em class="firstterm">thread</em> is the essence of a coroutine in Lua.
+We can think of a coroutine as a thread plus a nice interface,
+or we can think of a thread as a coroutine with a lower-level API.
+</p><p id="N1722B" style="text-indent: 0">
+From the C API perspective,
+you may find it useful to think of a thread as a
+<a class="indexterm" id="N1722D"/>stack—which is what a thread actually is,
+from an implementation point of view.
+Each stack keeps information about the
+pending calls of a thread,
+plus the parameters and local variables of each call.
+In other words, a stack has all the information
+that a thread needs to continue running.
+So, multiple threads mean multiple independent stacks.
+</p><p id="N17231" style="text-indent: 0">
+Most functions in Lua’s C API operate on a specific stack.
+How does Lua know which stack to use?
+When calling <a class="indexterm" id="N17233"/><code class="function">lua_pushnumber</code>,
+how do we say where to push the number?
+The secret is that the type <a class="indexterm" id="N1723B"/><code class="function">lua_State</code>,
+the first argument to these functions,
+represents not only a <a class="indexterm" id="N17243"/>Lua state,
+but also a thread within that state.
+(Many people argue that this type should be
+called <code class="literal">lua_Thread</code>.
+Maybe they are right.)
+</p><p id="N1724A" style="text-indent: 0">
+Whenever we create a <a class="indexterm" id="N1724C"/>Lua state,
+Lua automatically creates a main thread within this state
+and returns a <a class="indexterm" id="N17250"/><code class="function">lua_State</code> representing this thread.
+This <a class="indexterm" id="N17258"/>main thread is never collected.
+It is released together with the state,
+when we close the state with <a class="indexterm" id="N1725C"/><code class="function">lua_close</code>.
+Programs that do not bother with threads
+run everything in this main thread.
+</p><p id="N17264" style="text-indent: 0">
+We can create other threads in a state
+calling <a class="indexterm" id="N17266"></a><code class="function">lua_newthread</code>:
+</p><pre class="programlisting" id="N1726F">      lua_State *lua_newthread (lua_State *L);
+</pre><p style="text-indent: 0">
+This function pushes the new thread on the stack,
+as a value of type <code class="literal">"thread"</code>,
+and returns a <a class="indexterm" id="N17275"></a><code class="function">lua_State</code> pointer
+representing this new thread.
+For instance,
+consider the following statement:
+</p><pre class="programlisting" id="N1727D">      L1 = lua_newthread(L);
+</pre><p style="text-indent: 0">
+After running it,
+we will have two threads,
+<code class="literal">L1</code> and <code class="literal">L</code>,
+both referring internally to the same <a class="indexterm" id="N17286"></a>Lua state.
+Each thread has its own stack.
+The new thread <code class="literal">L1</code> starts with an empty stack;
+the old thread <code class="literal">L</code>
+has a reference to the new thread on top of its stack:
+</p><pre class="programlisting" id="N17290">      printf("%d\n", lua_gettop(L1));          --&gt; 0
+      printf("%s\n", luaL_typename(L, -1));    --&gt; thread
+</pre><p style="text-indent: 0">
+</p><p id="N17293" style="text-indent: 0">
+Except for the main thread,
+threads are subject to <a class="indexterm" id="N17295"></a>garbage collection,
+like any other Lua object.
+When we create a new thread,
+the value pushed on the stack ensures that
+the thread is not collected.
+We should never use a thread that is not properly
+anchored in the state.
+(The main thread is internally anchored,
+so we do not have to worry about it.)
+Any call to the Lua API may collect a non-anchored thread,
+even a call using this thread.
+For instance, consider the following fragment:
+</p><pre class="programlisting" id="N17299">        lua_State *L1 = lua_newthread (L);
+        lua_pop(L, 1);         /* L1 now is garbage for Lua */
+        lua_pushstring(L1, "hello");
+</pre><p style="text-indent: 0">
+The call to <a class="indexterm" id="N1729C"></a><code class="function">lua_pushstring</code> may trigger the garbage collector
+and collect <code class="literal">L1</code>, crashing the application,
+despite the fact that <code class="literal">L1</code> is in use.
+To avoid this,
+always keep a reference to the threads you are using,
+for instance on the stack of an anchored thread,
+in the registry,
+or in a Lua variable.
+</p><p id="N172AA" style="text-indent: 0">
+Once we have a new thread,
+we can use it like the main thread.
+We can push to and pop elements from its stack,
+we can use it to call functions, and the like.
+For instance,
+the following code does the call <code class="literal">f(5)</code> in the new
+thread and then moves the result to the old thread:
+</p><pre class="programlisting" id="N172AF">      lua_getglobal(L1, "f");   /* assume a global function 'f' */
+      lua_pushinteger(L1, 5);
+      lua_call(L1, 1, 1);
+      lua_xmove(L1, L, 1);
+</pre><p style="text-indent: 0">
+The function <a class="indexterm" id="N172B2"></a><code class="function">lua_xmove</code>
+moves Lua values between two stacks in the same state.
+A call like <code class="literal">lua_xmove(F, T, n)</code> pops <code class="literal">n</code> elements from
+the stack <code class="literal">F</code> and pushes them on <code class="literal">T</code>.
+</p><p id="N172C7" style="text-indent: 0">
+For these uses, however,
+we do not need a new thread;
+we could just use the main thread as well.
+The main point of using multiple threads is to implement coroutines,
+so that we can suspend their executions and resume them later.
+For that, we need the function <a class="indexterm" id="N172C9"></a><code class="function">lua_resume</code>:
+</p><pre class="programlisting" id="N172D2">      int lua_resume (lua_State *L, lua_State *from, int narg);
+</pre><p style="text-indent: 0">
+</p><p id="N172D5" style="text-indent: 0">
+To start running a coroutine,
+we use <a class="indexterm" id="N172D7"/><code class="function">lua_resume</code> as we use <a class="indexterm" id="N172DF"/><code class="function">lua_pcall</code>:
+we push the function to be called (which is the coroutine body),
+push its arguments,
+and call <a class="indexterm" id="N172E7"/><code class="function">lua_resume</code>
+passing in <code class="literal">narg</code> the number of arguments.
+(The <code class="literal">from</code> parameter is the thread
+that is doing the call or <code class="literal">NULL</code>.)
+The behavior is also much like <a class="indexterm" id="N172F8"/><code class="function">lua_pcall</code>,
+with three differences.
+First,
+<a class="indexterm" id="N17300"/><code class="function">lua_resume</code> does not have a parameter
+for the number of wanted results;
+it always returns all results from the called function.
+Second, it does not have a parameter for a message handler;
+an error does not unwind the stack,
+so we can inspect the stack after the error.
+Third, if the running function yields,
+<a class="indexterm" id="N17308"/><code class="function">lua_resume</code> returns the code <a class="indexterm" id="N17310"/><code class="function">LUA_YIELD</code>
+and leaves the thread in a state that can be resumed later.
+</p><p id="N17319" style="text-indent: 0">
+When <a class="indexterm" id="N1731B"/><code class="function">lua_resume</code> returns <a class="indexterm" id="N17323"/><code class="function">LUA_YIELD</code>,
+the visible part of the thread’s stack contains only the
+values passed to <a class="indexterm" id="N1732B"/><code class="function">yield</code>.
+A call to <a class="indexterm" id="N17333"/><code class="function">lua_gettop</code> will return the number of yielded values.
+To move these values to another thread,
+we can use <a class="indexterm" id="N1733B"/><code class="function">lua_xmove</code>.
+</p><p id="N17343" style="text-indent: 0">
+To resume a suspended thread,
+we call <a class="indexterm" id="N17345"/><code class="function">lua_resume</code> again.
+In such calls, Lua assumes that all values on the stack
+are to be returned by the call to <a class="indexterm" id="N1734D"/><code class="function">yield</code>.
+For instance,
+if we do not touch the thread’s stack between a return
+from <a class="indexterm" id="N17355"/><code class="function">lua_resume</code> and the next resume,
+<a class="indexterm" id="N1735D"/><code class="function">yield</code> will return exactly the values it yielded.
+</p><p id="N17365" style="text-indent: 0">
+Typically,
+we start a coroutine with a Lua function as its body.
+This Lua function can call other functions,
+and any of these functions can occasionally yield,
+terminating the call to <a class="indexterm" id="N17367"></a><code class="function">lua_resume</code>.
+For instance, assume the following definitions:
+</p><pre class="programlisting" id="N1736F">      function foo (x)  coroutine.yield(10, x)  end
+      
+      function foo1 (x)  foo(x + 1); return 3  end
+</pre><p style="text-indent: 0">
+Now, we run this C code:
+</p><pre class="programlisting" id="N17372">      lua_State *L1 = lua_newthread(L);
+      lua_getglobal(L1, "foo1");
+      lua_pushinteger(L1, 20);
+      lua_resume(L1, L, 1);
+</pre><p style="text-indent: 0">
+The call to <a class="indexterm" id="N17375"></a><code class="function">lua_resume</code> will return <a class="indexterm" id="N1737D"></a><code class="function">LUA_YIELD</code>,
+to signal that the thread yielded.
+At this point,
+the <code class="literal">L1</code> stack has the values given to <a class="indexterm" id="N17388"></a><code class="function">yield</code>:
+</p><pre class="programlisting" id="N17390">      printf("%d\n", lua_gettop(L1));             --&gt; 2
+      printf("%lld\n", lua_tointeger(L1, 1));     --&gt; 10
+      printf("%lld\n", lua_tointeger(L1, 2));     --&gt; 21
+</pre><p style="text-indent: 0">
+When we resume the thread again,
+it continues from where it stopped (the call to <a class="indexterm" id="N17393"></a><code class="function">yield</code>).
+From there, <code class="literal">foo</code> returns to <code class="literal">foo1</code>,
+which in turn returns to <a class="indexterm" id="N173A1"></a><code class="function">lua_resume</code>:
+</p><pre class="programlisting" id="N173A9">      lua_resume(L1, L, 0);
+      printf("%d\n", lua_gettop(L1));             --&gt; 1
+      printf("%lld\n", lua_tointeger(L1, 1));     --&gt; 3
+</pre><p style="text-indent: 0">
+This second call to <a class="indexterm" id="N173AC"></a><code class="function">lua_resume</code> will return <a class="indexterm" id="N173B4"></a><code class="function">LUA_OK</code>,
+which means a normal return.
+</p><p id="N173BC" style="text-indent: 0">
+A coroutine can also call C functions,
+which can call back other Lua functions.
+We have already discussed how to use continuations
+to allow those Lua functions to yield (<a class="xref" href="ch29.html#sc_continuations" title="Continuations">the section called “Continuations”</a>).
+A C function can yield, too.
+In that case,
+it also must provide a continuation function
+to be called when the thread resumes.
+To yield, a C function must call the following function:
+</p><pre class="programlisting" id="N173C1">      int lua_yieldk (lua_State *L, int nresults, int ctx,
+                                    lua_CFunction k);
+</pre><p style="text-indent: 0">
+We should use this function always in a return statement,
+such as here:
+</p><pre class="programlisting" id="N173C4">      static inf myCfunction (lua_State *L) {
+        ...
+        return lua_yieldk(L, nresults, ctx, k);
+      }
+</pre><p style="text-indent: 0">
+This call immediately suspends the running coroutine.
+The <code class="literal">nresults</code> parameter is the number of values on the stack
+to be returned to the respective <a class="indexterm" id="N173CA"></a><code class="function">lua_resume</code>;
+<code class="literal">ctx</code> is the context information to be passed to the continuation;
+and <code class="literal">k</code> is the continuation function.
+When the coroutine resumes,
+the control goes directly to the continuation function <code class="literal">k</code>.
+After yielding, <code class="literal">myCfunction</code> cannot do anything else;
+it must delegate any further work to its continuation.
+</p><p id="N173DE" style="text-indent: 0">
+Let us see a typical example.
+Suppose we want to write a function
+that reads some data,
+yielding if the data is not available.
+We may write the function in C like this:<sup>[<a href="#ftn.N173E0" id="N173E0" class="footnote">35</a>]</sup>
+</p><pre class="programlisting" id="N173E4">      int readK (lua_State *L, int status, lua_KContext ctx) {
+        (void)status;  (void)ctx;  /* unused parameters */
+        if (something_to_read()) {
+          lua_pushstring(L, read_some_data());
+          return 1;
+        }
+        else
+          return lua_yieldk(L, 0, 0, &amp;readK);
+      }
+      
+      int prim_read (lua_State *L) {
+        return readK(L, 0, 0);
+      }
+</pre><p style="text-indent: 0">
+In this example,
+<code class="literal">prim_read</code> does not need to do any initialization,
+so it calls directly the continuation function (<code class="literal">readK</code>).
+If there is data to read,
+<code class="literal">readK</code> reads and returns this data.
+Otherwise, it yields.
+When the thread resumes, it calls the continuation function again,
+which will try again to read some data.
+</p><p id="N173F0" style="text-indent: 0">
+If a C function has nothing else to do
+after yielding,
+it can call <a class="indexterm" id="N173F2"></a><code class="function">lua_yieldk</code> without a continuation function
+or use the macro <a class="indexterm" id="N173FA"></a><code class="function">lua_yield</code>:
+</p><pre class="programlisting" id="N17402">      return lua_yield(L, nres);
+</pre><p style="text-indent: 0">
+After this call,
+when the thread resumes,
+control returns to the function that called <code class="literal">myCfunction</code>.
+</p></div><div class="sect1" title="Lua States"><div class="titlepage"><div><div><h2 class="title"><a id="L307"/>Lua States</h2></div></div></div><p id="N1740C" style="text-indent: 0">
+Each call to <a class="indexterm" id="N1740E"></a><code class="function">luaL_newstate</code>
+(or to <a class="indexterm" id="N17416"></a><code class="function">lua_newstate</code>)
+creates a new <a class="indexterm" id="N1741E"></a>Lua state.
+Different Lua states are completely independent of each other.
+They share no data at all.
+This means that no matter what happens inside a Lua state,
+it cannot corrupt another <a class="indexterm" id="N17422"></a>Lua state.
+This also means that Lua states cannot communicate directly;
+we have to use some intervening C code.
+For instance, given two states <code class="literal">L1</code> and <code class="literal">L2</code>,
+the following command pushes in <code class="literal">L2</code>
+the string on the top of the stack in <code class="literal">L1</code>:
+</p><pre class="programlisting" id="N17432">        lua_pushstring(L2, lua_tostring(L1, -1));
+</pre><p style="text-indent: 0">
+Because data must pass through C,
+<a class="indexterm" id="N17435"></a>Lua states can exchange only types that are representable in C,
+like strings and numbers.
+<a class="indexterm" id="N17439"></a>
+Other types, such as tables,
+must be serialized to be transferred.
+</p><p id="N1743D" style="text-indent: 0">
+In systems that offer <a class="indexterm" id="N1743F"/>multithreading,
+an interesting design is to create
+an independent <a class="indexterm" id="N17443"/>Lua state for each thread.
+This design results in threads similar to <a class="indexterm" id="N17447"/>POSIX processes,
+where we have <a class="indexterm" id="N1744B"/>concurrency without shared memory.
+In this section, we will develop a prototype implementation for
+multithreading following this approach.
+I will use <a class="indexterm" id="N1744F"/>POSIX threads (<a class="indexterm" id="N17453"/><code class="literal">pthreads</code>)
+for this implementation.
+It should not be difficult to port the code
+to other thread systems,
+as it uses only basic facilities.
+</p><p id="N17459" style="text-indent: 0">
+The system we are going to develop is very simple.
+Its main purpose is to show the use of multiple Lua states
+in a multithreading context.
+After we have it up and running,
+we can add several advanced features on top of it.
+We will call our library <code class="literal">lproc</code>.
+It offers only four functions:
+</p><div class="variablelist"><dl><dt><span class="term"><code class="literal">lproc.start(chunk)</code></span></dt><dd><p id="N17464" style="text-indent: 0">
+starts a new process to run the given chunk (a string).
+The library implements a Lua <em>process</em> as a
+C <em>thread</em> plus its associated <a class="indexterm" id="N1746C"/>Lua state.
+</p></dd><dt><span class="term"><code class="literal">lproc.send(channel, val1, val2, ...)</code></span></dt><dd><p id="N17475" style="text-indent: 0">
+sends all given values (which should be strings)
+to the given channel identified by its name, also a string.
+(The exercises will ask you to add support
+for sending other types.)
+</p></dd><dt><span class="term"><code class="literal">lproc.receive(channel)</code></span></dt><dd><p id="N1747C" style="text-indent: 0">
+receives the values sent to the given channel.
+</p></dd><dt><span class="term"><code class="literal">lproc.exit()</code></span></dt><dd><p id="N17483" style="text-indent: 0">
+finishes a process.
+Only the main process needs this function.
+If this process ends without calling <code class="literal">lproc.exit</code>,
+the whole program terminates,
+without waiting for the end of the other processes.
+</p></dd></dl></div><p style="text-indent: 0">
+The library identifies channels by strings and
+uses them to match senders and receivers.
+A send operation can send any number of string values,
+which are returned by the matching receive operation.
+<a class="indexterm" id="N17489"></a>
+All communication is synchronous:
+a process sending a message to a <a class="indexterm" id="N1748D"></a>channel blocks until there is
+a process receiving from this channel,
+while a process receiving from a channel blocks until there is
+a process sending to it.
+</p><p id="N17491" style="text-indent: 0">
+Like its interface,
+the implementation of <code class="literal">lproc</code> is also simple.
+It uses two circular double-linked lists,<a class="indexterm" id="N17496"/>
+one for processes waiting to send a message and
+another for processes waiting to receive a message.
+It uses a single <a class="indexterm" id="N1749A"/>mutex to control access to these lists.
+Each process has an associated <a class="indexterm" id="N1749E"/>condition variable.
+When a process wants to send a message to a channel,
+it traverses the receiving list looking for a process
+waiting for that channel.
+If it finds one, it removes the process from the waiting list,
+moves the message’s values from itself to the found process,
+and signals the other process.
+Otherwise, it inserts itself into the sending list and
+waits on its condition variable.
+To receive a message, it does a symmetrical operation.
+</p><p id="N174A2" style="text-indent: 0">
+A main element in the implementation is the structure
+that represents a process:
+</p><pre class="programlisting" id="N174A4">      #include &lt;pthread.h&gt;
+      #include "lua.h"
+      #include "lauxlib.h"
+      
+      typedef struct Proc {
+        lua_State *L;
+        pthread_t thread;
+        pthread_cond_t cond;
+        const char *channel;
+        struct Proc *previous, *next;
+      } Proc;
+</pre><p style="text-indent: 0">
+The first two fields represent the <a class="indexterm" id="N174A7"></a>Lua state used by the process
+and the C thread that runs the process.
+The third field, <code class="literal">cond</code>,
+is the condition variable that the thread uses to block itself
+when it has to wait for a matching send/receive.
+The fourth field stores the channel that the process is waiting,
+if any.
+The last two fields, <code class="literal">previous</code> and <code class="literal">next</code>,
+are used to link the process structure into a waiting list.
+</p><p id="N174B4" style="text-indent: 0">
+The following code declares
+the two waiting lists and the associated mutex:
+</p><pre class="programlisting" id="N174B6">      static Proc *waitsend = NULL;
+      static Proc *waitreceive = NULL;
+      
+      static pthread_mutex_t kernel_access = PTHREAD_MUTEX_INITIALIZER;
+</pre><p style="text-indent: 0">
+</p><p id="N174B9" style="text-indent: 0">
+Each process needs a <code class="literal">Proc</code> structure,
+and it needs to access this structure whenever its
+script calls <code class="literal">send</code> or <code class="literal">receive</code>.
+The only parameter that these functions
+receive is the process’s <a class="indexterm" id="N174C4"></a>Lua state;
+therefore, each process should store its
+<code class="literal">Proc</code> structure inside its Lua state.
+In our implementation,
+each state keeps its corresponding <code class="literal">Proc</code> structure
+as a full userdata in the registry,
+associated with the key <code class="literal">"_SELF"</code>.
+The auxiliary function <code class="literal">getself</code>
+retrieves the <code class="literal">Proc</code> structure associated with a given state:
+</p><pre class="programlisting" id="N174D7">      static Proc *getself (lua_State *L) {
+        Proc *p;
+        lua_getfield(L, LUA_REGISTRYINDEX, "_SELF");
+        p = (Proc *)lua_touserdata(L, -1);
+        lua_pop(L, 1);
+        return p;
+      }
+</pre><p style="text-indent: 0">
+</p><p id="N174DA" style="text-indent: 0">
+The next function, <code class="literal">movevalues</code>,
+moves values from a sender process to a receiver process:
+</p><pre class="programlisting" id="N174DF">      static void movevalues (lua_State *send, lua_State *rec) {
+        int n = lua_gettop(send);
+        int i;
+        luaL_checkstack(rec, n, "too many results");
+        for (i = 2; i &lt;= n; i++)  /* move values to receiver */
+          lua_pushstring(rec, lua_tostring(send, i));
+      }
+</pre><p style="text-indent: 0">
+It moves to the receiver all values
+in the sender stack but the first,
+which will be the <a class="indexterm" id="N174E2"></a>channel.
+Note that, as we are pushing an arbitrary number of elements,
+we have to check for stack space.
+</p><p id="N174E6" style="text-indent: 0">
+<a class="xref" href="ch33.html#searchmatch" title="Figure 33.1. Function to search for a process waiting for a channel">Figure 33.1, “Function to search for a process waiting
+for a channel”</a> defines the function <code class="literal">searchmatch</code>,
+which traverses a list looking for a process
+that is waiting for a given channel.
+</p><div class="figure-float"><div class="figure"><a id="searchmatch"/><p class="title" style="text-indent: 0"><strong>Figure 33.1. Function to search for a process waiting
+for a channel</strong></p><div class="figure-contents"><pre class="programlisting" id="N174F3">      static Proc *searchmatch (const char *channel, Proc **list) {
+        Proc *node;
+        /* traverse the list */
+        for (node = *list; node != NULL; node = node-&gt;next) {
+          if (strcmp(channel, node-&gt;channel) == 0) {  /* match? */
+            /* remove node from the list */
+            if (*list == node)  /* is this node the first element? */
+              *list = (node-&gt;next == node) ? NULL : node-&gt;next;
+            node-&gt;previous-&gt;next = node-&gt;next;
+            node-&gt;next-&gt;previous = node-&gt;previous;
+            return node;
+          }
+        }
+        return NULL;  /* no match found */
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+If it finds one,
+it removes the process from the list and returns it;
+otherwise, the function returns <code class="literal">NULL</code>.
+</p><p id="N174F9" style="text-indent: 0">
+The last auxiliary function, in <a class="xref" href="ch33.html#waitonlist" title="Figure 33.2. Function to add a process to a waiting list">Figure 33.2, “Function to add a process to a waiting list”</a>,
+is called when a process cannot find a match.
+</p><div class="figure-float"><div class="figure"><a id="waitonlist"/><p class="title" style="text-indent: 0"><strong>Figure 33.2. Function to add a process to a waiting list</strong></p><div class="figure-contents"><pre class="programlisting" id="N17503">      static void waitonlist (lua_State *L, const char *channel,
+                                            Proc **list) {
+        Proc *p = getself(L);
+      
+        /* link itself at the end of the list */
+        if (*list == NULL) {  /* empty list? */
+          *list = p;
+          p-&gt;previous = p-&gt;next = p;
+        }
+        else {
+          p-&gt;previous = (*list)-&gt;previous;
+          p-&gt;next = *list;
+          p-&gt;previous-&gt;next = p-&gt;next-&gt;previous = p;
+        }
+      
+        p-&gt;channel = channel;  /* waiting channel */
+      
+        do {  /* wait on its condition variable */
+          pthread_cond_wait(&amp;p-&gt;cond, &amp;kernel_access);
+        } while (p-&gt;channel);
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+In this case, the process links itself at the end of
+the appropriate waiting list
+and waits until another process matches with it and wakes it up.
+(The loop around <code class="literal">pthread_cond_wait</code> handles
+the <a class="indexterm" id="N17509"></a>spurious wakeups allowed in <a class="indexterm" id="N1750D"></a>POSIX threads.)
+When a process wakes up another,
+it sets the other process’s field <code class="literal">channel</code> to <code class="literal">NULL</code>.
+So, if <code class="literal">p-&gt;channel</code> is not <code class="literal">NULL</code>,
+it means that nobody matched process <code class="literal">p</code>,
+so it has to keep waiting.
+</p><p id="N17520" style="text-indent: 0">
+With these auxiliary functions in place,
+we can write <code class="literal">send</code> and <code class="literal">receive</code> (<a class="xref" href="ch33.html#ll_send" title="Figure 33.3. Functions to send and receive messages">Figure 33.3, “Functions to send and receive messages”</a>).
+</p><div class="figure-float"><div class="figure"><a id="ll_send"/><p class="title" style="text-indent: 0"><strong>Figure 33.3. Functions to send and receive messages</strong></p><div class="figure-contents"><pre class="programlisting" id="N17530">      static int ll_send (lua_State *L) {
+        Proc *p;
+        const char *channel = luaL_checkstring(L, 1);
+      
+        pthread_mutex_lock(&amp;kernel_access);
+      
+        p = searchmatch(channel, &amp;waitreceive);
+      
+        if (p) {  /* found a matching receiver? */
+          movevalues(L, p-&gt;L);  /* move values to receiver */
+          p-&gt;channel = NULL;  /* mark receiver as not waiting */
+          pthread_cond_signal(&amp;p-&gt;cond);  /* wake it up */
+        }
+        else
+          waitonlist(L, channel, &amp;waitsend);
+      
+        pthread_mutex_unlock(&amp;kernel_access);
+        return 0;
+      }
+      
+      static int ll_receive (lua_State *L) {
+        Proc *p;
+        const char *channel = luaL_checkstring(L, 1);
+        lua_settop(L, 1);
+      
+        pthread_mutex_lock(&amp;kernel_access);
+      
+        p = searchmatch(channel, &amp;waitsend);
+      
+        if (p) {  /* found a matching sender? */
+          movevalues(p-&gt;L, L);  /* get values from sender */
+          p-&gt;channel = NULL;  /* mark sender as not waiting */
+          pthread_cond_signal(&amp;p-&gt;cond);  /* wake it up */
+        }
+        else
+          waitonlist(L, channel, &amp;waitreceive);
+      
+        pthread_mutex_unlock(&amp;kernel_access);
+      
+        /* return all stack values except the channel */
+        return lua_gettop(L) - 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+The function <code class="literal">ll_send</code> starts getting the channel.
+Then it locks the mutex and searches for a matching receiver.
+If it finds one,
+it moves its values to this receiver,
+marks the receiver as ready,
+and wakes it up.
+Otherwise, it puts itself on wait.
+When it finishes the operation,
+it unlocks the mutex and returns with no values to Lua.
+The function <code class="literal">ll_receive</code> is similar,
+but it has to return all received values.
+</p><p id="N17539" style="text-indent: 0">
+Now let us see how to create new processes.
+A new process needs a new POSIX thread,
+and a new thread needs a body to run.
+We will define this body later;
+here is its prototype,
+dictated by <a class="indexterm" id="N1753B"></a><code class="literal">pthreads</code>:
+</p><pre class="programlisting" id="N17541">      static void *ll_thread (void *arg);
+</pre><p style="text-indent: 0">
+</p><p id="N17544" style="text-indent: 0">
+To create and run a new process,
+the system must create a new <a class="indexterm" id="N17546"/>Lua state,
+start a new thread,
+compile the given chunk,
+call the chunk,
+and finally free its resources.
+The original thread does the first three tasks,
+and the new thread does the rest.
+(To simplify error handling,
+the system only starts the new thread after
+it has successfully compiled the given chunk.)
+
+</p><p id="N1754A" style="text-indent: 0">
+The function <code class="literal">ll_start</code> creates a new process
+(<a class="xref" href="ch33.html#ll_start" title="Figure 33.4. Function to create new processes">Figure 33.4, “Function to create new processes”</a>).
+</p><div class="figure-float"><div class="figure"><a id="ll_start"/><p class="title" style="text-indent: 0"><strong>Figure 33.4. Function to create new processes</strong></p><div class="figure-contents"><pre class="programlisting" id="N17557">      static int ll_start (lua_State *L) {
+        pthread_t thread;
+        const char *chunk = luaL_checkstring(L, 1);
+        lua_State *L1 = luaL_newstate();
+      
+        if (L1 == NULL)
+          luaL_error(L, "unable to create new state");
+      
+        if (luaL_loadstring(L1, chunk) != 0)
+          luaL_error(L, "error in thread body: %s",
+                        lua_tostring(L1, -1));
+      
+        if (pthread_create(&amp;thread, NULL, ll_thread, L1) != 0)
+          luaL_error(L, "unable to create new thread");
+      
+        pthread_detach(thread);
+        return 0;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+This function creates a new Lua state <code class="literal">L1</code>
+and compiles the given chunk in this new state.
+In case of error, it signals the error to
+the original state <code class="literal">L</code>.
+Then it creates a new thread (using <code class="literal">pthread_create</code>)
+with body <code class="literal">ll_thread</code>,
+passing the new state <code class="literal">L1</code> as the argument to the body.
+The call to <code class="literal">pthread_detach</code> tells the system that we
+will not want any final answer from this thread.
+</p><p id="N1756C" style="text-indent: 0">
+The body of each new thread is the function <code class="literal">ll_thread</code>
+(<a class="xref" href="ch33.html#ll_thread" title="Figure 33.5. Body for new threads">Figure 33.5, “Body for new threads”</a>),
+which receives its corresponding <a class="indexterm" id="N17574"></a>Lua state
+(created by <code class="literal">ll_start</code>)
+with only the precompiled main chunk on the stack.
+</p><div class="figure-float"><div class="figure"><a id="ll_thread"/><p class="title" style="text-indent: 0"><strong>Figure 33.5. Body for new threads</strong></p><div class="figure-contents"><pre class="programlisting" id="N17580">      int luaopen_lproc (lua_State *L);
+      
+      static void *ll_thread (void *arg) {
+        lua_State *L = (lua_State *)arg;
+        Proc *self;  /* own control block */
+      
+        openlibs(L);  /* open standard libraries */
+        luaL_requiref(L, "lproc", luaopen_lproc, 1);
+        lua_pop(L, 1);  /* remove result from previous call */
+      
+        self = (Proc *)lua_newuserdata(L, sizeof(Proc));
+        lua_setfield(L, LUA_REGISTRYINDEX, "_SELF");
+        self-&gt;L = L;
+        self-&gt;thread = pthread_self();
+        self-&gt;channel = NULL;
+        pthread_cond_init(&amp;self-&gt;cond, NULL);
+      
+        if (lua_pcall(L, 0, 0, 0) != 0)  /* call main chunk */
+          fprintf(stderr, "thread error: %s", lua_tostring(L, -1));
+      
+        pthread_cond_destroy(&amp;getself(L)-&gt;cond);
+        lua_close(L);
+        return NULL;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+First,
+it opens the standard Lua libraries and the <code class="literal">lproc</code> library.
+Second, it creates and initializes its own control block.
+Then, it calls its main chunk.
+Finally, it destroys its condition variable
+and closes its <a class="indexterm" id="N17586"></a>Lua state.
+</p><p id="N1758A" style="text-indent: 0">
+Note the use of <a class="indexterm" id="N1758C"/><code class="function">luaL_requiref</code> to open the <code class="literal">lproc</code> library.<sup>[<a href="#ftn.N17597" id="N17597" class="footnote">36</a>]</sup>
+This function is somewhat equivalent to <a class="indexterm" id="N1759B"/><code class="function">require</code> but,
+instead of searching for a loader,
+it uses the given function
+(<code class="literal">luaopen_lproc</code>, in our case) to open the library.
+After calling the open function,
+<a class="indexterm" id="N175A4"/><code class="function">luaL_requiref</code> registers the result
+in the <a class="indexterm" id="N175AC"/><code class="function">package.loaded</code> table,
+so that future calls to require the library will not try to
+open it again.
+With true as its last parameter,
+it also registers the library in the corresponding global variable
+(<code class="literal">lproc</code>, in our case).
+</p><p id="N175B7" style="text-indent: 0">
+<a class="xref" href="ch33.html#luaopen_lproc" title="Figure 33.6. Extra functions for the lproc module">Figure 33.6, “Extra functions for the <code class="literal">lproc</code> module”</a> presents the last functions for the module.
+</p><div class="figure-float"><div class="figure"><a id="luaopen_lproc"/><p class="title" style="text-indent: 0"><strong>Figure 33.6. Extra functions for the <code class="literal">lproc</code> module</strong></p><div class="figure-contents"><pre class="programlisting" id="N175C4">      static int ll_exit (lua_State *L) {
+        pthread_exit(NULL);
+        return 0;
+      }
+      
+      static const struct luaL_Reg ll_funcs[] = {
+        {"start", ll_start},
+        {"send", ll_send},
+        {"receive", ll_receive},
+        {"exit", ll_exit},
+        {NULL, NULL}
+      };
+      
+      int luaopen_lproc (lua_State *L) {
+        luaL_newlib(L, ll_funcs);  /* open library */
+        return 1;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+Both are quite simple.
+The function <code class="literal">ll_exit</code> should be called only by the main process,
+when it finishes,
+to avoid the immediate end of the whole program.
+The function <code class="literal">luaopen_lproc</code>
+is a standard function for opening the module.
+</p><p id="N175CD" style="text-indent: 0">
+As I said earlier,
+this implementation of processes in Lua is a very simple one.
+There are endless improvements we can make.
+Here I will briefly discuss some of them.
+</p><p id="N175CF" style="text-indent: 0">
+A first obvious improvement is to change
+the linear search for a matching channel.
+A nice alternative is to use a hash table to find a channel
+and to use independent waiting lists for each channel.
+</p><p id="N175D1" style="text-indent: 0">
+Another improvement relates to the efficiency of process creation.
+The creation of new <a class="indexterm" id="N175D3"></a>Lua states is a lightweight operation.
+However,
+the opening of all <a class="indexterm" id="N175D7"></a>standard libraries is not that lightweight,
+and most processes probably will not need all standard libraries.
+We can avoid the cost of opening a library by using the
+pre-registration of libraries,
+as we discussed in <a class="xref" href="ch17.html#reqfunc" title="The Function require">the section called “The Function <code class="literal">require</code>”</a>.
+With this approach,
+instead of calling <code class="literal">luaL_requiref</code> for each standard library,
+we just put the library opening function
+into the <a class="indexterm" id="N175E1"></a><code class="function">package.preload</code> table.
+If the process calls <code class="literal">require "lib"</code>,
+then—and only then—<a class="indexterm" id="N175EC"></a><code class="function">require</code> will call the associated
+function to open the library.
+The function <code class="literal">registerlib</code>,
+in <a class="xref" href="ch33.html#cd_openlibs" title="Figure 33.7. Registering libraries to be opened on demand">Figure 33.7, “Registering libraries to be opened on demand”</a>,
+does this registration.
+</p><div class="figure-float"><div class="figure"><a id="cd_openlibs"/><p class="title" style="text-indent: 0"><strong>Figure 33.7. Registering libraries to be opened on demand</strong></p><div class="figure-contents"><pre class="programlisting" id="N175FD">      static void registerlib (lua_State *L, const char *name,
+                                             lua_CFunction f) {
+        lua_getglobal(L, "package");
+        lua_getfield(L, -1, "preload");  /* get 'package.preload' */
+        lua_pushcfunction(L, f);
+        lua_setfield(L, -2, name);  /* package.preload[name] = f */
+        lua_pop(L, 2);  /* pop 'package' and 'preload' tables */
+      }
+      
+      static void openlibs (lua_State *L) {
+        luaL_requiref(L, "_G", luaopen_base, 1);
+        luaL_requiref(L, "package", luaopen_package, 1);
+        lua_pop(L, 2);  /* remove results from previous calls */
+        registerlib(L, "coroutine", luaopen_coroutine);
+        registerlib(L, "table", luaopen_table);
+        registerlib(L, "io", luaopen_io);
+        registerlib(L, "os", luaopen_os);
+        registerlib(L, "string", luaopen_string);
+        registerlib(L, "math", luaopen_math);
+        registerlib(L, "utf8", luaopen_utf8);
+        registerlib(L, "debug", luaopen_debug);
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+</p><p id="N17600" style="text-indent: 0">
+It is always a good idea to open the basic library.
+We also need the package library;
+otherwise, we will not have <a class="indexterm" id="N17602"/><code class="function">require</code> available to
+open the other libraries.
+All other libraries can be optional.
+Therefore, instead of calling <a class="indexterm" id="N17608"/><code class="function">luaL_openlibs</code>,
+we can call our own function <code class="literal">openlibs</code>
+(shown also in <a class="xref" href="ch33.html#cd_openlibs" title="Figure 33.7. Registering libraries to be opened on demand">Figure 33.7, “Registering libraries to be opened on demand”</a>)
+when opening new states.
+Whenever a process needs one of these libraries,
+it requires the library explicitly,
+and <a class="indexterm" id="N17616"/><code class="function">require</code> will call the corresponding
+<code class="literal">luaopen_*</code> function.
+</p><p id="N1761F" style="text-indent: 0">
+Other improvements involve the communication primitives.
+For instance, it would be useful to provide limits on how
+long <code class="literal">lproc.send</code> and <code class="literal">lproc.receive</code> should wait for a match.
+In particular,
+a zero limit would make these functions non-blocking.
+With <a class="indexterm" id="N17627"/>POSIX threads,
+we could use <code class="literal">pthread_cond_timedwait</code>
+to implement this feature.
+</p></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L308"/>Exercises</h2></div></div></div><p id="N17632" style="text-indent: 0">
+Exercise 33.1:<a id="L309"/> 
+As we saw,
+if a function calls <a class="indexterm" id="N17637"/><code class="function">lua_yield</code>
+(the version with no continuation),
+control returns to the function that called it
+when the thread resumes.
+What values does the calling function receive as
+results from that call?
+
+
+</p><p id="N1763F" style="text-indent: 0">
+Exercise 33.2:<a id="ex_movevalues"/> 
+Modify the <code class="literal">lproc</code> library so that
+it can send and receive other primitive types such as
+Booleans and numbers without converting them to strings.
+(Hint: you only have to modify the function <code class="literal">movevalues</code>.)
+
+
+</p><p id="N1764A" style="text-indent: 0">
+Exercise 33.3:<a id="L310"/> 
+Modify the <code class="literal">lproc</code> library so that
+it can send and receive tables.
+(Hint: you can traverse the original table
+building a copy in the receiving state.)
+
+
+</p><p id="N17652" style="text-indent: 0">
+Exercise 33.4:<a id="L311"/> 
+Implement in the <code class="literal">lproc</code> library a non-blocking <code class="literal">send</code> operation.
+
+
+</p></div><div class="footnotes"><br/><hr/><div class="footnote"><p id="N173E1" style="text-indent: 0"><sup>[<a href="#N173E0" id="ftn.N173E0" class="para">35</a>] </sup>As I already mentioned,
+the API for continuations prior to Lua 5.3 is a little different.
+In particular, the continuation function has only one parameter,
+the Lua state.</p></div><div class="footnote"><p id="N17598" style="text-indent: 0"><sup>[<a href="#N17597" id="ftn.N17597" class="para">36</a>] </sup>This function was introduced in Lua 5.2.</p></div></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

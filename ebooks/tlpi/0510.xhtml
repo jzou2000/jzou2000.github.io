@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>5.10. I/O on Large Files</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">5.10. I/O on Large Files</h3><p class="docText">The <span class="docEmphasis">off_t</span>
+ data type used to hold a file offset is typically implemented as a 
+signed long integer. (A signed data type is required because the value 
+-1 is used for representing error conditions.) On 32-bit architectures 
+(such as x86-32) this would limit the size of files to 2<sup>31</sup>–1 bytes (i.e., 2 GB).</p><p class="docText">However,
+ the capacity of disk drives long ago exceeded this limit, and thus the 
+need arose for 32-bit UNIX implementations to handle files larger than 
+this size. Since this is a problem common to many implementations, a 
+consortium of UNIX vendors cooperated on the <span class="docEmphasis">Large File Summit</span>
+ (LFS), to enhance the SUSv2 specification with the extra functionality 
+required to access large files. We outline the LFS enhancements in this 
+section. (The complete LFS specification, finalized in 1996, can be 
+found at http://opengroup.org/platform/lfs.html.)</p><p class="docText">Linux has provided LFS support on 32-bit systems since kernel 2.4 (<span class="docEmphasis">glibc</span>
+ 2.2 or later is also required). In addition, the corresponding file 
+system must also support large files. Most native Linux file systems 
+provide this support, but some nonnative file systems do not (notable 
+examples are Microsoft’s VFAT and NFSv2, both of which impose hard 
+limits of 2 GB, regardless of whether the LFS extensions are employed).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Because
+ long integers use 64 bits on 64-bit architectures (e.g., Alpha, IA-64),
+ these architectures generally don’t suffer the limitations that the LFS
+ enhancements were designed to address. Nevertheless, the implementation
+ details of some native Linux file systems mean that the theoretical 
+maximum size of a file may be less than 2<sup>63</sup>–1,
+ even on 64-bit systems. In most cases, these limits are much higher 
+than current disk sizes, so they don’t impose a practical limitation on 
+file sizes.</p><hr noshade="noshade" size="1"/><p class="docText">We can write applications requiring LFS functionality in one of two ways:</p><ul><li><p class="docList">Use
+ an alternative API that supports large files. This API was designed by 
+the LFS as a “transitional extension” to the Single UNIX Specification. 
+Thus, this API is not required to be present on systems conforming to 
+SUSv2 or SUSv3, but many conforming systems do provide it. This approach
+ is now obsolete.</p></li><li><p class="docList">Define the <tt>_FILE_OFFSET_BITS</tt>
+ macro with the value 64 when compiling our programs. This is the 
+preferred approach, because it allows conforming applications to obtain 
+LFS functionality without making any source code changes.</p></li></ul><h4 class="docSection2Title" id="title-ID0ETEBG">5.10.1. </h4><h5 class="docSection3Title" id="title-ID0EXEBG">5.10.1.1. The transitional LFS API</h5><p class="docText">To use the transitional LFS API, we must define the <tt>_LARGEFILE64_SOURCE</tt>
+ feature test macro when compiling our program, either on the command 
+line, or within the source file before including any header files. This 
+API provides functions capable of handling 64-bit file sizes and 
+offsets. These functions have the same names as their 32-bit 
+counterparts, but have the suffix <span class="docEmphasis">64</span> appended to the function name. Among these functions are <span class="docEmphasis">fopen64()</span>, <span class="docEmphasis">open64()</span>, <span class="docEmphasis">lseek64()</span>, <span class="docEmphasis">truncate64()</span>, <span class="docEmphasis">stat64()</span>, <span class="docEmphasis">mmap64()</span>, and <span class="docEmphasis">setrlimit64()</span>. (We’ve already described some of the 32-bit counterparts of these functions; others are described in later chapters.)</p><p class="docText">In
+ order to access a large file, we simply use the 64-bit version of the 
+function. For example, to open a large file, we could write the 
+following:</p><pre>fd = open64(name, O_CREAT | O_RDWR, mode);
+if (fd == -1)
+    errExit("open");</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Calling <span class="docEmphasis">open64()</span> is equivalent to specifying the <tt>O_LARGEFILE</tt> flag when calling <span class="docEmphasis">open()</span>. Attempts to open a file larger than 2 GB by calling <span class="docEmphasis">open()</span> without this flag return an error.</p><hr noshade="noshade" size="1"/><p class="docText">In addition to the aforementioned functions, the transitional LFS API adds some new data types, including:</p><ul><li><p class="docList"><span class="docEmphasis">struct stat64</span>: an analog of the <span class="docEmphasis">stat</span> structure (Section 15.1) allowing for large file sizes.</p></li><li><p class="docList"><span class="docEmphasis">off64_t</span>: a 64-bit type for representing file offsets.</p></li></ul><p class="docText">The <span class="docEmphasis">off64_t</span> data type is used with (among others) the <span class="docEmphasis">lseek64()</span> function, as shown in Example 5-3.
+ This program takes two command-line arguments: the name of a file to be
+ opened and an integer value specifying a file offset. The program opens
+ the specified file, seeks to the given file offset, and then writes a 
+string. The following shell session demonstrates the use of the program 
+to seek to a very large offset in the file (greater than 10 GB) and then
+ write some bytes:</p><pre>$ <b>./large_file x 10111222333 </b>
+$ <b>ls -l x </b>                                   <i> Check size of resulting file</i>
+-rw-------    1 mtk      users    10111222337 Mar  4 13:34 x</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EMJBG">Example 5-3. Accessing large files</h5><p></p><div class="box"><pre class="preFixedHeight"><b>fileio/large_file.c</b>
+#define _LARGEFILE64_SOURCE
+#include &lt;sys/stat.h&gt;
+#include &lt;fcntl.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int fd;
+    off64_t off;
+
+    if (argc != 3 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s pathname offset\n", argv[0]);
+
+    fd = open64(argv[1], O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    if (fd == -1)
+        errExit("open64");
+
+    off = atoll(argv[2]);
+    if (lseek64(fd, off, SEEK_SET) == -1)
+        errExit("lseek64");
+
+    if (write(fd, "test", 4) == -1)
+        errExit("write");
+    exit(EXIT_SUCCESS);
+}
+      <b>fileio/large_file.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0EXJBG">5.10.1.2. The <tt>_FILE_OFFSET_BITS</tt> macro</h5><p class="docText">The recommended method of obtaining LFS functionality is to define the macro <tt>_FILE_OFFSET_BITS</tt> with the value 64 when compiling a program. One way to do this is via a command-line option to the C compiler:</p><pre>$ <b>cc -D_FILE_OFFSET_BITS=64 prog.c</b></pre><br/>
+<p class="docText">Alternatively, we can define this macro in the C source before including any header files:</p><pre>#define _FILE_OFFSET_BITS 64</pre><br/>
+<p class="docText">This automatically 
+converts all of the relevant 32-bit functions and data types into their 
+64-bit counterparts. Thus, for example, calls to <span class="docEmphasis">open()</span> are actually converted into calls to <span class="docEmphasis">open64()</span>, and the <span class="docEmphasis">off_t</span>
+ data type is defined to be 64 bits long. In other words, we can 
+recompile an existing program to handle large files without needing to 
+make any changes to the source code.</p><p class="docText">Using <tt>_FILE_OFFSET_BITS</tt>
+ is clearly simpler than using the transitional LFS API, but this 
+approach relies on applications being cleanly written (e.g., correctly 
+using <span class="docEmphasis">off_t</span> to declare variables holding file offsets, rather than using a native C integer type).</p><p class="docText">The <tt>_FILE_OFFSET_BITS</tt>
+ macro is not required by the LFS specification, which merely mentions 
+this macro as an optional method of specifying the size of the <span class="docEmphasis">off_t</span> data type. Some UNIX implementations use a different feature test macro to obtain this functionality.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">If we attempt to access a large file using 32-bit functions (i.e., from a program compiled without setting <tt>_FILE_OFFSET_BITS</tt> to 64), then we may encounter the error <tt>EOVERFLOW</tt>. For example, this error can occur if we attempt to use the 32-bit version of <span class="docEmphasis">stat()</span> (Section 15.1) to retrieve information about a file whose size exceeds 2 GB.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EPMBG">5.10.1.3. Passing <span class="docEmphasis">off_t</span> values to <span class="docEmphasis">printf()</span></h5><p class="docText">One problem that the LFS extensions don’t solve for us is how to pass <span class="docEmphasis">off_t</span> values to <span class="docEmphasis">printf()</span> calls. In Section 3.6.2, we noted that the portable method of displaying values of one of the predefined system data types (e.g., <span class="docEmphasis">pid_t</span> or <span class="docEmphasis">uid_t</span>) was to cast that value to <span class="docEmphasis">long</span>, and use the <tt>%ld</tt> <span class="docEmphasis">printf()</span> specifier. However, if we are employing the LFS extensions, then this is often not sufficient for the <span class="docEmphasis">off_t</span> data type, because it may be defined as a type larger than <span class="docEmphasis">long</span>, typically <span class="docEmphasis">long long</span>. Therefore, to display a value of type <span class="docEmphasis">off_t</span>, we cast it to <span class="docEmphasis">long long</span> and use the <tt>%lld</tt> <span class="docEmphasis">printf()</span> specifier, as in the following:</p><pre>#define _FILE_OFFSET_BITS 64
+
+off_t offset;           /* Will be 64 bits, the size of 'long long' */
+
+/* Other code assigning a value to 'offset' */
+
+printf("offset=%lld\n", (long long) offset);</pre><br/>
+<p class="docText">Similar remarks also apply for the related <span class="docEmphasis">blkcnt_t</span> data type, which is employed in the <span class="docEmphasis">stat</span> structure (described in Section 15.1).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">If we are passing function arguments of the types <span class="docEmphasis">off_t</span> or <span class="docEmphasis">stat</span>
+ between separately compiled modules, then we need to ensure that both 
+modules use the same sizes for these types (i.e., either both were 
+compiled with <tt>_FILE_OFFSET_BITS</tt> set to 64 or both were compiled without this setting).</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

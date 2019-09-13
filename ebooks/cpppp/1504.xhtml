@@ -1,0 +1,384 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Runtime Type Identification</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Runtime Type Identification</h3>
+<p class="docText"><span class="docEmphasis">Runtime type identification (RTTI)</span>
+ is one of the more recent additions to C++, and it isn’t supported by 
+many older implementations. Other implementations may have compiler 
+settings for turning RTTI on and off. The intent of RTTI is to provide a
+ standard way for a program to determine the type of object during 
+runtime. Many class libraries have already provided ways to do so for 
+their own class objects, but in the absence of built-in support in C++, 
+each vendor’s mechanism is typically incompatible with those of other 
+vendors. Creating a language standard for RTTI should allow future 
+libraries to be compatible with each other.</p>
+
+<h4 class="docSection2Title" id="title-ID0EZPFK">What Is RTTI For?</h4>
+<p class="docText">Suppose you have a hierarchy of 
+classes descended from a common base class. You can set a base-class 
+pointer to point to an object of any of the classes in this hierarchy. 
+Next, you call a function that, after processing some information, 
+selects one of these classes, creates an object of that type, and 
+returns its address, which gets assigned to a base-class pointer. How 
+can you tell what kind of object it points to?</p>
+<p class="docText">Before answering this 
+question, you need to think about why you would want to know the type. 
+Perhaps you want to invoke the correct version of a class method. If 
+that’s the case, you don’t really need to know the object type, as long 
+as that function is a virtual function possessed by all members of the 
+class hierarchy. But it could be that a derived object has an 
+uninherited method. In that case, only some objects could use the 
+method. Or maybe, for debugging purposes, you would like to keep track 
+of which kinds of objects were generated. For these last two cases, RTTI
+ provides an answer.</p>
+
+<h4 class="docSection2Title" id="title-ID0EGQFK">How Does RTTI Work?</h4>
+<p class="docText">C++ has three components supporting RTTI:</p>
+<ul><li><p class="docList">The <tt>dynamic_cast</tt> operator generates a pointer to a derived type from a pointer to a base type, if possible. Otherwise, the operator returns <tt>0</tt>, the null pointer.</p></li><li><p class="docList">The <tt>typeid</tt> operator returns a value identifying the exact type of an object.</p></li><li><p class="docList">A <tt>type_info</tt> structure holds information about a particular type.</p></li></ul>
+<p class="docText">You can use RTTI only 
+with a class hierarchy that has virtual functions. The reason for this 
+is that these are the only class hierarchies for which you should be 
+assigning the addresses of derived objects to base-class pointers.</p>
+<div class="docNote"><p class="docNoteTitle">Caution</p>
+<p class="docText">RTTI works only for classes that have virtual functions.</p>
+</div><br/>
+<p class="docText">Let’s examine the three components of RTTI.</p>
+
+<h5 class="docSection3Title" id="title-ID0EIVFK">The <tt>dynamic_cast</tt> Operator</h5>
+<p class="docText">The <tt>dynamic_cast</tt> 
+operator is intended to be the most heavily used RTTI component. It 
+doesn’t answer the question of what type of object a pointer points to. 
+Instead, it answers the question of whether you can safely assign the 
+address of an object to a pointer of a particular type. Let’s look at 
+what that means. Suppose you have the following hierarchy:</p>
+<div class="docText"><pre>class Grand { // has virtual methods};
+class Superb : public Grand { ... };
+class Magnificent : public Superb { ... };</pre></div><br/>
+<p class="docText">Next, suppose you have the following pointers:</p>
+<div class="docText"><pre>Grand * pg = new Grand;
+Grand * ps = new Superb;
+Grand * pm = new Magnificent;</pre></div><br/>
+<p class="docText">Finally, consider the following type casts:</p>
+<div class="docText"><pre>Magnificent * p1 = (Magnificent *) pm;        // #1
+Magnificent * p2 = (Magnificent *) pg;        // #2
+Superb * p3 = (Magnificent *) pm;             // #3</pre></div><br/>
+<p class="docText">Which of these type 
+casts are safe? Depending on the class declarations, all of them could 
+be safe, but the only ones guaranteed to be safe are the ones in which 
+the pointer is the same type as the object or else a direct or indirect 
+base type for the object. For example, Type Cast #1 is safe because it 
+sets a type <tt>Magnificent</tt> pointer to point to a type <tt>Magnificent</tt> object. Type Cast #2 is not safe because it assigns the address of a base-class object (<tt>Grand</tt>) to a derived-class (<tt>Magnificent</tt>)
+ pointer. Thus, the program would expect the base-class object to have 
+derived-class properties, and that, in general, is false. A <tt>Magnificent</tt> object, for example, might have data members that a <tt>Grand</tt>
+ object would lack. Type Cast #3, however, is safe because it assigns 
+the address of a derived-class object to a base-class pointer. That is, 
+public derivation promises that a <tt>Magnificent</tt> object also is a <tt>Superb</tt> object (direct base) and a <tt>Grand</tt>
+ object (indirect base). Thus, it’s safe to assign its address to 
+pointers of all three types. Virtual functions ensure that using 
+pointers of any of the three types to a <tt>Magnificent</tt> object will invoke <tt>Magnificent</tt> methods.</p>
+<p class="docText">Note that the question of
+ whether a type conversion is safe is both more general and more useful 
+than the question of what kind of object is pointed to. The usual reason
+ for wanting to know the type is so that you can know if it’s safe to 
+invoke a particular method. You don’t necessarily need an exact type 
+match to invoke a method. The type can be a base type for which a 
+virtual version of the method is defined. The next example illustrates 
+this point.</p>
+<p class="docText">First, however, let’s look at the <tt>dynamic_cast</tt> syntax. The operator is used like this, where <tt>pg</tt> points to an object:</p>
+<div class="docText"><pre>Superb * pm = dynamic_cast&lt;Superb *&gt;(pg);</pre></div><br/>
+<p class="docText">This code asks whether the pointer <tt>pg</tt> can be type cast safely (as described previously) to the type <tt>Superb *</tt>. If it can, the operator returns the address of the object. Otherwise it returns <tt>0</tt>, the null pointer.</p>
+<div class="docNote"><p class="docNoteTitle">Note</p>
+<p class="docText">In general, the following expression converts the pointer <tt>pt</tt> to a pointer of type <tt>Type *</tt> if the pointed-to object (<tt>*pt</tt>) is of type <tt>Type</tt> or else derived directly or indirectly from type <tt>Type</tt>:</p>
+<div class="docText"><pre>dynamic_cast&lt;Type *&gt;(pt)</pre></div><br/>
+<p class="docText">Otherwise, the expression evaluates to <tt>0</tt>, the null pointer.</p>
+</div><br/>
+<p class="docText">Listing 15.17 illustrates the process. First it defines three classes, coincidentally named <tt>Grand</tt>, <tt>Superb</tt>, and <tt>Magnificent</tt>. The <tt>Grand</tt> class defines a virtual <tt>Speak()</tt> function, which each of the other classes redefines. The <tt>Superb</tt> class defines a virtual <tt>Say()</tt> function, which <tt>Magnificent</tt> redefines (see Figure 15.4). The program defines a <tt>GetOne()</tt> function that randomly creates and initializes an object of one of these three types and then returns the address as a type <tt>Grand *</tt> pointer. (The <tt>GetOne()</tt> function simulates an interactive user making decisions.) A loop assigns this pointer to a type <tt>Grand *</tt> variable called <tt>pg</tt> and then uses <tt>pg</tt> to invoke the <tt>Speak()</tt> function. Because this function is virtual, the code correctly invokes the <tt>Speak()</tt> version that is appropriate to the pointed-to object:</p>
+<div class="docText"><pre>for (int i = 0; i &lt; 5; i++)
+{
+    pg = GetOne();
+    pg-&gt;Speak();
+    ...
+}</pre></div><br/>
+<p class="docText"></p><p></p><center>
+<h5 class="docFigureTitle">Figure 15.4. The <tt>Grand</tt> family of classes.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="337" id="" src="Images/getfile-46.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<p class="docText">You can’t use this exact approach (using a pointer-to-<tt>Grand</tt>) to invoke the <tt>Say()</tt> function; it’s not defined for the <tt>Grand</tt> class. However, you can use the <tt>dynamic_cast</tt> operator to see if <tt>pg</tt> can be type cast to a pointer to <tt>Superb</tt>. This will be true if the object is either type <tt>Superb</tt> or <tt>Magnificent</tt>. In either case, you can invoke the <tt>Say()</tt> function safely:</p>
+<div class="docText"><pre>if (ps = dynamic_cast&lt;Superb *&gt;(pg))
+    ps-&gt;Say();</pre></div><br/>
+<p class="docText">Recall that the value of an assignment expression is the value of its left-hand side. Thus, the value of the <tt>if</tt> condition is <tt>ps</tt>. If the type cast succeeds, <tt>ps</tt> is nonzero, or true. If the type cast fails, which it will if <tt>pg</tt> points to a <tt>Grand</tt> object, <tt>ps</tt> is zero, or false. Listing 15.17 shows the full code. (By the way, some compilers, noting that programmers usually use the <tt>==</tt> operator in an <tt>if</tt> statement condition, may issue a warning about unintended assignment.)</p>
+<h5 class="docExampleTitle" id="title-ID0E14FK">Listing 15.17. <tt>rtti1.cpp</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// rtti1.cpp -- using the RTTI dynamic_cast operator
+#include &lt;iostream&gt;
+#include &lt;cstdlib&gt;
+#include &lt;ctime&gt;
+
+using std::cout;
+
+class Grand
+{
+private:
+    int hold;
+public:
+    Grand(int h = 0) : hold(h) {}
+    virtual void Speak() const { cout &lt;&lt; "I am a grand class!\n";}
+    virtual int Value() const { return hold; }
+};
+
+class Superb : public Grand
+{
+public:
+    Superb(int h = 0) : Grand(h) {}
+    void Speak() const {cout &lt;&lt; "I am a superb class!!\n"; }
+    virtual void Say() const
+        { cout &lt;&lt; "I hold the superb value of " &lt;&lt; Value() &lt;&lt; "!\n";}
+};
+
+class Magnificent : public Superb
+{
+private:
+    char ch;
+public:
+    Magnificent(int h = 0, char c = 'A') : Superb(h), ch(c) {}
+    void Speak() const {cout &lt;&lt; "I am a magnificent class!!!\n";}
+    void Say() const {cout &lt;&lt; "I hold the character " &lt;&lt; ch &lt;&lt;
+               " and the integer "  &lt;&lt; Value() &lt;&lt; "!\n"; }
+};
+
+Grand * GetOne();
+
+int main()
+{
+    std::srand(std::time(0));
+    Grand * pg;
+    Superb * ps;
+    for (int i = 0; i &lt; 5; i++)
+    {
+        pg = GetOne();
+        pg-&gt;Speak();
+        if( ps = dynamic_cast&lt;Superb *&gt;(pg))
+            ps-&gt;Say();
+    }
+    return 0;
+}
+
+Grand * GetOne()    // generate one of three kinds of objects randomly
+{
+    Grand * p;
+    switch( std::rand() % 3)
+    {
+        case 0: p = new Grand(std::rand() % 100);
+                    break;
+        case 1: p = new Superb(std::rand() % 100);
+                    break;
+        case 2: p = new Magnificent(std::rand() % 100,
+                              'A' + std::rand() % 26);
+                    break;
+    }
+    return p;
+}
+
+					  </pre><br/>
+</div><p></p>
+<div class="docNote"><p class="docNoteTitle">Note</p>
+<p class="docText">Even if your compiler 
+supports RTTI, it might have that feature turned off by default. If the 
+feature is inactive, the program may still compile but produce runtime 
+errors. If you find this to be the case, you should check your 
+documentation or explore the menu options.</p>
+</div><br/>
+<p class="docText">The program in Listing 15.17
+ illustrates an important point. You should use virtual functions when 
+possible and RTTI only when necessary. Here is some sample output:</p>
+<div class="docText"><pre>I am a superb class!!
+I hold the superb value of 68!
+I am a magnificent class!!!
+I hold the character R and the integer 68!
+I am a magnificent class!!!
+I hold the character D and the integer 12!
+I am a magnificent class!!!
+I hold the character V and the integer 59!
+I am a grand class!</pre></div><br/>
+<p class="docText">As you can see, the <tt>Say()</tt> methods were invoked just for the <tt>Superb</tt> and <tt>Magnificent</tt> classes. (The output will vary from run to run because the program uses <tt>rand()</tt> to select the object type.)</p>
+<p class="docText">You can use <tt>dynamic_cast</tt>
+ with references, too. The usage is slightly different; there is no 
+reference value corresponding to the null-pointer type, so there’s no 
+special reference value that can be used to indicate failure. Instead, 
+when goaded by an improper request, <tt>dynamic_cast</tt> throws a type <tt>bad_cast</tt> exception, which is derived from the <tt>exception</tt> class and defined in the <tt>typeinfo</tt> header file. Thus, the operator can be used as follows, where <tt>rg</tt> is a reference to a <tt>Grand</tt> object:</p>
+<div class="docText"><pre>#include &lt;typeinfo&gt; // for bad_cast
+...
+try {
+    Superb &amp; rs = dynamic_cast&lt;Superb &amp;&gt;(rg);
+    ...
+}
+catch(bad_cast &amp;){
+    ...
+};</pre></div><br/>
+
+<h5 class="docSection3Title" id="title-ID0EDAGK">The <tt>typeid</tt> Operator and <tt>type_info</tt> Class</h5>
+<p class="docText">The <tt>typeid</tt> operator lets you determine whether two objects are the same type. Somewhat like <tt>sizeof</tt>, it accepts two kinds of arguments:</p>
+<ul><li><p class="docList">The name of a class</p></li><li><p class="docList">An expression that evaluates to an object</p></li></ul>
+<p class="docText">The <tt>typeid</tt> operator returns a reference to a <tt>type_info</tt> object, where <tt>type_info</tt> is a class defined in the <tt>typeinfo</tt> header file (formerly <tt>typeinfo.h</tt>). The <tt>type_info</tt> class overloads the <tt>==</tt> and <tt>!=</tt> operators so that you can use these operators to compare types. For example, the following expression evaluates to the <tt>bool</tt> value <tt>true</tt> if <tt>pg</tt> points to a <tt>Magnificent</tt> object and to <tt>false</tt> otherwise:</p>
+<div class="docText"><pre>typeid(Magnificent) == typeid(*pg)</pre></div><br/>
+<p class="docText">If <tt>pg</tt> happens to be a null pointer, the program throws a <tt>bad_typeid</tt> exception. This exception type is derived from the <tt>exception</tt> class and is declared in the <tt>typeinfo</tt> header file.</p>
+<p class="docText">The implementation of the <tt>type_info</tt> class varies among vendors, but it includes a <tt>name()</tt>
+ member that returns an implementation-dependent string that is 
+typically (but not necessarily) the name of the class. For example, the 
+following statement displays the string defined for the class of the 
+object to which the pointer <tt>pg</tt> points:</p>
+<div class="docText"><pre>cout &lt;&lt; "Now processing type " &lt;&lt; typeid(*pg).name() &lt;&lt; ".\n";</pre></div><br/>
+<p class="docText">Listing 15.18 modifies Listing 15.17 so that it uses the <tt>typeid</tt> operator and the <tt>name()</tt> member function. Note that they are used for situations that <tt>dynamic_cast</tt> and <tt>virtual</tt> functions don’t handle. The <tt>typeid</tt> test is used to select an action that isn’t even a class method, so it can’t be invoked by a class pointer. The <tt>name()</tt> method statement shows how the method can be used in debugging. Note that the program includes the <tt>typeinfo</tt> header file.</p>
+<h5 class="docExampleTitle" id="title-ID0EYGGK">Listing 15.18. <tt>rtti2.cpp</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// rtti2.cpp  -- using dynamic_cast, typeid, and type_info
+#include &lt;iostream&gt;
+#include &lt;cstdlib&gt;
+#include &lt;ctime&gt;
+#include &lt;typeinfo&gt;
+using namespace std;
+
+class Grand
+{
+private:
+    int hold;
+public:
+    Grand(int h = 0) : hold(h) {}
+    virtual void Speak() const { cout &lt;&lt; "I am a grand class!\n";}
+    virtual int Value() const { return hold; }
+};
+
+class Superb : public Grand
+{
+public:
+    Superb(int h = 0) : Grand(h) {}
+    void Speak() const {cout &lt;&lt; "I am a superb class!!\n"; }
+    virtual void Say() const
+        { cout &lt;&lt; "I hold the superb value of " &lt;&lt; Value() &lt;&lt; "!\n";}
+};
+
+class Magnificent : public Superb
+{
+private:
+    char ch;
+public:
+    Magnificent(int h = 0, char cv = 'A') : Superb(h), ch(cv) {}
+    void Speak() const {cout &lt;&lt; "I am a magnificent class!!!\n";}
+    void Say() const {cout &lt;&lt; "I hold the character " &lt;&lt; ch &lt;&lt;
+               " and the integer "  &lt;&lt; Value() &lt;&lt; "!\n"; }
+};
+
+Grand * GetOne();
+int main()
+{
+    srand(time(0));
+    Grand * pg;
+    Superb * ps;
+    for (int i = 0; i &lt; 5; i++)
+    {
+        pg = GetOne();
+        cout &lt;&lt; "Now processing type " &lt;&lt; typeid(*pg).name() &lt;&lt; ".\n";
+        pg-&gt;Speak();
+        if( ps = dynamic_cast&lt;Superb *&gt;(pg))
+            ps-&gt;Say();
+        if (typeid(Magnificent) == typeid(*pg))
+            cout &lt;&lt; "Yes, you're really magnificent.\n";
+    }
+    return 0;
+}
+
+Grand * GetOne()
+{
+    Grand * p;
+
+    switch( rand() % 3)
+    {
+        case 0: p = new Grand(rand() % 100);
+                    break;
+        case 1: p = new Superb(rand() % 100);
+                    break;
+        case 2: p = new Magnificent(rand() % 100, 'A' + rand() % 26);
+                    break;
+    }
+    return p;
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Here’s a sample run of the program in Listing 15.18:</p>
+<div class="docText"><pre>Now processing type Magnificent.
+I am a magnificent class!!!
+I hold the character P and the integer 52!
+Yes, you're really magnificent.
+Now processing type Superb.
+I am a superb class!!
+I hold the superb value of 37!
+Now processing type Grand.
+I am a grand class!
+Now processing type Superb.
+I am a superb class!!
+I hold the superb value of 18!
+Now processing type Grand.
+I am a grand class!</pre></div><br/>
+<p class="docText">As with the preceding example, the exact output will vary from run to run because the program uses <tt>rand()</tt> to select types. Also some compilers may provide different output when <tt>name()</tt> is called, for example, <tt>5Grand</tt> instead of <tt>Grand</tt>.</p>
+
+<h4 class="docSection2Title" id="title-ID0EGJGK">Misusing RTTI</h4>
+<p class="docText">RTTI has many vocal 
+critics within the C++ community. They view RTTI as unnecessary, a 
+potential source of program inefficiency, and a possible contributor to 
+bad programming practices. Without delving into the debate over RTTI, 
+let’s look at the sort of programming that you should avoid.</p>
+<p class="docText">Consider the core of Listing 15.17:</p>
+<div class="docText"><pre>Grand * pg;
+Superb * ps;
+for (int i = 0; i &lt; 5; i++)
+{
+    pg = GetOne();
+    pg-&gt;Speak();
+    if( ps = dynamic_cast&lt;Superb *&gt;(pg))
+         ps-&gt;Say();
+}</pre></div><br/>
+<p class="docText">By using <tt>typeid</tt> and ignoring <tt>dynamic_cast</tt> and virtual functions, you can rewrite this code as follows:</p>
+<div class="docText"><pre>Grand * pg;
+Superb * ps;
+Magnificent * pm;
+for (int i = 0; i &lt; 5; i++)
+{
+    pg = GetOne();
+    if (typeid(Magnificent) == typeid(*pg))
+    {
+        pm = (Magnificent *) pg;
+        pm-&gt;Speak();
+        pm-&gt;Say();
+    }
+    else if (typeid(Superb) == typeid(*pg))
+    {
+        ps = (Superb *) pg;
+        ps-&gt;Speak();
+        ps-&gt;Say();
+    }
+    else
+        pg-&gt;Speak();
+}</pre></div><br/>
+<p class="docText">Not only is this uglier 
+and longer than the original, it has the serious flaw of naming each 
+class explicitly. Suppose, for example, that you find it necessary to 
+derive an <tt>Insufferable</tt> class from the <tt>Magnificent</tt> class. And suppose the new class redefines <tt>Speak()</tt> and <tt>Say()</tt>. With the version that uses <tt>typeid</tt> to test explicitly for each type, you would have to modify the <tt>for</tt> loop code, adding a new <tt>else if</tt> section. The original version, however, requires no changes at all. The following statement works for all classes derived from <tt>Grand</tt>:</p>
+<div class="docText"><pre>pg-&gt;Speak();</pre></div><br/>
+<p class="docText">And this statement works for all classes derived from <tt>Superb</tt>:</p>
+<div class="docText"><pre>if( ps = dynamic_cast&lt;Superb *&gt;(pg))
+      ps-&gt;Say();</pre></div><br/>
+<div class="docNote"><p class="docNoteTitle">Tip</p>
+<p class="docText">If you find yourself using <tt>typeid</tt> in an extended series of <tt>if else</tt> statements, you should check whether you should instead use virtual functions and <tt>dynamic_cast</tt>.</p>
+</div><br/>
+</div>
+</body>
+</html>

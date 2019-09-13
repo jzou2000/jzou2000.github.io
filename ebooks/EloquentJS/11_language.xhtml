@@ -1,0 +1,541 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+  <head>
+    <title>Project: A Programming Language</title>
+    <link rel="stylesheet" href="style.css"/>
+  </head>
+  <body>
+    <article>
+
+<h1 id="language"><span class="chap_num">Chapter 11</span>Project: A Programming Language</h1>
+<blockquote>
+<p>The evaluator, which determines the meaning of expressions in a
+programming language, is just another program.</p>
+ <footer>Hal Abelson and Gerald Sussman, <cite>Structure and Interpretation of Computer Programs</cite></footer>
+</blockquote>
+<p>Building your own
+programming language is surprisingly easy (as long as you do not
+aim too high) and very enlightening.</p>
+<p>The main thing I want to show in this chapter is that there is no
+magic involved in building your own language. I&#8217;ve often felt that
+some human inventions were so immensely clever and complicated that
+I&#8217;d never be able to understand them. But with a little reading and
+tinkering, such things often turn out to be quite mundane.</p>
+<p>We will build a programming language called Egg. It
+will be a tiny, simple language but one that is powerful enough to
+express any computation you can think of. It will also allow simple
+abstraction based on functions.</p>
+<h2 id="parsing">Parsing</h2>
+<p>The most immediately visible part of a
+programming language is its <em>syntax</em>, or notation. A <em>parser</em> is a
+program that reads a piece of text and produces a data structure that
+reflects the structure of the program contained in that text. If the
+text does not form a valid program, the parser should complain and
+point out the error.</p>
+<p>Our language will have a simple and uniform
+syntax. Everything in Egg is an expression. An expression can be a
+variable, a number, a string, or an <em>application</em>. Applications are
+used for function calls but also for constructs such as <code>if</code> or <code>while</code>.</p>
+<p>To
+keep the parser simple, strings in Egg do not support anything like
+backslash escapes. A string is simply a sequence of characters that
+are not double quotes, wrapped in double quotes. A number is a
+sequence of digits. Variable names can consist of any character that
+is not whitespace and does not have a special meaning in the
+syntax.</p>
+<p>Applications are written the way they are in
+JavaScript, by putting parentheses after an expression and having
+any number of arguments between those parentheses, separated by
+commas.</p>
+<pre>do(define(x, 10),
+   if(&gt;(x, 5),
+      print("large"),
+      print("small")))</pre>
+<p>The uniformity of the Egg language means that
+things that are operators in JavaScript (such as <code>&gt;</code>) are normal
+variables in this language, applied just like other functions. And
+since the syntax has no concept of a block, we need a <code>do</code>
+construct to represent doing multiple things in sequence.</p>
+<p>The data structure that the parser will
+use to describe a program will consist of expression objects, each
+of which has a <code>type</code> property indicating the kind of expression it is
+and other properties to describe its content.</p>
+<p>Expressions of type <code>"value"</code> represent literal strings
+or numbers. Their <code>value</code> property contains the string or number value
+that they represent. Expressions of type <code>"word"</code> are used for
+identifiers (names). Such objects have a <code>name</code> property that holds
+the identifier&#8217;s name as a string. Finally, <code>"apply"</code> expressions
+represent applications. They have an <code>operator</code> property that refers
+to the expression that is being applied, and they have an <code>args</code> property that
+refers to an array of argument expressions.</p>
+<p>The <code>&gt;(x, 5)</code> part of the previous program would be represented like this:</p>
+<pre>{
+  <span class="cm-property">type</span>: <span class="cm-string">"apply"</span>,
+  <span class="cm-property">operator</span>: {<span class="cm-property">type</span>: <span class="cm-string">"word"</span>, <span class="cm-property">name</span>: <span class="cm-string">">"</span>},
+  <span class="cm-property">args</span>: [
+    {<span class="cm-property">type</span>: <span class="cm-string">"word"</span>, <span class="cm-property">name</span>: <span class="cm-string">"x"</span>},
+    {<span class="cm-property">type</span>: <span class="cm-string">"value"</span>, <span class="cm-property">value</span>: <span class="cm-number">5</span>}
+  ]
+}</pre>
+<p>Such a data structure is called a <em>syntax tree</em>. If you
+imagine the objects as dots and the links between them as lines
+between those dots, it has a treelike shape. The fact that
+expressions contain other expressions, which in turn might contain
+more expressions, is similar to the way branches split and split again.</p>
+<div class="image">
+  <img src="img/syntax_tree.svg" alt="The structure of a syntax tree"/>
+</div>
+<p>Contrast this to the parser we wrote for the
+configuration file format in <a href="09_regexp.xhtml#ini">Chapter 9</a>, which
+had a simple structure: it split the input into lines and
+handled those lines one at a time. There were only a few simple forms
+that a line was allowed to have.</p>
+<p>Here we must find a
+different approach. Expressions are not separated into lines, and they
+have a recursive structure. Application expressions <em>contain</em> other
+expressions.</p>
+<p>Fortunately, this problem can be solved elegantly by
+writing a parser function that is recursive in a way that reflects the
+recursive nature of the language.</p>
+<p>We define a function
+<code>parseExpression</code>, which takes a string as input and returns an
+object containing the data structure for the expression at the start
+of the string, along with the part of the string left after parsing
+this expression. When parsing subexpressions (the argument to an
+application, for example), this function can be called again, yielding
+the argument expression as well as the text that remains. This text
+may in turn contain more arguments or may be the closing parenthesis
+that ends the list of arguments.</p>
+<p>This is the first part of the parser:</p>
+<pre><span class="cm-keyword">function</span> <span class="cm-variable">parseExpression</span>(<span class="cm-def">program</span>) {
+  <span class="cm-variable-2">program</span> <span class="cm-operator">=</span> <span class="cm-variable">skipSpace</span>(<span class="cm-variable-2">program</span>);
+  <span class="cm-keyword">var</span> <span class="cm-def">match</span>, <span class="cm-def">expr</span>;
+  <span class="cm-keyword">if</span> (<span class="cm-variable-2">match</span> <span class="cm-operator">=</span> <span class="cm-string-2">/^"([^"]*)"/</span>.<span class="cm-property">exec</span>(<span class="cm-variable-2">program</span>))
+    <span class="cm-variable-2">expr</span> <span class="cm-operator">=</span> {<span class="cm-property">type</span>: <span class="cm-string">"value"</span>, <span class="cm-property">value</span>: <span class="cm-variable-2">match</span>[<span class="cm-number">1</span>]};
+  <span class="cm-keyword">else</span> <span class="cm-keyword">if</span> (<span class="cm-variable-2">match</span> <span class="cm-operator">=</span> <span class="cm-string-2">/^\d+\b/</span>.<span class="cm-property">exec</span>(<span class="cm-variable-2">program</span>))
+    <span class="cm-variable-2">expr</span> <span class="cm-operator">=</span> {<span class="cm-property">type</span>: <span class="cm-string">"value"</span>, <span class="cm-property">value</span>: <span class="cm-variable">Number</span>(<span class="cm-variable-2">match</span>[<span class="cm-number">0</span>])};
+  <span class="cm-keyword">else</span> <span class="cm-keyword">if</span> (<span class="cm-variable-2">match</span> <span class="cm-operator">=</span> <span class="cm-string-2">/^[^\s(),"]+/</span>.<span class="cm-property">exec</span>(<span class="cm-variable-2">program</span>))
+    <span class="cm-variable-2">expr</span> <span class="cm-operator">=</span> {<span class="cm-property">type</span>: <span class="cm-string">"word"</span>, <span class="cm-property">name</span>: <span class="cm-variable-2">match</span>[<span class="cm-number">0</span>]};
+  <span class="cm-keyword">else</span>
+    <span class="cm-keyword">throw</span> <span class="cm-keyword">new</span> <span class="cm-variable">SyntaxError</span>(<span class="cm-string">"Unexpected syntax: "</span> <span class="cm-operator">+</span> <span class="cm-variable-2">program</span>);
+
+  <span class="cm-keyword">return</span> <span class="cm-variable">parseApply</span>(<span class="cm-variable-2">expr</span>, <span class="cm-variable-2">program</span>.<span class="cm-property">slice</span>(<span class="cm-variable-2">match</span>[<span class="cm-number">0</span>].<span class="cm-property">length</span>));
+}
+
+<span class="cm-keyword">function</span> <span class="cm-variable">skipSpace</span>(<span class="cm-def">string</span>) {
+  <span class="cm-keyword">var</span> <span class="cm-def">first</span> <span class="cm-operator">=</span> <span class="cm-variable-2">string</span>.<span class="cm-property">search</span>(<span class="cm-string-2">/\S/</span>);
+  <span class="cm-keyword">if</span> (<span class="cm-variable-2">first</span> <span class="cm-operator">==</span> <span class="cm-operator">-</span><span class="cm-number">1</span>) <span class="cm-keyword">return</span> <span class="cm-string">""</span>;
+  <span class="cm-keyword">return</span> <span class="cm-variable-2">string</span>.<span class="cm-property">slice</span>(<span class="cm-variable-2">first</span>);
+}</pre>
+<p>Because Egg allows any amount of
+whitespace between its elements, we have to repeatedly cut the
+whitespace off the start of the program string. This is what the
+<code>skipSpace</code> function helps with.</p>
+<p>After skipping any
+leading space, <code>parseExpression</code> uses three regular expressions to
+spot the three simple (atomic) elements that Egg supports: strings,
+numbers, and words. The parser constructs a different kind of data
+structure depending on which one matches. If the input does not match
+one of these three forms, it is
+not a valid expression, and the parser throws an error. <code>SyntaxError</code> is a
+standard error object type, which is raised when an attempt is made to
+run an invalid JavaScript program.</p>
+<p>We can then cut off the part that we matched
+from the program string and pass that, along with the object for the
+expression, to <code>parseApply</code>, which checks whether the expression is an
+application. If so, it parses a parenthesized list of arguments.</p>
+<pre><span class="cm-keyword">function</span> <span class="cm-variable">parseApply</span>(<span class="cm-def">expr</span>, <span class="cm-def">program</span>) {
+  <span class="cm-variable-2">program</span> <span class="cm-operator">=</span> <span class="cm-variable">skipSpace</span>(<span class="cm-variable-2">program</span>);
+  <span class="cm-keyword">if</span> (<span class="cm-variable-2">program</span>[<span class="cm-number">0</span>] <span class="cm-operator">!=</span> <span class="cm-string">"("</span>)
+    <span class="cm-keyword">return</span> {<span class="cm-property">expr</span>: <span class="cm-variable-2">expr</span>, <span class="cm-property">rest</span>: <span class="cm-variable-2">program</span>};
+
+  <span class="cm-variable-2">program</span> <span class="cm-operator">=</span> <span class="cm-variable">skipSpace</span>(<span class="cm-variable-2">program</span>.<span class="cm-property">slice</span>(<span class="cm-number">1</span>));
+  <span class="cm-variable-2">expr</span> <span class="cm-operator">=</span> {<span class="cm-property">type</span>: <span class="cm-string">"apply"</span>, <span class="cm-property">operator</span>: <span class="cm-variable-2">expr</span>, <span class="cm-property">args</span>: []};
+  <span class="cm-keyword">while</span> (<span class="cm-variable-2">program</span>[<span class="cm-number">0</span>] <span class="cm-operator">!=</span> <span class="cm-string">")"</span>) {
+    <span class="cm-keyword">var</span> <span class="cm-def">arg</span> <span class="cm-operator">=</span> <span class="cm-variable">parseExpression</span>(<span class="cm-variable-2">program</span>);
+    <span class="cm-variable-2">expr</span>.<span class="cm-property">args</span>.<span class="cm-property">push</span>(<span class="cm-variable-2">arg</span>.<span class="cm-property">expr</span>);
+    <span class="cm-variable-2">program</span> <span class="cm-operator">=</span> <span class="cm-variable">skipSpace</span>(<span class="cm-variable-2">arg</span>.<span class="cm-property">rest</span>);
+    <span class="cm-keyword">if</span> (<span class="cm-variable-2">program</span>[<span class="cm-number">0</span>] <span class="cm-operator">==</span> <span class="cm-string">","</span>)
+      <span class="cm-variable-2">program</span> <span class="cm-operator">=</span> <span class="cm-variable">skipSpace</span>(<span class="cm-variable-2">program</span>.<span class="cm-property">slice</span>(<span class="cm-number">1</span>));
+    <span class="cm-keyword">else</span> <span class="cm-keyword">if</span> (<span class="cm-variable-2">program</span>[<span class="cm-number">0</span>] <span class="cm-operator">!=</span> <span class="cm-string">")"</span>)
+      <span class="cm-keyword">throw</span> <span class="cm-keyword">new</span> <span class="cm-variable">SyntaxError</span>(<span class="cm-string">"Expected ',' or ')'"</span>);
+  }
+  <span class="cm-keyword">return</span> <span class="cm-variable">parseApply</span>(<span class="cm-variable-2">expr</span>, <span class="cm-variable-2">program</span>.<span class="cm-property">slice</span>(<span class="cm-number">1</span>));
+}</pre>
+<p>If the next character in the program is not an opening
+parenthesis, this is not an application, and <code>parseApply</code> simply
+returns the expression it was given.</p>
+<p>Otherwise, it skips the opening parenthesis and
+creates the syntax tree object for this application expression. It
+then recursively calls <code>parseExpression</code> to parse each argument until a
+closing parenthesis is found. The recursion is indirect, through
+<code>parseApply</code> and <code>parseExpression</code> calling each other.</p>
+<p>Because an application expression can itself be applied (such as in
+<code>multiplier(2)(1)</code>), <code>parseApply</code> must, after it has parsed an
+application, call itself again to check whether another pair of
+parentheses follows.</p>
+<p>This is all we
+need to parse Egg. We wrap it in a convenient <code>parse</code> function that
+verifies that it has reached the end of the input string after parsing
+the expression (an Egg program is a single expression), and that
+gives us the program&#8217;s data structure.</p>
+<pre><span class="cm-keyword">function</span> <span class="cm-variable">parse</span>(<span class="cm-def">program</span>) {
+  <span class="cm-keyword">var</span> <span class="cm-def">result</span> <span class="cm-operator">=</span> <span class="cm-variable">parseExpression</span>(<span class="cm-variable-2">program</span>);
+  <span class="cm-keyword">if</span> (<span class="cm-variable">skipSpace</span>(<span class="cm-variable-2">result</span>.<span class="cm-property">rest</span>).<span class="cm-property">length</span> <span class="cm-operator">></span> <span class="cm-number">0</span>)
+    <span class="cm-keyword">throw</span> <span class="cm-keyword">new</span> <span class="cm-variable">SyntaxError</span>(<span class="cm-string">"Unexpected text after program"</span>);
+  <span class="cm-keyword">return</span> <span class="cm-variable-2">result</span>.<span class="cm-property">expr</span>;
+}
+
+<span class="cm-variable">console</span>.<span class="cm-property">log</span>(<span class="cm-variable">parse</span>(<span class="cm-string">"+(a, 10)"</span>));
+<span class="cm-comment">// → {type: "apply",</span>
+<span class="cm-comment">//    operator: {type: "word", name: "+"},</span>
+<span class="cm-comment">//    args: [{type: "word", name: "a"},</span>
+<span class="cm-comment">//           {type: "value", value: 10}]}</span></pre>
+<p>It works! It doesn&#8217;t give us very helpful
+information when it fails and doesn&#8217;t store the line and column on
+which each expression starts, which might be helpful when reporting
+errors later, but it&#8217;s good enough for our purposes.</p>
+<h2>The evaluator</h2>
+<p>What can we do with the syntax tree for a
+program? Run it, of course! And that is what the evaluator does. You
+give it a syntax tree and an environment object that associates names
+with values, and it will evaluate the expression that the tree
+represents and return the value that this produces.</p>
+<pre><span class="cm-keyword">function</span> <span class="cm-variable">evaluate</span>(<span class="cm-def">expr</span>, <span class="cm-def">env</span>) {
+  <span class="cm-keyword">switch</span>(<span class="cm-variable-2">expr</span>.<span class="cm-property">type</span>) {
+    <span class="cm-keyword">case</span> <span class="cm-string">"value"</span>:
+      <span class="cm-keyword">return</span> <span class="cm-variable-2">expr</span>.<span class="cm-property">value</span>;
+
+    <span class="cm-keyword">case</span> <span class="cm-string">"word"</span>:
+      <span class="cm-keyword">if</span> (<span class="cm-variable-2">expr</span>.<span class="cm-property">name</span> <span class="cm-keyword">in</span> <span class="cm-variable-2">env</span>)
+        <span class="cm-keyword">return</span> <span class="cm-variable-2">env</span>[<span class="cm-variable-2">expr</span>.<span class="cm-property">name</span>];
+      <span class="cm-keyword">else</span>
+        <span class="cm-keyword">throw</span> <span class="cm-keyword">new</span> <span class="cm-variable">ReferenceError</span>(<span class="cm-string">"Undefined variable: "</span> <span class="cm-operator">+</span>
+                                 <span class="cm-variable-2">expr</span>.<span class="cm-property">name</span>);
+    <span class="cm-keyword">case</span> <span class="cm-string">"apply"</span>:
+      <span class="cm-keyword">if</span> (<span class="cm-variable-2">expr</span>.<span class="cm-property">operator</span>.<span class="cm-property">type</span> <span class="cm-operator">==</span> <span class="cm-string">"word"</span> <span class="cm-operator">&amp;&amp;</span>
+          <span class="cm-variable-2">expr</span>.<span class="cm-property">operator</span>.<span class="cm-property">name</span> <span class="cm-keyword">in</span> <span class="cm-variable">specialForms</span>)
+        <span class="cm-keyword">return</span> <span class="cm-variable">specialForms</span>[<span class="cm-variable-2">expr</span>.<span class="cm-property">operator</span>.<span class="cm-property">name</span>](<span class="cm-variable-2">expr</span>.<span class="cm-property">args</span>,
+                                                <span class="cm-variable-2">env</span>);
+      <span class="cm-keyword">var</span> <span class="cm-def">op</span> <span class="cm-operator">=</span> <span class="cm-variable">evaluate</span>(<span class="cm-variable-2">expr</span>.<span class="cm-property">operator</span>, <span class="cm-variable-2">env</span>);
+      <span class="cm-keyword">if</span> (<span class="cm-keyword">typeof</span> <span class="cm-variable-2">op</span> <span class="cm-operator">!=</span> <span class="cm-string">"function"</span>)
+        <span class="cm-keyword">throw</span> <span class="cm-keyword">new</span> <span class="cm-variable">TypeError</span>(<span class="cm-string">"Applying a non-function."</span>);
+      <span class="cm-keyword">return</span> <span class="cm-variable-2">op</span>.<span class="cm-property">apply</span>(<span class="cm-atom">null</span>, <span class="cm-variable-2">expr</span>.<span class="cm-property">args</span>.<span class="cm-property">map</span>(<span class="cm-keyword">function</span>(<span class="cm-def">arg</span>) {
+        <span class="cm-keyword">return</span> <span class="cm-variable">evaluate</span>(<span class="cm-variable-2">arg</span>, <span class="cm-variable-2">env</span>);
+      }));
+  }
+}
+
+<span class="cm-keyword">var</span> <span class="cm-variable">specialForms</span> <span class="cm-operator">=</span> <span class="cm-variable">Object</span>.<span class="cm-property">create</span>(<span class="cm-atom">null</span>);</pre>
+<p>The evaluator has code for
+each of the expression types. A literal value expression simply
+produces its value. (For example, the expression <code>100</code> just evaluates
+to the number 100.) For a variable, we must check whether it is
+actually defined in the environment and, if it is, fetch the
+variable&#8217;s value.</p>
+<p>Applications are more involved. If they are
+a special form, like <code>if</code>, we do not evaluate anything and simply
+pass the argument expressions, along with the environment, to the
+function that handles this form. If it is a normal call, we evaluate
+the operator, verify that it is a function, and call it with the
+result of evaluating the arguments.</p>
+<p>We will use plain JavaScript function values to represent Egg&#8217;s
+function values. We will come back to this
+<a href="11_language.xhtml#egg_fun">later</a>, when the special form called
+<code>fun</code> is defined.</p>
+<p>The recursive structure of
+<code>evaluate</code> resembles the similar structure of the parser. Both mirror
+the structure of the language itself. It would also be possible to
+integrate the parser with the evaluator and evaluate during parsing,
+but splitting them up this way makes the program more readable.</p>
+<p>This is really all that is
+needed to interpret Egg. It is that simple. But without defining a few
+special forms and adding some useful values to the environment,
+you can&#8217;t do anything with this language yet.</p>
+<h2>Special forms</h2>
+<p>The <code>specialForms</code> object
+is used to define special syntax in Egg. It associates words with
+functions that evaluate such special forms. It is currently empty.
+Let&#8217;s add some forms.</p>
+<pre><span class="cm-variable">specialForms</span>[<span class="cm-string">"if"</span>] <span class="cm-operator">=</span> <span class="cm-keyword">function</span>(<span class="cm-def">args</span>, <span class="cm-def">env</span>) {
+  <span class="cm-keyword">if</span> (<span class="cm-variable-2">args</span>.<span class="cm-property">length</span> <span class="cm-operator">!=</span> <span class="cm-number">3</span>)
+    <span class="cm-keyword">throw</span> <span class="cm-keyword">new</span> <span class="cm-variable">SyntaxError</span>(<span class="cm-string">"Bad number of args to if"</span>);
+
+  <span class="cm-keyword">if</span> (<span class="cm-variable">evaluate</span>(<span class="cm-variable-2">args</span>[<span class="cm-number">0</span>], <span class="cm-variable-2">env</span>) <span class="cm-operator">!==</span> <span class="cm-atom">false</span>)
+    <span class="cm-keyword">return</span> <span class="cm-variable">evaluate</span>(<span class="cm-variable-2">args</span>[<span class="cm-number">1</span>], <span class="cm-variable-2">env</span>);
+  <span class="cm-keyword">else</span>
+    <span class="cm-keyword">return</span> <span class="cm-variable">evaluate</span>(<span class="cm-variable-2">args</span>[<span class="cm-number">2</span>], <span class="cm-variable-2">env</span>);
+};</pre>
+<p>Egg&#8217;s <code>if</code> construct expects exactly three
+arguments. It will evaluate the first, and if the result isn&#8217;t the
+value <code>false</code>, it will evaluate the second. Otherwise, the third gets
+evaluated. This <code>if</code> form is more similar to JavaScript&#8217;s ternary <code>?:</code>
+operator than to JavaScript&#8217;s <code>if</code>. It is an expression, not a statement,
+and it produces a value, namely, the result of the second or third
+argument.</p>
+<p>Egg differs from JavaScript in how it handles the
+condition value to <code>if</code>. It will not treat things like zero or the
+empty string as false, but only the precise value <code>false</code>.</p>
+<p>The reason we need to represent <code>if</code> as
+a special form, rather than a regular function, is that all arguments
+to functions are evaluated before the function is called, whereas
+<code>if</code> should evaluate only <em>either</em> its second or its third argument,
+depending on the value of the first.</p>
+<p>The <code>while</code> form is similar.</p>
+<pre><span class="cm-variable">specialForms</span>[<span class="cm-string">"while"</span>] <span class="cm-operator">=</span> <span class="cm-keyword">function</span>(<span class="cm-def">args</span>, <span class="cm-def">env</span>) {
+  <span class="cm-keyword">if</span> (<span class="cm-variable-2">args</span>.<span class="cm-property">length</span> <span class="cm-operator">!=</span> <span class="cm-number">2</span>)
+    <span class="cm-keyword">throw</span> <span class="cm-keyword">new</span> <span class="cm-variable">SyntaxError</span>(<span class="cm-string">"Bad number of args to while"</span>);
+
+  <span class="cm-keyword">while</span> (<span class="cm-variable">evaluate</span>(<span class="cm-variable-2">args</span>[<span class="cm-number">0</span>], <span class="cm-variable-2">env</span>) <span class="cm-operator">!==</span> <span class="cm-atom">false</span>)
+    <span class="cm-variable">evaluate</span>(<span class="cm-variable-2">args</span>[<span class="cm-number">1</span>], <span class="cm-variable-2">env</span>);
+
+  <span class="cm-comment">// Since undefined does not exist in Egg, we return false,</span>
+  <span class="cm-comment">// for lack of a meaningful result.</span>
+  <span class="cm-keyword">return</span> <span class="cm-atom">false</span>;
+};</pre>
+<p>Another basic building block is <code>do</code>, which executes all its arguments
+from top to bottom. Its value is the value produced by the last
+argument.</p>
+<pre><span class="cm-variable">specialForms</span>[<span class="cm-string">"do"</span>] <span class="cm-operator">=</span> <span class="cm-keyword">function</span>(<span class="cm-def">args</span>, <span class="cm-def">env</span>) {
+  <span class="cm-keyword">var</span> <span class="cm-def">value</span> <span class="cm-operator">=</span> <span class="cm-atom">false</span>;
+  <span class="cm-variable-2">args</span>.<span class="cm-property">forEach</span>(<span class="cm-keyword">function</span>(<span class="cm-def">arg</span>) {
+    <span class="cm-variable-2">value</span> <span class="cm-operator">=</span> <span class="cm-variable">evaluate</span>(<span class="cm-variable-2">arg</span>, <span class="cm-variable-2">env</span>);
+  });
+  <span class="cm-keyword">return</span> <span class="cm-variable-2">value</span>;
+};</pre>
+<p>To be able to create variables and give them new
+values, we also create a form called <code>define</code>. It expects a word as
+its first argument and an expression producing the value to assign to
+that word as its second argument. Since <code>define</code>, like everything, is
+an expression, it must return a value. We&#8217;ll make it return the value
+that was assigned (just like JavaScript&#8217;s <code>=</code> operator).</p>
+<pre><span class="cm-variable">specialForms</span>[<span class="cm-string">"define"</span>] <span class="cm-operator">=</span> <span class="cm-keyword">function</span>(<span class="cm-def">args</span>, <span class="cm-def">env</span>) {
+  <span class="cm-keyword">if</span> (<span class="cm-variable-2">args</span>.<span class="cm-property">length</span> <span class="cm-operator">!=</span> <span class="cm-number">2</span> <span class="cm-operator">||</span> <span class="cm-variable-2">args</span>[<span class="cm-number">0</span>].<span class="cm-property">type</span> <span class="cm-operator">!=</span> <span class="cm-string">"word"</span>)
+    <span class="cm-keyword">throw</span> <span class="cm-keyword">new</span> <span class="cm-variable">SyntaxError</span>(<span class="cm-string">"Bad use of define"</span>);
+  <span class="cm-keyword">var</span> <span class="cm-def">value</span> <span class="cm-operator">=</span> <span class="cm-variable">evaluate</span>(<span class="cm-variable-2">args</span>[<span class="cm-number">1</span>], <span class="cm-variable-2">env</span>);
+  <span class="cm-variable-2">env</span>[<span class="cm-variable-2">args</span>[<span class="cm-number">0</span>].<span class="cm-property">name</span>] <span class="cm-operator">=</span> <span class="cm-variable-2">value</span>;
+  <span class="cm-keyword">return</span> <span class="cm-variable-2">value</span>;
+};</pre>
+<h2>The environment</h2>
+<p>The environment accepted
+by <code>evaluate</code> is an object with properties whose names correspond to
+variable names and whose values correspond to the values those
+variables are bound to. Let&#8217;s define an environment object to
+represent the global scope.</p>
+<p>To be able to use the <code>if</code> construct we just defined, we must
+have access to Boolean values. Since there are only two
+Boolean values, we do not need special syntax for them. We simply bind
+two variables to the values <code>true</code> and <code>false</code> and use those.</p>
+<pre><span class="cm-keyword">var</span> <span class="cm-variable">topEnv</span> <span class="cm-operator">=</span> <span class="cm-variable">Object</span>.<span class="cm-property">create</span>(<span class="cm-atom">null</span>);
+
+<span class="cm-variable">topEnv</span>[<span class="cm-string">"true"</span>] <span class="cm-operator">=</span> <span class="cm-atom">true</span>;
+<span class="cm-variable">topEnv</span>[<span class="cm-string">"false"</span>] <span class="cm-operator">=</span> <span class="cm-atom">false</span>;</pre>
+<p>We can now evaluate a simple expression that negates a Boolean value.</p>
+<pre><span class="cm-keyword">var</span> <span class="cm-variable">prog</span> <span class="cm-operator">=</span> <span class="cm-variable">parse</span>(<span class="cm-string">"if(true, false, true)"</span>);
+<span class="cm-variable">console</span>.<span class="cm-property">log</span>(<span class="cm-variable">evaluate</span>(<span class="cm-variable">prog</span>, <span class="cm-variable">topEnv</span>));
+<span class="cm-comment">// → false</span></pre>
+<p>To supply basic
+arithmetic and comparison operators, we will also add some
+function values to the environment. In the interest of keeping the
+code short, we&#8217;ll use <code>new Function</code> to synthesize a bunch of operator
+functions in a loop, rather than defining them all individually.</p>
+<pre>[<span class="cm-string">"+"</span>, <span class="cm-string">"-"</span>, <span class="cm-string">"*"</span>, <span class="cm-string">"/"</span>, <span class="cm-string">"=="</span>, <span class="cm-string">"&lt;"</span>, <span class="cm-string">">"</span>].<span class="cm-property">forEach</span>(<span class="cm-keyword">function</span>(<span class="cm-def">op</span>) {
+  <span class="cm-variable">topEnv</span>[<span class="cm-variable-2">op</span>] <span class="cm-operator">=</span> <span class="cm-keyword">new</span> <span class="cm-variable">Function</span>(<span class="cm-string">"a, b"</span>, <span class="cm-string">"return a "</span> <span class="cm-operator">+</span> <span class="cm-variable-2">op</span> <span class="cm-operator">+</span> <span class="cm-string">" b;"</span>);
+});</pre>
+<p>A way to output values is also very useful, so we&#8217;ll wrap
+<code>console.log</code> in a function and call it <code>print</code>.</p>
+<pre><span class="cm-variable">topEnv</span>[<span class="cm-string">"print"</span>] <span class="cm-operator">=</span> <span class="cm-keyword">function</span>(<span class="cm-def">value</span>) {
+  <span class="cm-variable">console</span>.<span class="cm-property">log</span>(<span class="cm-variable-2">value</span>);
+  <span class="cm-keyword">return</span> <span class="cm-variable-2">value</span>;
+};</pre>
+<p>That gives us enough elementary tools
+to write simple programs. The following <code>run</code> function provides a
+convenient way to write and run them. It creates a fresh environment
+and parses and evaluates the strings we give it as a single program.</p>
+<pre><span class="cm-keyword">function</span> <span class="cm-variable">run</span>() {
+  <span class="cm-keyword">var</span> <span class="cm-def">env</span> <span class="cm-operator">=</span> <span class="cm-variable">Object</span>.<span class="cm-property">create</span>(<span class="cm-variable">topEnv</span>);
+  <span class="cm-keyword">var</span> <span class="cm-def">program</span> <span class="cm-operator">=</span> <span class="cm-variable">Array</span>.<span class="cm-property">prototype</span>.<span class="cm-property">slice</span>
+    .<span class="cm-property">call</span>(<span class="cm-variable-2">arguments</span>, <span class="cm-number">0</span>).<span class="cm-property">join</span>(<span class="cm-string">"\n"</span>);
+  <span class="cm-keyword">return</span> <span class="cm-variable">evaluate</span>(<span class="cm-variable">parse</span>(<span class="cm-variable-2">program</span>), <span class="cm-variable-2">env</span>);
+}</pre>
+<p>The use of
+<code>Array.prototype.slice.call</code> is a trick to turn an array-like object, such as <code>arguments</code>, into a real array so that we can call
+<code>join</code> on it. It takes all the arguments given to <code>run</code> and treats
+them as the lines of a program.</p>
+<pre><span class="cm-variable">run</span>(<span class="cm-string">"do(define(total, 0),"</span>,
+    <span class="cm-string">"   define(count, 1),"</span>,
+    <span class="cm-string">"   while(&lt;(count, 11),"</span>,
+    <span class="cm-string">"         do(define(total, +(total, count)),"</span>,
+    <span class="cm-string">"            define(count, +(count, 1)))),"</span>,
+    <span class="cm-string">"   print(total))"</span>);
+<span class="cm-comment">// → 55</span></pre>
+<p>This is the program we&#8217;ve seen
+several times before, which computes the sum of the numbers 1 to 10,
+expressed in Egg. It is clearly uglier than the equivalent JavaScript
+program but not bad for a language implemented in less than 150
+lines of code.</p>
+<h2 id="egg_fun">Functions</h2>
+<p>A programming language without
+functions is a poor programming language indeed.</p>
+<p>Fortunately, it is not hard to add a <code>fun</code> construct, which treats its
+last argument as the function&#8217;s body and treats all the arguments before that as
+the names of the function&#8217;s arguments.</p>
+<pre><span class="cm-variable">specialForms</span>[<span class="cm-string">"fun"</span>] <span class="cm-operator">=</span> <span class="cm-keyword">function</span>(<span class="cm-def">args</span>, <span class="cm-def">env</span>) {
+  <span class="cm-keyword">if</span> (<span class="cm-operator">!</span><span class="cm-variable-2">args</span>.<span class="cm-property">length</span>)
+    <span class="cm-keyword">throw</span> <span class="cm-keyword">new</span> <span class="cm-variable">SyntaxError</span>(<span class="cm-string">"Functions need a body"</span>);
+  <span class="cm-keyword">function</span> <span class="cm-def">name</span>(<span class="cm-def">expr</span>) {
+    <span class="cm-keyword">if</span> (<span class="cm-variable-2">expr</span>.<span class="cm-property">type</span> <span class="cm-operator">!=</span> <span class="cm-string">"word"</span>)
+      <span class="cm-keyword">throw</span> <span class="cm-keyword">new</span> <span class="cm-variable">SyntaxError</span>(<span class="cm-string">"Arg names must be words"</span>);
+    <span class="cm-keyword">return</span> <span class="cm-variable-2">expr</span>.<span class="cm-property">name</span>;
+  }
+  <span class="cm-keyword">var</span> <span class="cm-def">argNames</span> <span class="cm-operator">=</span> <span class="cm-variable-2">args</span>.<span class="cm-property">slice</span>(<span class="cm-number">0</span>, <span class="cm-variable-2">args</span>.<span class="cm-property">length</span> <span class="cm-operator">-</span> <span class="cm-number">1</span>).<span class="cm-property">map</span>(<span class="cm-variable-2">name</span>);
+  <span class="cm-keyword">var</span> <span class="cm-def">body</span> <span class="cm-operator">=</span> <span class="cm-variable-2">args</span>[<span class="cm-variable-2">args</span>.<span class="cm-property">length</span> <span class="cm-operator">-</span> <span class="cm-number">1</span>];
+
+  <span class="cm-keyword">return</span> <span class="cm-keyword">function</span>() {
+    <span class="cm-keyword">if</span> (<span class="cm-variable-2">arguments</span>.<span class="cm-property">length</span> <span class="cm-operator">!=</span> <span class="cm-variable-2">argNames</span>.<span class="cm-property">length</span>)
+      <span class="cm-keyword">throw</span> <span class="cm-keyword">new</span> <span class="cm-variable">TypeError</span>(<span class="cm-string">"Wrong number of arguments"</span>);
+    <span class="cm-keyword">var</span> <span class="cm-def">localEnv</span> <span class="cm-operator">=</span> <span class="cm-variable">Object</span>.<span class="cm-property">create</span>(<span class="cm-variable-2">env</span>);
+    <span class="cm-keyword">for</span> (<span class="cm-keyword">var</span> <span class="cm-def">i</span> <span class="cm-operator">=</span> <span class="cm-number">0</span>; <span class="cm-variable-2">i</span> <span class="cm-operator">&lt;</span> <span class="cm-variable-2">arguments</span>.<span class="cm-property">length</span>; <span class="cm-variable-2">i</span><span class="cm-operator">++</span>)
+      <span class="cm-variable-2">localEnv</span>[<span class="cm-variable-2">argNames</span>[<span class="cm-variable-2">i</span>]] <span class="cm-operator">=</span> <span class="cm-variable-2">arguments</span>[<span class="cm-variable-2">i</span>];
+    <span class="cm-keyword">return</span> <span class="cm-variable">evaluate</span>(<span class="cm-variable-2">body</span>, <span class="cm-variable-2">localEnv</span>);
+  };
+};</pre>
+<p>Functions
+in Egg have their own local environment, just like in JavaScript. We
+use <code>Object.create</code> to make a new object that has access to the
+variables in the outer environment (its prototype) but that can also
+contain new variables without modifying that outer scope.</p>
+<p>The function
+created by the <code>fun</code> form creates this local environment and adds the
+argument variables to it. It then evaluates the function body in this
+environment and returns the result.</p>
+<pre><span class="cm-variable">run</span>(<span class="cm-string">"do(define(plusOne, fun(a, +(a, 1))),"</span>,
+    <span class="cm-string">"   print(plusOne(10)))"</span>);
+<span class="cm-comment">// → 11</span>
+
+<span class="cm-variable">run</span>(<span class="cm-string">"do(define(pow, fun(base, exp,"</span>,
+    <span class="cm-string">"     if(==(exp, 0),"</span>,
+    <span class="cm-string">"        1,"</span>,
+    <span class="cm-string">"        *(base, pow(base, -(exp, 1)))))),"</span>,
+    <span class="cm-string">"   print(pow(2, 10)))"</span>);
+<span class="cm-comment">// → 1024</span></pre>
+<h2>Compilation</h2>
+<p>What we have built is an
+interpreter. During evaluation, it acts directly on the representation
+of the program produced by the parser.</p>
+<p><em>Compilation</em> is the process of
+adding another step between the parsing and the running of a program,
+which transforms the program into something that can be evaluated more
+efficiently by doing as much work as possible in advance. For example,
+in well-designed languages it is obvious, for each use of a
+variable, which variable is being referred to, without actually
+running the program. This can be used to avoid looking up the variable
+by name every time it is accessed and to directly fetch it from some
+predetermined memory location.</p>
+<p>Traditionally, compilation involves converting the program to
+machine code, the raw format that a computer&#8217;s processor can
+execute. But any process that converts a program to a different
+representation can be thought of as compilation.</p>
+<p>It would
+be possible to write an alternative evaluation strategy for Egg,
+one that first converts the program to a JavaScript program, uses <code>new
+Function</code> to invoke the JavaScript compiler on it, and then runs the
+result. When done right, this would make Egg run very fast while
+still being quite simple to implement.</p>
+<p>If you are interested in this topic and willing to spend some time on
+it, I encourage you to try to implement such a compiler as an
+exercise.</p>
+<h2>Cheating</h2>
+<p>When we defined <code>if</code> and <code>while</code>, you probably
+noticed that they were more or less trivial wrappers around
+JavaScript&#8217;s own <code>if</code> and <code>while</code>. Similarly, the values in Egg are
+just regular old JavaScript values.</p>
+<p>If you compare the implementation of Egg, built on top of JavaScript,
+with the amount of work and complexity required to build a programming
+language directly on the raw functionality provided by a machine, the
+difference is huge. Regardless, this example hopefully gave you an
+impression of the way programming languages work.</p>
+<p>And when it comes to getting something done, cheating is more
+effective than doing everything yourself. Though the toy language in
+this chapter doesn&#8217;t do anything that couldn&#8217;t be done better in
+JavaScript, there <em>are</em> situations where writing small languages helps
+get real work done.</p>
+<p>Such a language does not have to resemble a typical programming
+language. If JavaScript didn&#8217;t come equipped with regular expressions,
+you could write your own parser and evaluator for such a sublanguage.</p>
+<p>Or imagine you are building a giant
+robotic dinosaur and need to program its behavior. JavaScript
+might not be the most effective way to do this. You might instead opt
+for a language that looks like this:</p>
+<pre>behavior walk
+  perform when
+    destination ahead
+  actions
+    move left-foot
+    move right-foot
+
+behavior attack
+  perform when
+    Godzilla in-view
+  actions
+    fire laser-eyes
+    launch arm-rockets</pre>
+<p>This is what is usually called a <em>domain-specific language</em>, a language tailored to express a narrow domain of
+knowledge. Such a language can be more expressive than a
+general-purpose language because it is designed to express exactly the
+things that need expressing in its domain and nothing else.</p>
+<h2>Exercises</h2>
+<h3>Arrays</h3>
+<p>Add support for arrays to Egg by adding the
+following three functions to the top scope: <code>array(...)</code> to
+construct an array containing the argument values, <code>length(array)</code> to
+get an array&#8217;s length, and <code>element(array, n)</code> to fetch the n<sup>th</sup>
+element from an array.</p>
+<h3>Closure</h3>
+<p>The way we have defined <code>fun</code> allows
+functions in Egg to “close over” the surrounding environment, allowing
+the function&#8217;s body to use local values that were visible at the time
+the function was defined, just like JavaScript functions do.</p>
+<p>The following program illustrates this: function <code>f</code> returns a function
+that adds its argument to <code>f</code>'s argument, meaning that it needs access
+to the local scope inside <code>f</code> to be able to use variable <code>a</code>.</p>
+<pre><span class="cm-variable">run</span>(<span class="cm-string">"do(define(f, fun(a, fun(b, +(a, b)))),"</span>,
+    <span class="cm-string">"   print(f(4)(5)))"</span>);
+<span class="cm-comment">// → 9</span></pre>
+<p>Go back to the definition of the <code>fun</code> form and explain which
+mechanism causes this to work.</p>
+<h3>Comments</h3>
+<p>It would be nice if we could
+write comments in Egg. For example, whenever we find a hash sign
+(<code>#</code>), we could treat the rest of the line as a comment and ignore it,
+similar to <code>//</code> in JavaScript.</p>
+<p>We do not have to make any big changes to the
+parser to support this. We can simply change <code>skipSpace</code> to skip
+comments like they are whitespace so that all the points where
+<code>skipSpace</code> is called will now also skip comments. Make this change.</p>
+<h3>Fixing scope</h3>
+<p>Currently, the only way to
+assign a variable a value is <code>define</code>. This construct acts as
+a way both to define new variables and to give existing ones a new value.</p>
+<p>This ambiguity causes a problem. When you try
+to give a nonlocal variable a new value, you will end up defining a
+local one with the same name instead. (Some languages work like this
+by design, but I&#8217;ve always found it a silly way to handle scope.)</p>
+<p>Add a special form <code>set</code>, similar to
+<code>define</code>, which gives a variable a new value, updating the variable in
+an outer scope if it doesn&#8217;t already exist in the inner scope. If the
+variable is not defined at all, throw a <code>ReferenceError</code> (which is
+another standard error type).</p>
+<p>The technique of representing scopes as simple objects,
+which has made things convenient so far, will get in your way a
+little at this point. You might want to use the
+<code>Object.getPrototypeOf</code> function, which returns the prototype of an
+object. Also remember that scopes do not derive from
+<code>Object.prototype</code>, so if you want to call <code>hasOwnProperty</code> on them,
+you have to use this clumsy expression:</p>
+<pre><span class="cm-variable">Object</span>.<span class="cm-property">prototype</span>.<span class="cm-property">hasOwnProperty</span>.<span class="cm-property">call</span>(<span class="cm-variable">scope</span>, <span class="cm-variable">name</span>);</pre>
+<p>This fetches the <code>hasOwnProperty</code> method from the <code>Object</code> prototype
+and then calls it on a scope object.</p>
+    </article>
+  </body>
+</html>

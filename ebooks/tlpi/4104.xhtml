@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>41.4. Creating and Using Shared Libraries—A First Pass</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">41.4. Creating and Using Shared Libraries—A First Pass</h3><p class="docText">To
+ begin understanding how shared libraries operate, we look at the 
+minimum sequence of steps required to build and use a shared library. 
+For the moment, we’ll ignore the convention that is normally used to 
+name shared library files. This convention, described in Section 41.6,
+ allows programs to automatically load the most up-to-date version of 
+the libraries they require, and also allows multiple incompatible 
+versions (so-called <span class="docEmphasis">major versions</span>) of a library to coexist peacefully.</p><p class="docText">In
+ this chapter, we concern ourselves only with Executable and Linking 
+Format (ELF) shared libraries, since ELF is the format employed for 
+executables and shared libraries in modern versions of Linux, as well as
+ in many other UNIX implementations.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">ELF supersedes the older <span class="docEmphasis">a.out</span> and <span class="docEmphasis">COFF</span> formats.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0EEVHK">41.4.1. Creating a Shared Library</h4><p class="docText">In order to build a shared version of the static library we created earlier, we perform the following steps:</p><pre>$ <b>gcc -g -c -fPIC -Wall mod1.c mod2.c mod3.c</b>
+$ <b>gcc -g -shared -o libfoo.so mod1.o mod2.o mod3.o</b></pre><br/>
+<p class="docText">The first of these commands creates the three object modules that are to be put into the library. (We explain the <span class="docEmphasis">cc -fPIC</span> option in the next section.) The <span class="docEmphasis">cc -shared</span> command creates a shared library containing the three object modules.</p><p class="docText">By convention, shared libraries have the prefix <tt>lib</tt> and the suffix <tt>.so</tt> (for <span class="docEmphasis">shared object</span>).</p><p class="docText">In our examples, we use the <span class="docEmphasis">gcc</span> command, rather than the equivalent <span class="docEmphasis">cc</span>
+ command, to emphasize that the command-line options we are using to 
+create shared libraries are compiler-dependent. Using a different C 
+compiler on another UNIX implementation will probably require different 
+options.</p><p class="docText">Note that it is possible to compile the source files and create the shared library in a single command:</p><pre>$ <b>gcc -g -fPIC -Wall mod1.c mod2.c mod3.c -shared -o libfoo.so</b></pre><br/>
+<p class="docText">However, to clearly distinguish
+ the compilation and library building steps, we’ll write the two as 
+separate commands in the examples shown in this chapter.</p><p class="docText">Unlike
+ static libraries, it is not possible to add or remove individual object
+ modules from a previously built shared library. As with normal 
+executables, the object files within a shared library no longer maintain
+ distinct identities.</p><h4 class="docSection2Title" id="title-ID0ERWHK">41.4.2. Position-Independent Code</h4><p class="docText">The <span class="docEmphasis">cc -fPIC</span> option specifies that the compiler should generate <span class="docEmphasis">position-independent code</span>.
+ This changes the way that the compiler generates code for operations 
+such as accessing global, static, and external variables; accessing 
+string constants; and taking the addresses of functions. These changes 
+allow the code to be located at any virtual address at run time. This is
+ necessary for shared libraries, since there is no way of knowing at 
+link time where the shared library code will be located in memory. (The 
+run-time memory location of a shared library depends on various factors,
+ such as the amount of memory already taken up by the program that is 
+loading the library and which other shared libraries the program has 
+already loaded.)</p><p class="docText">On Linux/x86-32, it is possible to create a shared library using modules compiled without the <span class="docEmphasis">-fPIC</span>
+ option. However, doing so loses some of the benefits of shared 
+libraries, since pages of program text containing position-dependent 
+memory references are not shared across processes. On some 
+architectures, it is impossible to build shared libraries without the <span class="docEmphasis">-fPIC</span> option.</p><p class="docText">In order to determine whether an existing object file has been compiled with the <span class="docEmphasis">-fPIC</span> option, we can check for the presence of the name <tt>_GLOBAL_OFFSET_TABLE_</tt> in the object file’s symbol table, using either of the following commands:</p><pre>$ <b>nm mod1.o | grep _GLOBAL_OFFSET_TABLE_</b>
+$ <b>readelf -s mod1.o | grep _GLOBAL_OFFSET_TABLE_</b></pre><br/>
+<p class="docText">Conversely, if either of the
+ following equivalent commands yields any output, then the specified 
+shared library includes at least one object module that was not compiled
+ with <span class="docEmphasis">-fPIC</span>:</p><pre>$ <b>objdump --all-headers libfoo.so | grep TEXTREL</b>
+$ <b>readelf -d libfoo.so | grep TEXTREL</b></pre><br/>
+<p class="docText">The string <tt>TEXTREL</tt> indicates the presence of an object module whose text segment contains a reference that requires run-time relocation.</p><p class="docText">We say more about the <span class="docEmphasis">nm</span>, <span class="docEmphasis">readelf</span>, and <span class="docEmphasis">objdump</span> commands in Section 41.5.</p><h4 class="docSection2Title" id="title-ID0EPYHK">41.4.3. Using a Shared Library</h4><p class="docText">In order to use a shared library, two steps must occur that are not required for programs that use static libraries:</p><ul><li><p class="docList">Since
+ the executable file no longer contains copies of the object files that 
+it requires, it must have some mechanism for identifying the shared 
+library that it needs at run time. This is done by embedding the name of
+ the shared library inside the executable during the link phase. (In ELF
+ parlance, the library dependency is recorded in a <tt>DT_NEEDED</tt> tag in the executable.) The list of all of a program’s shared library dependencies is referred to as its <span class="docEmphasis">dynamic dependency list</span>.</p></li><li><p class="docList">At
+ run time, there must be some mechanism for resolving the embedded 
+library name—that is, for finding the shared library file corresponding 
+to the name specified in the executable file—and then loading the 
+library into memory, if it is not already present.</p></li></ul><p class="docText">Embedding the name of the library inside the executable happens automatically when we link our program with a shared library:</p><pre>$ <b>gcc -g -Wall -o prog prog.c libfoo.so</b></pre><br/>
+<p class="docText">If we now attempt to run our program, we receive the following error message:</p><pre>$ <b>./prog</b>
+./prog: error in loading shared libraries: libfoo.so: cannot
+open shared object file: No such file or directory</pre><br/>
+<p class="docText">This brings us to the second required step: <span class="docEmphasis">dynamic linking</span>, which is the task of resolving the embedded library name at run time. This task is performed by the <span class="docEmphasis">dynamic linker</span> (also called the <span class="docEmphasis">dynamic linking loader</span> or the <span class="docEmphasis">run-time linker</span>). The dynamic linker is itself a shared library, named <tt>/lib/ld-linux.so.2</tt>, which is employed by every ELF executable that uses shared libraries.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The pathname <tt>/lib/ld-linux.so.2</tt> is normally a symbolic link pointing to the dynamic linker executable file. This file has the name <tt>ld-</tt><span class="docEmphasis">version</span><tt>.so</tt>, where <span class="docEmphasis">version</span> is the <span class="docEmphasis">glibc</span> version installed on the system—for example, <tt>ld-2.11.so</tt>.
+ The pathname of the dynamic linker differs on some architectures. For 
+example, on IA-64, the dynamic linker symbolic link is named <tt>/lib/ld-linux-ia64.so.2</tt>.</p><hr noshade="noshade" size="1"/><p class="docText">The
+ dynamic linker examines the list of shared libraries required by a 
+program and uses a set of predefined rules in order to find the library 
+files in the file system. Some of these rules specify a set of standard 
+directories in which shared libraries normally reside. For example, many
+ shared libraries reside in <tt>/lib</tt> and <tt>/usr/lib</tt>.
+ The error message above occurs because our library resides in the 
+current working directory, which is not part of the standard list 
+searched by the dynamic linker.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Some
+ architectures (e.g., zSeries, PowerPC64, and x86-64) support execution 
+of both 32-bit and 64-bit programs. On such systems, the 32-bit 
+libraries reside in <tt>*/lib</tt> subdirectories, and the 64-bit libraries reside in <tt>*/lib64</tt> subdirectories.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0ET2HK">41.4.3.1. The <tt>LD_LIBRARY_PATH</tt> environment variable</h5><p class="docText">One
+ way of informing the dynamic linker that a shared library resides in a 
+nonstandard directory is to specify that directory as part of a 
+colon-separated list of directories in the <tt>LD_LIBRARY_PATH</tt>
+ environment variable. (Semicolons can also be used to separate the 
+directories, in which case the list must be quoted to prevent the shell 
+from interpreting the semicolons.) If <tt>LD_LIBRARY_PATH</tt>
+ is defined, then the dynamic linker searches for the shared library in 
+the directories it lists before looking in the standard library 
+directories. (Later, we’ll see that a production application should 
+never rely on <tt>LD_LIBRARY_PATH</tt>, but for 
+now, this variable provides us with a simple way of getting started with
+ shared libraries.) Thus, we can run our program with the following 
+command:</p><pre>$ <b>LD_LIBRARY_PATH=. ./prog</b>
+Called mod1-x1
+Called mod2-x2</pre><br/>
+<p class="docText">The (<span class="docEmphasis">bash</span>,
+ Korn, and Bourne) shell syntax used in the above command creates an 
+environment variable definition within the process executing <span class="docEmphasis">prog</span>. This definition tells the dynamic linker to search for shared libraries in <tt>.</tt>, the current working directory.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">An empty directory specification in the <tt>LD_LIBRARY_PATH</tt> list (e.g., the middle specification in <span class="docEmphasis">dirx::diry</span>) is equivalent to <tt>.</tt>, the current working directory (but note that setting <tt>LD_LIBRARY_PATH</tt> to an empty string does not achieve the same result). We avoid this usage (SUSv3 discourages the corresponding usage in the <tt>PATH</tt> environment variable).</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EQ4HK">41.4.3.2. Static linking and dynamic linking contrasted</h5><p class="docText">Commonly, the term <span class="docEmphasis">linking</span> is used to describe the use of the linker, <span class="docEmphasis">ld</span>, to combine one or more compiled object files into a single executable file. Sometimes, the term <span class="docEmphasis">static</span> linking is used to distinguish this step from <span class="docEmphasis">dynamic</span> linking, the run-time loading of the shared libraries used by an executable. (Static linking is sometimes also referred to as <span class="docEmphasis">link editing</span>, and a static linker such as <span class="docEmphasis">ld</span>
+ is sometimes referred to as a link editor.) Every program—including 
+those that use shared libraries—goes through a static-linking phase. At 
+run time, a program that employs shared libraries additionally undergoes
+ dynamic linking.</p><h4 class="docSection2Title" id="title-ID0E45HK">41.4.4. The Shared Library Soname</h4><p class="docText">In
+ the example presented so far, the name that was embedded in the 
+executable and sought by the dynamic linker at run time was the actual 
+name of the shared library file. This is referred to as the library’s <span class="docEmphasis">real name</span>. However, it is possible—in fact, usual—to create a shared library with a kind of alias, called a <span class="docEmphasis">soname</span> (the <tt>DT_SONAME</tt> tag in ELF parlance).</p><p class="docText">If
+ a shared library has a soname, then, during static linking, the soname 
+is embedded in the executable file instead of the real name, and 
+subsequently used by the dynamic linker when searching for the library 
+at run time. The purpose of the soname is to provide a level of 
+indirection that permits an executable to use, at run time, a version of
+ the shared library that is different from (but compatible with) the 
+library against which it was linked.</p><p class="docText">In Section 41.6,
+ we’ll look at the conventions used for the shared library real name and
+ soname. For now, we show a simplified example to demonstrate the 
+principles.</p><p class="docText">The first step in using a soname is to specify it when the shared library is created:</p><pre>$ <b>gcc -g -c -fPIC -Wall mod1.c mod2.c mod3.c</b>
+$ <b>gcc -g -shared -Wl,-soname,libbar.so -o libfoo.so mod1.o mod2.o mod3.o</b></pre><br/>
+<p class="docText">The <span class="docEmphasis">-Wl,-soname,libbar.so</span> option is an instruction to the linker to mark the shared library <tt>libfoo.so</tt> with the soname <tt>libbar.so</tt>.</p><p class="docText">If we want to determine the soname of an existing shared library, we can use either of the following commands:</p><pre>$ <b>objdump -p libfoo.so | grep SONAME</b>
+  SONAME      libbar.so
+$ <b>readelf -d libfoo.so | grep SONAME</b>
+ 0x0000000e (SONAME)      Library soname: [libbar.so]</pre><br/>
+<p class="docText">Having created a shared library with a soname, we then create the executable as usual:</p><pre>$ <b>gcc -g -Wall -o prog prog.c libfoo.so</b></pre><br/>
+<p class="docText">However, this time, the linker detects that the library <tt>libfoo.so</tt> contains the soname <tt>libbar.so</tt> and embeds the latter name inside the executable.</p><p class="docText">Now when we attempt to run the program, this is what we see:</p><pre>$ <b>LD_LIBRARY_PATH=. ./prog</b>
+prog: error in loading shared libraries: libbar.so: cannot open
+shared object file: No such file or directory</pre><br/>
+<p class="docText">The problem here is that the dynamic linker can’t find anything named <tt>libbar.so</tt>.
+ When using a soname, one further step is required: we must create a 
+symbolic link from the soname to the real name of the library. This 
+symbolic link must be created in one of the directories searched by the 
+dynamic linker. Thus, we could run our program as follows:</p><pre>$ <b>ln -s libfoo.so libbar.so </b>
+         <i> Create soname symbolic link in current directory</i>
+$ <b>LD_LIBRARY_PATH=. ./prog </b>
+Called mod1-x1
+Called mod2-x2</pre><br/>
+<p class="docText">Figure 41-1
+ shows the compilation and linking steps involved in producing a shared 
+library with an embedded soname, linking a program against that shared 
+library, and creating the soname symbolic link needed to run the 
+program.</p><p></p><center><h5 class="docFigureTitle">Figure 41-1. Creating a shared library and linking a program against it</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-68.png"/></p></center><p></p><br/><p class="docText">Figure 41-2 shows the steps that occur when the program created in Figure 41-1 is loaded into memory in preparation for execution.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">To find out which shared libraries a process is currently using, we can list the contents of the corresponding Linux-specific <tt>/proc/</tt><span class="docEmphasis">PID/</span><tt>maps</tt> file (Section 48.5).</p><hr noshade="noshade" size="1"/><p></p><center><h5 class="docFigureTitle">Figure 41-2. Execution of a program that loads a shared library</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_002-35.png"/></p></center><p></p><br/>
+</div>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>61.2. The shutdown() System Call</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">61.2. The <span class="docEmphasis">shutdown()</span> System Call</h3><p class="docText">Calling <span class="docEmphasis">close()</span>
+ on a socket closes both halves of the bidirectional communication 
+channel. Sometimes, it is useful to close one half of the connection, so
+ that data can be transmitted in just one direction through the socket. 
+The <span class="docEmphasis">shutdown()</span> system call provides this functionality.</p><pre>#include &lt;sys/socket.h&gt;
+
+int <b>shutdown</b>(int <span class="docEmphasis">sockfd</span>, int <span class="docEmphasis">how</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">shutdown()</span> system call closes one or both channels of the socket <span class="docEmphasis">sockfd</span>, depending on the value of <span class="docEmphasis">how</span>, which is specified as one of the following:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SHUT_RD</span></span></span></p></dt><dd><p class="docList">Close
+ the reading half of the connection. Subsequent reads will return 
+end-of-file (0). Data can still be written to the socket. After a <tt>SHUT_RD</tt> on a UNIX domain stream socket, the peer application receives a <tt>SIGPIPE</tt> signal and the <tt>EPIPE</tt> error if it makes further attempts to write to the peer socket. As discussed in Section 61.6.6, <tt>SHUT_RD</tt> can’t be used meaningfully for TCP sockets.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SHUT_WR</span></span></span></p></dt><dd><p class="docList">Close
+ the writing half of the connection. Once the peer application has read 
+all outstanding data, it will see end-of-file. Subsequent writes to the 
+local socket yield the <tt>SIGPIPE</tt> signal and an <tt>EPIPE</tt>
+ error. Data written by the peer can still be read from the socket. In 
+other words, this operation allows us to signal end-of-file to the peer 
+while still being able to read data that the peer sends back to us. The <tt>SHUT_WR</tt> operation is employed by programs such as <span class="docEmphasis">ssh</span> and <span class="docEmphasis">rsh</span> (refer to Section 18.5 of [Stevens, 1994]). The <tt>SHUT_WR</tt> operation is the most common use of <span class="docEmphasis">shutdown()</span>, and is sometimes referred to as a <span class="docEmphasis">socket half-close</span>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SHUT_RDWR</span></span></span></p></dt><dd><p class="docList">Close both the read and the write halves of the connection. This is the same as performing a <tt>SHUT_RD</tt> followed by a <tt>SHUT_WR</tt>.</p></dd></dl><p class="docText">Aside from the semantics of the <span class="docEmphasis">how</span> argument, <span class="docEmphasis">shutdown()</span> differs from <span class="docEmphasis">close()</span>
+ in another important respect: it closes the socket channel(s) 
+regardless of whether there are other file descriptors referring to the 
+socket. (In other words, <span class="docEmphasis">shutdown()</span> is performing an operation on the open file description, rather than the file descriptor. See Figure 5-1, in Section 5.1.1.1.) Suppose, for example, that <span class="docEmphasis">sockfd</span>
+ refers to a connected stream socket. If we make the following calls, 
+then the connection remains open, and we can still perform I/O on the 
+connection via the file descriptor <span class="docEmphasis">fd2</span>:</p><pre>fd2 = dup(sockfd);
+close(sockfd);</pre><br/>
+<p class="docText">However, if we make the 
+following sequence of calls, then both channels of the connection are 
+closed, and I/O can no longer be performed via <span class="docEmphasis">fd2</span>:</p><pre>fd2 = dup(sockfd);
+shutdown(sockfd, SHUT_RDWR);</pre><br/>
+<p class="docText">A similar scenario holds if a file descriptor for a socket is duplicated during a <span class="docEmphasis">fork()</span>. If, after the <span class="docEmphasis">fork()</span>, one process does a <tt>SHUT_RDWR</tt> on its copy of the descriptor, then the other process also can no longer perform I/O on its descriptor.</p><p class="docText">Note that <span class="docEmphasis">shutdown()</span> doesn’t close the file descriptor, even if <span class="docEmphasis">how</span> is specified as <tt>SHUT_RDWR</tt>. To close the file descriptor, we must additionally call <span class="docEmphasis">close()</span>.</p><h4 class="docSection2Title" id="title-ID0ETEHM">61.2.1. </h4><h5 class="docSection3Title" id="title-ID0EXEHM">61.2.1.1. Example program</h5><p class="docText">Example 61-2 demonstrates the use of the <span class="docEmphasis">shutdown()</span> <tt>SHUT_WR</tt> operation. This program is a TCP client for the <span class="docEmphasis">echo</span> service. (We presented a TCP server for the <span class="docEmphasis">echo</span>
+ service in Section 60.3.) To shorten the implementation, we make use of
+ functions in the Internet domain sockets library shown in Section 59.12.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In some Linux distributions, the <span class="docEmphasis">echo</span> service is not enabled by default, and therefore we must enable it before running the program in Example 61-2. Typically, this service is implemented internally by the <span class="docEmphasis">inetd(8)</span> daemon (Section 60.5), and, to enable the <span class="docEmphasis">echo</span> service, we must edit the file <tt>/etc/inetd.conf</tt> to uncomment the two lines corresponding to the UDP and TCP <span class="docEmphasis">echo</span> services (see Example 60-5, in Section 60.5.1.2), and then send a <tt>SIGHUP</tt> signal to the <span class="docEmphasis">inetd</span> daemon.</p><p class="docText">Many distributions supply the more modern <span class="docEmphasis">xinetd(8)</span> instead of <span class="docEmphasis">inetd(8)</span>. Consult the <span class="docEmphasis">xinetd</span> documentation for information about how to make the equivalent changes under <span class="docEmphasis">xinetd</span>.</p><hr noshade="noshade" size="1"/><p class="docText">As its single command-line argument, the program takes the name of the host on which the <span class="docEmphasis">echo</span> server is running. The client performs a <span class="docEmphasis">fork()</span>, yielding parent and child processes.</p><p class="docText">The client parent writes the contents of standard input to the socket, so that it can be read by the <span class="docEmphasis">echo</span> server. When the parent detects end-of-file on standard input, it uses <span class="docEmphasis">shutdown()</span> to close the writing half of its socket. This causes the <span class="docEmphasis">echo</span>
+ server to see end-of-file, at which point it closes its socket (which 
+causes the client child in turn to see end-of-file). The parent then 
+terminates.</p><p class="docText">The client child reads the <span class="docEmphasis">echo</span>
+ server’s response from the socket and echoes the response on standard 
+output. The child terminates when it sees end-of-file on the socket.</p><p class="docText">The following shows an example of what we see when running this program:</p><pre class="preFixedWidth">$ <b>cat &gt; tell-tale-heart.txt </b>                           <i> Create a file for testing</i>
+<b>It is impossible to say how the idea entered my brain; </b>
+<b>but once conceived, it haunted me day and night. </b>
+<i> Type Control-D</i>
+$ <b>./is_echo_cl tekapo &lt; tell-tale-heart.txt </b>
+It is impossible to say how the idea entered my brain;
+but once conceived, it haunted me day and night.
+
+					  </pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EHIHM">Example 61-2. A client for the <span class="docEmphasis">echo</span> service</h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/is_echo_cl.c</b>
+#include "inet_sockets.h"
+#include "tlpi_hdr.h"
+
+#define BUF_SIZE 100
+
+int
+main(int argc, char *argv[])
+{
+    int sfd;
+    ssize_t numRead;
+    char buf[BUF_SIZE];
+
+    if (argc != 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s host\n", argv[0]);
+
+    sfd = inetConnect(argv[1], "echo", SOCK_STREAM);
+    if (sfd == -1)
+        errExit("inetConnect");
+
+    switch (fork()) {
+    case -1:
+        errExit("fork");
+
+    case 0:             /* Child: read server's response, echo on stdout */
+        for (;;) {
+            numRead = read(sfd, buf, BUF_SIZE);
+            if (numRead &lt;= 0)           /* Exit on EOF or error */
+                break;
+            printf("%.*s", (int) numRead, buf);
+        }
+        exit(EXIT_SUCCESS);
+
+    default:            /* Parent: write contents of stdin to socket */
+        for (;;) {
+            numRead = read(STDIN_FILENO, buf, BUF_SIZE);
+            if (numRead &lt;= 0)           /* Exit loop on EOF or error */
+                break;
+            if (write(sfd, buf, numRead) != numRead)
+                fatal("write() failed");
+        }
+
+        /* Close writing channel, so server sees EOF */
+
+        if (shutdown(sfd, SHUT_WR) == -1)
+            errExit("shutdown");
+        exit(EXIT_SUCCESS);
+    }
+}
+      <b>sockets/is_echo_cl.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

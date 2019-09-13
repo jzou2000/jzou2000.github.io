@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 10. Meaning of a Const Member Function</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 10. Meaning of a Const Member Function</h2>
+		
+<p class="docText">Technically, const member functions are trivial. Socially, they can be complex.</p>
+		
+<p class="docText">The type of the <tt>this</tt> pointer in a non-const member function of a class X is X <tt>* const</tt>. That is, it’s a constant pointer to a non-constant X (see <span class="docEmphasis">Const Pointers and Pointers to Const</span> [7, 21]). Because the object to which <tt>this</tt> refers is not const, it can be modified. The type of <tt>this</tt> in a const member function of a class X is <tt>const X * const</tt>. That is, it’s a constant pointer to a constant X. Because the object to which <tt>this</tt> refers is const, it cannot be modified. That’s the difference between const and non-const member functions.</p>
+		
+<p class="docText">This is why it’s 
+possible to change the logical state of an object with a const member 
+function even if the physical state of the object does not change. 
+Consider the following somewhat uninspired implementation of a class X 
+that uses a pointer to an allocated buffer to hold some portion of its 
+state:</p>
+		
+<div class="docText">
+  <pre class="preFixedHeight">class X {
+  public:
+    X() : buffer_(0), isComputed_(false) {}
+    //...
+    void setBuffer() {
+        int *tmp = new int[MAX];
+        delete [] buffer_;
+        buffer_ = tmp;
+    }
+<span class="docEmphMark">    void modifyBuffer( int index, int value ) const // immoral!</span>
+        { buffer_[index] = value; }
+    int getValue() const {
+        if( !isComputed_ ) {
+<span class="docEmphMark">            computedValue_ = expensiveOperation(); // error!    </span>
+				<span class="docEmphMark">isComputed_ = true; // error!                         </span>
+        }
+        return computedValue_;
+    }
+  private:
+    static int expensiveOperation();
+    int *buffer_;
+    bool isComputed_;
+    int computedValue_;
+};
+
+
+					  </pre>
+</div>
+<br/>
+		
+<p class="docText">The <tt>setBuffer</tt> member function must be non-const because it’s modifying a data member of its X object. However, <tt>modifyBuffer</tt> can legally be const because it’s not changing the X object; it’s changing only some data to which the <tt>buffer_</tt> member of X refers.</p>
+		
+<p class="docText">That’s legal, but it’s not 
+moral. Like a shyster lawyer who follows the letter of the law while 
+violating its intent, a C++ programmer who writes a const member 
+function that changes the logical state of its object will be judged 
+guilty by his or her peers, if not by the compiler. It’s just wrong.</p>
+		
+<p class="docText">Conversely, sometimes
+ a member function that really should be declared to be const must 
+modify its object. This is a common situation where a value is computed 
+by “lazy evaluation.” That is, the value is not computed until the first
+ request for it in order to speed things up in the event that the 
+request isn’t made at all. The function <tt>X::getValue</tt>
+ is attempting to perform a lazy evaluation of an expensive computation,
+ but, because it is declared to be a const member function, it is not 
+allowed to set the values of the <tt>isComputed_</tt> and <tt>computedValue_</tt>
+ data members of its X object. There is a temptation in cases like this 
+to commit the crime of casting in order to promote the greater good of 
+being able to declare the member function to be const:</p>
+		
+<div class="docText">
+  <pre>int getValue() const {
+    if( !isComputed_ ) {
+<span class="docEmphMark">        X *const aThis = const_cast&lt;X *const&gt;(this); // bad idea!</span>
+        aThis-&gt;computedValue_ = expensiveOperation();
+        aThis-&gt;isComputed_ = true;
+    }
+    return computedValue_;
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Resist the temptation. The proper way to handle this situation is to declare the relevant data members to be <tt>mutable</tt>:</p>
+		
+<div class="docText">
+  <pre>class X {
+  public:
+    //...
+    int getValue() const {
+        if( !isComputed_ ) {
+            computedValue_ = expensiveOperation(); // fine...
+            isComputed_ = true; // also fine...
+        }
+        return computedValue_;
+    }
+  private:
+    //...
+    mutable bool isComputed_; // can now be modified
+    mutable int computedValue_; // can now be modified
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Non-static data members of a class may be declared to be <tt>mutable</tt>,
+ which will allow their values to be modified by const member functions 
+of the class (as well as by non-const member functions). This in turn 
+allows a “logically const” member function to be declared to be const 
+even though its implementation requires modification of its object.</p>
+		
+<p class="docText">The effect of const on the type of a member function’s <tt>this</tt>
+ pointer also explains how function overload resolution can distinguish 
+between const and non-const versions of a member function. Consider the 
+following omnipresent example of an overloaded index operator:</p>
+		
+<div class="docText">
+  <pre>class X {
+  public:
+    //...
+    int &amp;operator [](int index);
+    const int &amp;operator [](int index) const;
+    //...
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Recall that the left argument of a binary overloaded member operator is passed as the <tt>this</tt> pointer. Therefore, in indexing an X object, the address of the X object is passed as the <tt>this</tt> pointer:</p>
+		
+<div class="docText">
+  <pre>int i = 12;
+X a;
+a[7] = i; // this is X *const because a is non-const
+const X b;
+i = b[i]; // this is const X *const because b is const
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Overload resolution will match the address of a const object with a <tt>this</tt> pointer that points to a const. As another example, consider the following non-member binary operator with two const arguments:</p>
+		
+<div class="docText">
+  <pre>X operator +( const X &amp;, const X &amp; );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">If we decide to declare a 
+member analog to this overloaded operator, we should declare it to be a 
+const member function in order to preserve the constness of the left 
+argument:</p>
+		
+<div class="docText">
+  <pre>class X {
+  public:
+    //...
+<span class="docEmphMark">    X operator +( const X &amp;rightArg ); // left arg is non-const! </span>
+    X operator +( const X &amp;rightArg ) const; // left arg is const
+    //...
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Like many areas of social life, proper programming with const in C++ is technically simple but morally challenging.</p>
+		
+
+
+</body>
+</html>

@@ -1,0 +1,653 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 28. Extending Your Application</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 28. Extending Your Application"><div class="titlepage"><div><h1><span class="partLabel">28</span> Extending Your Application</h1></div></div><p id="N160E3" style="text-indent: 0">
+<a class="indexterm" id="N160E5"/>
+An important use of Lua is as a <em>configuration</em> language.
+In this chapter, we will illustrate how we can use Lua to
+configure a program,
+starting with a simple example and evolving
+it to perform increasingly complex tasks.
+</p><div class="sect1" title="The Basics"><div class="titlepage"><div><div><h2 class="title"><a id="L267"/>The Basics</h2></div></div></div><p id="N160F0" style="text-indent: 0">
+As our first task,
+let us imagine a simple configuration scenario:
+our C program has a window
+and we want the user to be able to specify the
+initial window size.
+Clearly, for such a simple task,
+there are several options simpler than using Lua,
+like environment variables or files with name-value pairs.
+But even using a simple text file,
+we have to parse it somehow;
+so, we decide to use a Lua configuration file
+(that is, a plain text file that happens to be a Lua program).
+In its simplest form,
+this file can contain something like the following:
+</p><pre class="programlisting" id="N160F2">      -- define window size
+      width = 200
+      height = 300
+</pre><p style="text-indent: 0">
+</p><p id="N160F5" style="text-indent: 0">
+Now, we must use the Lua API to direct Lua to parse this file
+and then to get the values of the global variables <code class="literal">width</code>
+and <code class="literal">height</code>.
+The function <code class="literal">load</code>, in <a class="xref" href="ch28.html#load" title="Figure 28.1. Getting user information from a configuration file">Figure 28.1, “Getting user information from a configuration file”</a>, does this job.
+</p><div class="figure-float"><div class="figure"><a id="load"/><p class="title" style="text-indent: 0"><strong>Figure 28.1. Getting user information from a configuration file</strong></p><div class="figure-contents"><pre class="programlisting" id="N16108">      int getglobint (lua_State *L, const char *var) {
+        int isnum, result;
+        lua_getglobal(L, var);
+        result = (int)lua_tointegerx(L, -1, &amp;isnum);
+        if (!isnum)
+          error(L, "'%s' should be a number\n", var);
+        lua_pop(L, 1);   /* remove result from the stack */
+        return result;
+      }
+      
+      void load (lua_State *L, const char *fname, int *w, int *h) {
+        if (luaL_loadfile(L, fname) || lua_pcall(L, 0, 0, 0))
+          error(L, "cannot run config. file: %s", lua_tostring(L, -1));
+        *w = getglobint(L, "width");
+        *h = getglobint(L, "height");
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+It assumes that we have already created a <a class="indexterm" id="N1610B"></a>Lua state,
+following what we saw in the previous chapter.
+It calls <a class="indexterm" id="N1610F"></a><code class="function">luaL_loadfile</code>
+to load the chunk from the file <code class="literal">fname</code>,
+and then calls <a class="indexterm" id="N1611A"></a><code class="function">lua_pcall</code> to run the compiled chunk.
+In case of errors
+(e.g., a syntax error in our configuration file),
+these functions push the error message onto the stack
+and return a non-zero error code;
+our program then uses <a class="indexterm" id="N16122"></a><code class="function">lua_tostring</code> with index -1
+to get the message from the top of the stack.
+(We defined the function <code class="literal">error</code> in <a class="xref" href="ch27.html#first-ex" title="A First Example">the section called “A First Example”</a>.)
+</p><p id="N16130" style="text-indent: 0">
+After running the chunk,
+the program needs to get the values of the
+global variables.
+For that,
+it calls the auxiliary function <code class="literal">getglobint</code>
+(also in <a class="xref" href="ch28.html#load" title="Figure 28.1. Getting user information from a configuration file">Figure 28.1, “Getting user information from a configuration file”</a>) twice.
+This function first calls <a class="indexterm" id="N16138"/><code class="function">lua_getglobal</code>,
+whose single parameter (besides the omnipresent <a class="indexterm" id="N16140"/><code class="function">lua_State</code>)
+is the variable name,
+to push the corresponding global value onto the stack.
+Next, <code class="literal">getglobint</code> uses <a class="indexterm" id="N1614B"/><code class="function">lua_tointegerx</code>
+to convert this value to an integer,
+ensuring that it has the correct type.
+</p><p id="N16153" style="text-indent: 0">
+Is it worth using Lua for that task?
+As I said before, for such a simple task,
+a simple file with only two numbers in it would be
+easier to use than Lua.
+Even so, the use of Lua brings some advantages.
+First, Lua handles all syntax details for us;
+our configuration file can even have comments!
+Second, the user is already able to do
+some complex configurations with it.
+For instance,
+the script may prompt the user for some information,
+or it can query an environment variable
+to choose a proper size:
+</p><pre class="programlisting" id="N16155">      -- configuration file
+      if getenv("DISPLAY") == ":0.0" then
+        width = 300; height = 300
+      else
+        width = 200; height = 200
+      end
+</pre><p style="text-indent: 0">
+Even in such simple configuration scenarios,
+it is hard to anticipate what users will want;
+but as long as the script defines the two variables,
+our C application works without changes.
+</p><p id="N16158" style="text-indent: 0">
+A final reason for using Lua is that
+now it is easy to add new
+configuration facilities to our program;
+this ease fosters an attitude
+that results in programs that are more flexible.
+</p></div><div class="sect1" title="Table Manipulation"><div class="titlepage"><div><div><h2 class="title"><a id="L268"/>Table Manipulation</h2></div></div></div><p id="N1615E" style="text-indent: 0">
+Let us adopt that attitude:
+now, we want to configure a background color for the window, too.
+We will assume that the final color specification is composed
+of three numbers,
+where each number is a color component in <a class="indexterm" id="N16160"/>RGB.
+Usually, in C, these numbers are integers in some range
+like <em>[0,255]</em>.
+In Lua, we will use the more natural range <em>[0,1]</em>.
+</p><p id="N1616A" style="text-indent: 0">
+A naive approach here is to ask the user to set each component
+in a different global variable:
+</p><pre class="programlisting" id="N1616C">      -- configuration file
+      width = 200
+      height = 300
+      background_red = 0.30
+      background_green = 0.10
+      background_blue = 0
+</pre><p style="text-indent: 0">
+This approach has two drawbacks:
+it is too verbose
+(real programs may need dozens of different colors,
+for window background, window foreground, menu background, etc.);
+and there is no way to predefine common colors,
+so that, later,
+the user can simply write something like <code class="literal">background = WHITE</code>.
+To avoid these drawbacks, we will use a table to represent a color:
+</p><pre class="programlisting" id="N16172">      background = {red = 0.30, green = 0.10, blue = 0}
+</pre><p style="text-indent: 0">
+The use of tables gives more structure to the script;
+now it is easy for the user (or for the application)
+to predefine colors for later use in the configuration file:
+</p><pre class="programlisting" id="N16175">      BLUE = {red = 0, green = 0, blue = 1.0}
+      <em class="replaceable"><code>other color definitions</code></em>
+      
+      background = BLUE
+</pre><p style="text-indent: 0">
+To get these values in C, we can do as follows:
+</p><pre class="programlisting" id="N1617B">        lua_getglobal(L, "background");
+        if (!lua_istable(L, -1))
+          error(L, "'background' is not a table");
+      
+        red = getcolorfield(L, "red");
+        green = getcolorfield(L, "green");
+        blue = getcolorfield(L, "blue");
+</pre><p style="text-indent: 0">
+We first get the value of the global variable <code class="literal">background</code>
+and ensure that it is a table;
+then we use <code class="literal">getcolorfield</code> to get each color component.
+</p><p id="N16184" style="text-indent: 0">
+Of course, the function <code class="literal">getcolorfield</code> is not part of the Lua API;
+we must define it.
+Again, we face the problem of polymorphism:
+there are potentially many versions of <code class="literal">getcolorfield</code> functions,
+varying the key type, value type, error handling, etc.
+The Lua API offers one function, <a class="indexterm" id="N1618C"></a><code class="function">lua_gettable</code>,
+that works for all types.
+It takes the position of the table on the stack,
+pops the key from the stack,
+and pushes the corresponding value.
+Our private <code class="literal">getcolorfield</code>,
+defined in <a class="xref" href="ch28.html#getcolorfield" title="Figure 28.2. A particular getcolorfield implementation">Figure 28.2, “A particular <code class="literal">getcolorfield</code> implementation”</a>,
+</p><div class="figure-float"><div class="figure"><a id="getcolorfield"/><p class="title" style="text-indent: 0"><strong>Figure 28.2. A particular <code class="literal">getcolorfield</code> implementation</strong></p><div class="figure-contents"><pre class="programlisting" id="N161A3">      #define MAX_COLOR       255
+      
+      /* assume that table is on the top of the stack */
+      int getcolorfield (lua_State *L, const char *key) {
+        int result, isnum;
+        lua_pushstring(L, key);  /* push key */
+        lua_gettable(L, -2);  /* get background[key] */
+        result = (int)(lua_tonumberx(L, -1, &amp;isnum) * MAX_COLOR);
+        if (!isnum)
+          error(L, "invalid component '%s' in color", key);
+        lua_pop(L, 1);  /* remove number */
+        return result;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+assumes that the table is on the top of the stack;
+so, after pushing the key with <a class="indexterm" id="N161A6"></a><code class="function">lua_pushstring</code>,
+the table will be at index -2.
+Before returning,
+<code class="literal">getcolorfield</code> pops the retrieved value from the stack,
+leaving the stack at the same level that it was before the call.
+</p><p id="N161B1" style="text-indent: 0">
+We will extend our example a little further
+and introduce color names for the user.
+The user can still use color tables,
+but she can also use predefined names for the more common colors.
+To implement this feature,
+we need a color table in our C application:
+</p><pre class="programlisting" id="N161B3">      struct ColorTable {
+        char *name;
+        unsigned char red, green, blue;
+      } colortable[] = {
+        {"WHITE",   MAX_COLOR, MAX_COLOR, MAX_COLOR},
+        {"RED",     MAX_COLOR,         0,         0},
+        {"GREEN",           0, MAX_COLOR,         0},
+        {"BLUE",            0,         0, MAX_COLOR},
+        <em class="replaceable"><code>other colors</code></em>
+        {NULL, 0, 0, 0}  /* sentinel */
+      };
+</pre><p style="text-indent: 0">
+</p><p id="N161B9" style="text-indent: 0">
+Our implementation will create global variables with the color names
+and initialize these variables using color tables.
+The result is the same as if the user had the following
+lines in her script:
+</p><pre class="programlisting" id="N161BB">      WHITE = {red = 1.0, green = 1.0, blue = 1.0}
+      RED   = {red = 1.0, green = 0,   blue = 0}
+      <em class="replaceable"><code>other colors</code></em>
+</pre><p style="text-indent: 0">
+</p><p id="N161C1" style="text-indent: 0">
+To set the table fields,
+we define an auxiliary function, <code class="literal">setcolorfield</code>;
+it pushes the index and the field value on the stack,
+and then calls <a class="indexterm" id="N161C6"></a><code class="function">lua_settable</code>:
+</p><pre class="programlisting" id="N161CE">      /* assume that table is on top */
+      void setcolorfield (lua_State *L, const char *index, int value) {
+        lua_pushstring(L, index); /* key */
+        lua_pushnumber(L, (double)value / MAX_COLOR);  /* value */
+        lua_settable(L, -3);
+      }
+</pre><p style="text-indent: 0">
+Like other API functions,
+<a class="indexterm" id="N161D1"></a><code class="function">lua_settable</code> works for many different types,
+so it gets all its operands from the stack.
+It takes the table index as an argument
+and pops the key and the value.
+The function <code class="literal">setcolorfield</code> assumes that before the call
+the table is on the top of the stack (index -1);
+after pushing the index and the value,
+the table will be at index -3.
+</p><p id="N161DD" style="text-indent: 0">
+The next function, <code class="literal">setcolor</code>, defines a single color.
+It creates a table, sets the appropriate fields,
+and assigns this table to the corresponding global variable:
+</p><pre class="programlisting" id="N161E2">      void setcolor (lua_State *L, struct ColorTable *ct) {
+        lua_newtable(L);                 /* creates a table */
+        setcolorfield(L, "red", ct-&gt;red);
+        setcolorfield(L, "green", ct-&gt;green);
+        setcolorfield(L, "blue", ct-&gt;blue);
+        lua_setglobal(L, ct-&gt;name);      /* 'name' = table */
+      }
+</pre><p style="text-indent: 0">
+The function <a class="indexterm" id="N161E5"></a><code class="function">lua_newtable</code> creates an empty table
+and pushes it on the stack;
+the three calls to <code class="literal">setcolorfield</code> set the table fields;
+finally, <a class="indexterm" id="N161F1"></a><code class="function">lua_setglobal</code> pops the table and
+sets it as the value of the global with the given name.
+</p><p id="N161F9" style="text-indent: 0">
+With these previous functions,
+the following loop will register all colors for
+the configuration script:
+</p><pre class="programlisting" id="N161FB">      int i = 0;
+      while (colortable[i].name != NULL)
+        setcolor(L, &amp;colortable[i++]);
+</pre><p style="text-indent: 0">
+Remember that the application must execute this loop
+before running the script.
+</p><p id="N161FE" style="text-indent: 0">
+<a class="xref" href="ch28.html#colorsearch" title="Figure 28.3. Colors as strings or tables">Figure 28.3, “Colors as strings or tables”</a> shows
+another option for implementing named colors.
+</p><div class="figure-float"><div class="figure"><a id="colorsearch"/><p class="title" style="text-indent: 0"><strong>Figure 28.3. Colors as strings or tables</strong></p><div class="figure-contents"><pre class="programlisting" id="N16208">        lua_getglobal(L, "background");
+        if (lua_isstring(L, -1)) {   /* value is a string? */
+          const char *name = lua_tostring(L, -1);  /* get string */
+          int i;   /* search the color table */
+          for (i = 0; colortable[i].name != NULL; i++) {
+            if (strcmp(colorname, colortable[i].name) == 0)
+              break;
+          }
+          if (colortable[i].name == NULL)  /* string not found? */
+            error(L, "invalid color name (%s)", colorname);
+          else {  /* use colortable[i] */
+            red = colortable[i].red;
+            green = colortable[i].green;
+            blue = colortable[i].blue;
+          }
+        } else if (lua_istable(L, -1)) {
+          red = getcolorfield(L, "red");
+          green = getcolorfield(L, "green");
+          blue = getcolorfield(L, "blue");
+        } else
+            error(L, "invalid value for 'background'");
+</pre></div></div></div><p style="text-indent: 0">
+
+Instead of global variables,
+the user can denote color names with strings,
+writing her settings as <code class="literal">background = "BLUE"</code>.
+Therefore, <code class="literal">background</code> can be either a table or a string.
+With this design,
+the application does not need to do anything before running
+the user’s script.
+Instead, it needs more work to get a color.
+When it gets the value of the variable <code class="literal">background</code>,
+it must test whether the value is a string,
+and then look up the string in the color table.
+</p><p id="N16214" style="text-indent: 0">
+What is the best option?
+In C programs,
+the use of strings to denote options is not a good practice,
+because the compiler cannot detect misspellings.
+In Lua, however, the error message for a misspelt color
+will probably be seen by the author of the configuration <span class="quote">“<span class="quote">program</span>”</span>.
+The distinction between programmer and user is blurred,
+and so the difference between a compilation error and a run-time error
+is blurred, too.
+</p><p id="N16219" style="text-indent: 0">
+With strings,
+the value of <code class="literal">background</code> would be the misspelled string;
+hence, the application can add this information to the error message.
+The application can also compare strings regardless of case,
+so that a user can write <code class="literal">"white"</code>, <code class="literal">"WHITE"</code>, or even <code class="literal">"White"</code>.
+Moreover, if the user script is small
+and there are many colors,
+it may be inefficient to register hundreds of colors
+(and to create hundreds of tables and global variables)
+when the user needs only a few.
+With strings, we avoid this overhead.
+</p><div class="sect2" title="Some short cuts"><div class="titlepage"><div><div><h3 class="title"><a id="L269"/>Some short cuts</h3></div></div></div><p id="N1622B" style="text-indent: 0">
+Although the C API strives for simplicity,
+Lua is not radical.
+So, the API offers short cuts
+for several common operations.
+Let us see some of them.
+</p><p id="N1622D" style="text-indent: 0">
+Because indexing a table with a string key is so common,
+Lua has a specialized version of <a class="indexterm" id="N1622F"></a><code class="function">lua_gettable</code>
+for this case: <a class="indexterm" id="N16237"></a><code class="function">lua_getfield</code>.
+Using this function, we can rewrite the two lines
+</p><pre class="programlisting" id="N16240">        lua_pushstring(L, key);
+        lua_gettable(L, -2);  /* get background[key] */
+</pre><p style="text-indent: 0">
+in <code class="literal">getcolorfield</code> as
+</p><pre class="programlisting" id="N16246">        lua_getfield(L, -1, key);  /* get background[key] */
+</pre><p style="text-indent: 0">
+(As we do not push the string onto the stack,
+the table index is still -1 when we call <a class="indexterm" id="N16249"></a><code class="function">lua_getfield</code>.)
+</p><p id="N16251" style="text-indent: 0">
+Because it is common to check the type
+of a value returned by <a class="indexterm" id="N16253"></a><code class="function">lua_gettable</code>,
+in Lua 5.3 this function
+(and similar ones like <a class="indexterm" id="N1625B"></a><code class="function">lua_getfield</code>)
+now returns the type of its result.
+Therefore,
+we can simplify further
+the access and the check in <code class="literal">getcolorfield</code>:
+</p><pre class="programlisting" id="N16266">        if (lua_getfield(L, -1, key) != LUA_TNUMBER)
+          error(L, "invalid component in background color");
+</pre><p style="text-indent: 0">
+</p><p id="N16269" style="text-indent: 0">
+As you might expect,
+Lua offers also a specialized version of <a class="indexterm" id="N1626B"></a><code class="function">lua_settable</code>
+for string keys,
+called <a class="indexterm" id="N16273"></a><code class="function">lua_setfield</code>.
+Using this function, we can rewrite our previous
+definition for <code class="literal">setcolorfield</code> as follows:
+</p><pre class="programlisting" id="N1627F">      void setcolorfield (lua_State *L, const char *index, int value) {
+        lua_pushnumber(L, (double)value / MAX_COLOR);
+        lua_setfield(L, -2, index);
+      }
+</pre><p style="text-indent: 0">
+</p><p id="N16282" style="text-indent: 0">
+As a small optimization,
+we can also replace our use of <a class="indexterm" id="N16284"></a><code class="function">lua_newtable</code>
+in the function <code class="literal">setcolor</code>.
+Lua offers another function,
+<a class="indexterm" id="N1628F"></a><code class="function">lua_createtable</code>,
+where we create a table and pre-allocate space for entries.
+Lua declares these functions like this:
+</p><pre class="programlisting" id="N16297">      void lua_createtable (lua_State *L, int narr, int nrec);
+      
+      #define lua_newtable(L)      lua_createtable(L, 0, 0)
+</pre><p style="text-indent: 0">
+The parameter <code class="literal">narr</code> is the expected number of elements
+in the sequence part of the table
+(that is, entries with sequential integer indices),
+and <code class="literal">nrec</code> is the expected number of other elements.
+In <code class="literal">setcolor</code>,
+we could write <code class="literal">lua_createtable(L, 0, 3)</code>
+as a hint that the table will get three entries.
+(Lua code does a similar optimization
+when we write a constructor.)
+</p></div></div><div class="sect1" title="Calling Lua Functions"><div class="titlepage"><div><div><h2 class="title"><a id="L270"/>Calling Lua Functions</h2></div></div></div><p id="N162AA" style="text-indent: 0">
+<a class="indexterm" id="N162AC"/>
+A great strength of Lua is that a configuration file can define
+functions to be called by the application.
+For instance, we can write in C an application to plot the graph
+of a function
+and define in Lua the function to be plotted.
+</p><p id="N162B2" style="text-indent: 0">
+The API protocol to call a function is simple:
+first, we push the function to be called;
+second, we push the arguments to the call;
+then we use <a class="indexterm" id="N162B4"/><code class="function">lua_pcall</code> to do the actual call;
+finally, we get the results from the stack.
+</p><p id="N162BC" style="text-indent: 0">
+As an example, let us assume that our configuration file
+has a function like this:
+</p><pre class="programlisting" id="N162BE">      function f (x, y)
+        return (x^2 * math.sin(y)) / (1 - x)
+      end
+</pre><p style="text-indent: 0">
+We want to evaluate, in C,
+<code class="literal">z = f(x, y)</code> for given <code class="literal">x</code> and <code class="literal">y</code>.
+Assuming that we have already opened the Lua library and run
+the configuration file,
+the function <code class="literal">f</code> in <a class="xref" href="ch28.html#callingLua" title="Figure 28.4. Calling a Lua function from C">Figure 28.4, “Calling a Lua function from C”</a>
+evaluates that code.
+</p><div class="figure-float"><div class="figure"><a id="callingLua"/><p class="title" style="text-indent: 0"><strong>Figure 28.4. Calling a Lua function from C</strong></p><div class="figure-contents"><pre class="programlisting" id="N162D5">      /* call a function 'f' defined in Lua */
+      double f (lua_State *L, double x, double y) {
+        int isnum;
+        double z;
+      
+        /* push functions and arguments */
+        lua_getglobal(L, "f");  /* function to be called */
+        lua_pushnumber(L, x);   /* push 1st argument */
+        lua_pushnumber(L, y);   /* push 2nd argument */
+      
+        /* do the call (2 arguments, 1 result) */
+        if (lua_pcall(L, 2, 1, 0) != LUA_OK)
+          error(L, "error running function 'f': %s",
+                   lua_tostring(L, -1));
+      
+        /* retrieve result */
+        z = lua_tonumberx(L, -1, &amp;isnum);
+        if (!isnum)
+          error(L, "function 'f' should return a number");
+        lua_pop(L, 1);  /* pop returned value */
+        return z;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+</p><p id="N162D8" style="text-indent: 0">
+The second and third arguments to <a class="indexterm" id="N162DA"/><code class="function">lua_pcall</code>
+are the number of arguments we are passing
+and the number of results we want.
+The fourth argument indicates a message-handling function;
+we will discuss it in a moment.
+As in a Lua assignment,
+<a class="indexterm" id="N162E3"/><code class="function">lua_pcall</code> adjusts the actual number of results
+to what we have asked for,
+pushing nils or discarding extra values as needed.
+Before pushing the results,
+<a class="indexterm" id="N162EB"/><code class="function">lua_pcall</code> removes from the stack
+the function and its arguments.
+When a function returns <a class="indexterm" id="N162F3"/>multiple results,
+the first result is pushed first;
+for instance, if there are three results,
+the first one will be at index -3
+and the last at index -1.
+</p><p id="N162F7" style="text-indent: 0">
+If there is any error while <a class="indexterm" id="N162F9"/><code class="function">lua_pcall</code> is running,
+<a class="indexterm" id="N16301"/><code class="function">lua_pcall</code> returns an error code;
+moreover, it pushes the error message on the stack
+(but still pops the function and its arguments).
+Before pushing the message, however,
+<a class="indexterm" id="N16309"/><code class="function">lua_pcall</code> calls the <a class="indexterm" id="N16311"/>message handler function,
+if there is one.
+To specify a message handler function,
+we use the last argument of <a class="indexterm" id="N16315"/><code class="function">lua_pcall</code>.
+Zero means no message handler function;
+that is, the final error message is the original message.
+Otherwise, this argument should be the index on the stack where
+the message handler function is located.
+In such cases,
+we should push the handler on the stack
+somewhere below the function to be called.
+</p><p id="N1631D" style="text-indent: 0">
+For normal errors, <a class="indexterm" id="N1631F"/><code class="function">lua_pcall</code> returns the
+error code <a class="indexterm" id="N16327"/><code class="function">LUA_ERRRUN</code>.
+Two special kinds of errors deserve different codes,
+because they never run the message handler.
+The first kind is a memory allocation error.
+For such errors, <a class="indexterm" id="N16330"/><code class="function">lua_pcall</code> returns <a class="indexterm" id="N16338"/><code class="function">LUA_ERRMEM</code>.
+The second kind is an error
+while Lua is running the message handler itself.
+In this case, it is of little use to call the handler again,
+so <a class="indexterm" id="N16341"/><code class="function">lua_pcall</code> returns immediately with a code <a class="indexterm" id="N16349"/><code class="function">LUA_ERRERR</code>.
+Since version 5.2, Lua differentiates a third kind of error:
+when a <a class="indexterm" id="N16352"/>finalizer raises an error,
+<a class="indexterm" id="N16356"/><code class="function">lua_pcall</code> returns the code <a class="indexterm" id="N1635E"/><code class="function">LUA_ERRGCMM</code>
+(<em>error in a GC metamethod</em>).
+This code indicates that the error
+is not directly related to the call itself.
+</p></div><div class="sect1" title="A Generic Call Function"><div class="titlepage"><div><div><h2 class="title"><a id="L271"/>A Generic Call Function</h2></div></div></div><p id="N1636E" style="text-indent: 0">
+As a more advanced example,
+we will build a wrapper for calling Lua functions,
+using the <a class="indexterm" id="N16370"></a><code class="literal">stdarg</code> facility in C.
+Our wrapper function, let us call it <code class="literal">call_va</code>,
+takes the name of a global function to be called,
+a string describing the types of the arguments and results,
+then the list of arguments, and finally a list of pointers to
+variables to store the results;
+it handles all the details of the API.
+With this function, we could write our example
+in <a class="xref" href="ch28.html#callingLua" title="Figure 28.4. Calling a Lua function from C">Figure 28.4, “Calling a Lua function from C”</a> simply like this:
+</p><pre class="programlisting" id="N1637E">      call_va(L, "f", "dd&gt;d", x, y, &amp;z);
+</pre><p style="text-indent: 0">
+The string <code class="literal">"dd&gt;d"</code> means
+<span class="quote">“<span class="quote">two arguments of type double, one result of type double</span>”</span>.
+This descriptor can use the letters <code class="literal">d</code> for double,
+<code class="literal">i</code> for integer,
+and <code class="literal">s</code> for strings;
+a <code class="literal">&gt;</code> separates arguments from the results.
+If the function has no results, the <code class="literal">&gt;</code> is optional.
+</p><p id="N16396" style="text-indent: 0">
+<a class="xref" href="ch28.html#call_va" title="Figure 28.5. A generic call function">Figure 28.5, “A generic call function”</a> shows the implementation of <code class="literal">call_va</code>.
+</p><div class="figure-float"><div class="figure"><a id="call_va"/><p class="title" style="text-indent: 0"><strong>Figure 28.5. A generic call function</strong></p><div class="figure-contents"><pre class="programlisting" id="N163A3">      #include &lt;stdarg.h&gt;
+      
+      void call_va (lua_State *L, const char *func,
+                                  const char *sig, ...) {
+        va_list vl;
+        int narg, nres;  /* number of arguments and results */
+      
+        va_start(vl, sig);
+        lua_getglobal(L, func);  /* push function */
+      
+        <em class="replaceable"><code>push and count arguments (<a class="xref" href="ch28.html#call_va1" title="Figure 28.6. Pushing arguments for the generic call function">Figure 28.6, “Pushing arguments for the generic call function”</a>)</code></em>
+      
+        nres = strlen(sig);  /* number of expected results */
+      
+        if (lua_pcall(L, narg, nres, 0) != 0)  /* do the call */
+          error(L, "error calling '%s': %s", func,
+                                             lua_tostring(L, -1));
+      
+        <em class="replaceable"><code>retrieve results (<a class="xref" href="ch28.html#call_va2" title="Figure 28.7. Retrieving results for the generic call function">Figure 28.7, “Retrieving results for the generic call function”</a>)</code></em>
+      
+        va_end(vl);
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+Despite its generality,
+this function follows the same steps of our first example:
+it pushes the function, pushes the arguments (<a class="xref" href="ch28.html#call_va1" title="Figure 28.6. Pushing arguments for the generic call function">Figure 28.6, “Pushing arguments for the generic call function”</a>),
+does the call, and gets the results (<a class="xref" href="ch28.html#call_va2" title="Figure 28.7. Retrieving results for the generic call function">Figure 28.7, “Retrieving results for the generic call function”</a>).
+</p><div class="figure-float"><div class="figure"><a id="call_va1"/><p class="title" style="text-indent: 0"><strong>Figure 28.6. Pushing arguments for the generic call function</strong></p><div class="figure-contents"><pre class="programlisting" id="N163BD">        for (narg = 0; *sig; narg++) {  /* repeat for each argument */
+      
+          /* check stack space */
+          luaL_checkstack(L, 1, "too many arguments");
+      
+          switch (*sig++) {
+      
+            case 'd':  /* double argument */
+              lua_pushnumber(L, va_arg(vl, double));
+              break;
+      
+            case 'i':  /* int argument */
+              lua_pushinteger(L, va_arg(vl, int));
+              break;
+      
+            case 's':  /* string argument */
+              lua_pushstring(L, va_arg(vl, char *));
+              break;
+      
+            case '&gt;':  /* end of arguments */
+              goto endargs;  /* break the loop */
+      
+            default:
+              error(L, "invalid option (%c)", *(sig - 1));
+          }
+      
+        }
+        endargs:
+</pre></div></div></div><p style="text-indent: 0">
+
+</p><div class="figure-float"><div class="figure"><a id="call_va2"/><p class="title" style="text-indent: 0"><strong>Figure 28.7. Retrieving results for the generic call function</strong></p><div class="figure-contents"><pre class="programlisting" id="N163C5">        nres = -nres;  /* stack index of first result */
+        while (*sig) {  /* repeat for each result */
+          switch (*sig++) {
+      
+            case 'd': {  /* double result */
+              int isnum;
+              double n = lua_tonumberx(L, nres, &amp;isnum);
+              if (!isnum)
+                error(L, "wrong result type");
+              *va_arg(vl, double *) = n;
+              break;
+            }
+      
+            case 'i': {  /* int result */
+              int isnum;
+              int n = lua_tointegerx(L, nres, &amp;isnum);
+              if (!isnum)
+                error(L, "wrong result type");
+              *va_arg(vl, int *) = n;
+              break;
+            }
+      
+            case 's': {  /* string result */
+              const char *s = lua_tostring(L, nres);
+              if (s == NULL)
+                error(L, "wrong result type");
+              *va_arg(vl, const char **) = s;
+              break;
+            }
+      
+            default:
+              error(L, "invalid option (%c)", *(sig - 1));
+          }
+          nres++;
+        }
+</pre></div></div></div><p style="text-indent: 0">
+
+Most of its code is straightforward,
+but there are some subtleties.
+First, it does not need to check whether <code class="literal">func</code> is a function:
+<a class="indexterm" id="N163CB"></a><code class="function">lua_pcall</code> will trigger that error.
+Second, because it pushes an arbitrary number of arguments,
+it must ensure that there is enough stack space.
+Third, because the function can return strings,
+<code class="literal">call_va</code> cannot pop the results from the stack.
+It is up to the caller to pop them,
+after it finishes using any string results
+(or after copying them to appropriate buffers).
+</p></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L272"/>Exercises</h2></div></div></div><p id="N163DA" style="text-indent: 0">
+Exercise 28.1:<a id="L273"/> 
+Write a C program that reads a Lua file defining a function <code class="literal">f</code>
+from numbers to numbers and plots that function.
+(You do not need to do anything fancy;
+the program can plot the results printing ASCII asterisks
+as we did in <a class="xref" href="ch16.html#compil" title="Compilation">the section called “Compilation”</a>.)
+
+
+</p><p id="N163E5" style="text-indent: 0">
+Exercise 28.2:<a id="L274"/> 
+Modify the function <code class="literal">call_va</code> (<a class="xref" href="ch28.html#call_va" title="Figure 28.5. A generic call function">Figure 28.5, “A generic call function”</a>)
+to handle Boolean values.
+
+
+</p><p id="N163F0" style="text-indent: 0">
+Exercise 28.3:<a id="L275"></a> 
+Let us suppose a program that needs to
+monitor several weather stations.
+Internally, it uses a four-byte string to represent each station,
+and there is a configuration file to map each string to the
+actual URL of the corresponding station.
+A Lua configuration file could do this mapping in several ways:
+</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem"><p id="N163F7" style="text-indent: 0">a bunch of global variables, one for each station;</p></li><li class="listitem"><p id="N163FA" style="text-indent: 0">a table mapping string codes to URLs;</p></li><li class="listitem"><p id="N163FD" style="text-indent: 0">a function mapping string codes to URLs.</p></li></ul></div><p style="text-indent: 0">
+Discuss the pros and cons of each option,
+considering things like the total number of stations,
+the regularity of the URLs
+(e.g., there may be a formation rule from codes to URLs),
+the kind of users,
+etc.
+
+
+</p></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

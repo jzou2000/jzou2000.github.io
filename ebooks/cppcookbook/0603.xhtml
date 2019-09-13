@@ -1,0 +1,258 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 6.2. Using vectors Efficiently</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 6.2. Using vectors Efficiently</h3>
+
+<h4 class="docSection2Title" id="title-ID0EGOAI">Problem</h4>
+<p class="docText">You are using <tt>vector</tt>s
+
+
+ and you have tight space or time
+requirements and need to reduce or eliminate overhead.</p>
+
+<h4 class="docSection2Title" id="title-ID0EKPAI">Solution</h4>
+<p class="docText">Understand how a <tt>vector</tt> is implemented, know the
+complexity of insertion and deletion member functions, and minimize
+unnecessary memory churn with the <tt>reserve</tt> member
+function. Example 6-2 shows a few of these
+techniques in action.</p>
+<h5 class="docExampleTitle" id="title-ID0E2PAI">Example 6-2. Using a vector efficiently</h5><p></p><div class="box">
+<pre>#include &lt;iostream&gt;
+#include &lt;vector&gt;
+#include &lt;string&gt;
+
+using std::vector;
+using std::string;
+
+void f(vector&lt;string&gt;&amp; vec) { // Pass vec by reference (or
+                              // pointer, if you have to)
+   // ...
+}
+
+int main( ) {
+
+   vector&lt;string&gt; vec(500); // Tell the vector that you plan on
+                            // putting a certain number of objects
+                            // in it at construction
+   vector&lt;string&gt; vec2;
+
+   // Fill up vec...
+   f(vec);
+
+   vec2.reserve(500);       // Or, after the fact, tell the vector
+                            // that you want the buffer to be big
+                            // enough to hold this many objects
+
+   // Fill up vec2...
+}</pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0EEQAI">Discussion</h4>
+<p class="docText">The key to using <tt>vector</tt>s efficiently lies in
+knowing how they work. Once you have a good idea of how a
+<tt>vector</tt> is usually implemented, the performance hot
+spots become obvious.</p>
+
+<h5 class="docSection3Title" id="title-ID0EQQAI">How vectors work</h5>
+<p class="docText">A <tt>vector</tt> is, essentially, a managed array. More
+specifically, a <tt>vector&lt;T&gt;</tt> is a chunk of
+contiguous memory (i.e., an array) that is large enough to hold
+<span class="docEmphasis">n</span> objects of type <tt>T</tt>, where
+<span class="docEmphasis">n</span> is greater than or equal to zero and is less
+or equal to an implementation-defined maximum size.
+<span class="docEmphasis">n</span> usually increases during the lifetime of the
+container as you add or remove elements, but it
+doesn't decrease. What makes a
+<tt>vector</tt> different from an array is the automatic
+memory management of that array, the member functions for inserting
+and retrieving elements, and the member functions that provide
+metadata about the container, such as the size (number of elements)
+and capacity (the buffer size), but also the type information:
+<tt>vector&lt;T&gt;::value_type</tt> is
+<tt>T</tt>'s type,
+<tt>vector&lt;T&gt;::pointer</tt> is a
+pointer-to-<tt>T</tt> type, and so on. These last two, and
+several others, are part of every standard container, and they allow
+you to write generic code that works regardless of
+<tt>T</tt>'s type. Figure 6-1 gives a graphical depiction of what some of
+<tt>vector</tt>'s member functions
+provide, given a <tt>vector</tt> that has a size of
+<tt>7</tt> and a capacity of <tt>10</tt>.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 6-1. A vector's innards</h5>
+<img alt="" border="0" height="192" id="" src="Images/getfile.gif" width="449"/></center><p></p><br/>
+<p class="docText">If you are curious how your standard library vendor has implemented
+<tt>vector</tt>, compile Example 6-1 and
+step into every <tt>vector</tt> member function call, or,
+open the <tt>&lt;vector&gt;</tt> header in your standard
+library implementation and take a look. It may not be the most
+reader-friendly code you've ever seen, but it should
+be enlightening. First, if you haven't looked at
+much library code, it will give you an idea of what implementation
+techniques are used to write efficient, portable, generic code.
+Second, it will give you a concrete understanding of whatever
+container you're using. If you are writing code that
+may need to run with different standard library implementations, you
+should do this anyway.</p>
+<p class="docText">Regardless of the library vendor, however, most implementations of
+vector are similar. There is a member variable that points to an
+array of <tt>T</tt>s, and the elements you add or assign
+are copy constructed or assigned into each array element.</p>
+<p class="docText">Adding a <tt>T</tt> object to the buffer is usually done by
+using <span class="docEmphasis">placement</span>
+<tt>new</tt>—so
+called because you give the type of object to be constructed as well
+as the address where it should be constructed—to copy construct
+a new object in the next available slot. If, instead, you are
+assigning a new value to a slot explicitly by using its index (with
+<tt>operator[]</tt> or <tt>at</tt>),
+<tt>T</tt>'s assignment operator is used.
+Note that in both cases what happens is that your object is cloned
+via copy construction or <tt>T::operator=</tt>. The
+<tt>vector</tt> does <span class="docEmphasis">not</span> simply store
+the address of the object you are adding. It is for this reason that
+any type stored in a vector must be copy constructible and
+assignable. These properties mean that an equivalent object of
+<tt>T</tt> can be created by calling
+<tt>T</tt>'s copy constructor or
+assignment operator. This is important, because of the copy-in,
+copy-out semantics of <tt>vector</tt>s—if copy
+constructing or assigning one of your objects does not work properly,
+then what you get out of a <tt>vector</tt> might be
+different than what you put in. This is bad.</p>
+<p class="docText">Once you have added a bunch of objects
+to
+ a <tt>vector</tt>, its buffer
+becomes full and it must grow to accommodate any new objects. The
+algorithm for growth is implementation defined, but what usually
+happens is that the buffer size of <span class="docEmphasis">n</span> is
+increased to 2<span class="docEmphasis">n</span> + 1. The important concept here
+is how <tt>vector</tt> grows the buffer. You
+can't just tell the operating system to extend your
+hunk of heap memory indefinitely; you have to request a new chunk of
+memory that is bigger than the one you just had. As a result, the
+process of increasing the buffer size
+is
+
+as follows:</p>
+<div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Allocate memory for a new buffer.</p></div></li><li><div style="font-weight:normal"><p class="docList">Copy the old data into the new buffer.</p></div></li><li><div style="font-weight:normal"><p class="docList">Delete the old buffer.</p></div></li></ol></div>
+<p class="docText">This allows the <tt>vector</tt> to keep all of its objects
+in one contiguous chunk of memory.</p>
+
+<h5 class="docSection3Title" id="title-ID0EPVAI">Optimizing vector performance</h5>
+<p class="docText">The previous section
+should give you
+a good
+idea of how objects are stored in a vector. And from that overview,
+the major performance points should have jumped out at you, but in
+case they didn't, I'll discuss
+them.</p>
+<p class="docText">To begin with, a <tt>vector</tt> (or any other standard
+library container) doesn't store your object, it
+stores a <span class="docEmphasis">copy</span> of your object. This means that
+each time you put something in a <tt>vector</tt>, you
+aren't really
+"putting" it anywhere;
+you're copying it somewhere else with its copy
+constructor or assignment operator. Similarly, when you retrieve a
+value from a <tt>vector</tt>, you are copying what is in
+the vector at that location to your local variable. Consider a simple
+assignment to a local variable from an element in a
+<tt>vector</tt>:</p>
+<pre>vector&lt;MyObj&gt; myVec;
+// Put some MyObj objects in myVec
+MyObj obj = myVec[10];  // Copy the object at index 10</pre><br/>
+<p class="docText">This assignment calls <tt>obj</tt>'s
+assignment operator with the object returned by
+<tt>myVec[10]</tt> as its righthand side. The performance
+overhead from lots of object copies will add up quickly, so
+it's best if you avoid it.</p>
+<p class="docText">Put pointers in the <tt>vector</tt> instead of the objects
+themselves to reduce copy overhead. Storing pointers will require
+fewer CPU cycles to add or retrieve data, because pointers are
+quicker to copy than objects, and it will reduce the memory required
+by the <tt>vector</tt>'s buffer. Just
+remember that if you add pointers to a standard library container,
+the container doesn't <tt>delete</tt> them
+when it's destroyed. Containers destroy only the
+objects they contain, i.e., the variable holding the addresses of the
+objects pointed to, but a container doesn't know
+that what it's storing is a pointer or an object,
+all it knows is that it's some object of type
+<tt>T</tt>.</p>
+<p class="docText">Resizing the memory buffer
+
+
+is also not cheap. Copying every
+element in the buffer is a lot of work, and such a thing is best
+avoided. To protect against this, specify the buffer size explicitly.
+There are a couple of ways to do this. The simplest way to do it is
+during construction:</p>
+<pre>vector&lt;string&gt; vec(1000);</pre><br/>
+<p class="docText">This reserves enough space for 1,000 strings and it initializes each
+slot in the buffer with <tt>string</tt>'s
+default constructor. With this approach, you pay for constructing
+each of these objects, but you add some measure of safety by
+initializing every element in the buffer with an empty string. This
+means that if you reference an element that hasn't
+been assigned, you simply get an empty object.</p>
+<p class="docText">If you want to initialize the buffer to something special, you can
+pass in the object that you want to copy into each slot in the
+buffer:</p>
+<pre>string defString = "uninitialized";
+vector&lt;string&gt; vec(100, defString);
+string s = vec[50]; // s = "uninitialized"</pre><br/>
+<p class="docText">With this form, <tt>vec</tt> will copy construct 100
+elements from <tt>defString</tt>.</p>
+<p class="docText">The other way to reserve buffer space is to call the
+<tt>reserve</tt> member function sometime after the
+<tt>vector</tt> has been constructed:</p>
+<pre>vector&lt;string&gt; vec;
+vec.reserve(1000);</pre><br/>
+<p class="docText">The biggest difference between calling <tt>reserve</tt> and
+specifying the size at construction is that
+<tt>reserve</tt> doesn't initialize the
+slots in the buffer with anything. Specifically, this means that you
+shouldn't reference indexes where you
+haven't already put something:</p>
+<pre>vector&lt;string&gt; vec(100);
+string s = vec[50];      // No problem: s is now an empty string
+vector&lt;string&gt; vec2;
+vec2.reserve(100);
+s = vec2[50];            // Undefined</pre><br/>
+<p class="docText">Using reserve or specifying a number of default objects at
+construction will help you avoid nasty buffer reallocation. That
+helps with performance, but also avoids another problem: anytime a
+buffer is reallocated, any iterators you may have that refer to its
+elements become invalid.</p>
+<p class="docText">Finally, inserting anywhere but the end of a vector is not a good
+idea. Look again at Figure 6-1. Since a
+<tt>vector</tt> is just an array with some other bells and
+whistles, it should be easy to see why you should insert only at the
+end. The objects in the <tt>vector</tt> are stored
+contiguously, so when you insert anywhere but at the end, say, at
+index <span class="docEmphasis">n</span>, the objects from
+<span class="docEmphasis">n+1</span> to the end must be shifted down by one
+(toward the end) to make room for the new item. This operation is
+linear, which means it is expensive for <tt>vector</tt>s of
+even modest size. Deleting an element in a vector has a similar
+effect: it means that all indexes larger than <span class="docEmphasis">n</span>
+must be shifted up one slot. If you need to be able to insert and
+delete anywhere but the end of a
+
+
+ container, you should use a
+<tt>list</tt> instead.</p>
+</div>
+</body>
+</html>

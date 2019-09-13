@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>48.4. Example: Transferring Data via Shared Memory</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">48.4. Example: Transferring Data via Shared Memory</h3><p class="docText">We
+ now look at an example application that uses System V shared memory and
+ semaphores. The application consists of two programs: the <span class="docEmphasis">writer</span> and the <span class="docEmphasis">reader</span>.
+ The writer reads blocks of data from standard input and copies 
+(“writes”) them into a shared memory segment. The reader copies 
+(“reads”) blocks of data from the shared memory segment to standard 
+output. In effect, the programs treat the shared memory somewhat like a 
+pipe.</p><p class="docText">The two programs employ a pair of System V semaphores in a binary semaphore protocol (the <span class="docEmphasis">initSemAvailable()</span>, <span class="docEmphasis">initSemInUse()</span>, <span class="docEmphasis">reserveSem()</span>, and <span class="docEmphasis">releaseSem()</span> functions defined in Section 47.9) to ensure that:</p><ul><li><p class="docList">only one process accesses the shared memory segment at a time; and</p></li><li><p class="docList">the
+ processes alternate in accessing the segment (i.e., the writer writes 
+some data, then the reader reads the data, then the writer writes again,
+ and so on).</p></li></ul><p class="docText">Figure 48-1
+ provides an overview of the use of these two semaphores. Note that the 
+writer initializes the two semaphores so that it is the first of the two
+ programs to be able to access the shared memory segment; that is, the 
+writer’s semaphore is initially available, and the reader’s semaphore is
+ initially in use.</p><p class="docText">The source code for the application consists of three files. The first of these, Example 48-1, is a header file shared by the reader and writer programs. This header defines the <span class="docEmphasis">shmseg</span>
+ structure that we use to declare pointers to the shared memory segment.
+ Doing this allows us to impose a structure on the bytes of the shared 
+memory segment.</p><p></p><center><h5 class="docFigureTitle">Figure 48-1. Using semaphores to ensure exclusive, alternating access to shared memory</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_008-18.png"/></p></center><p></p><br/><h5 class="docExampleTitle" id="title-ID0EEWCM">Example 48-1. Header file for <tt>svshm_xfr_writer.c</tt> and <tt>svshm_xfr_reader.c</tt></h5><p></p><div class="box"><pre class="preFixedWidth"><b>svshm/svshm_xfr.h</b>
+#include &lt;sys/types.h&gt;
+#include &lt;sys/stat.h&gt;
+#include &lt;sys/sem.h&gt;
+#include &lt;sys/shm.h&gt;
+#include "binary_sems.h"        /* Declares our binary semaphore functions */
+#include "tlpi_hdr.h"
+
+#define SHM_KEY 0x1234          /* Key for shared memory segment */
+#define SEM_KEY 0x5678          /* Key for semaphore set */
+
+#define OBJ_PERMS (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)
+                                /* Permissions for our IPC objects */
+
+#define WRITE_SEM 0             /* Writer has access to shared memory */
+#define READ_SEM 1              /* Reader has access to shared memory */
+
+#ifndef BUF_SIZE                /* Allow "cc -D" to override definition */
+#define BUF_SIZE 1024           /* Size of transfer buffer */
+#endif
+
+struct shmseg {                 /* Defines structure of shared memory segment */
+    int cnt;                    /* Number of bytes used in 'buf' */
+    char buf[BUF_SIZE];         /* Data being transferred */
+};
+      <b>svshm/svshm_xfr.h</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Example 48-2 is the writer program. This program performs the following steps:</p><ul><li><p class="docList">Create
+ a set containing the two semaphores that are used by the writer and 
+reader program to ensure that they alternate in accessing the shared 
+memory segment <img alt="" border="0" id="" src="Images/getfile_004-21.png"/>.
+ The semaphores are initialized so that the writer has first access to 
+the shared memory segment. Since the writer creates the semaphore set, 
+it must be started before the reader.</p></li><li><p class="docList">Create the shared memory segment and attach it to the writer’s virtual address space at an address chosen by the system <img alt="" border="0" id="" src="Images/getfile_003-48.png"/>.</p></li><li><p class="docList">Enter a loop that transfers data from standard input to the shared memory segment <img alt="" border="0" id="" src="Images/getfile_002-50.png"/>. The following steps are performed in each loop iteration:</p><ul><li><p class="docList">Reserve (decrement) the writer semaphore <img alt="" border="0" id="" src="Images/getfile_006-32.png"/>.</p></li><li><p class="docList">Read data from standard input into the shared memory segment <img alt="" border="0" id="" src="Images/getfile_009-19.png"/>.</p></li><li><p class="docList">Release (increment) the reader semaphore <img alt="" border="0" id="" src="Images/getfile_010-16.png"/>.</p></li></ul></li><li><p class="docList">The loop terminates when no further data is available from standard input <img alt="" border="0" id="" src="Images/getfile_007-25.png"/>.
+ On the last pass through the loop, the writer indicates to the reader 
+that there is no more data by passing a block of data of length 0 (<span class="docEmphasis">shmp -&gt; cnt</span> is 0).</p></li><li><p class="docList">Upon
+ exiting the loop, the writer once more reserves its semaphore, so that 
+it knows that the reader has completed the final access to the shared 
+memory <img alt="" border="0" id="" src="Images/getfile_005-39.png"/>. The writer then removes the shared memory segment and semaphore set <img alt="" border="0" id="" src="Images/getfile-92.png"/>.</p></li></ul><p class="docText">Example 48-3
+ is the reader program. It transfers blocks of data from the shared 
+memory segment to standard output. The reader performs the following 
+steps:</p><ul><li><p class="docList">Obtain the IDs of the semaphore set and shared memory segment that were created by the writer program <img alt="" border="0" id="" src="Images/getfile_004-22.png"/>.</p></li><li><p class="docList">Attach the shared memory segment for read-only access <img alt="" border="0" id="" src="Images/getfile_003-49.png"/>.</p></li><li><p class="docList">Enter a loop that transfers data from the shared memory segment <img alt="" border="0" id="" src="Images/getfile_002-51.png"/>. The following steps are performed in each loop iteration:</p><ul><li><p class="docList">Reserve (decrement) the reader semaphore <img alt="" border="0" id="" src="Images/getfile_006-33.png"/>.</p></li><li><p class="docList">Check whether <span class="docEmphasis">shmp -&gt; cnt</span> is 0; if so, exit this loop <img alt="" border="0" id="" src="Images/getfile_009-20.png"/>.</p></li><li><p class="docList">Write the block of data in the shared memory segment to standard output <img alt="" border="0" id="" src="Images/getfile_010-17.png"/>.</p></li><li><p class="docList">Release (increment) the writer semaphore <img alt="" border="0" id="" src="Images/getfile_007-26.png"/>.</p></li></ul></li><li><p class="docList">After exiting the loop, detach the shared memory segment <img alt="" border="0" id="" src="Images/getfile_005-40.png"/> and releases the writer semaphore <img alt="" border="0" id="" src="Images/getfile-93.png"/>, so that the writer program can remove the IPC objects.</p></li></ul><h5 class="docExampleTitle" id="title-ID0EV3CM">Example 48-2. Transfer blocks of data from <span class="docEmphasis">stdin</span> to a System V shared memory segment</h5><p></p><div class="box"><pre class="preFixedHeight"><b>svshm/svshm_xfr_writer.c</b>
+    #include "semun.h"              /* Definition of semun union */
+    #include "svshm_xfr.h"
+
+    int
+    main(int argc, char *argv[])
+    {
+        int semid, shmid, bytes, xfrs;
+        struct shmseg *shmp;
+        union semun dummy;
+
+<img alt="" border="0" id="" src="Images/getfile_004-23.png"/>    semid = semget(SEM_KEY, 2, IPC_CREAT | OBJ_PERMS);
+        if (semid == -1)
+            errExit("semget");
+
+            if (initSemAvailable(semid, WRITE_SEM) == -1)
+            errExit("initSemAvailable");
+        if (initSemInUse(semid, READ_SEM) == -1)
+            errExit("initSemInUse");
+
+<img alt="" border="0" id="" src="Images/getfile_003-50.png"/>    shmid = shmget(SHM_KEY, sizeof(struct shmseg), IPC_CREAT | OBJ_PERMS);
+        if (shmid == -1)
+            errExit("shmget");
+
+        shmp = shmat(shmid, NULL, 0);
+        if (shmp == (void *) -1)
+            errExit("shmat");
+
+        /* Transfer blocks of data from stdin to shared memory */
+
+<img alt="" border="0" id="" src="Images/getfile_002-52.png"/>    for (xfrs = 0, bytes = 0; ; xfrs++, bytes += shmp-&gt;cnt) {
+
+<img alt="" border="0" id="" src="Images/getfile_006-34.png"/>
+        if (reserveSem(semid, WRITE_SEM) == -1)         /* Wait for our turn */
+                errExit("reserveSem");
+
+<img alt="" border="0" id="" src="Images/getfile_009-21.png"/>        shmp-&gt;cnt = read(STDIN_FILENO, shmp-&gt;buf, BUF_SIZE);
+            if (shmp-&gt;cnt == -1)
+                errExit("read");
+
+<img alt="" border="0" id="" src="Images/getfile_010-18.png"/>
+        if (releaseSem(semid, READ_SEM) == -1)          /* Give reader a turn */
+                errExit("releaseSem");
+
+            /* Have we reached EOF? We test this after giving the reader
+               a turn so that it can see the 0 value in shmp-&gt;cnt. */
+
+<img alt="" border="0" id="" src="Images/getfile_007-27.png"/>        if (shmp-&gt;cnt == 0)
+                break;
+        }
+
+        /* Wait until reader has let us have one more turn. We then know
+           reader has finished, and so we can delete the IPC objects. */
+
+<img alt="" border="0" id="" src="Images/getfile_005-41.png"/>    if (reserveSem(semid, WRITE_SEM) == -1)
+            errExit("reserveSem");
+
+<img alt="" border="0" id="" src="Images/getfile-94.png"/>    if (semctl(semid, 0, IPC_RMID, dummy) == -1)
+            errExit("semctl");
+        if (shmdt(shmp) == -1)
+            errExit("shmdt");
+        if (shmctl(shmid, IPC_RMID, 0) == -1)
+            errExit("shmctl");
+
+        fprintf(stderr, "Sent %d bytes (%d xfrs)\n", bytes, xfrs);
+        exit(EXIT_SUCCESS);
+    }
+          <b>svshm/svshm_xfr_writer.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docExampleTitle" id="title-ID0EC6CM">Example 48-3. Transfer blocks of data from a System V shared memory segment to <span class="docEmphasis">stdout</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>svshm/svshm_xfr_reader.c</b>
+    #include "svshm_xfr.h"
+
+    int
+    main(int argc, char *argv[])
+    {
+        int semid, shmid, xfrs, bytes;
+        struct shmseg *shmp;
+
+        /* Get IDs for semaphore set and shared memory created by writer */
+
+<img alt="" border="0" id="" src="Images/getfile_004-24.png"/>    semid = semget(SEM_KEY, 0, 0);
+        if (semid == -1)
+            errExit("semget");
+
+        shmid  = shmget(SHM_KEY, 0, 0);
+        if (shmid == -1)
+            errExit("shmget");
+
+<img alt="" border="0" id="" src="Images/getfile_003-51.png"/>    shmp = shmat(shmid, NULL, SHM_RDONLY);
+        if (shmp == (void *) -1)
+            errExit("shmat");
+
+        /* Transfer blocks of data from shared memory to stdout */
+
+<img alt="" border="0" id="" src="Images/getfile_002-53.png"/>    for (xfrs = 0, bytes = 0; ; xfrs++) {
+
+<img alt="" border="0" id="" src="Images/getfile_006-35.png"/>
+        if (reserveSem(semid, READ_SEM) == -1)          /* Wait for our turn */
+                errExit("reserveSem");
+
+<img alt="" border="0" id="" src="Images/getfile_009-22.png"/>        if (shmp-&gt;cnt == 0)                    /* Writer encountered EOF */
+                break;
+            bytes += shmp-&gt;cnt;
+
+<img alt="" border="0" id="" src="Images/getfile_010-19.png"/>        if (write(STDOUT_FILENO, shmp-&gt;buf, shmp-&gt;cnt) != shmp-&gt;cnt)
+                fatal("partial/failed write");
+
+<img alt="" border="0" id="" src="Images/getfile_007-28.png"/>
+        if (releaseSem(semid, WRITE_SEM) == -1)         /* Give writer a turn */
+                errExit("releaseSem");
+        }
+
+<img alt="" border="0" id="" src="Images/getfile_005-42.png"/>    if (shmdt(shmp) == -1)
+            errExit("shmdt");
+
+        /* Give writer one more turn, so it can clean up */
+
+<img alt="" border="0" id="" src="Images/getfile-95.png"/>    if (releaseSem(semid, WRITE_SEM) == -1)
+            errExit("releaseSem");
+
+        fprintf(stderr, "Received %d bytes (%d xfrs)\n", bytes, xfrs);
+        exit(EXIT_SUCCESS);
+    }
+          <b>svshm/svshm_xfr_reader.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The following shell session demonstrates the use of the programs in Example 48-2 and Example 46-9. We invoke the writer, using the file <tt>/etc/services</tt> as input, and then invoke the reader, directing its output to another file:</p><pre class="preFixedWidth">$ <b>wc -c /etc/services </b>                               <i> Display size of test file</i>
+764360 /etc/services
+$ <b>./svshm_xfr_writer &lt; /etc/services &amp; </b>
+[1] 9403
+$ <b>./svshm_xfr_reader &gt; out.txt </b>
+Received 764360 bytes (747 xfrs)                    <i> Message from reader</i>
+Sent 764360 bytes (747 xfrs)                        <i> Message from writer</i>
+[1]+  Done              ./svshm_xfr_writer &lt; /etc/services
+$ <b>diff /etc/services out.txt </b>
+$
+
+					  </pre><br/>
+<p class="docText">The <span class="docEmphasis">diff</span>
+ command produced no output, indicating that the output file produced by
+ the reader has the same content as the input file used by the writer.</p>
+</div>
+</body>
+</html>

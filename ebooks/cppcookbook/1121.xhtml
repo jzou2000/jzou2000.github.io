@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 11.20. Representing Large Fixed-Width Integers</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 11.20. Representing Large Fixed-Width Integers</h3>
+
+<h4 class="docSection2Title" id="title-ID0EFDAK">Problem</h4>
+<p class="docText">You need to perform arithmetic
+ of numbers larger than can be
+represented by a <tt>long</tt>
+<tt>int</tt>.</p>
+
+<h4 class="docSection2Title" id="title-ID0E4DAK">Solution</h4>
+<p class="docText">The <tt>BigInt</tt>
+
+template in Example 11-38 uses the
+<tt>bitset</tt> from the <tt>&lt;bitset&gt;</tt>
+header to allow you to represent unsigned integers using a fixed
+number of bits specified as a template parameter.</p>
+<h5 class="docExampleTitle" id="title-ID0EYEAK">Example 11-38. big_int.hpp</h5><p></p><div class="box">
+<pre class="preFixedHeight">#ifndef BIG_INT_HPP
+#define BIG_INT_HPP
+
+#include &lt;bitset&gt;
+
+#include "bitset_arithmetic.hpp" // Recipe 11.20
+
+template&lt;unsigned int N&gt;
+class BigInt
+{
+  typedef BigInt self;
+public:
+  BigInt( ) : bits( ) { }
+  BigInt(const self&amp; x) : bits(x.bits) { }
+  BigInt(unsigned long x) {
+    int n = 0;
+    while (x) {
+      bits[n++] = x &amp; 0x1;
+      x &gt;&gt;= 1;
+    }
+  }
+  explicit BigInt(const std::bitset&lt;N&gt;&amp; x) : bits(x) { }
+
+  // public functions
+  bool operator[](int n) const { return bits[n]; }
+  unsigned long toUlong( ) const { return bits.to_ulong( ); }
+
+  // operators
+  self&amp; operator&lt;&lt;=(unsigned int n) {
+    bits &lt;&lt;= n;
+    return *this;
+  }
+  self&amp; operator&gt;&gt;=(unsigned int n) {
+    bits &gt;&gt;= n;
+    return *this;
+  }
+  self operator++(int) {
+    self i = *this;
+    operator++( );
+    return i;
+  }
+  self operator--(int) {
+    self i = *this;
+    operator--( );
+    return i;
+  }
+  self&amp; operator++( ) {
+    bool carry = false;
+    bits[0] = fullAdder(bits[0], 1, carry);
+    for (int i = 1; i &lt; N; i++) {
+      bits[i] = fullAdder(bits[i], 0, carry);
+    }
+    return *this;
+  }
+  self&amp; operator--( ) {
+    bool borrow = false;
+    bits[0] = fullSubtractor(bits[0], 1, borrow);
+    for (int i = 1; i &lt; N; i++) {
+      bits[i] = fullSubtractor(bits[i], 0, borrow);
+    }
+    return *this;
+  }
+  self&amp; operator+=(const self&amp; x) {
+    bitsetAdd(bits, x.bits);
+    return *this;
+  }
+  self&amp; operator-=(const self&amp; x) {
+    bitsetSubtract(bits, x.bits);
+    return *this;
+  }
+  self&amp; operator*=(const self&amp; x) {
+    bitsetMultiply(bits, x.bits);
+    return *this;
+  }
+  self&amp; operator/=(const self&amp; x) {
+    std::bitset&lt;N&gt; tmp;
+    bitsetDivide(bits, x.bits, bits, tmp);
+    return *this;
+  }
+  self&amp; operator%=(const self&amp; x) {
+    std::bitset&lt;N&gt; tmp;
+    bitsetDivide(bits, x.bits, tmp, bits);
+    return *this;
+  }
+  self operator~( ) const { return ~bits; }
+  self&amp; operator&amp;=(self x) { bits &amp;= x.bits; return *this; }
+  self&amp; operator|=(self x) { bits |= x.bits; return *this; }
+  self&amp; operator^=(self x) { bits ^= x.bits; return *this; }
+
+  // friend functions
+  friend self operator&lt;&lt;(self x, unsigned int n) { return x &lt;&lt;= n; }
+  friend self operator&gt;&gt;(self x, unsigned int n) { return x &gt;&gt;= n; }
+  friend self operator+(self x, const self&amp; y) { return x += y; }
+  friend self operator-(self x, const self&amp; y) { return x -= y; }
+  friend self operator*(self x, const self&amp; y) { return x *= y; }
+  friend self operator/(self x, const self&amp; y) { return x /= y; }
+  friend self operator%(self x, const self&amp; y) { return x %= y; }
+  friend self operator^(self x, const self&amp; y) { return x ^= y; }
+  friend self operator&amp;(self x, const self&amp; y) { return x &amp;= y; }
+  friend self operator|(self x, const self&amp; y) { return x |= y; }
+
+  // comparison operators
+  friend bool operator==(const self&amp; x, const self&amp; y) {
+    return x.bits == y.bits;
+  }
+  friend bool operator!=(const self&amp; x, const self&amp; y) {
+    return x.bits != y.bits;
+  }
+  friend bool operator&gt;(const self&amp; x, const self&amp; y) {
+    return bitsetGt(x.bits, y.bits);
+  }
+  friend bool operator&lt;(const self&amp; x, const self&amp; y) {
+    return bitsetLt(x.bits, y.bits);
+  }
+  friend bool operator&gt;=(const self&amp; x, const self&amp; y) {
+    return bitsetGtEq(x.bits, y.bits);
+  }
+  friend bool operator&lt;=(const self&amp; x, const self&amp; y) {
+    return bitsetLtEq(x.bits, y.bits);
+  }
+private:
+  std::bitset&lt;N&gt; bits;
+};
+
+#endif
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">The <tt>BigInt</tt> template class could be used to
+represent factorials, as shown in Example 11-39.</p>
+<h5 class="docExampleTitle" id="title-ID0EWFAK">Example 11-39. Using the 
+big_int class</h5><p></p><div class="box">
+
+<pre class="preFixedHeight">#include "big_int.hpp"
+
+#include &lt;iostream&gt;
+#include &lt;vector&gt;
+#include &lt;iterator&gt;
+#include &lt;algorithm&gt;
+
+using namespace std;
+
+void outputBigInt(BigInt&lt;1024&gt; x) {
+  vector&lt;int&gt; v;
+  if (x == 0) {
+    cout &lt;&lt; 0;
+    return;
+  }
+  while (x &gt; 0) {
+    v.push_back((x % 10).to_ulong( ));
+    x /= 10;
+  }
+  copy(v.rbegin( ), v.rend( ), ostream_iterator&lt;int&gt;(cout, ""));
+  cout &lt;&lt; endl;
+}
+
+int main( ) {
+  BigInt&lt;1024&gt; n(1);
+  // compute 32 factorial
+  for (int i=1; i &lt;= 32; ++i) {
+    n *= i;
+  }
+  outputBigInt(n);
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">The program in Example 11-39 outputs:</p>
+<pre>263130836933693530167218012160000000</pre><br/>
+
+<h4 class="docSection2Title" id="title-ID0EIGAK">Discussion</h4>
+<p class="docText">Large integers are common in many applications. In cryptography, for
+example, integers of 1,000 bits and larger are not uncommon. However,
+the current C++ standard provides integers only as large as a
+<tt>long int</tt>.</p>
+<p></p><table align="center" bgcolor="black" border="0" cellpadding="1" cellspacing="0" width="90%"><tbody><tr><td><table bgcolor="white" border="0" cellpadding="6" cellspacing="0" width="100%"><tbody><tr><td valign="top" width="60"><img alt="" height="54" src="Images/tip_yellow.gif" width="50"/></td><td valign="top">
+<p class="docText">The number of bits in a <tt>long int</tt> is implementation
+specific, but is guaranteed to be at least 32. And
+<tt>t</tt> probably won't ever be as large
+as 1,000. Remember that one of those bits is reserved for the sign.</p>
+</td></tr></tbody></table></td></tr></tbody></table><p></p><br/>
+<p class="docText">The next version of the standard (C++ 0x) is expected to follow the
+C99 standard and provide a <tt>long long</tt> type that
+will be defined as being at least as large as a long int, and
+possibly bigger. Despite this there
+ will always be occasions where an
+integer type larger than the largest primitive is needed.</p>
+<p class="docText">The implementation I presented here is based on a binary
+representation of numbers using a <tt>bitset</tt>, at a
+cost of some performance. What I lost in performance I more than made
+up for in simplicity. A more efficient implementation of arbitrary
+precision numbers could easily fill the book.</p>
+
+<h4 class="docSection2Title" id="title-ID0ETHAK">See Also</h4>
+<p class="docText">Recipe 11.19</p>
+</div>
+</body>
+</html>

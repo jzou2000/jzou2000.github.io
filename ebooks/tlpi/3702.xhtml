@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>37.2. Creating a Daemon</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">37.2. Creating a Daemon</h3><p class="docText">To become a daemon, a program performs the following steps:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Perform a <span class="docEmphasis">fork()</span>, after which the parent exits and the child continues. (As a consequence, the daemon becomes a child of the <span class="docEmphasis">init</span> process.) This step is done for two reasons:</p><ul><li><p class="docList">Assuming
+ the daemon was started from the command line, the parent’s termination 
+is noticed by the shell, which then displays another shell prompt and 
+leaves the child to continue in the background.</p></li><li><p class="docList">The
+ child process is guaranteed not to be a process group leader, since it 
+inherited its process group ID from its parent and obtained its own 
+unique process ID, which differs from the inherited process group ID. 
+This is required in order to be able to successfully perform the next 
+step.</p></li></ul></div></li><li><div style="font-weight:normal"><p class="docList">The child process calls <span class="docEmphasis">setsid()</span> (Section 34.3) to start a new session and free itself of any association with a controlling terminal.</p></div></li><li><div style="font-weight:normal"><p class="docList">If
+ the daemon never opens any terminal devices thereafter, then we don’t 
+need to worry about the daemon reacquiring a controlling terminal. If 
+the daemon might later open a terminal device, then we must take steps 
+to ensure that the device does not become the controlling terminal. We 
+can do this in two ways:</p><ul><li><p class="docList">Specify the <tt>O_NOCTTY</tt> flag on any <span class="docEmphasis">open()</span> that may apply to a terminal device.</p></li><li><p class="docList">Alternatively, and more simply, perform a second <span class="docEmphasis">fork()</span> after the <span class="docEmphasis">setsid()</span>
+ call, and again have the parent exit and the (grand)child continue. 
+This ensures that the child is not the session leader, and thus, 
+according to the System V conventions for the acquisition of a 
+controlling terminal (which Linux follows), the process can never 
+reacquire a controlling terminal (Section 34.4).</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On implementations following the BSD conventions, a process can obtain a controlling terminal only through an explicit <span class="docEmphasis">ioctl()</span> <tt>TIOCSCTTY</tt> operation, and so this second <span class="docEmphasis">fork()</span> has no effect with regard to the acquisition of a controlling terminal, but the superfluous <span class="docEmphasis">fork()</span> does no harm.</p><hr noshade="noshade" size="1"/></div></li><li><div style="font-weight:normal"><p class="docList">Clear the process umask (Section 15.4.6), to ensure that, when the daemon creates files and directories, they have the requested permissions.</p></div></li><li><div style="font-weight:normal"><p class="docList">Change the process’s current working directory, typically to the root directory (<tt>/</tt>).
+ This is necessary because a daemon usually runs until system shutdown; 
+if the daemon’s current working directory is on a file system other than
+ the one containing <tt>/</tt>, then that file system can’t be unmounted (Section 14.8.2).
+ Alternatively, the daemon can change its working directory to a 
+location where it does its job or a location defined in its 
+configuration file, as long as we know that the file system containing 
+this directory never needs to be unmounted. For example, <span class="docEmphasis">cron</span> places itself in <tt>/var/spool/cron</tt>.</p></div></li><li><div style="font-weight:normal"><p class="docList">Close
+ all open file descriptors that the daemon has inherited from its 
+parent. (A daemon may need to keep certain inherited file descriptors 
+open, so this step is optional, or open to variation.) This is done for a
+ variety of reasons. Since the daemon has lost its controlling terminal 
+and is running in the background, it makes no sense for the daemon to 
+keep file descriptors 0, 1, and 2 open if these refer to the terminal. 
+Furthermore, we can’t unmount any file systems on which the long-lived 
+daemon holds files open. And, as usual, we should close unused open file
+ descriptors because file descriptors are a finite resource.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Some UNIX implementations (e.g., Solaris 9 and some of the recent BSD releases) provide a function named <span class="docEmphasis">closefrom(n)</span> (or similar), which closes all file descriptors greater than or equal to <span class="docEmphasis">n</span>. This function isn’t available on Linux.</p><hr noshade="noshade" size="1"/></div></li><li><div style="font-weight:normal"><p class="docList">After having closed file descriptors 0, 1, and 2, a daemon normally opens <tt>/dev/null</tt> and uses <span class="docEmphasis">dup2()</span> (or similar) to make all those descriptors refer to this device. This is done for two reasons:</p><ul><li><p class="docList">It
+ ensures that if the daemon calls library functions that perform I/O on 
+these descriptors, those functions won’t unexpectedly fail.</p></li><li><p class="docList">It
+ prevents the possibility that the daemon later opens a file using 
+descriptor 1 or 2, which is then written to—and thus corrupted—by a 
+library function that expects to treat these descriptors as standard 
+output and standard error.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText"><tt>/dev/null</tt>
+ is a virtual device that always discards the data written to it. When 
+we want to eliminate the standard output or error of a shell command, we
+ can redirect it to this file. Reads from this device always return 
+end-of-file.</p><hr noshade="noshade" size="1"/></div></li></ol></div><p class="docText">We now show the implementation of a function, <span class="docEmphasis">becomeDaemon()</span>, that performs the steps described above in order to turn the caller into a daemon.</p><pre>#include &lt;syslog.h&gt;
+
+int <b>becomeDaemon</b>(int <span class="docEmphasis">flags</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">becomeDaemon()</span> function takes a bit-mask argument, <span class="docEmphasis">flags</span>, that allows the caller to selectively inhibit some of the steps, as described in the comments in the header file in Example 37-1.</p><h5 class="docExampleTitle" id="title-ID0EWPGK">Example 37-1. Header file for <tt>become_daemon.c</tt></h5><p></p><div class="box"><pre class="preFixedWidth"><b>daemons/become_daemon.h</b>
+#ifndef BECOME_DAEMON_H             /* Prevent double inclusion */
+#define BECOME_DAEMON_H
+
+/* Bit-mask values for 'flags' argument of becomeDaemon() */
+
+#define BD_NO_CHDIR           01    /* Don't chdir("/") */
+#define BD_NO_CLOSE_FILES     02    /* Don't close all open files */
+#define BD_NO_REOPEN_STD_FDS  04    /* Don't reopen stdin, stdout, and
+                                      stderr to /dev/null */
+#define BD_NO_UMASK0         010    /* Don't do a umask(0) */
+
+#define BD_MAX_CLOSE  8192          /* Maximum file descriptors to close if
+                                       sysconf(_SC_OPEN_MAX) is indeterminate */
+
+int becomeDaemon(int flags);
+
+#endif
+      <b>daemons/become_daemon.h</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The implementation of the <span class="docEmphasis">becomeDaemon()</span> function is shown in Example 37-2.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The GNU C library provides a nonstandard function, <span class="docEmphasis">daemon()</span>, that turns the caller into a daemon. The <span class="docEmphasis">glibc daemon()</span> function doesn’t have an equivalent of the <span class="docEmphasis">flags</span> argument of our <span class="docEmphasis">becomeDaemon()</span> function.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0EERGK">Example 37-2. Creating a daemon process</h5><p></p><div class="box"><pre class="preFixedHeight"><b>daemons/become_daemon.c</b>
+#include &lt;sys/stat.h&gt;
+#include &lt;fcntl.h&gt;
+#include "become_daemon.h"
+#include "tlpi_hdr.h"
+
+int                             /* Returns 0 on success, -1 on error */
+becomeDaemon(int flags)
+{
+    int maxfd, fd;
+
+    switch (fork()) {                   /* Become background process */
+    case -1: return -1;
+    case 0:  break;                     /* Child falls through... */
+    default: _exit(EXIT_SUCCESS);       /* while parent terminates */
+    }
+
+    if (setsid() == -1)                 /* Become leader of new session */
+        return -1;
+
+    switch (fork()) {                   /* Ensure we are not session leader */
+    case -1: return -1;
+    case 0:  break;
+    default: _exit(EXIT_SUCCESS);
+    }
+
+    if (!(flags &amp; BD_NO_UMASK0))
+        umask(0);                       /* Clear file mode creation mask */
+
+    if (!(flags &amp; BD_NO_CHDIR))
+        chdir("/");                     /* Change to root directory */
+
+    if (!(flags &amp; BD_NO_CLOSE_FILES)) { /* Close all open files */
+        maxfd = sysconf(_SC_OPEN_MAX);
+        if (maxfd == -1)                /* Limit is indeterminate... */
+            maxfd = BD_MAX_CLOSE;       /* so take a guess */
+
+        for (fd = 0; fd &lt; maxfd; fd++)
+            close(fd);
+    }
+
+    if (!(flags &amp; BD_NO_REOPEN_STD_FDS)) {
+        close(STDIN_FILENO);            /* Reopen standard fd's to /dev/null */
+
+        fd = open("/dev/null", O_RDWR);
+
+        if (fd != STDIN_FILENO)         /* 'fd' should be 0 */
+            return -1;
+        if (dup2(STDIN_FILENO, STDOUT_FILENO) != STDOUT_FILENO)
+            return -1;
+        if (dup2(STDIN_FILENO, STDERR_FILENO) != STDERR_FILENO)
+            return -1;
+    }
+
+    return 0;
+}
+      <b>daemons/become_daemon.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">If we write a program that makes the call <span class="docEmphasis">becomeDaemon(0)</span> and then sleeps for a while, we can use <span class="docEmphasis">ps(1)</span> to look at some of the attributes of the resulting process:</p><pre>$ <b>./test_become_daemon</b>
+$ <b>ps -C test_become_daemon -o "pid ppid pgid sid tty command"</b>
+  PID  PPID  PGID   SID TT       COMMAND
+24731     1 24730 24730 ?        ./test_become_daemon</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">We don’t show the source code for <tt>daemons/test_become_daemon.c</tt>, since it is trivial, but the program is provided in the source code distribution for this book.</p><hr noshade="noshade" size="1"/><p class="docText">In the output of <span class="docEmphasis">ps</span>, the <tt>?</tt> under the <span class="docEmphasis">TT</span>
+ heading indicates that the process has no controlling terminal. From 
+the fact that the process ID is not the same as the session ID (SID), we
+ can also see that the process is not the leader of its session, and so 
+won’t reacquire a controlling terminal if it opens a terminal device. 
+This is as things should be for a daemon.</p>
+</div>
+</body>
+</html>

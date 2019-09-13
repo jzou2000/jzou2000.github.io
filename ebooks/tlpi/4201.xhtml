@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>42.1. Dynamically Loaded Libraries</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">42.1. Dynamically Loaded Libraries</h3><p class="docText">When
+ an executable starts, the dynamic linker loads all of the shared 
+libraries in the program’s dynamic dependency list. Sometimes, however, 
+it can be useful to load libraries at a later time. For example, a 
+plug-in is loaded only when it is needed. This functionality is provided
+ by an API to the dynamic linker. This API, usually referred to as the <span class="docEmphasis">dlopen</span> API, originated on Solaris, and much of it is now specified in SUSv3.</p><p class="docText">The <span class="docEmphasis">dlopen</span>
+ API enables a program to open a shared library at run time, search for a
+ function by name in that library, and then call the function. A shared 
+library loaded at run time in this way is commonly referred to as a <span class="docEmphasis">dynamically loaded library</span>, and is created in the same way as any other shared library.</p><p class="docText">The core <span class="docEmphasis">dlopen</span> API consists of the following functions (all of which are specified in SUSv3):</p><ul><li><p class="docList">The <span class="docEmphasis">dlopen()</span> function opens a shared library, returning a handle used by subsequent calls.</p></li><li><p class="docList">The <span class="docEmphasis">dlsym()</span> function searches a library for a symbol (a string containing the name of a function or variable) and returns its address.</p></li><li><p class="docList">The <span class="docEmphasis">dlclose()</span> function closes a library previously opened by <span class="docEmphasis">dlopen()</span>.</p></li><li><p class="docList">The <span class="docEmphasis">dlerror()</span> function returns an error-message string, and is used after a failure return from one of the preceding functions.</p></li></ul><p class="docText">The <span class="docEmphasis">glibc</span> implementation also includes a number of related functions, some of which we describe below.</p><p class="docText">To build programs that use the <span class="docEmphasis">dlopen</span> API on Linux, we must specify the <span class="docEmphasis">-ldl</span> option, in order to link against the <span class="docEmphasis">libdl</span> library.</p><h4 class="docSection2Title" id="title-ID0EWCAM">42.1.1. Opening a Shared Library: <span class="docEmphasis">dlopen()</span></h4><p class="docText">The <span class="docEmphasis">dlopen()</span> function loads the shared library named in <span class="docEmphasis">libfilename</span> into the calling process’s virtual address space and increments the count of open references to the library.</p><pre>#include &lt;dlfcn.h&gt;
+
+void *<b>dlopen</b>(const char *<span class="docEmphasis">libfilename</span>, int <span class="docEmphasis">flags</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns library handle on success, or <tt>NULL</tt> on error</p><hr noshade="noshade" size="1"/><p class="docText">If <span class="docEmphasis">libfilename</span> contains a slash (<tt>/</tt>), <span class="docEmphasis">dlopen()</span>
+ interprets it as an absolute or relative pathname. Otherwise, the 
+dynamic linker searches for the shared library using the rules described
+ in Section 41.11.</p><p class="docText">On success, <span class="docEmphasis">dlopen()</span> returns a handle that can be used to refer to the library in subsequent calls to functions in the <span class="docEmphasis">dlopen</span> API. If an error occurred (e.g., the library couldn’t be found), <span class="docEmphasis">dlopen()</span> returns <tt>NULL</tt>.</p><p class="docText">If the shared library specified by <span class="docEmphasis">libfilename</span> contains dependencies on other shared libraries, <span class="docEmphasis">dlopen()</span>
+ also automatically loads those libraries. This procedure occurs 
+recursively if necessary. We refer to the set of such loaded libraries 
+as this library’s <span class="docEmphasis">dependency tree</span>.</p><p class="docText">It is possible to call <span class="docEmphasis">dlopen()</span>
+ multiple times on the same library file. The library is loaded into 
+memory only once (by the initial call), and all calls return the same <span class="docEmphasis">handle</span> value. However, the <span class="docEmphasis">dlopen</span> API maintains a reference count for each library handle. This count is incremented by each call to <span class="docEmphasis">dlopen()</span> and decremented by each call to <span class="docEmphasis">dlclose()</span>; only when the count reaches 0 does <span class="docEmphasis">dlclose()</span> unload the library from memory.</p><p class="docText">The <span class="docEmphasis">flags</span> argument is a bit mask that must include exactly one of the constants <tt>RTLD_LAZY</tt> or <tt>RTLD_NOW</tt>, with the following meanings:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">RTLD_LAZY</span></span></span></p></dt><dd><p class="docList">Undefined
+ function symbols in the library should be resolved only as the code is 
+executed. If a piece of code requiring a particular symbol is not 
+executed, that symbol is never resolved. Lazy resolution is performed 
+only for function references; references to variables are always 
+resolved immediately. Specifying the <tt>RTLD_LAZY</tt>
+ flag provides behavior that corresponds to the normal operation of the 
+dynamic linker when loading the shared libraries identified in an 
+executable’s dynamic dependency list.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">RTLD_NOW</span></span></span></p></dt><dd><p class="docList">All undefined symbols in the library should be immediately resolved before <span class="docEmphasis">dlopen()</span>
+ completes, regardless of whether they will ever be required. As a 
+consequence, opening the library is slower, but any potential undefined 
+function symbol errors are detected immediately instead of at some later
+ time. This can be useful when debugging an application, or simply to 
+ensure that an application fails immediately on an unresolved symbol, 
+rather than doing so only after executing for a long time.</p></dd></dl><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">By setting the environment variable <tt>LD_BIND_NOW</tt> to a nonempty string, we can force the dynamic linker to immediately resolve all symbols (i.e., like <tt>RTLD_NOW</tt>)
+ when loading the shared libraries identified in an executable’s dynamic
+ dependency list. This environment variable is effective in <span class="docEmphasis">glibc</span> 2.1.1 and later. Setting <tt>LD_BIND_NOW</tt> overrides the effect of the <span class="docEmphasis">dlopen()</span> <tt>RTLD_LAZY</tt> flag.</p><hr noshade="noshade" size="1"/><p class="docText">It is also possible to include further values in <span class="docEmphasis">flags</span>. The following flags are specified in SUSv3:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">RTLD_GLOBAL</span></span></span></p></dt><dd><p class="docList">Symbols
+ in this library and its dependency tree are made available for 
+resolving references in other libraries loaded by this process and also 
+for lookups via <span class="docEmphasis">dlsym()</span>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">RTLD_LOCAL</span></span></span></p></dt><dd><p class="docList">This is the converse of <tt>RTLD_GLOBAL</tt>
+ and the default if neither constant is specified. It specifies that 
+symbols in this library and its dependency tree are not available to 
+resolve references in subsequently loaded libraries.</p></dd></dl><p class="docText">SUSv3 doesn’t specify a default if neither <tt>RTLD_GLOBAL</tt> nor <tt>RTLD_LOCAL</tt> is specified. Most UNIX implementations assume the same default (<tt>RTLD_LOCAL</tt>) as Linux, but a few assume a default of <tt>RTLD_GLOBAL</tt>.</p><p class="docText">Linux also supports a number of flags that are not specified in SUSv3:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">RTLD_NODELETE</span></span> (since <span class="docEmphasis">glibc</span> 2.2)</span></p></dt><dd><p class="docList">Don’t unload the library during a <span class="docEmphasis">dlclose()</span>,
+ even if the reference count falls to 0. This means that the library’s 
+static variables are not reinitialized if the library is later reloaded 
+by <span class="docEmphasis">dlopen()</span>. (We can achieve a similar effect for libraries loaded automatically by the dynamic linker by specifying the <span class="docEmphasis">gcc -Wl,-znodelete</span> option when creating the library.)</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">RTLD_NOLOAD</span></span> (since <span class="docEmphasis">glibc</span> 2.2)</span></p></dt><dd><p class="docList">Don’t
+ load the library. This serves two purposes. First, we can use this flag
+ to check if a particular library is currently loaded as part of the 
+process’s address space. If it is, <span class="docEmphasis">dlopen()</span> returns the library’s handle; if it is not, <span class="docEmphasis">dlopen()</span> returns <tt>NULL</tt>. Second, we can use this flag to “promote” the <span class="docEmphasis">flags</span> of an already loaded library. For example, we can specify <tt>RTLD_NOLOAD | RTLD_GLOBAL</tt> in <span class="docEmphasis">flags</span> when using <span class="docEmphasis">dlopen()</span> on a library previously opened with <tt>RTLD_LOCAL</tt>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">RTLD_DEEPBIND</span></span> (since <span class="docEmphasis">glibc</span> 2.3.4)</span></p></dt><dd><p class="docList">When
+ resolving symbol references made by this library, search for 
+definitions in the library before searching for definitions in libraries
+ that have already been loaded. This allows a library to be 
+self-contained, using its own symbol definitions in preference to global
+ symbols with the same name defined in other shared libraries that have 
+already been loaded. (This is similar to the effect of the <span class="docEmphasis">-Bsymbolic</span> linker option described in Section 41.12.)</p></dd></dl><p class="docText">The <tt>RTLD_NODELETE</tt> and <tt>RTLD_NOLOAD</tt> flags are also implemented in the Solaris <span class="docEmphasis">dlopen</span> API, but are available on few other UNIX implementations. The <tt>RTLD_DEEPBIND</tt> flag is Linux-specific.</p><p class="docText">As a special case, we can specify <span class="docEmphasis">libfilename</span> as <tt>NULL</tt>. This causes <span class="docEmphasis">dlopen()</span>
+ to return a handle for the main program. (SUSv3 refers to this as a 
+handle for the “global symbol object.”) Specifying this handle in a 
+subsequent call to <span class="docEmphasis">dlsym()</span>
+ causes the requested symbol to be sought in the main program, followed 
+by all shared libraries loaded at program startup, and then all 
+libraries dynamically loaded with the <tt>RTLD_GLOBAL</tt> flag.</p><h4 class="docSection2Title" id="title-ID0EYMAM">42.1.2. Diagnosing Errors: <span class="docEmphasis">dlerror()</span></h4><p class="docText">If we receive an error return from <span class="docEmphasis">dlopen()</span> or one of the other functions in the <span class="docEmphasis">dlopen</span> API, we can use <span class="docEmphasis">dlerror()</span> to obtain a pointer to a string that indicates the cause of the error.</p><pre>#include &lt;dlfcn.h&gt;
+
+const char *<span class="docEmphasis">dlerror</span>(void);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns pointer to error-diagnostic string, or <tt>NULL</tt> if no error has occurred since previous call to <span class="docEmphasis">dlerror()</span></p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">dlerror()</span> function returns <tt>NULL</tt> if no error has occurred since the last call to <span class="docEmphasis">dlerror()</span>. We’ll see how this is useful in the next section.</p><h4 class="docSection2Title" id="title-ID0E6OAM">42.1.3. Obtaining the Address of a Symbol: <span class="docEmphasis">dlsym()</span></h4><p class="docText">The <span class="docEmphasis">dlsym()</span> function searches for the named <span class="docEmphasis">symbol</span> (a function or variable) in the library referred to by <span class="docEmphasis">handle</span> and in the libraries in that library’s dependency tree.</p><pre>#include &lt;dlfcn.h&gt;
+
+void *<b>dlsym</b>(void *<span class="docEmphasis">handle</span>, char *<span class="docEmphasis">symbol</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns address of <span class="docEmphasis">symbol</span>, or <tt>NULL</tt> if <span class="docEmphasis">symbol</span> is not found</p><hr noshade="noshade" size="1"/><p class="docText">If <span class="docEmphasis">symbol</span> is found, <span class="docEmphasis">dlsym()</span> returns its address; otherwise, <span class="docEmphasis">dlsym()</span> returns <tt>NULL</tt>. The <span class="docEmphasis">handle</span> argument is normally a library handle returned by a previous call to <span class="docEmphasis">dlopen()</span>. Alternatively, it may be one of the so-called pseudohandles described below.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">A related function, <span class="docEmphasis">dlvsym(handle, symbol, version)</span>, is similar to <span class="docEmphasis">dlsym()</span>, but can be used to search a symbol-versioned library for a symbol definition whose version matches the string specified in <span class="docEmphasis">version</span>. (We describe symbol versioning in Section 42.3.2.) The <tt>_GNU_SOURCE</tt> feature test macro must be defined in order to obtain the declaration of this function from <tt>&lt;dlfcn.h&gt;</tt>.</p><hr noshade="noshade" size="1"/><p class="docText">The value of a symbol returned by <span class="docEmphasis">dlsym()</span> may be <tt>NULL</tt>, which is indistinguishable from the “symbol not found” return. In order to differentiate the two possibilities, we must call <span class="docEmphasis">dlerror()</span> beforehand (to make sure that any previously held error string is cleared) and then if, after the call to <span class="docEmphasis">dlsym()</span>, <span class="docEmphasis">dlerror()</span> returns a non-<tt>NULL</tt> value, we know that an error occurred.</p><p class="docText">If <span class="docEmphasis">symbol</span> is the name of a variable, then we can assign the return value of <span class="docEmphasis">dlsym()</span> to an appropriate pointer type, and obtain the value of the variable by dereferencing the pointer:</p><pre>int *ip;
+
+ip = (int *) dlsym(symbol, "myvar");
+if (ip != NULL)
+    printf("Value is %d\n", *ip);</pre><br/>
+<p class="docText">If <span class="docEmphasis">symbol</span> is the name of a function, then the pointer returned by <span class="docEmphasis">dlsym()</span> can be used to call the function. We can store the value returned by <span class="docEmphasis">dlsym()</span> in a pointer of the appropriate type, such as the following:</p><pre>int (*funcp)(int);              /* Pointer to a function taking an integer
+                                   argument and returning an integer */</pre><br/>
+<p class="docText">However, we can’t simply assign the result of <span class="docEmphasis">dlsym()</span> to such a pointer, as in the following example:</p><pre>funcp = dlsym(handle, symbol);</pre><br/>
+<p class="docText">The reason is that the C99 standard forbids assignment between a function pointer and <span class="docEmphasis">void *</span>. The solution is to use the following (somewhat clumsy) cast:</p><pre>*(void **) (&amp;funcp) = dlsym(handle, symbol);</pre><br/>
+<p class="docText">Having used <span class="docEmphasis">dlsym()</span>
+ to obtain a pointer to the function, we can then call the function 
+using the usual C syntax for dereferencing function pointers:</p><pre>res = (*funcp)(somearg);</pre><br/>
+<p class="docText">Instead of the <span class="docEmphasis">*(void **)</span> syntax shown above, one might consider using the following seemingly equivalent code when assigning the return value of <span class="docEmphasis">dlsym()</span>:</p><pre>(void *) funcp = dlsym(handle, symbol);</pre><br/>
+<p class="docText">However, for this code, <span class="docEmphasis">gcc -pedantic</span> warns that “ANSI C forbids the use of cast expressions as lvalues.” The <span class="docEmphasis">*(void **)</span> syntax doesn’t incur this warning because we are assigning to an address <span class="docEmphasis">pointed to</span> by the assignment’s lvalue.</p><p class="docText">On many UNIX implementations, we can use casts such as the following to eliminate warnings from the C compiler:</p><pre>funcp = (int (*) (int)) dlsym(handle, symbol);</pre><br/>
+<p class="docText">However, the specification of <span class="docEmphasis">dlsym()</span> in SUSv3 <span class="docEmphasis">Technical Corrigendum Number 1</span> notes that the C99 standard nevertheless requires compilers to generate a warning for such a conversion, and proposes the <span class="docEmphasis">*(void **)</span> syntax shown above.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">SUSv3 TC1 noted that because of the need for the <span class="docEmphasis">*(void **)</span> syntax, a future version of the standard may define separate <span class="docEmphasis">dlsym()</span>-like APIs for handling data and function pointers. However, SUSv4 contains no changes with respect to this point.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EZUAM">42.1.3.1. Using library pseudohandles with <span class="docEmphasis">dlsym()</span></h5><p class="docText">Instead of specifying a library handle returned by a call to <span class="docEmphasis">dlopen()</span>, either of the following <span class="docEmphasis">pseudohandles</span> may be specified as the <span class="docEmphasis">handle</span> argument for <span class="docEmphasis">dlsym()</span>:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">RTLD_DEFAULT</span></span></span></p></dt><dd><p class="docList">Search for <span class="docEmphasis">symbol</span>
+ starting with the main program, and then proceeding in order through 
+the list of all shared libraries loaded, including those libraries 
+dynamically loaded by <span class="docEmphasis">dlopen()</span> with the <tt>RTLD_GLOBAL</tt> flag. This corresponds to the default search model employed by the dynamic linker.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">RTLD_NEXT</span></span></span></p></dt><dd><p class="docList">Search for <span class="docEmphasis">symbol</span> in shared libraries loaded after the one invoking <span class="docEmphasis">dlsym()</span>.
+ This is useful when creating a wrapper function with the same name as a
+ function defined elsewhere. For example, in our main program, we may 
+define our own version of <span class="docEmphasis">malloc()</span> (which perhaps does some bookkeeping of memory allocation), and this function can invoke the real <span class="docEmphasis">malloc()</span> by first obtaining its address via the call <span class="docEmphasis">func = dlsym(RTLD_NEXT, “malloc”)</span>.</p></dd></dl><p class="docText">The
+ pseudohandle values listed above are not required by SUSv3 (which 
+nevertheless reserves them for future use), and are not available on all
+ UNIX implementations. In order to get the definitions of these 
+constants from <tt>&lt;dlfcn.h&gt;</tt>, we must define the <tt>_GNU_SOURCE</tt> feature test macro.</p><h5 class="docSection3Title" id="title-ID0EGXAM">42.1.3.2. Example program</h5><p class="docText">Example 42-1 demonstrates the use of the <span class="docEmphasis">dlopen</span>
+ API. This program takes two command-line arguments: the name of a 
+shared library to load and the name of a function to execute within that
+ library. The following examples demonstrate the use of this program:</p><pre>$ <b>./dynload ./libdemo.so.1 x1</b>
+Called mod1-x1
+$ <b>LD_LIBRARY_PATH=. ./dynload libdemo.so.1 x1</b>
+Called mod1-x1</pre><br/>
+<p class="docText">In the first of the above commands, <span class="docEmphasis">dlopen()</span>
+ notes that the library path includes a slash and thus interprets it as a
+ relative pathname (in this case, to a library in the current working 
+directory). In the second command, we specify a library search path in <tt>LD_LIBRARY_PATH</tt>.
+ This search path is interpreted according to the usual rules of the 
+dynamic linker (in this case, likewise to find the library in the 
+current working directory).</p><h5 class="docExampleTitle" id="title-ID0ECYAM">Example 42-1. Using the <span class="docEmphasis">dlopen</span> API</h5><p></p><div class="box"><pre class="preFixedHeight"><b>shlibs/dynload.c</b>
+#include &lt;dlfcn.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    void *libHandle;            /* Handle for shared library */
+    void (*funcp)(void);        /* Pointer to function with no arguments */
+    const char *err;
+
+    if (argc != 3 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s lib-path func-name\n", argv[0]);
+
+    /* Load the shared library and get a handle for later use */
+
+    libHandle = dlopen(argv[1], RTLD_LAZY);
+    if (libHandle == NULL)
+        fatal("dlopen: %s", dlerror());
+
+    /* Search library for symbol named in argv[2] */
+
+    (void) dlerror();                           /* Clear dlerror() */
+    *(void **) (&amp;funcp) = dlsym(libHandle, argv[2]);
+    err = dlerror();
+    if (err != NULL)
+        fatal("dlsym: %s", err);
+
+    /* If the address returned by dlsym() is non-NULL, try calling it
+       as a function that takes no arguments */
+
+    if (funcp == NULL)
+        printf("%s is NULL\n", argv[2]);
+    else
+        (*funcp)();
+
+    dlclose(libHandle);                         /* Close the library */
+
+    exit(EXIT_SUCCESS);
+}
+
+      <b>shlibs/dynload.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0EQYAM">42.1.4. Closing a Shared Library: <span class="docEmphasis">dlclose()</span></h4><p class="docText">The <span class="docEmphasis">dlclose()</span> function closes a library.</p><pre>#include &lt;dlfcn.h&gt;
+
+int <b>dlclose</b>(void *<span class="docEmphasis">handle</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">dlclose()</span> function decrements the system’s counter of open references to the library referred to by <span class="docEmphasis">handle</span>.
+ If this reference count falls to 0, and no symbols in the library are 
+required by other libraries, then the library is unloaded. This 
+procedure is also (recursively) performed for the libraries in this 
+library’s dependency tree. An implicit <span class="docEmphasis">dlclose()</span> of all libraries is performed on process termination.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">From <span class="docEmphasis">glibc</span> 2.2.3 onward, a function within a shared library can use <span class="docEmphasis">atexit()</span> (or <span class="docEmphasis">on_exit()</span>) to establish a function that is called automatically when the library is unloaded.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0EJ1AM">42.1.5. Obtaining Information About Loaded Symbols: <span class="docEmphasis">dladdr()</span></h4><p class="docText">Given an address in <span class="docEmphasis">addr</span> (typically, one obtained by an earlier call to <span class="docEmphasis">dlsym()</span>), <span class="docEmphasis">dladdr()</span> returns a structure containing information about that address.</p><pre>#define _GNU_SOURCE
+#include &lt;dlfcn.h&gt;
+
+int <b>dladdr</b>(const void *<span class="docEmphasis">addr</span>, Dl_info *<span class="docEmphasis">info</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns nonzero value if <span class="docEmphasis">addr</span> was found in a shared library, otherwise 0</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">info</span> argument is a pointer to a caller-allocated structure that has the following form:</p><pre>typedef struct {
+    const char *dli_fname;          /* Pathname of shared library
+                                       containing 'addr' */
+    void       *dli_fbase;          /* Base address at which shared
+                                       library is loaded */
+    const char *dli_sname;          /* Name of nearest run-time symbol
+                                       with an address &lt;= 'addr' */
+    void       *dli_saddr;          /* Actual value of the symbol
+                                       returned in 'dli_sname' */
+} Dl_info;</pre><br/>
+<p class="docText">The first two fields of the <span class="docEmphasis">Dl_info</span> structure specify the pathname and run-time base address of the shared library containing the address specified in <span class="docEmphasis">addr</span>. The last two fields return information about that address. Assuming that <span class="docEmphasis">addr</span> points to the exact address of a symbol in the shared library, then <span class="docEmphasis">dli_saddr</span> returns the same value as was passed in <span class="docEmphasis">addr</span>.</p><p class="docText">SUSv3 doesn’t specify <span class="docEmphasis">dladdr()</span>, and this function is not available on all UNIX implementations.</p><h4 class="docSection2Title" id="title-ID0EB4AM">42.1.6. Accessing Symbols in the Main Program</h4><p class="docText">Suppose that we use <span class="docEmphasis">dlopen()</span> to dynamically load a shared library, use <span class="docEmphasis">dlsym()</span> to obtain the address of a function <span class="docEmphasis">x()</span> from that library, and then call <span class="docEmphasis">x()</span>. If <span class="docEmphasis">x()</span> in turn calls a function <span class="docEmphasis">y()</span>, then <span class="docEmphasis">y()</span> would normally be sought in one of the shared libraries loaded by the program.</p><p class="docText">Sometimes, it is desirable instead to have <span class="docEmphasis">x()</span> invoke an implementation of <span class="docEmphasis">y()</span>
+ in the main program. (This is similar to a callback mechanism.) In 
+order to do this, we must make the (global-scope) symbols in the main 
+program available to the dynamic linker, by linking the program using 
+the <span class="docEmphasis">--export-dynamic</span> linker option:</p><pre class="preFixedWidth">$ <b>gcc -Wl,--export-dynamic main.c </b>     <i> (plus further options and arguments)</i>
+
+					  </pre><br/>
+<p class="docText">Equivalently, we can write the following:</p><pre>$ <b>gcc -export-dynamic main.c</b></pre><br/>
+<p class="docText">Using either of these options allows a dynamically loaded library to access global symbols in the main program.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">gcc -rdynamic</span> option and the <span class="docEmphasis">gcc -Wl,-E</span> option are further synonyms for <span class="docEmphasis">-Wl,--export-dynamic</span>.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

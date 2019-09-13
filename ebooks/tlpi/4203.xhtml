@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>42.3. Linker Version Scripts</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">42.3. Linker Version Scripts</h3><p class="docText">A <span class="docEmphasis">version script</span> is a text file containing instructions for the linker, <span class="docEmphasis">ld</span>. In order to use a version script, we must specify the <span class="docEmphasis">—version-script</span> linker option:</p><pre>$ <b>gcc -Wl,--version-script,</b><b><tt><i>myscriptfile.map</i></tt></b> <b>...</b></pre><br/>
+<p class="docText">Version scripts are commonly (but not universally) identified using the extension <tt>.map</tt>.</p><p class="docText">The following sections describe some uses of version scripts.</p><h4 class="docSection2Title" id="title-ID0E2FAM">42.3.1. Controlling Symbol Visibility with Version Scripts</h4><p class="docText">One
+ use of version scripts is to control the visibility of symbols that 
+might otherwise accidentally be made global (i.e., visible to 
+applications linking against the library). As a simple example, suppose 
+that we are building a shared library from the three source files <tt>vis_comm.c</tt>, <tt>vis_f1.c</tt>, and <tt>vis_f2.c</tt>, which respectively define the functions <span class="docEmphasis">vis_comm()</span>, <span class="docEmphasis">vis_f1()</span>, and <span class="docEmphasis">vis_f2()</span>. The <span class="docEmphasis">vis_comm()</span> function is called by <span class="docEmphasis">vis_f1()</span> and <span class="docEmphasis">vis_f2()</span>,
+ but is not intended for direct use by applications linked against the 
+library. Suppose we build the shared library in the usual way:</p><pre>$ <b>gcc -g -c -fPIC -Wall vis_comm.c vis_f1.c vis_f2.c</b>
+$ <b>gcc -g -shared -o vis.so vis_comm.o vis_f1.o vis_f2.o</b></pre><br/>
+<p class="docText">If we use the following <span class="docEmphasis">readelf</span> command to list the dynamic symbols exported by the library, we see the following:</p><pre>$ <b>readelf --syms --use-dynamic vis.so | grep vis_</b>
+   30  12: 00000790    59    FUNC GLOBAL DEFAULT  10 vis_f1
+   25  13: 000007d0    73    FUNC GLOBAL DEFAULT  10 vis_f2
+   27  16: 00000770    20    FUNC GLOBAL DEFAULT  10 vis_comm</pre><br/>
+<p class="docText">This shared library exported three symbols: <span class="docEmphasis">vis_comm()</span>, <span class="docEmphasis">vis_f1()</span>, and <span class="docEmphasis">vis_f2()</span>. However, we would like to ensure that only the symbols <span class="docEmphasis">vis_f1()</span> and <span class="docEmphasis">vis_f2()</span> are exported by the library. We can achieve this result using the following version script:</p><pre>$ <b>cat vis.map</b>
+VER_1 {
+    global:
+        vis_f1;
+        vis_f2;
+    local:
+        *;
+};</pre><br/>
+<p class="docText">The identifier <span class="docEmphasis">VER_1</span> is an example of a <span class="docEmphasis">version tag</span>. As we’ll see in the discussion of symbol versioning in Section 42.3.2, a version script may contain multiple <span class="docEmphasis">version nodes</span>, each grouped within braces (<tt>{}</tt>)
+ and prefixed with a unique version tag. If we are using a version 
+script only for the purpose of controlling symbol visibility, then the 
+version tag is redundant; nevertheless, older versions of <span class="docEmphasis">ld</span> required it. Modern versions of <span class="docEmphasis">ld</span>
+ allow the version tag to be omitted; in this case, the version node is 
+said to have an anonymous version tag, and no other version nodes may be
+ present in the script.</p><p class="docText">Within the version node, the <tt>global</tt>
+ keyword begins a semicolon-separated list of symbols that are made 
+visible outside the library. The local keyword begins a list of symbols 
+that are to be hidden from the outside world. The asterisk (*) here 
+illustrates the fact that we can use wildcard patterns in these symbol 
+specifications. The wildcard characters are the same as those used for 
+shell filename matching—for example, <tt>*</tt> and <tt>?</tt>. (See the <span class="docEmphasis">glob(7)</span> manual page for further details.) In this example, using an asterisk for the <tt>local</tt> specification says that everything that wasn’t explicitly declared <tt>global</tt> is hidden. If we did not say this, then <span class="docEmphasis">vis_comm()</span> would still be visible, since the default is to make C global symbols visible outside the shared library.</p><p class="docText">We can then build our shared library using the version script as follows:</p><pre>$ <b>gcc -g -c -fPIC -Wall vis_comm.c vis_f1.c vis_f2.c</b>
+$ <b>gcc -g -shared -o vis.so vis_comm.o vis_f1.o vis_f2.o \</b>
+        <b>-Wl,--version-script,vis.map</b></pre><br/>
+<p class="docText">Using <span class="docEmphasis">readelf</span> once more shows that <span class="docEmphasis">vis_comm()</span> is no longer externally visible:</p><pre>$ <b>readelf --syms --use-dynamic vis.so | grep vis_</b>
+   25   0: 00000730    73    FUNC GLOBAL DEFAULT  11 vis_f2
+   29  16: 000006f0    59    FUNC GLOBAL DEFAULT  11 vis_f1</pre><br/>
+<h4 class="docSection2Title" id="title-ID0E6JAM">42.3.2. Symbol Versioning</h4><p class="docText">Symbol
+ versioning allows a single shared library to provide multiple versions 
+of the same function. Each program uses the version of the function that
+ was current when the program was (statically) linked against the shared
+ library. As a result, we can make an incompatible change to a shared 
+library without needing to increase the library’s major version number. 
+Carried to an extreme, symbol versioning can replace the traditional 
+shared library major and minor versioning scheme. Symbol versioning is 
+used in this manner in <span class="docEmphasis">glibc</span> 2.1 and later, so that all versions of <span class="docEmphasis">glibc</span> from 2.0 onward are supported within a single major library version (<tt>libc.so.6</tt>).</p><p class="docText">We
+ demonstrate the use of symbol versioning with a simple example. We 
+begin by creating the first version of a shared library using a version 
+script:</p><pre>$ <b>cat sv_lib_v1.c</b>
+#include &lt;stdio.h&gt;
+
+void xyz(void) { printf("v1 xyz\n"); }
+$ <b>cat sv_v1.map</b>
+VER_1 {
+        global: xyz;
+        local:  *;      # Hide all other symbols
+};
+$ <b>gcc -g -c -fPIC -Wall sv_lib_v1.c</b>
+$ <b>gcc -g -shared -o libsv.so sv_lib_v1.o -Wl,--version-script,sv_v1.map</b></pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Within a version script, the hash character (<tt>#</tt>) starts a comment.</p><hr noshade="noshade" size="1"/><p class="docText">(To keep the example simple, we avoid the use of explicit library sonames and library major version numbers.)</p><p class="docText">At this stage, our version script, <tt>sv_v1.map</tt>, serves only to control the visibility of the shared library’s symbols; <span class="docEmphasis">xyz()</span> is exported, but all other symbols (of which there are none in this small example) are hidden. Next, we create a program, <span class="docEmphasis">p1</span>, which makes use of this library:</p><pre>$ <b>cat sv_prog.c</b>
+#include &lt;stdlib.h&gt;
+
+int
+main(int argc, char *argv[])
+{
+    void xyz(void);
+
+    xyz();
+
+    exit(EXIT_SUCCESS);
+}
+$ <b>gcc -g -o p1 sv_prog.c libsv.so</b></pre><br/>
+<p class="docText">When we run this program, we see the expected result:</p><pre>$ <b>LD_LIBRARY_PATH=. ./p1</b>
+v1 xyz</pre><br/>
+<p class="docText">Now, suppose that we want to modify the definition of <span class="docEmphasis">xyz()</span> within our library, while still ensuring that program <span class="docEmphasis">p1</span> continues to use the old version of this function. To do this, we must define two versions of <span class="docEmphasis">xyz()</span> within our library:</p><pre>$ <b>cat sv_lib_v2.c</b>
+#include &lt;stdio.h&gt;
+
+__asm__(".symver xyz_old,xyz@VER_1");
+__asm__(".symver xyz_new,xyz@@VER_2");
+
+void xyz_old(void) { printf("v1 xyz\n"); }
+
+void xyz_new(void) { printf("v2 xyz\n"); }
+
+void pqr(void) { printf("v2 pqr\n"); }</pre><br/>
+<p class="docText">Our two versions of <span class="docEmphasis">xyz()</span> are provided by the functions <span class="docEmphasis">xyz_old()</span> and <span class="docEmphasis">xyz_new()</span>. The <span class="docEmphasis">xyz_old()</span> function corresponds to our original definition of <span class="docEmphasis">xyz()</span>, which is the one that should continue to be used by program <span class="docEmphasis">p1</span>. The <span class="docEmphasis">xyz_new()</span> function provides the definition of <span class="docEmphasis">xyz()</span> to be used by programs linking against the new version of the library.</p><p class="docText">The two <tt>.symver</tt>
+ assembler directives are the glue that ties these two functions to 
+different version tags in the modified version script (shown in a 
+moment) that we use to create the new version of the shared library. The
+ first of these directives says that <span class="docEmphasis">xyz_old()</span> is the implementation of <span class="docEmphasis">xyz()</span> to be used for applications linked against version tag <span class="docEmphasis">VER_1</span> (i.e., program <span class="docEmphasis">p1</span> in our example), and that <span class="docEmphasis">xyz_new()</span> is the implementation of <span class="docEmphasis">xyz()</span> to be used by applications linked against version tag <span class="docEmphasis">VER_2</span>.</p><p class="docText">The use of <tt>@@</tt> rather than <tt>@</tt> in the second <tt>.symver</tt> directive indicates that this is the default definition of <span class="docEmphasis">xyz()</span> to which applications should bind when statically linked against this shared library. Exactly one of the <tt>.symver</tt> directives for a symbol should be marked using <tt>@@</tt>.</p><p class="docText">The corresponding version script for our modified library is as follows:</p><pre>$ <b>cat sv_v2.map</b>
+VER_1 {
+        global: xyz;
+        local:  *;      # Hide all other symbols
+};
+
+VER_2 {
+        global: pqr;
+} VER_1;</pre><br/>
+<p class="docText">This version script provides a new version tag, <span class="docEmphasis">VER_2</span>, which depends on the tag <span class="docEmphasis">VER_1</span>. This dependency is indicated by the following line:</p><pre>} VER_1;</pre><br/>
+<p class="docText">Version tag 
+dependencies indicate the relationships between successive library 
+versions. Semantically, the only effect of version tag dependencies on 
+Linux is that a version node inherits <tt>global</tt> and <tt>local</tt> specifications from the version node upon which it depends.</p><p class="docText">Dependencies can be chained, so that we could have another version node tagged <span class="docEmphasis">VER_3</span>, which depended on <span class="docEmphasis">VER_2</span>, and so on.</p><p class="docText">The
+ version tag names have no meanings in themselves. Their relationship 
+with one another is determined only by the specified version 
+dependencies, and we chose the names <span class="docEmphasis">VER_1</span> and <span class="docEmphasis">VER_2</span>
+ merely to be suggestive of these relationships. To assist maintenance, 
+recommended practice is to use version tags that include the package 
+name and a version number. For example, <span class="docEmphasis">glibc</span> uses version tags with names such as <span class="docEmphasis">GLIBC_2.0</span>, <span class="docEmphasis">GLIBC_2.1</span>, and so on.</p><p class="docText">The <span class="docEmphasis">VER_2</span> version tag also specifies that the new function <span class="docEmphasis">pqr()</span> is to be exported by the library and bound to the <span class="docEmphasis">VER_2</span> version tag. If we didn’t declare <span class="docEmphasis">pqr()</span> in this manner, then the <tt>local</tt> specification that <span class="docEmphasis">VER_2</span> version tag inherited from the <span class="docEmphasis">VER_1</span> version tag would make <span class="docEmphasis">pqr()</span> invisible outside the library. Note also that if we omitted the <tt>local</tt> specification altogether, then the symbols <span class="docEmphasis">xyz_old()</span> and <span class="docEmphasis">xyz_new()</span> would also be exported by the library (which is typically not what we want).</p><p class="docText">We now build the new version of our library in the usual way:</p><pre>$ <b>gcc -g -c -fPIC -Wall sv_lib_v2.c</b>
+$ <b>gcc -g -shared -o libsv.so sv_lib_v2.o -Wl,--version-script,sv_v2.map</b></pre><br/>
+<p class="docText">Now we can create a new program, <span class="docEmphasis">p2</span>, which uses the new definition of <span class="docEmphasis">xyz()</span>, while program <span class="docEmphasis">p1</span> uses the old version of <span class="docEmphasis">xyz()</span>.</p><pre>$ <b>gcc -g -o p2 sv_prog.c libsv.so </b>
+$ <b>LD_LIBRARY_PATH=. ./p2 </b>
+v2 xyz                                        <i> Uses</i> <span class="docEmphasis">xyz@VER_2</span>
+$ <b>LD_LIBRARY_PATH=. ./p1 </b>
+v1 xyz                                        <i> Uses</i> <span class="docEmphasis">xyz@VER_1</span></pre><br/>
+<p class="docText">The version tag dependencies of an executable are recorded at static link time. We can use <span class="docEmphasis">objdump -t</span> to display the symbol tables of each executable, thus showing the different version tag dependencies of each program:</p><pre>$ <b>objdump -t p1 | grep xyz</b>
+08048380       F *UND*  0000002e              xyz@@VER_1
+$ <b>objdump -t p2 | grep xyz</b>
+080483a0       F *UND*  0000002e              xyz@@VER_2</pre><br/>
+<p class="docText">We can also use <span class="docEmphasis">readelf -s</span> to obtain similar information.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Further information about symbol versioning can be found using the command <span class="docEmphasis">info ld scripts version</span> and at http://people.redhat.com/drepper/symbol-versioning.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

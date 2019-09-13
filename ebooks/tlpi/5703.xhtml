@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>57.3. Datagram Sockets in the UNIX Domain</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">57.3. Datagram Sockets in the UNIX Domain</h3><p class="docText">In the generic description of datagram sockets that we provided in Section 56.6,
+ we stated that communication using datagram sockets is unreliable. This
+ is the case for datagrams transferred over a network. However, for UNIX
+ domain sockets, datagram transmission is carried out within the kernel,
+ and is reliable. All messages are delivered in order and unduplicated.</p><h4 class="docSection2Title" id="title-ID0EKOFM">57.3.1. </h4><h5 class="docSection3Title" id="title-ID0EOOFM">57.3.1.1. Maximum datagram size for UNIX domain datagram sockets</h5><p class="docText">SUSv3
+ doesn’t specify a maximum size for datagrams sent via a UNIX domain 
+socket. On Linux, we can send quite large datagrams. The limits are 
+controlled via the <tt>SO_SNDBUF</tt> socket option and various <tt>/proc</tt> files, as described in the <span class="docEmphasis">socket(7)</span>
+ manual page. However, some other UNIX implementations impose lower 
+limits, such as 2048 bytes. Portable applications employing UNIX domain 
+datagram sockets should consider imposing a low upper limit on the size 
+of datagrams used.</p><h5 class="docSection3Title" id="title-ID0EPPFM">57.3.1.2. Example program</h5><p class="docText">Example 57-6 and Example 57-7
+ show a simple client-server application using UNIX domain datagram 
+sockets. Both of these programs make use of the header file shown in Example 57-5.</p><h5 class="docExampleTitle" id="title-ID0EITFM">Example 57-5. Header file used by <tt>ud_ucase_sv.c</tt> and <tt>ud_ucase_cl.c</tt></h5><p></p><div class="box"><pre><b>sockets/ud_ucase.h</b>
+#include &lt;sys/un.h&gt;
+#include &lt;sys/socket.h&gt;
+#include &lt;ctype.h&gt;
+#include "tlpi_hdr.h"
+
+#define BUF_SIZE 10             /* Maximum size of messages exchanged
+                                   between client to server */
+
+#define SV_SOCK_PATH "/tmp/ud_ucase"
+     <b>sockets/ud_ucase.h</b></pre><br/>
+</div><p></p><p class="docText">The server program (Example 57-6)
+ first creates a socket and binds it to a well-known address. 
+(Beforehand, the server unlinks the pathname matching that address, in 
+case the pathname already exists.) The server then enters an infinite 
+loop, using <span class="docEmphasis">recvfrom()</span>
+ to receive datagrams from clients, converting the received text to 
+uppercase, and returning the converted text to the client using the 
+address obtained via <span class="docEmphasis">recvfrom()</span>.</p><p class="docText">The client program (Example 57-7)
+ creates a socket and binds the socket to an address, so that the server
+ can send its reply. The client address is made unique by including the 
+client’s process ID in the pathname. The client then loops, sending each
+ of its command-line arguments as a separate message to the server. 
+After sending each message, the client reads the server response and 
+displays it on standard output.</p><h5 class="docExampleTitle" id="title-ID0EJUFM">Example 57-6. A simple UNIX domain datagram server</h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/ud_ucase_sv.c</b>
+#include "ud_ucase.h"
+
+int
+main(int argc, char *argv[])
+{
+    struct sockaddr_un svaddr, claddr;
+    int sfd, j;
+    ssize_t numBytes;
+    socklen_t len;
+    char buf[BUF_SIZE];
+
+    sfd = socket(AF_UNIX, SOCK_DGRAM, 0);       /* Create server socket */
+    if (sfd == -1)
+        errExit("socket");
+
+    /* Construct well-known address and bind server socket to it */
+
+    if (remove(SV_SOCK_PATH) == -1 &amp;&amp; errno != ENOENT)
+        errExit("remove-%s", SV_SOCK_PATH);
+
+    memset(&amp;svaddr, 0, sizeof(struct sockaddr_un));
+    svaddr.sun_family = AF_UNIX;
+    strncpy(svaddr.sun_path, SV_SOCK_PATH, sizeof(svaddr.sun_path) - 1);
+
+    if (bind(sfd, (struct sockaddr *) &amp;svaddr, sizeof(struct sockaddr_un)) == -1)
+        errExit("bind");
+
+    /* Receive messages, convert to uppercase, and return to client */
+
+    for (;;) {
+        len = sizeof(struct sockaddr_un);
+        numBytes = recvfrom(sfd, buf, BUF_SIZE, 0,
+                            (struct sockaddr *) &amp;claddr, &amp;len);
+        if (numBytes == -1)
+            errExit("recvfrom");
+
+        printf("Server received %ld bytes from %s\n", (long) numBytes,
+                claddr.sun_path);
+
+        for (j = 0; j &lt; numBytes; j++)
+            buf[j] = toupper((unsigned char) buf[j]);
+
+        if (sendto(sfd, buf, numBytes, 0, (struct sockaddr *) &amp;claddr, len) !=
+                numBytes)
+            fatal("sendto");
+    }
+}
+      <b>sockets/ud_ucase_sv.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docExampleTitle" id="title-ID0EUUFM">Example 57-7. A simple UNIX domain datagram client</h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/ud_ucase_cl.c</b>
+#include "ud_ucase.h"
+
+int
+main(int argc, char *argv[])
+{
+    struct sockaddr_un svaddr, claddr;
+    int sfd, j;
+    size_t msgLen;
+    ssize_t numBytes;
+    char resp[BUF_SIZE];
+
+    if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s msg...\n", argv[0]);
+
+    /* Create client socket; bind to unique pathname (based on PID) */
+
+    sfd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (sfd == -1)
+        errExit("socket");
+
+    memset(&amp;claddr, 0, sizeof(struct sockaddr_un));
+    claddr.sun_family = AF_UNIX;
+    snprintf(claddr.sun_path, sizeof(claddr.sun_path),
+            "/tmp/ud_ucase_cl.%ld", (long) getpid());
+
+    if (bind(sfd, (struct sockaddr *) &amp;claddr, sizeof(struct sockaddr_un)) == -1)
+        errExit("bind");
+
+    /* Construct address of server */
+
+    memset(&amp;svaddr, 0, sizeof(struct sockaddr_un));
+    svaddr.sun_family = AF_UNIX;
+    strncpy(svaddr.sun_path, SV_SOCK_PATH, sizeof(svaddr.sun_path) - 1);
+
+    /* Send messages to server; echo responses on stdout */
+
+    for (j = 1; j &lt; argc; j++) {
+        msgLen = strlen(argv[j]);       /* May be longer than BUF_SIZE */
+        if (sendto(sfd, argv[j], msgLen, 0, (struct sockaddr *) &amp;svaddr,
+                sizeof(struct sockaddr_un)) != msgLen)
+            fatal("sendto");
+
+        numBytes = recvfrom(sfd, resp, BUF_SIZE, 0, NULL, NULL);
+        if (numBytes == -1)
+            errExit("recvfrom");
+        printf("Response %d: %.*s\n", j, (int) numBytes, resp);
+    }
+
+    remove(claddr.sun_path);            /* Remove client socket pathname */
+    exit(EXIT_SUCCESS);
+}
+      <b>sockets/ud_ucase_cl.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The following shell session log demonstrates the use of the server and client programs:</p><pre class="preFixedWidth">$ <b>./ud_ucase_sv &amp; </b>
+[1] 20113
+$ <b>./ud_ucase_cl hello world </b>                 <i> Send 2 messages to server</i>
+Server received 5 bytes from /tmp/ud_ucase_cl.20150
+Response 1: HELLO
+Server received 5 bytes from /tmp/ud_ucase_cl.20150
+Response 2: WORLD
+$ <b>./ud_ucase_cl 'long message' </b>              <i> Send 1 longer message to server</i>
+Server received 10 bytes from /tmp/ud_ucase_cl.20151
+Response 1: LONG MESSA
+$ <b>kill %1 </b>                                   <i> Terminate server</i>
+
+					  </pre><br/>
+<p class="docText">The second invocation of the client program was designed to show that when a <span class="docEmphasis">recvfrom()</span> call specifies a <span class="docEmphasis">length</span> (<tt>BUF_SIZE</tt>, defined in Example 57-5
+ with the value 10) that is shorter than the message size, the message 
+is silently truncated. We can see that this truncation occurred, because
+ the server prints a message saying it received just 10 bytes, while the
+ message sent by the client consisted of 12 bytes.</p>
+</div>
+</body>
+</html>

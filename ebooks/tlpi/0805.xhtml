@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>8.5. Password Encryption and User Authentication</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">8.5. Password Encryption and User Authentication</h3><p class="docText">Some
+ applications require that users authenticate themselves. Authentication
+ typically takes the form of a username (login name) and password. An 
+application may maintain its own database of usernames and passwords for
+ this purpose. Sometimes, however, it is necessary or convenient to 
+allow users to enter their standard username and password as defined in <tt>/etc/passwd</tt> and <tt>/etc/shadow</tt>.
+ (For the remainder of this section, we assume a system where password 
+shadowing is enabled, and thus that the encrypted password is stored in <tt>/etc/shadow</tt>.) Network applications that provide some form of login to a remote system, such as <span class="docEmphasis">ssh</span> and <span class="docEmphasis">ftp</span>,
+ are typical examples of such programs. These applications must validate
+ a username and password in the same way that the standard <span class="docEmphasis">login</span> program does.</p><p class="docText">For security reasons, UNIX systems encrypt passwords using a <span class="docEmphasis">one-way encryption</span>
+ algorithm, which means that there is no method of re-creating the 
+original password from its encrypted form. Therefore, the only way of 
+validating a candidate password is to encrypt it using the same method 
+and see if the encrypted result matches the value stored in <tt>/etc/shadow</tt>. The encryption algorithm is encapsulated in the <span class="docEmphasis">crypt()</span> function.</p><pre>#define _XOPEN_SOURCE
+#include &lt;unistd.h&gt;
+
+char *<b>crypt</b>(const char *<span class="docEmphasis">key</span>, const char *<span class="docEmphasis">salt</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns pointer to statically allocated string containing encrypted password on success, or <tt>NULL</tt> on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">crypt()</span> algorithm takes a <span class="docEmphasis">key</span> (i.e., a password) of up to 8 characters, and applies a variation of the Data Encryption Standard (DES) algorithm to it. The <span class="docEmphasis">salt</span>
+ argument is a 2-character string whose value is used to perturb (vary) 
+the algorithm, a technique designed to make it more difficult to crack 
+the encrypted password. The function returns a pointer to a statically 
+allocated 13-character string that is the encrypted password.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Details of DES can be found at http://www.itl.nist.gov/fipspubs/fip46-2.htm.
+ As noted earlier, other algorithms may be used instead of DES. For 
+example, MD5 yields a 34-character string starting with a dollar sign (<tt>$</tt>), which allows <span class="docEmphasis">crypt()</span> to distinguish DES-encrypted passwords from MD5-encrypted passwords.</p><p class="docText">In
+ our discussion of password encryption, we are using the word 
+“encryption” somewhat loosely. Accurately, DES uses the given password 
+string as an encryption key to encode a fixed bit string, while MD5 is a
+ complex type of hashing function. The result in both cases is the same:
+ an undecipherable and irreversible transformation of the input 
+password.</p><hr noshade="noshade" size="1"/><p class="docText">Both the <span class="docEmphasis">salt</span> argument and the encrypted password are composed of characters selected from the 64-character set <tt>[a-zA-Z0-9/.]</tt>. Thus, the 2-character <span class="docEmphasis">salt</span>
+ argument can cause the encryption algorithm to vary in any of 64 * 64 =
+ 4096 different ways. This means that instead of preencrypting an entire
+ dictionary and checking the encrypted password against all words in the
+ dictionary, a cracker would need to check the password against 4096 
+encrypted versions of the dictionary.</p><p class="docText">The encrypted password returned by <span class="docEmphasis">crypt()</span> contains a copy of the original <span class="docEmphasis">salt</span> value as its first two characters. This means that when encrypting a candidate password, we can obtain the appropriate <span class="docEmphasis">salt</span> value from the encrypted password value already stored in <tt>/etc/shadow</tt>. (Programs such as <span class="docEmphasis">passwd(1)</span> generate a random <span class="docEmphasis">salt</span> value when encrypting a new password.) In fact, the <span class="docEmphasis">crypt()</span> function ignores any characters in the <span class="docEmphasis">salt</span> string beyond the first two. Therefore, we can specify the encrypted password itself as the <span class="docEmphasis">salt</span> argument.</p><p class="docText">In order to use <span class="docEmphasis">crypt()</span> on Linux, we must compile programs with the <span class="docEmphasis">-lcrypt</span> option, so that they are linked against the <span class="docEmphasis">crypt</span> library.</p><h4 class="docSection2Title" id="title-ID0EBGAI">8.5.1. </h4><h5 class="docSection3Title" id="title-ID0EFGAI">8.5.1.1. Example program</h5><p class="docText">Example 8-2 demonstrates how to use <span class="docEmphasis">crypt()</span>
+ to authenticate a user. This program first reads a username and then 
+retrieves the corresponding password record and (if it exists) shadow 
+password record. The program prints an error message and exits if no 
+password record is found, or if the program doesn’t have permission to 
+read from the shadow password file (this requires either superuser 
+privilege or membership of the <span class="docEmphasis">shadow</span> group). The program then reads the user’s password, using the <span class="docEmphasis">getpass()</span> function.</p><pre>#define _BSD_SOURCE
+#include &lt;unistd.h&gt;
+char *<b>getpass</b>(const char *<span class="docEmphasis">prompt</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns pointer to statically allocated input password string on success, or <tt>NULL</tt> on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">getpass()</span> function first disables echoing and all processing of terminal special characters (such as the <span class="docEmphasis">interrupt</span> character, normally <span class="docEmphasis">Control-C</span>). (We explain how to change these terminal settings in Chapter 62.) It then prints the string pointed to by <span class="docEmphasis">prompt</span>,
+ and reads a line of input, returning the null-terminated input string 
+with the trailing newline stripped, as its function result. (This string
+ is statically allocated, and so will be overwritten on a subsequent 
+call to <span class="docEmphasis">getpass()</span>.) Before returning, <span class="docEmphasis">getpass()</span> restores the terminal settings to their original states.</p><p class="docText">Having read a password with <span class="docEmphasis">getpass()</span>, the program in Example 8-2 then validates that password by using <span class="docEmphasis">crypt()</span>
+ to encrypt it and checking that the resulting string matches the 
+encrypted password recorded in the shadow password file. If the password
+ matches, then the ID of the user is displayed, as in the following 
+example:</p><pre class="preFixedWidth">$ <b>su </b>                            <i> Need privilege to read shadow password file</i>
+
+Password:
+# <b>./check_password </b>
+
+Username: <b>mtk </b>
+
+Password:                       <i> We type in password, which is not echoed</i>
+
+Successfully authenticated: UID=1000
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The program in Example 8-2 sizes the character array holding a username using the value returned by <span class="docEmphasis">sysconf(_SC_LOGIN_NAME_MAX)</span>, which yields the maximum size of a username on the host system. We explain the use of <span class="docEmphasis">sysconf()</span> in Section 11.2.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0ECLAI">Example 8-2. Authenticating a user against the shadow password file</h5><p></p><div class="box"><pre class="preFixedHeight"><b>users_groups/check_password.c</b>
+#define _BSD_SOURCE     /* Get getpass() declaration from &lt;unistd.h&gt; */
+#define _XOPEN_SOURCE   /* Get crypt() declaration from &lt;unistd.h&gt; */
+#include &lt;unistd.h&gt;
+#include &lt;limits.h&gt;
+#include &lt;pwd.h&gt;
+#include &lt;shadow.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    char *username, *password, *encrypted, *p;
+    struct passwd *pwd;
+    struct spwd *spwd;
+    Boolean authOk;
+    size_t len;
+    long lnmax;
+
+    lnmax = sysconf(_SC_LOGIN_NAME_MAX);
+    if (lnmax == -1)                    /* If limit is indeterminate */
+        lnmax = 256;                    /* make a guess */
+
+    username = malloc(lnmax);
+    if (username == NULL)
+        errExit("malloc");
+
+    printf("Username: ");
+    fflush(stdout);
+    if (fgets(username, lnmax, stdin) == NULL)
+        exit(EXIT_FAILURE);             /* Exit on EOF */
+
+    len = strlen(username);
+    if (username[len - 1] == '\n')
+        username[len - 1] = '\0';       /* Remove trailing '\n' */
+
+    pwd = getpwnam(username);
+    if (pwd == NULL)
+        fatal("couldn't get password record");
+    spwd = getspnam(username);
+    if (spwd == NULL &amp;&amp; errno == EACCES)
+        fatal("no permission to read shadow password file");
+
+    if (spwd != NULL)           /* If there is a shadow password record */
+        pwd-&gt;pw_passwd = spwd-&gt;sp_pwdp;     /* Use the shadow password */
+
+    password = getpass("Password: ");
+
+    /* Encrypt password and erase cleartext version immediately */
+
+    encrypted = crypt(password, pwd-&gt;pw_passwd);
+    for (p = password; *p != '\0'; )
+        *p++ = '\0';
+
+    if (encrypted == NULL)
+        errExit("crypt");
+
+    authOk = strcmp(encrypted, pwd-&gt;pw_passwd) == 0;
+    if (!authOk) {
+        printf("Incorrect password\n");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Successfully authenticated: UID=%ld\n", (long) pwd-&gt;pw_uid);
+
+    /* Now do authenticated work... */
+
+    exit(EXIT_SUCCESS);
+}
+     <b>users_groups/check_password.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Example 8-2
+ illustrates an important security point. Programs that read a password 
+should immediately encrypt that password and erase the unencrypted 
+version from memory. This minimizes the possibility of a program crash 
+producing a core dump file that could be read to discover the password.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">There
+ are other possible ways in which the unencrypted password could be 
+exposed. For example, the password could be read from the swap file by a
+ privileged program if the virtual memory page containing the password 
+is swapped out. Alternatively, a process with sufficient privilege could
+ read <tt>/dev/mem</tt> (a virtual device 
+that presents the physical memory of a computer as a sequential stream 
+of bytes) in an attempt to discover the password.</p><p class="docText">The <span class="docEmphasis">getpass()</span>
+ function appeared in SUSv2, which marked it LEGACY, noting that the 
+name was misleading and the function provided functionality that was in 
+any case easy to implement. The specification of <span class="docEmphasis">getpass()</span> was removed in SUSv3. It nevertheless appears on most UNIX implementations.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

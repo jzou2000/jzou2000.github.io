@@ -1,0 +1,302 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 13.3. Writing and Reading Dates and Times</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 13.3. Writing and Reading Dates and Times</h3>
+
+<h4 class="docSection2Title" id="title-ID0EUUAK">Problem</h4>
+<p class="docText">You need to display or read dates and times using local formatting
+conventions.</p>
+
+<h4 class="docSection2Title" id="title-ID0E3UAK">Solution</h4>
+<p class="docText">Use the <tt>time_t</tt> type and <tt>tm</tt>
+<tt>struct</tt> from <tt>&lt;ctime&gt;</tt>, and
+the date and time facets provided in
+<tt>&lt;locale&gt;</tt>, to write and read dates and times
+(facets are described in the discussion in a moment). See Example 13-4 for a sample.</p>
+<h5 class="docExampleTitle" id="title-ID0ETVAK">Example 13-4. Writing and reading dates</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;iostream&gt;
+#include &lt;ctime&gt;
+#include &lt;locale&gt;
+#include &lt;sstream&gt;
+#include &lt;iterator&gt;
+
+using namespace std;
+
+void translateDate(istream&amp; in, ostream&amp; out) {
+
+   // Create a date reader
+   const time_get&lt;char&gt;&amp; dateReader =
+     use_facet&lt;time_get&lt;char&gt; &gt;(in.getloc( ));
+
+   // Create a state object, which the facets will use to tell
+   // us if there was a problem.
+   ios_base::iostate state = 0;
+
+   // End marker
+   istreambuf_iterator&lt;char&gt; end;
+
+   tm t; // Time struct (from &lt;ctime&gt;)
+
+   // Now that all that's out of the way, read in the date from
+   // the input stream and put it in a time struct.
+   dateReader.get_date(in, end, in, state, &amp;t);
+
+   // Now the date is in a tm struct. Print it to the out stream
+   // using its locale. Make sure you only print out what you
+   // know is valid in t.
+   if (state == 0 || state == ios_base::eofbit) {
+      // The read succeeded.
+      const time_put&lt;char&gt;&amp; dateWriter =
+        use_facet&lt;time_put&lt;char&gt; &gt;(out.getloc( ));
+
+      char fmt[] = "%x";
+
+      if (dateWriter.put(out, out, out.fill( ),
+                         &amp;t, &amp;fmt[0], &amp;fmt[2]).failed( ))
+         cerr &lt;&lt; "Unable to write to output stream.\n";
+   } else {
+      cerr &lt;&lt; "Unable to read cin!\n";
+   }
+}
+
+int main( ) {
+
+   cin.imbue(locale("english"));
+   cout.imbue(locale("german"));
+   translateDate(cin, cout);
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">This program produces the following output:</p>
+<pre><b>3/28/2005</b>
+28.03.2005</pre><br/>
+
+<h4 class="docSection2Title" id="title-ID0ECWAK">Discussion</h4>
+<p class="docText">Writing and reading date and time data requires some knowledge of
+<tt>locale</tt>'s design details. Read the
+introduction to this chapter if you aren't already
+familiar with the concepts of locales and facets.</p>
+<p class="docText">C++ does not have a standard class for representing dates and times;
+the closest it gets is the <tt>time_t</tt> type and
+<tt>struct</tt>
+<tt>tm</tt> from
+<tt>&lt;ctime&gt;</tt>. If you want to write and read dates
+using standard library facilities, you will have to be able to
+convert whatever nonstandard date representation you are using to a
+<tt>struct</tt>
+<tt>tm</tt>. It is worthwhile to
+do so, since the implementation(s) you are using has probably already
+built in support for formatting locale-sensitive dates.</p>
+<p class="docText">Earlier, I stated that a facet was an aspect of a locale that
+requires locale-specific behavior. More concretely, a facet is a
+<tt>const</tt> instantiation of a class template for a
+character type that looks up how it behaves based on the locale class
+you give it at construction. In Example 13-4, I
+create an instance of the <tt>time_get</tt> facet like
+this:</p>
+<pre>const time_get&lt;char&gt;&amp; dateReader =
+  use_facet&lt;time_get&lt;char&gt; &gt;(in.getloc( ));</pre><br/>
+<p class="docText">The function template <tt>use_facet</tt> looks up a given
+facet for a given locale. All of the standard facets are class
+templates that accept a character type parameter, and since I am
+reading and writing <tt>char</tt>s, I instantiate my
+<tt>time_get</tt> class for <tt>char</tt>s. The
+standard requires that an implementation provide template
+specializations for <tt>char</tt> and
+<tt>wchar_t</tt>, so they are guaranteed to exist (although
+it is not guaranteed to support a given locale other than the C
+locale). The <tt>time_get</tt> object I created is
+<tt>const</tt> because the locale functionality provided by
+an implementation is a set of rules for formatting various kinds of
+data in different locales, and the rules are not user-editable, thus,
+the state of a given facet should not be changed by consumer code.</p>
+<p class="docText">The locale I pass to <tt>use_facet</tt> is the one
+associated with the stream I am about to write to. <tt>getloc(
+)</tt> is declared in <tt>ios_base</tt> and returns
+the locale associated with an input or output stream. Using the
+locale that is already associated with the stream you want to read
+from or write to is the best approach; passing in the locale name as
+a parameter or being specified in some other manner is error prone.</p>
+<p class="docText">Once I've created the object that's
+going to do the actual reading, I need to create something to capture
+stream state:</p>
+<pre>ios_base::iostate state = 0;</pre><br/>
+<p class="docText">Facets don't modify the state of the stream itself,
+e.g., set <tt>stream::failbit</tt>
+<tt>=</tt>
+<tt>1</tt>; instead, they will set the state in your state
+object to indicate that a date couldn't be read.
+This is because failure to read a formatted value
+isn't a problem with the stream
+necessarily—the input stream of characters may still be
+perfectly valid—but reading it in the format you expect may not
+be possible.</p>
+<p class="docText">The actual date information is stored in a <tt>struct</tt>
+<tt>tm</tt>. All I have to do is create a local
+<tt>tm</tt> variable and pass its address to the
+<tt>time_get</tt> or <tt>time_put</tt> facets.</p>
+<p class="docText">Once I have read in the date, I can check the state variable I used
+to see if all went as expected. If it is equal to zero or
+<tt>ios_base::eofbit</tt>, then that indicates that the
+stream state is okay and that my date was read in with no problem.
+Since in Example 13-4 I want to write the date out to
+another stream, I have to create an object for just that purpose. I
+do it like this:</p>
+<pre>const time_put&lt;char&gt;&amp; dateWriter =
+   use_facet&lt;time_put&lt;char&gt; &gt;(out.getloc( ));</pre><br/>
+<p class="docText">This works the same way as the previous instantiation of a
+<tt>time_get</tt> class, but in the other direction. After
+that, I created a formatting string (with
+<tt>printf</tt>-like formatting syntax) that will print the
+date. "%x" prints the date and
+"%X" prints the time. Be careful
+though: this example only read in the date, so the members of the
+<tt>struct</tt>
+<tt>tm</tt> that have to do with
+time are undefined at this point.</p>
+<p class="docText">Now, I can write to the output stream. Here's how:</p>
+<pre>if (dateWriter.put(out,        // Output stream iterator
+                   out,        // Output stream
+                   out.fill( ), // Fill char to use
+                   &amp;t,         // Addr of tm struct
+                   &amp;fmt[0],    // Begin and end of format string
+                   &amp;fmt[2]
+                   ).failed( )) // iter_type.failed( ) tells us if
+                               // there was a problem writing</pre><br/>
+<p class="docText"><tt>time_put::put</tt> writes the date to the output stream
+you pass it using the locale it (the <tt>time_put</tt>
+object) was created with. <tt>time_put::put</tt> returns an
+<tt>ostreambuf_iterator</tt>, which has a member function
+<tt>failed</tt> that you can call to see if the iterator is
+in a corrupt state.</p>
+<p class="docText"><tt>get_date</tt>
+
+
+isn't the only member function you can use to get
+components of a date from a stream. There are a few of them:</p>
+<dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">get_date</span></span></span></p></dt>
+<dd>
+<p class="docList">Gets the date from a stream using a locale's
+formatting rules</p>
+</dd>
+<dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">get_time</span></span>
+
+</span></p></dt>
+<dd>
+<p class="docList">Gets the time from a stream using a locale's
+formatting rules</p>
+</dd>
+<dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">get_weekday</span></span>
+
+</span></p></dt>
+<dd>
+<p class="docList">Gets the weekday name, e.g., Monday, lundi, <img align="absmiddle" alt="" border="0" id="" src="Images/getfile-8.gif"/></p>
+</dd>
+</dl>
+<dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">get_year</span></span>
+
+</span></p></dt>
+<dd>
+<p class="docList">Gets the year from a stream using a locale's
+formatting rules</p>
+</dd>
+</dl>
+<p class="docText">Something else that you may find handy is the
+<tt>date_order</tt> member function. It returns an
+enumeration (<tt>time_base::dateorder</tt> in
+<tt>&lt;locale&gt;</tt>) that indicates the order of month,
+day, and year in the date. This can be useful if you have to parse
+the date output by <tt>time_get::put</tt>. Example 13-5 shows how to check the date order.</p>
+<h5 class="docExampleTitle" id="title-ID0E54AK">Example 13-5. Looking at date order</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;iostream&gt;
+#include &lt;locale&gt;
+#include &lt;string&gt;
+
+using namespace std;
+
+int main( ) {
+
+   cin.imbue(locale("german"));
+
+   const time_get&lt;char&gt;&amp; dateReader =
+     use_facet&lt;time_get&lt;char&gt; &gt;(cin.getloc( ));
+
+   time_base::dateorder d = dateReader.date_order( );
+
+   string s;
+
+   switch (d) {
+   case time_base::no_order:
+     s = "No order";
+     break;
+   case time_base::dmy:
+     s = "day/month/year";
+     break;
+   case time_base::mdy:
+     s = "month/day/year";
+     break;
+   case time_base::ymd:
+     s = "year/month/day";
+     break;
+   case time_base::ydm:
+     s = "year/day/month";
+     break;
+   }
+
+   cout &lt;&lt; "Date order for locale " &lt;&lt; cin.getloc( ).name( )
+        &lt;&lt; " is " &lt;&lt; s &lt;&lt; endl;
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">There is also another handy feature you can use when it comes to
+
+instantiating facets:
+<tt>has_facet</tt>. This is a function template that
+returns a <tt>bool</tt> indicating whether the facet you
+want is defined for a given locale. So to be safe, take advantage of
+<tt>has_facet</tt> whenever you are instantiating a facet.
+If it returns false, you can always default to the classic C locale,
+since it's guaranteed to be there by a
+standard-conforming implementation. <tt>has_facet</tt>
+looks like this:</p>
+<pre>if (has_facet&lt;time_put&lt;char&gt; &gt;(loc)) {
+   const time_put&lt;char&gt;&amp; dateWriter =
+     use_facet&lt;time_put&lt;char&gt; &gt;(loc);</pre><br/>
+<p class="docText">Once you get over the syntax of the
+<tt>time_get</tt>
+
+
+
+and <tt>time_put</tt> classes, you will find them
+straightforward to use. As always, you can use
+<tt>typedef</tt> to minimize the number of unsightly angle
+brackets:</p>
+<pre>typedef time_put&lt;char&gt; TimePutNarrow;
+typedef time_get&lt;char&gt; TimeGetNarrow;
+// ...
+const TimeGetNarrow&amp; dateReader = use_facet&lt;TimeGetNarrow&gt;(loc);</pre><br/>
+<p class="docText">Writing and reading dates in locale-specific formats is a bit
+tedious, but once you have an understanding of
+<tt>locale</tt>'s expectations of you, it
+is effective and powerful. Chapter 5 is
+entirely dedicated to the subject of dates and times, so for more
+detailed formatting information when writing dates and times, see
+Recipe 5.2.</p>
+
+<h4 class="docSection2Title" id="title-ID0EIABK">See Also</h4>
+<p class="docText">Chapter 5 and Recipe 5.2</p>
+</div>
+</body>
+</html>

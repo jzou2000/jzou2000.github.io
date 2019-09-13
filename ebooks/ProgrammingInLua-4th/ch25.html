@@ -1,0 +1,856 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 25. Reflection</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 25. Reflection"><div class="titlepage"><div><h1><span class="partLabel">25</span> Reflection</h1></div></div><p id="N15454" style="text-indent: 0">
+<a class="indexterm" id="N15456"/>
+Reflection is the ability of a program to
+inspect and modify some aspects of its own execution.
+Dynamic languages like Lua naturally support
+several reflective features:
+environments allow run-time inspection of global variables;
+functions like <a class="indexterm" id="N1545A"/><code class="function">type</code> and <a class="indexterm" id="N15460"/><code class="function">pairs</code> allow run-time
+inspection and traversal of unknown data structures;
+functions like <a class="indexterm" id="N15466"/><code class="function">load</code> and <a class="indexterm" id="N1546C"/><code class="function">require</code> allow a program
+to add code to itself or update its own code.
+However, many things are still missing:
+programs cannot introspect on their local variables,
+programs cannot trace their execution,
+functions cannot know their callers, etc.
+The <a class="indexterm" id="N15472"/>debug library fills many of these gaps.
+</p><p id="N15476" style="text-indent: 0">
+The debug library comprises two kinds of functions:
+<a class="indexterm" id="N15478"/><em class="firstterm">introspective functions</em> and <em>hooks</em>.<a class="indexterm" id="N15482"/>
+Introspective functions allow us to inspect several
+aspects of the running program,
+such as its stack of active functions,
+current line of execution,
+and values and names of local variables.
+Hooks allow us to trace the execution of a program.
+</p><p id="N15486" style="text-indent: 0">
+Despite its name,
+the debug library does not give us a <a class="indexterm" id="N15488"/>debugger for Lua.
+Nevertheless, it provides all the primitives that we need
+to write our own <a class="indexterm" id="N1548C"/>debuggers,
+with varying levels of sophistication.
+</p><p id="N15490" style="text-indent: 0">
+Unlike the other libraries,
+we should use the debug library with parsimony.
+First, some of its functionality is not
+exactly famous for performance.
+Second, it breaks some sacred truths of the language,
+such as that we cannot access a local variable
+from outside its lexical scope.
+Although the library is readily available as a standard library,
+I prefer to require it explicitly in any chunk that uses it.
+</p><div class="sect1" title="Introspective Facilities"><div class="titlepage"><div><div><h2 class="title"><a id="introspect"/>Introspective Facilities</h2></div></div></div><p id="N15496" style="text-indent: 0">
+The main introspective function in the debug library
+is <a class="indexterm" id="N15498"></a><code class="function">getinfo</code>.
+Its first parameter can be a function or a stack level.
+When we call <code class="literal">debug.getinfo(foo)</code> for a function <code class="literal">foo</code>,
+it returns a table with some data about this function.
+The table can have the following fields:
+</p><div class="variablelist"><dl><dt><span class="term"><code class="literal">source</code>:</span></dt><dd><p id="N154AE" style="text-indent: 0">
+This field tells where the function was defined.
+If the function was defined in a string (through a call to <a class="indexterm" id="N154B0"/><code class="function">load</code>),
+<code class="literal">source</code> is that string.
+If the function was defined in a file,
+<code class="literal">source</code> is the file name prefixed with an <a class="indexterm" id="N154BC"/>at-sign.
+</p></dd><dt><span class="term"><code class="literal">short_src</code>:</span></dt><dd><p id="N154C6" style="text-indent: 0">
+This field gives a short version of <code class="literal">source</code> (up to 60 characters).
+It is useful for error messages.
+</p></dd><dt><span class="term"><code class="literal">linedefined</code>:</span></dt><dd><p id="N154D1" style="text-indent: 0">
+This field gives the
+number of the first line in the source where the function was defined.
+</p></dd><dt><span class="term"><code class="literal">lastlinedefined</code>:</span></dt><dd><p id="N154D9" style="text-indent: 0">
+This field gives the
+number of the last line in the source where the function was defined.
+</p></dd><dt><span class="term"><code class="literal">what</code>:</span></dt><dd><p id="N154E1" style="text-indent: 0">
+This field tells
+what this function is.
+Options are <code class="literal">"Lua"</code> if <code class="literal">foo</code> is a regular Lua function,
+<code class="literal">"C"</code> if it is a C function,
+or <code class="literal">"main"</code> if it is the main part of a Lua chunk.
+</p></dd><dt><span class="term"><code class="literal">name</code>:</span></dt><dd><p id="N154F5" style="text-indent: 0">
+This field gives
+a reasonable name for the function,
+such as the name of a global variable that stores this function.
+</p></dd><dt><span class="term"><code class="literal">namewhat</code>:</span></dt><dd><p id="N154FD" style="text-indent: 0">
+This field tells
+what the previous field means.
+This field can be <code class="literal">"global"</code>, <code class="literal">"local"</code>, <code class="literal">"method"</code>,
+<code class="literal">"field"</code>, or <code class="literal">""</code> (the empty string).
+The empty string means that Lua did not find
+a name for the function.
+</p></dd><dt><span class="term"><code class="literal">nups</code>:</span></dt><dd><p id="N15514" style="text-indent: 0">
+This is the
+number of <a class="indexterm" id="N15516"/>upvalues of that function.
+</p></dd><dt><span class="term"><code class="literal">nparams</code>:</span></dt><dd><p id="N15520" style="text-indent: 0">
+This is the
+number of parameters of that function.
+</p></dd><dt><span class="term"><code class="literal">isvararg</code>:</span></dt><dd><p id="N15528" style="text-indent: 0">
+This tells
+whether the function is variadic (a Boolean).
+</p></dd><dt><span class="term"><code class="literal">activelines</code>:</span></dt><dd><p id="N15530" style="text-indent: 0">
+This field is
+a table representing the set of active lines of the function.
+An <a class="indexterm" id="N15532"/><em>active line</em> is a line with some code,
+as opposed to empty lines or lines containing only comments.
+(A typical use of this information is for setting breakpoints.
+Most debuggers do not allow us to set a
+breakpoint outside an active line,
+as it would be unreachable.)
+</p></dd><dt><span class="term"><code class="literal">func</code>:</span></dt><dd><p id="N1553E" style="text-indent: 0">
+This field has the function itself.
+</p></dd></dl></div><p style="text-indent: 0">
+</p><p id="N15541" style="text-indent: 0">
+When <code class="literal">foo</code> is a C function,
+Lua does not have much data about it.
+For such functions, only the fields
+<code class="literal">what</code>, <code class="literal">name</code>, <code class="literal">namewhat</code>, <code class="literal">nups</code>,
+and <code class="literal">func</code> are meaningful.
+</p><p id="N15555" style="text-indent: 0">
+When we call <code class="literal">debug.getinfo(n)</code> for some number <em class="replaceable"><code>n</code></em>,
+we get data about the function active at that stack level.
+<a class="indexterm" id="N1555D"/>
+A <em>stack level</em> is a number that refers to a particular
+function that is active at that moment.
+The function calling <a class="indexterm" id="N15564"/><code class="function">getinfo</code> has level one,
+the function that called it has level two,
+and so on.
+(At level zero,
+we get data about <a class="indexterm" id="N1556C"/><code class="function">getinfo</code> itself,
+a C function.)
+If <em class="replaceable"><code>n</code></em> is larger than the number
+of active functions on the stack,
+<a class="indexterm" id="N15577"/><code class="function">debug.getinfo</code> returns nil.
+When we query an active function,
+by calling <a class="indexterm" id="N1557F"/><code class="function">debug.getinfo</code> with a stack level,
+the resulting table has two extra fields:
+<code class="literal">currentline</code>,
+the line where the function is at that moment;
+and <code class="literal">istailcall</code> (a Boolean),
+true if this function was called by a tail call.
+(In this case, the real caller of this function
+is not on the stack anymore.)
+</p><p id="N1558D" style="text-indent: 0">
+The field <code class="literal">name</code> is tricky.
+Remember that,
+because functions are <a class="indexterm" id="N15592"/>first-class values in Lua,
+a function may not have a name, or may have several names.
+Lua tries to find a name for a function by looking
+into the code that called the function,
+to see how it was called.
+This method works only when we call
+<a class="indexterm" id="N15596"/><code class="function">getinfo</code> with a number,
+that is, when we ask information about a particular invocation.
+</p><p id="N1559E" style="text-indent: 0">
+The function <a class="indexterm" id="N155A0"></a><code class="function">getinfo</code> is not efficient.
+Lua keeps debug information in a form that
+does not impair program execution;
+efficient retrieval is a secondary goal here.
+To achieve better performance,
+<a class="indexterm" id="N155A8"></a><code class="function">getinfo</code> has an optional second parameter that
+selects what information to get.
+In this way,
+the function does not waste time collecting data that the
+user does not need.
+The format of this parameter is a string,
+where each letter selects a group of fields,
+according to the following table:
+</p><div class="informaltable"><table border="1"><colgroup><col/><col/></colgroup><tbody><tr><td><p id="N155B6" style="text-indent: 0"><code class="literal">n</code></p></td><td><p id="N155BA" style="text-indent: 0">selects <code class="literal">name</code> and <code class="literal">namewhat</code></p></td></tr><tr><td><p id="N155C3" style="text-indent: 0"><code class="literal">f</code></p></td><td><p id="N155C7" style="text-indent: 0">selects <code class="literal">func</code></p></td></tr><tr><td><p id="N155CD" style="text-indent: 0"><code class="literal">S</code></p></td><td><p id="N155D1" style="text-indent: 0">selects <code class="literal">source</code>, <code class="literal">short_src</code>,
+  <code class="literal">what</code>, <code class="literal">linedefined</code>, and <code class="literal">lastlinedefined</code></p></td></tr><tr><td><p id="N155E3" style="text-indent: 0"><code class="literal">l</code></p></td><td><p id="N155E7" style="text-indent: 0">selects <code class="literal">currentline</code></p></td></tr><tr><td><p id="N155ED" style="text-indent: 0"><code class="literal">L</code></p></td><td><p id="N155F1" style="text-indent: 0">selects <code class="literal">activelines</code></p></td></tr><tr><td><p id="N155F7" style="text-indent: 0"><code class="literal">u</code></p></td><td><p id="N155FB" style="text-indent: 0">selects <code class="literal">nup</code>, <code class="literal">nparams</code>, and <code class="literal">isvararg</code></p></td></tr></tbody></table></div><p style="text-indent: 0">
+</p><p id="N15606" style="text-indent: 0">
+The following function illustrates the use of <a class="indexterm" id="N15608"></a><code class="function">debug.getinfo</code>
+by printing a primitive <a class="indexterm" id="N15610"></a>traceback of the active stack:
+</p><pre class="programlisting" id="N15614">      function traceback ()
+        for level = 1, math.huge do
+          local info = debug.getinfo(level, "Sl")
+          if not info then break end
+          if info.what == "C" then   -- is a C function?
+            print(string.format("%d\tC function", level))
+          else   -- a Lua function
+            print(string.format("%d\t[%s]:%d", level,
+               info.short_src, info.currentline))
+          end
+        end
+      end
+</pre><p style="text-indent: 0">
+It is not difficult to improve this function,
+by including more data from <a class="indexterm" id="N15617"></a><code class="function">getinfo</code>.
+Actually, the debug library offers such an improved version,
+the function <a class="indexterm" id="N1561F"></a><code class="function">traceback</code>.
+Unlike our version, <a class="indexterm" id="N15628"></a><code class="function">debug.traceback</code> does not print its result;
+instead, it returns a (potentially long) string
+containing the traceback:
+</p><pre class="programlisting" id="N15630">      &gt; print(debug.traceback())
+      stack traceback:
+              stdin:1: in main chunk
+              [C]: in ?
+</pre><p style="text-indent: 0">
+</p><div class="sect2" title="Accessing local variables"><div class="titlepage"><div><div><h3 class="title"><a id="L241"/>Accessing local variables</h3></div></div></div><p id="N15637" style="text-indent: 0">
+We can inspect the <a class="indexterm" id="N15639"/>local variables of any active function
+with <a class="indexterm" id="N1563D"/><code class="function">debug.getlocal</code>.
+This function has two parameters:
+the stack level of the function we are querying
+and a variable index.
+It returns two values:
+the name and the current value of the variable.
+If the variable index is larger than the number of active variables,
+<a class="indexterm" id="N15646"/><code class="function">getlocal</code> returns nil.
+If the stack level is invalid, it raises an error.
+(We can use <a class="indexterm" id="N1564E"/><code class="function">debug.getinfo</code> to check the
+validity of the stack level.)
+</p><p id="N15656" style="text-indent: 0">
+Lua numbers local variables in the
+order that they appear in a function,
+counting only the variables that are active
+in the current scope of the function.
+For instance, consider the following function:
+</p><pre class="programlisting" id="N15658">      function foo (a, b)
+        local x
+        do local c = a - b end
+        local a = 1
+        while true do
+          local name, value = debug.getlocal(1, a)
+          if not name then break end
+          print(name, value)
+          a = a + 1
+        end
+      end
+</pre><p style="text-indent: 0">
+The call <code class="literal">foo(10, 20)</code> will print this:
+</p><pre class="programlisting" id="N1565E">      a       10
+      b       20
+      x       nil
+      a       4
+</pre><p style="text-indent: 0">
+The variable with index 1 is <code class="literal">a</code> (the first parameter),
+2 is <code class="literal">b</code>, 3 is <code class="literal">x</code>, and 4 is the inner <code class="literal">a</code>.
+At the point where <code class="literal">getlocal</code> is called,
+<code class="literal">c</code> is already out of scope,
+while <code class="literal">name</code> and <code class="literal">value</code> are not yet in scope.
+(Remember that local variables are only visible
+after their initialization code.)
+</p><p id="N15679" style="text-indent: 0">
+Starting with Lua 5.2,
+negative indices get information
+about the <a class="indexterm" id="N1567B"/>extra arguments of a <a class="indexterm" id="N1567F"/>variadic function:
+index -1 refers to the first extra argument.
+The name of the variable in this case is always <code class="literal">"(*vararg)"</code>.
+</p><p id="N15686" style="text-indent: 0">
+We can also change the values of local variables,
+with <a class="indexterm" id="N15688"/><code class="function">debug.setlocal</code>.
+Its first two parameters are a stack level
+and a variable index, like in <code class="literal">getlocal</code>.
+Its third parameter is the new value for the variable.
+It returns the variable name
+or nil if the variable index is out of scope.
+</p></div><div class="sect2" title="Accessing non-local variables"><div class="titlepage"><div><div><h3 class="title"><a id="L242"/>Accessing non-local variables</h3></div></div></div><p id="N15698" style="text-indent: 0">
+The debug library also allows us to
+access the <a class="indexterm" id="N1569A"/>non-local variables used by a Lua function,
+with <a class="indexterm" id="N1569E"/><code class="function">getupvalue</code>.
+Unlike local variables,
+the non-local variables referred by a function exist
+even when the function is not active
+(this is what closures are about, after all).
+Therefore,
+the first argument for <a class="indexterm" id="N156A7"/><code class="function">getupvalue</code> is not a stack level,
+but a function (a closure, more precisely).
+The second argument is the variable index.
+Lua numbers non-local variables in the order
+in which they are first referred in a function,
+but this order is not relevant,
+because a function cannot access two non-local variables
+with the same name.
+</p><p id="N156AF" style="text-indent: 0">
+We can also update non-local variables,
+with <a class="indexterm" id="N156B1"/><code class="function">debug.setupvalue</code>.
+As you might expect, it has three parameters:
+a <a class="indexterm" id="N156BA"/>closure, a variable index, and the new value.
+Like <a class="indexterm" id="N156BE"/><code class="function">setlocal</code>, it returns the name of the variable,
+or nil if the variable index is out of range.
+</p><p id="N156C6" style="text-indent: 0">
+<a class="xref" href="ch25.html#getvarvalue" title="Figure 25.1. Getting the value of a variable">Figure 25.1, “Getting the value of a variable”</a> shows how we can access the value
+of a variable from a calling function,
+given the variable’s name.
+</p><div class="figure-float"><div class="figure"><a id="getvarvalue"/><p class="title" style="text-indent: 0"><strong>Figure 25.1. Getting the value of a variable</strong></p><div class="figure-contents"><pre class="programlisting" id="N156D0">      function getvarvalue (name, level, isenv)
+        local value
+        local found = false
+      
+        level = (level or 1) + 1
+      
+        -- try local variables
+        for i = 1, math.huge do
+          local n, v = debug.getlocal(level, i)
+          if not n then break end
+          if n == name then
+            value = v
+            found = true
+          end
+        end
+        if found then return "local", value end
+      
+        -- try non-local variables
+        local func = debug.getinfo(level, "f").func
+        for i = 1, math.huge do
+          local n, v = debug.getupvalue(func, i)
+          if not n then break end
+          if n == name then return "upvalue", v end
+        end
+      
+        if isenv then return "noenv" end   -- avoid loop
+      
+        -- not found; get value from the environment
+        local _, env = getvarvalue("_ENV", level, true)
+        if env then
+          return "global", env[name]
+        else        -- no _ENV available
+          return "noenv"
+        end
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+It can be used like here:
+</p><pre class="programlisting" id="N156D3">      &gt; local a = 4; print(getvarvalue("a"))   --&gt; local    4
+      &gt; a = "xx"; print(getvarvalue("a"))      --&gt; global   xx
+</pre><p style="text-indent: 0">
+The parameter <code class="literal">level</code> tells
+where on the stack the function should look;
+one (the default) means the immediate caller.
+The plus one in the code corrects the level to include
+the call to <code class="literal">getvarvalue</code> itself.
+I will explain the parameter <code class="literal">isenv</code> in a moment.
+</p><p id="N156DF" style="text-indent: 0">
+The function first looks for a local variable.
+If there is more than one local with the given name,
+it must get the one with the highest index;
+thus, it must always go through the whole loop.
+If it cannot find any local variable with that name,
+then it tries the <a class="indexterm" id="N156E1"/>non-local variables.
+For that, it gets the calling closure,
+with <a class="indexterm" id="N156E5"/><code class="function">debug.getinfo</code>,
+and then it traverses its non-local variables.
+Finally, if it cannot find a non-local variable with that name,
+then it goes for a global variable:
+it calls itself recursively to access
+the proper <a class="indexterm" id="N156ED"/><code class="function">_ENV</code> variable
+and then looks up the name in that environment.
+</p><p id="N156F4" style="text-indent: 0">
+The parameter <code class="literal">isenv</code> avoids a tricky problem.
+It tells when we are in a recursive call,
+looking for the variable <a class="indexterm" id="N156F9"/><code class="function">_ENV</code> to query a global name.
+A function that uses no global variables
+may not have an upvalue <a class="indexterm" id="N15700"/><code class="function">_ENV</code>.
+In that case, if we tried to consult <a class="indexterm" id="N15707"/><code class="function">_ENV</code> as a global,
+we would enter a recursive loop,
+because we would need <a class="indexterm" id="N1570E"/><code class="function">_ENV</code> to get its own value.
+So, when <code class="literal">isenv</code> is true and
+the function cannot find a local or an upvalue,
+it does not try the global variables.
+</p></div><div class="sect2" title="Accessing other coroutines"><div class="titlepage"><div><div><h3 class="title"><a id="L243"/>Accessing other coroutines</h3></div></div></div><p id="N1571C" style="text-indent: 0">
+All introspective functions from the debug library
+accept an optional <a class="indexterm" id="N1571E"></a>coroutine as their first argument,
+so that we can inspect the coroutine from the outside.
+For instance, consider the next example:
+</p><pre class="programlisting" id="N15722">      co = coroutine.create(function ()
+        local x = 10
+        coroutine.yield()
+        error("some error")
+      end)
+      
+      coroutine.resume(co)
+      print(debug.traceback(co))
+</pre><p style="text-indent: 0">
+
+The call to <a class="indexterm" id="N15725"></a><code class="function">traceback</code> will work on the <a class="indexterm" id="N1572D"></a>coroutine <code class="literal">co</code>,
+resulting in something like this:
+</p><pre class="programlisting" id="N15734">      stack traceback:
+              [C]: in function 'yield'
+              temp:3: in function &lt;temp:1&gt;
+</pre><p style="text-indent: 0">
+The trace does not go through the call to <a class="indexterm" id="N15737"></a><code class="function">resume</code>,
+because the <a class="indexterm" id="N1573F"></a>coroutine
+and the main program run in different stacks.
+</p><p id="N15743" style="text-indent: 0">
+When a coroutine raises an error,
+it does not unwind its stack.
+This means that we can inspect it after the error.
+Continuing our example,
+the coroutine hits the error if we resume it again:
+</p><pre class="programlisting" id="N15745">      print(coroutine.resume(co))      --&gt; false   temp:4: some error
+</pre><p style="text-indent: 0">
+Now, if we print its traceback, we get something like this:
+</p><pre class="programlisting" id="N15748">      stack traceback:
+              [C]: in function 'error'
+              temp:4: in function &lt;temp:1&gt;
+</pre><p style="text-indent: 0">
+We can also inspect local variables from a <a class="indexterm" id="N1574B"></a>coroutine,
+even after an error:
+</p><pre class="programlisting" id="N1574F">      print(debug.getlocal(co, 1, 1))     --&gt; x       10
+</pre><p style="text-indent: 0">
+</p></div></div><div class="sect1" title="Hooks"><div class="titlepage"><div><div><h2 class="title"><a id="L244"/>Hooks</h2></div></div></div><p id="N15756" style="text-indent: 0">
+The <a class="indexterm" id="N15758"></a>hook mechanism of the debug library allows us
+to register a function to be called at
+specific events as a program runs.
+There are four kinds of events that can trigger a hook:
+</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem"><p id="N1575E" style="text-indent: 0"><em>call</em> events happen every time Lua calls a function;</p></li><li class="listitem"><p id="N15763" style="text-indent: 0"><em>return</em> events happen every time a function returns;</p></li><li class="listitem"><p id="N15768" style="text-indent: 0"><em>line</em> events happen when Lua starts
+executing a new line of code;</p></li><li class="listitem"><p id="N1576D" style="text-indent: 0"><em>count</em> events happen after a
+given number of instructions.
+(Instructions here mean internal <a class="indexterm" id="N15771"/>opcodes,
+which we visited briefly in <a class="xref" href="ch16.html#precompiler" title="Precompiled Code">the section called “Precompiled Code”</a>.)</p></li></ul></div><p style="text-indent: 0">
+Lua calls all hooks with a string argument
+that describes the event that generated the call:
+<code class="literal">"call"</code> (or <code class="literal">"tail call"</code>),
+<code class="literal">"return"</code>, <code class="literal">"line"</code>, or <code class="literal">"count"</code>.
+For line events, it also passes a second argument,
+the new line number.
+To get more information inside a <a class="indexterm" id="N15788"></a>hook,
+we have to call <a class="indexterm" id="N1578C"></a><code class="function">debug.getinfo</code>.
+</p><p id="N15794" style="text-indent: 0">
+To register a hook,
+we call <a class="indexterm" id="N15796"/><code class="function">debug.sethook</code> with two or three arguments:
+the first argument is the hook function;
+the second argument is a mask string,
+which describes the events we want to monitor;
+and the optional third argument is a number
+that describes at what frequency we want to get count events.
+To monitor the call, return, and line events,
+we add their first letters (<code class="literal">c</code>, <code class="literal">r</code>, or <code class="literal">l</code>)
+into the mask string.
+To monitor the count event,
+we simply supply a counter as the third argument.
+To turn off hooks,
+we call <a class="indexterm" id="N157A8"/><code class="function">sethook</code> with no arguments.
+
+</p><p id="N157B0" style="text-indent: 0">
+As a simple example,
+the following code installs a primitive tracer,
+<a class="indexterm" id="N157B2"></a>
+which prints each line the interpreter executes:
+</p><pre class="programlisting" id="N157B6">      debug.sethook(print, "l")
+</pre><p style="text-indent: 0">
+This call simply installs <a class="indexterm" id="N157B9"></a><code class="function">print</code> as the <a class="indexterm" id="N157BF"></a>hook function
+and instructs Lua to call it only at line events.
+A more elaborated tracer can use <a class="indexterm" id="N157C3"></a><code class="function">getinfo</code> to
+add the current file name to the trace:
+</p><pre class="programlisting" id="N157CB">      function trace (event, line)
+        local s = debug.getinfo(2).short_src
+        print(s .. ":" .. line)
+      end
+      
+      debug.sethook(trace, "l")
+</pre><p style="text-indent: 0">
+</p><p id="N157CE" style="text-indent: 0">
+A useful function to use with hooks is <a class="indexterm" id="N157D0"></a><code class="function">debug.debug</code>.
+This simple function gives us a prompt that executes arbitrary
+Lua commands.
+It is roughly equivalent to the following code:
+</p><pre class="programlisting" id="N157D8">      function debug1 ()
+        while true do
+          io.write("debug&gt; ")
+          local line = io.read()
+          if line == "cont" then break end
+          assert(load(line))()
+        end
+      end
+</pre><p style="text-indent: 0">
+When the user enters the <span class="quote">“<span class="quote">command</span>”</span> <code class="literal">cont</code>, the function returns.
+The standard implementation is very simple and runs
+the commands in the global environment,
+outside the scope of the code being debugged.
+<a class="link" href="ch25.html#ex_improve-debug">Exercise 25.4</a> discusses a better implementation.
+</p></div><div class="sect1" title="Profiles"><div class="titlepage"><div><div><h2 class="title"><a id="section-profile"/>Profiles</h2></div></div></div><p id="N157E9" style="text-indent: 0">
+Besides debugging,
+another common application for reflection is profiling,
+that is,
+an analysis of the behavior of a program regarding
+its use of resources.
+For a timing profile,
+it is better to use the C interface:
+the overhead of a Lua call for each <a class="indexterm" id="N157EB"/>hook is too high
+and may invalidate any measurement.
+However, for counting profiles,
+Lua code does a decent job.
+In this section, we will develop a rudimentary <a class="indexterm" id="N157EF"/>profiler
+that lists the number of times each function in a
+program is called during a run.
+</p><p id="N157F3" style="text-indent: 0">
+The main data structures of our program are two tables:
+one maps functions to their call counters,
+and the other maps functions to their names.
+The indices to both tables are the functions themselves.
+</p><pre class="programlisting" id="N157F5">      local Counters = {}
+      local Names = {}
+</pre><p style="text-indent: 0">
+We could retrieve the function names after the profiling,
+but remember that we get better results
+if we get the name of a function
+while it is active,
+because then Lua can look at the code that is calling the function
+to find its name.
+</p><p id="N157F8" style="text-indent: 0">
+Now we define the <a class="indexterm" id="N157FA"></a>hook function.
+Its job is to get the function being called,
+increment the corresponding counter,
+and collect the function name.
+The code is in <a class="xref" href="ch25.html#hook-func" title="Figure 25.2. Hook for counting number of calls">Figure 25.2, “Hook for counting number of calls”</a>.
+</p><div class="figure-float"><div class="figure"><a id="hook-func"/><p class="title" style="text-indent: 0"><strong>Figure 25.2. Hook for counting number of calls</strong></p><div class="figure-contents"><pre class="programlisting" id="N15806">      local function hook ()
+        local f = debug.getinfo(2, "f").func
+        local count = Counters[f]
+        if count == nil then    -- first time 'f' is called?
+          Counters[f] = 1
+          Names[f] = debug.getinfo(2, "Sn")
+        else     -- only increment the counter
+          Counters[f] = count + 1
+        end
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+The next step is to run the program with that hook.
+We will assume that the program we want to analyze
+is in a file
+and that the user gives this file name
+as an argument to the profiler,
+like this:
+</p><pre class="programlisting" id="N15809">      % lua profiler main-prog
+</pre><p style="text-indent: 0">
+With this scheme, the profiler can get the file name in <code class="literal">arg[1]</code>,
+turn on the hook, and run the file:
+</p><pre class="programlisting" id="N1580F">      local f = assert(loadfile(arg[1]))
+      debug.sethook(hook, "c")  -- turn on the hook for calls
+      f()                       -- run the main program
+      debug.sethook()           -- turn off the hook
+</pre><p style="text-indent: 0">
+The last step is to show the results.
+The function <code class="literal">getname</code>, in <a class="xref" href="ch25.html#getname" title="Figure 25.3. Getting the name of a function">Figure 25.3, “Getting the name of a function”</a>,
+produces a name for a function.
+</p><div class="figure-float"><div class="figure"><a id="getname"/><p class="title" style="text-indent: 0"><strong>Figure 25.3. Getting the name of a function</strong></p><div class="figure-contents"><pre class="programlisting" id="N1581D">      function getname (func)
+        local n = Names[func]
+        if n.what == "C" then
+          return n.name
+        end
+        local lc = string.format("[%s]:%d", n.short_src, n.linedefined)
+        if n.what ~= "main" and n.namewhat ~= "" then
+          return string.format("%s (%s)", lc, n.name)
+        else
+          return lc
+        end
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+Because function names in Lua are so uncertain,
+we add to each function its location,
+given as a pair <em>file:line</em>.
+If a function has no name,
+then we use just its location.
+For a C function,
+we use only its name (as it has no location).
+After that definition,
+we print each function with its counter:
+</p><pre class="programlisting" id="N15823">      for func, count in pairs(Counters) do
+        print(getname(func), count)
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N15826" style="text-indent: 0">
+If we apply our profiler to the Markov example
+that we developed in <a class="xref" href="ch19.html" title="Chapter 19. Interlude: Markov Chain Algorithm">Chapter 19, <em>Interlude: Markov Chain Algorithm</em></a>,
+we get a result like this:
+</p><pre class="programlisting" id="N1582B">      [markov.lua]:4 884723
+      write   10000
+      [markov.lua]:0 1
+      read    31103
+      sub     884722
+      ...
+</pre><p style="text-indent: 0">
+This result means that the <a class="indexterm" id="N1582E"></a>anonymous function at line 4
+(which is the iterator function defined inside <code class="literal">allwords</code>)
+was called 884723 times,
+<code class="literal">write</code> (<a class="indexterm" id="N15838"></a><code class="function">io.write</code>) was called 10000 times,
+and so on.
+</p><p id="N15840" style="text-indent: 0">
+There are several improvements that we can make to this profiler,
+such as to sort the output,
+to print better function names,
+and to embellish the output format.
+Nevertheless, this basic profiler is already useful as it is.
+</p></div><div class="sect1" title="Sandboxing"><div class="titlepage"><div><div><h2 class="title"><a id="sc_sandbox"/>Sandboxing</h2></div></div></div><p id="N15846" style="text-indent: 0">
+In <a class="xref" href="ch22.html#sc_envload" title="_ENV and load">the section called “<code class="literal">_ENV</code> and <code class="literal">load</code>”</a>,
+we saw how easy it is to use <a class="indexterm" id="N1584B"/><code class="function">load</code> to run
+a Lua chunk in a restricted environment.
+Because Lua does all communication with the external world
+through library functions,
+once we remove these functions,
+we also remove the possibility of a script to have any
+effect on the external world.
+Nevertheless,
+we are still susceptible to
+<a class="indexterm" id="N15851"/>denial of service (DoS) attacks,
+with a script wasting large amounts of CPU time or memory.
+Reflection, in the form of debug hooks,
+provides an interesting approach to curb
+such attacks.
+</p><p id="N15855" style="text-indent: 0">
+A first step is to use a count hook to limit the number
+of instructions that a chunk can execute.
+<a class="xref" href="ch25.html#cd_basic-sandbox" title="Figure 25.4. A naive sandbox with hooks">Figure 25.4, “A naive sandbox with hooks”</a> shows a program to run
+a given file in that kind of sandbox.
+</p><div class="figure-float"><div class="figure"><a id="cd_basic-sandbox"/><p class="title" style="text-indent: 0"><strong>Figure 25.4. A naive sandbox with hooks</strong></p><div class="figure-contents"><pre class="programlisting" id="N1585F">      local debug = require "debug"
+      
+      -- maximum "steps" that can be performed
+      local steplimit = 1000
+      
+      local count = 0     -- counter for steps
+      
+      local function step ()
+        count = count + 1
+        if count &gt; steplimit then
+          error("script uses too much CPU")
+        end
+      end
+      
+      -- load file
+      local f = assert(loadfile(arg[1], "t", {}))
+      
+      debug.sethook(step, "", 100)    -- set hook
+      
+      f()    -- run file
+</pre></div></div></div><p style="text-indent: 0">
+
+The program loads the given file,
+sets the hook,
+and runs the file.
+It sets the hook as a count hook,
+so that Lua calls the hook every 100 instructions.
+The hook (the function <code class="literal">step</code>) only increments a counter and
+checks it against a fixed limit.
+What can possibly go wrong?
+</p><p id="N15865" style="text-indent: 0">
+Of course, we must restrict the size
+of the chunks that we load:
+a huge chunk can exhaust memory only by being loaded.
+Another problem is that a program can consume huge amounts of
+memory with surprisingly few instructions,
+as the next fragment shows:
+</p><pre class="programlisting" id="N15867">      local s = "123456789012345"
+      for i = 1, 36 do s = s .. s end
+</pre><p style="text-indent: 0">
+With less than 150 instructions,
+this tiny fragment will try to create a string with one terabyte.
+Clearly, restricting only steps and program size is not enough.
+</p><p id="N1586A" style="text-indent: 0">
+One improvement is to check and limit memory use
+in the <code class="literal">step</code> function,
+as we show in <a class="xref" href="ch25.html#cd_sandbox-mem" title="Figure 25.5. Controlling memory use">Figure 25.5, “Controlling memory use”</a>.
+</p><div class="figure-float"><div class="figure"><a id="cd_sandbox-mem"/><p class="title" style="text-indent: 0"><strong>Figure 25.5. Controlling memory use</strong></p><div class="figure-contents"><pre class="programlisting" id="N15877">      -- maximum memory (in KB) that can be used
+      local memlimit = 1000
+      
+      -- maximum "steps" that can be performed
+      local steplimit = 1000
+      
+      local function checkmem ()
+        if collectgarbage("count") &gt; memlimit then
+          error("script uses too much memory")
+        end
+      end
+      
+      local count = 0
+      local function step ()
+        checkmem()
+        count = count + 1
+        if count &gt; steplimit then
+          error("script uses too much CPU")
+        end
+      end
+      
+      <em class="replaceable"><code>as before</code></em>
+</pre></div></div></div><p style="text-indent: 0">
+
+Because memory can grow so fast with so few instructions,
+we should set a very low limit or
+call the hook in small steps.
+More concretely,
+a program can do a thousandfold increase in the size
+of a string in 40 instructions.
+So, either we call the hook with a higher frequency
+than every 40 steps or
+we set the memory limit to one thousandth of
+what we can really afford.
+I would probably choose both.
+</p><p id="N1587D" style="text-indent: 0">
+A subtler problem is the string library.
+We can call any function from this library
+as a method on a string.
+Therefore,
+we can call these functions even if they
+are not in the environment;
+literal strings smuggle them into our sandbox.
+No function in the string library
+affects the external world,
+but they bypass our step counter.
+(A call to a C function
+counts as one instruction in Lua.)
+Some functions in the string library can be
+quite dangerous for DoS attacks.
+For instance,
+the call <code class="literal">("x"):rep(2^30)</code>
+swallows 1 GB of memory in a single step.
+As another example,
+
+Lua 5.2 takes 13 minutes to run the following call
+in <a class="indexterm" id="N15882"></a>my new machine:
+</p><pre class="programlisting" id="N15886">      s = "01234567890123456789012345678901234567890123456789"
+      s:find(".*.*.*.*.*.*.*.*.*x")
+</pre><p style="text-indent: 0">
+</p><p id="N15889" style="text-indent: 0">
+An interesting way to restrict the access
+to the string library
+is to use call hooks.
+Every time a function is called,
+we check whether it is authorized.
+<a class="xref" href="ch25.html#cd_sandbox-callhook" title="Figure 25.6. Using hooks to bar calls to unauthorized functions">Figure 25.6, “Using hooks to bar calls
+to unauthorized functions”</a> implements this idea.
+</p><div class="figure-float"><div class="figure"><a id="cd_sandbox-callhook"/><p class="title" style="text-indent: 0"><strong>Figure 25.6. Using hooks to bar calls
+to unauthorized functions</strong></p><div class="figure-contents"><pre class="programlisting" id="N15893">      local debug = require "debug"
+      
+      -- maximum "steps" that can be performed
+      local steplimit = 1000
+      
+      local count = 0     -- counter for steps
+      
+      -- set of authorized functions
+      local validfunc = {
+        [string.upper] = true,
+        [string.lower] = true,
+        ...       -- other authorized functions
+      }
+      
+      local function hook (event)
+        if event == "call" then
+          local info = debug.getinfo(2, "fn")
+          if not validfunc[info.func] then
+            error("calling bad function: " .. (info.name or "?"))
+          end
+        end
+        count = count + 1
+        if count &gt; steplimit then
+          error("script uses too much CPU")
+        end
+      end
+      
+      -- load chunk
+      local f = assert(loadfile(arg[1], "t", {}))
+      
+      debug.sethook(hook, "", 100)    -- set hook
+      
+      f()    -- run chunk
+</pre></div></div></div><p style="text-indent: 0">
+
+In that code,
+the table <code class="literal">validfunc</code> represents a set
+with the functions that the program can call.
+The function <code class="literal">hook</code> uses the debug library
+to access the function being called
+and then checks whether that function is in
+the <code class="literal">validfunc</code> set.
+</p><p id="N1589F" style="text-indent: 0">
+An important point in any sandbox implementation
+is what functions we allow inside the sandbox.
+Sandboxes for data description can restrict all
+or most functions.
+Other sandboxes must be more forgiving,
+maybe offering their own restricted implementations
+for some functions
+(e.g., <a class="indexterm" id="N158A1"/><code class="function">load</code> restricted to small text chunks,
+file access restricted to a fixed directory,
+or pattern matching restricted to small subjects).
+</p><p id="N158A7" style="text-indent: 0">
+We should never think in terms of what functions to remove,
+but what functions to add.
+For each candidate,
+we must carefully consider its possible weaknesses,
+which may be subtle.
+As a rule of thumb,
+all functions from the mathematical library are safe.
+Most functions from the string library are safe;
+just be careful with resource-consuming ones.
+The debug and package libraries are off-limits;
+almost everything there can be dangerous.
+The functions <a class="indexterm" id="N158A9"/><code class="function">setmetatable</code> and <a class="indexterm" id="N158AF"/><code class="function">getmetatable</code>
+are also tricky:
+first, they can allow access to otherwise inaccessible values;
+moreover,
+they allow the creation of tables with finalizers,
+where someone can install all sorts of <span class="quote">“<span class="quote">time bombs</span>”</span>
+(code that can be executed outside the sandbox,
+when the table is collected).
+</p></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L245"/>Exercises</h2></div></div></div><p id="N158BC" style="text-indent: 0">
+Exercise 25.1:<a id="L246"/> 
+Adapt <code class="literal">getvarvalue</code> (<a class="xref" href="ch25.html#getvarvalue" title="Figure 25.1. Getting the value of a variable">Figure 25.1, “Getting the value of a variable”</a>)
+to work with different coroutines
+(like the functions from the <a class="indexterm" id="N158C7"/><code class="function">debug</code> library).
+
+
+</p><p id="N158CF" style="text-indent: 0">
+Exercise 25.2:<a id="L247"/> 
+Write a function <code class="literal">setvarvalue</code> similar to <code class="literal">getvarvalue</code>
+(<a class="xref" href="ch25.html#getvarvalue" title="Figure 25.1. Getting the value of a variable">Figure 25.1, “Getting the value of a variable”</a>).
+
+
+</p><p id="N158DD" style="text-indent: 0">
+Exercise 25.3:<a id="L248"/> 
+Write a version of <code class="literal">getvarvalue</code> (<a class="xref" href="ch25.html#getvarvalue" title="Figure 25.1. Getting the value of a variable">Figure 25.1, “Getting the value of a variable”</a>)
+that returns a table with all variables
+that are visible at the calling function.
+(The returned table should not include environmental variables;
+instead, it should inherit them from the
+original environment.)
+
+
+</p><p id="N158E8" style="text-indent: 0">
+Exercise 25.4:<a id="ex_improve-debug"/> 
+Write an improved version of <a class="indexterm" id="N158ED"/><code class="function">debug.debug</code>
+that runs the given commands as if they were
+in the lexical scope of the calling function.
+(Hint: run the commands in an empty environment and
+use the <a class="indexterm" id="N158F5"/><code class="literal">__index</code> metamethod
+attached to the function <code class="literal">getvarvalue</code>
+to do all accesses to variables.)
+
+
+</p><p id="N15901" style="text-indent: 0">
+Exercise 25.5:<a id="L249"/> 
+Improve the previous exercise to handle updates, too.
+
+
+</p><p id="N15906" style="text-indent: 0">
+Exercise 25.6:<a id="L250"/> 
+Implement some of the suggested improvements for the
+basic profiler that we developed in <a class="xref" href="ch25.html#section-profile" title="Profiles">the section called “Profiles”</a>.
+
+
+</p><p id="N1590E" style="text-indent: 0">
+Exercise 25.7:<a id="L251"></a> 
+Write a library for breakpoints.
+It should offer at least two functions:
+</p><pre class="programlisting" id="N15913">      setbreakpoint(function, line)    --&gt; returns handle
+      removebreakpoint(handle)
+</pre><p style="text-indent: 0">
+We specify a <a class="indexterm" id="N15916"></a>breakpoint by
+a function and a line inside that function.
+When the program hits a breakpoint,
+the library should call <a class="indexterm" id="N1591A"></a><code class="function">debug.debug</code>.
+(Hint: for a basic implementation,
+use a line hook that checks whether it is in a breakpoint;
+to improve performance,
+use a call hook to trace program execution
+and only turn on the line hook when the program is running
+the target function.)
+
+
+</p></div><p id="N15922" style="text-indent: 0">
+Exercise 25.8:<a id="L252"/> 
+One problem with the sandbox in <a class="xref" href="ch25.html#cd_sandbox-callhook" title="Figure 25.6. Using hooks to bar calls to unauthorized functions">Figure 25.6, “Using hooks to bar calls
+to unauthorized functions”</a>
+is that sandboxed code cannot call its own functions.
+How can you correct this problem?
+
+
+</p></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

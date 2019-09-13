@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 39. Exception Safe Functions</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 39. Exception Safe Functions</h2>
+		
+<p class="docText">The
+ hard part about writing exception safe code isn’t the throwing or 
+catching of exceptions; it’s everything in between. As a thrown 
+exception wends its way from the throw expression to the catch clause, 
+every partially executed function on that path must “clean up” any 
+important resources that it controls before its activation record is 
+popped off the execution stack. Generally (but not always), all that is 
+required to write an exception safe function is a moment’s reflection 
+and some common sense.</p>
+		
+<p class="docText">For example, consider the implementation of <tt>String</tt> assignment from <span class="docEmphasis">Assignment and Initialization Are Different</span> [12, 41]:</p>
+		
+<div class="docText">
+  <pre>String &amp;String::operator =( const char *str ) {
+    if( !str ) str = "";
+    char *tmp = strcpy( new char[ strlen(str)+1 ], str );
+    delete [] s_;
+    s_ = tmp;
+    return *this;
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The implementation of this 
+function may look superfluously ornate, since we could have coded it 
+with fewer lines and no temporary:</p>
+		
+<div class="docText">
+  <pre>String &amp;String::operator =( const char *str ) {
+<span class="docEmphMark">    delete [] s_;                                        </span>
+    if( !str ) str = "";
+    s_ = strcpy( new char[ strlen(str)+1 ], str );
+    return *this;
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">However, while the array delete comes with a social guarantee not to throw an exception (see <span class="docEmphasis">Exception Safety Axioms</span> [38, 131]), the array new a couple of lines later makes no such promise. If we delete the old buffer before we know whether allocation of the new buffer will succeed, we’ll leave the <tt>String</tt> object in a bad state. Herb Sutter summarizes the situation well in his <span class="docEmphasis">Exceptional C++</span>,
+ which I’ll paraphrase as this: First do anything that could cause an 
+exception “off to the side” without changing important state, and then 
+use operations that can’t throw an exception to finish up. That’s what 
+we did in the first implementation of <tt>String::operator =</tt> above. Let’s look at another example from <span class="docEmphasis">Commands and Hollywood</span> [19, 67]:</p>
+		
+<div class="docText">
+  <pre>void Button::setAction( const Action *newAction ) {
+    Action *temp = newAction-&gt;clone(); // off to the side...
+    delete action_; // then change state!
+    action_ = temp;
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Because it’s a virtual function, we really know nothing about the exception-related behavior of the call to <tt>clone</tt>, so we assume the worst. If the <tt>clone</tt> operation succeeds, we continue with an exception safe deletion and pointer assignment. Otherwise, a thrown exception from <tt>clone</tt> will cause premature exit from <tt>Button::setAction</tt>
+ with no harm done. Newer C++ programmers have a tendency to “clean up” 
+code like this in such a way as to make it exception unsafe:</p>
+		
+<div class="docText">
+  <pre>				<span class="docEmphMark">void Button::setAction( const Action *newAction ) {              </span>
+				<span class="docEmphMark">    delete action_; // change state!                             </span>
+				<span class="docEmphMark">    action_ = newAction-&gt;clone(); // then maybe throw?           </span>
+				<span class="docEmphMark">}                                                                </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">Performing the deletion (which is assumed to be exception safe) before the clone (which makes no such promise) will leave the <tt>Button</tt> object in an inconsistent state if <tt>clone</tt> throws an exception.</p>
+		
+<p class="docText">Notice that properly 
+written exception safe code employs relatively few try blocks. A novice 
+attempt to write exception safe code is often littered with unnecessary 
+and often damaging <tt>try</tt>s and <tt>catch</tt>es:</p>
+		
+<div class="docText">
+  <pre>				<span class="docEmphMark">void Button::setAction( const Action *newAction ) {              </span>
+				<span class="docEmphMark">    delete action_;                                              </span>
+				<span class="docEmphMark">    try {                                                        </span>
+				<span class="docEmphMark">        action_ = newAction-&gt;clone();                            </span>
+				<span class="docEmphMark">    }                                                            </span>
+				<span class="docEmphMark">    catch( ... ) {                                               </span>
+				<span class="docEmphMark">        action_ = 0;                                             </span>
+				<span class="docEmphMark">        throw;                                                   </span>
+				<span class="docEmphMark">    }                                                            </span>
+				<span class="docEmphMark">}                                                                </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">This version with its fussy try block and catch clause is exception safe in the sense that the <tt>Button</tt> object is left in a consistent (but likely different) state if <tt>clone</tt> throws an exception. However, our previous version was shorter, simpler, and more exception safe because it left the <tt>Button</tt> object not merely consistent but unchanged.</p>
+		
+<p class="docText">It’s a good idea to minimize 
+the use of try blocks, where possible, and employ them primarily in 
+locations where you really want to examine the type of a passing 
+exception in order to do something with it. In practice, these locations
+ are often at module boundaries between your code and third-party 
+libraries and between your code and the operating system.</p>
+		
+
+
+</body>
+</html>

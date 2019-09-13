@@ -1,0 +1,381 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>30.2. Signaling Changes of State: Condition Variables</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">30.2. Signaling Changes of State: Condition Variables</h3><p class="docText">A
+ mutex prevents multiple threads from accessing a shared variable at the
+ same time. A condition variable allows one thread to inform other 
+threads about changes in the state of a shared variable (or other shared
+ resource) and allows the other threads to wait (block) for such 
+notification.</p><p class="docText">A
+ simple example that doesn’t use condition variables serves to 
+demonstrate why they are useful. Suppose that we have a number of 
+threads that produce some “result units” that are consumed by the main 
+thread, and that we use a mutex-protected variable, <span class="docEmphasis">avail</span>, to represent the number of produced units awaiting consumption:</p><pre>static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
+
+static int avail = 0;</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The code segments shown in this section can be found in the file <tt>threads/prod_no_condvar.c</tt> in the source code distribution for this book.</p><hr noshade="noshade" size="1"/><p class="docText">In the producer threads, we would have code such as the following:</p><pre>/* Code to produce a unit omitted */
+
+s = pthread_mutex_lock(&amp;mtx);
+if (s != 0)
+    errExitEN(s, "pthread_mutex_lock");
+
+avail++;    /* Let consumer know another unit is available */
+
+s = pthread_mutex_unlock(&amp;mtx);
+if (s != 0)
+    errExitEN(s, "pthread_mutex_unlock");</pre><br/>
+<p class="docText">And in the main (consumer) thread, we could employ the following code:</p><pre>for (;;) {
+    s = pthread_mutex_lock(&amp;mtx);
+    if (s != 0)
+        errExitEN(s, "pthread_mutex_lock");
+
+    while (avail &gt; 0) {         /* Consume all available units */
+        /* Do something with produced unit */
+        avail--;
+    }
+
+    s = pthread_mutex_unlock(&amp;mtx);
+    if (s != 0)
+        errExitEN(s, "pthread_mutex_unlock");
+}</pre><br/>
+<p class="docText">The above code works, but it wastes CPU time, because the main thread continually loops, checking the state of the variable <span class="docEmphasis">avail</span>. A <span class="docEmphasis">condition variable</span>
+ remedies this problem. It allows a thread to sleep (wait) until another
+ thread notifies (signals) it that it must do something (i.e., that some
+ “condition” has arisen that the sleeper must now respond to).</p><p class="docText">A
+ condition variable is always used in conjunction with a mutex. The 
+mutex provides mutual exclusion for accessing the shared variable, while
+ the condition variable is used to signal changes in the variable’s 
+state. (The use of the term <span class="docEmphasis">signal</span> here has nothing to do with the signals described in Chapter 20 to Chapter 22; rather, it is used in the sense of <span class="docEmphasis">indicate</span>.)</p><h4 class="docSection2Title" id="title-ID0E6HEK">30.2.1. Statically Allocated Condition Variables</h4><p class="docText">As
+ with mutexes, condition variables can be allocated statically or 
+dynamically. We defer discussion of dynamically allocated condition 
+variables until Section 30.2.5, and consider statically allocated condition variables here.</p><p class="docText">A condition variable has the type <span class="docEmphasis">pthread_cond_t</span>.
+ As with a mutex, a condition variable must be initialized before use. 
+For a statically allocated condition variable, this is done by assigning
+ it the value <tt>PTHREAD_COND_INITIALIZER</tt>, as in the following example:</p><pre>pthread_cond_t cond = PTHREAD_COND_INITIALIZER;</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">According to SUSv3, applying the operations that we describe in the remainder of this section to a <span class="docEmphasis">copy</span>
+ of a condition variable yields results that are undefined. Operations 
+should always be performed only on the original condition variable that 
+has been statically initialized using <tt>PTHREAD_COND_INITIALIZER</tt> or dynamically initialized using <span class="docEmphasis">pthread_cond_init()</span> (described in Section 30.2.5).</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0E6JEK">30.2.2. Signaling and Waiting on Condition Variables</h4><p class="docText">The principal condition variable operations are <span class="docEmphasis">signal</span> and <span class="docEmphasis">wait</span>.
+ The signal operation is a notification to one or more waiting threads 
+that a shared variable’s state has changed. The wait operation is the 
+means of blocking until such a notification is received.</p><p class="docText">The <span class="docEmphasis">pthread_cond_signal()</span> and <span class="docEmphasis">pthread_cond_broadcast()</span> functions both signal the condition variable specified by <span class="docEmphasis">cond</span>. The <span class="docEmphasis">pthread_cond_wait()</span> function blocks a thread until the condition variable <span class="docEmphasis">cond</span> is signaled.</p><pre>#include &lt;pthread.h&gt;
+
+int <b>pthread_cond_signal</b>(pthread_cond_t *<span class="docEmphasis">cond</span>);
+int <b>pthread_cond_broadcast</b>(pthread_cond_t *<span class="docEmphasis">cond</span>);
+int <b>pthread_cond_wait</b>(pthread_cond_t *<span class="docEmphasis">cond</span>, pthread_mutex_t *<span class="docEmphasis">mutex</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">All return 0 on success, or a positive error number on error</p><hr noshade="noshade" size="1"/><p class="docText">The difference between <span class="docEmphasis">pthread_cond_signal()</span> and <span class="docEmphasis">pthread_cond_broadcast()</span> lies in what happens if multiple threads are blocked in <span class="docEmphasis">pthread_cond_wait()</span>. With <span class="docEmphasis">pthread_cond_signal()</span>, we are simply guaranteed that at least one of the blocked threads is woken up; with <span class="docEmphasis">pthread_cond_broadcast()</span>, all blocked threads are woken up.</p><p class="docText">Using <span class="docEmphasis">pthread_cond_broadcast()</span> always yields correct results (since all threads should be programmed to handle redundant and spurious wake-ups), but <span class="docEmphasis">pthread_cond_signal()</span> can be more efficient. However, <span class="docEmphasis">pthread_cond_signal()</span>
+ should be used only if just one of the waiting threads needs to be 
+woken up to handle the change in state of the shared variable, and it 
+doesn’t matter which one of the waiting threads is woken up. This 
+scenario typically applies when all of the waiting threads are designed 
+to perform the exactly same task. Given these assumptions, <span class="docEmphasis">pthread_cond_signal()</span> can be more efficient than <span class="docEmphasis">pthread_cond_broadcast()</span>, because it avoids the following possibility:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">All waiting threads are awoken.</p></div></li><li><div style="font-weight:normal"><p class="docList">One
+ thread is scheduled first. This thread checks the state of the shared 
+variable(s) (under protection of the associated mutex) and sees that 
+there is work to be done. The thread performs the required work, changes
+ the state of the shared variable(s) to indicate that the work has been 
+done, and unlocks the associated mutex.</p></div></li><li><div style="font-weight:normal"><p class="docList">Each
+ of the remaining threads in turn locks the mutex and tests the state of
+ the shared variable. However, because of the change made by the first 
+thread, these threads see that there is no work to be done, and so 
+unlock the mutex and go back to sleep (i.e., call <span class="docEmphasis">pthread_cond_wait()</span> once more).</p></div></li></ol></div><p class="docText">By contrast, <span class="docEmphasis">pthread_cond_broadcast()</span>
+ handles the case where the waiting threads are designed to perform 
+different tasks (in which case they probably have different predicates 
+associated with the condition variable).</p><p class="docText">A
+ condition variable holds no state information. It is simply a mechanism
+ for communicating information about the application’s state. If no 
+thread is waiting on the condition variable at the time that it is 
+signaled, then the signal is lost. A thread that later waits on the 
+condition variable will unblock only when the variable is signaled once 
+more.</p><p class="docText">The <span class="docEmphasis">pthread_cond_timedwait()</span> function is the same as <span class="docEmphasis">pthread_cond_wait()</span>, except that the <span class="docEmphasis">abstime</span>
+ argument specifies an upper limit on the time that the thread will 
+sleep while waiting for the condition variable to be signaled.</p><pre>#include &lt;pthread.h&gt;
+
+int <b>pthread_cond_timedwait</b>(pthread_cond_t *<span class="docEmphasis">cond</span>, pthread_mutex_t *<span class="docEmphasis">mutex</span>,
+                           const struct timespec *<span class="docEmphasis">abstime</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or a positive error number on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">abstime</span> argument is a <span class="docEmphasis">timespec</span> structure (Section 23.4.2) specifying an absolute time expressed as seconds and nanoseconds since the Epoch (Section 10.1). If the time interval specified by <span class="docEmphasis">abstime</span> expires without the condition variable being signaled, then <span class="docEmphasis">pthread_cond_timedwait()</span> returns the error <tt>ETIMEDOUT</tt>.</p><h5 class="docSection3Title" id="title-ID0EDQEK">30.2.2.1. Using a condition variable in the producer-consumer example</h5><p class="docText">Let’s
+ revise our previous example to use a condition variable. The 
+declarations of our global variable and associated mutex and condition 
+variable are as follows:</p><pre>static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+static int avail = 0;</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The code segments shown in this section can be found in the file <tt>threads/prod_condvar.c</tt> in the source code distribution for this book.</p><hr noshade="noshade" size="1"/><p class="docText">The code in the producer threads is the same as before, except that we add a call to <span class="docEmphasis">pthread_cond_signal()</span>:</p><pre>s = pthread_mutex_lock(&amp;mtx);
+if (s != 0)
+    errExitEN(s, "pthread_mutex_lock");
+
+avail++;                /* Let consumer know another unit is available */
+
+s = pthread_mutex_unlock(&amp;mtx);
+if (s != 0)
+    errExitEN(s, "pthread_mutex_unlock");
+
+s = pthread_cond_signal(&amp;cond);         /* Wake sleeping consumer */
+if (s != 0)
+    errExitEN(s, "pthread_cond_signal");</pre><br/>
+<p class="docText">Before considering the code of the consumer, we need to explain <span class="docEmphasis">pthread_cond_wait()</span>
+ in greater detail. We noted earlier that a condition variable always 
+has an associated mutex. Both of these objects are passed as arguments 
+to <span class="docEmphasis">pthread_cond_wait()</span>, which performs the following steps:</p><ul><li><p class="docList">unlock the mutex specified by <span class="docEmphasis">mutex</span>;</p></li><li><p class="docList">block the calling thread until another thread signals the condition variable <span class="docEmphasis">cond</span>; and</p></li><li><p class="docList">relock <span class="docEmphasis">mutex</span>.</p></li></ul><p class="docText">The <span class="docEmphasis">pthread_cond_wait()</span> function is designed to perform these steps because, normally, we access a shared variable in the following manner:</p><pre>s = pthread_mutex_lock(&amp;mtx);
+if (s != 0)
+    errExitEN(s, "pthread_mutex_lock");
+
+while (/* Check that shared variable is not in state we want */)
+    pthread_cond_wait(&amp;cond, &amp;mtx);
+
+/* Now shared variable is in desired state; do some work */
+
+s = pthread_mutex_unlock(&amp;mtx);
+if (s != 0)
+    errExitEN(s, "pthread_mutex_unlock");</pre><br/>
+<p class="docText">(We explain why the <span class="docEmphasis">pthread_cond_wait()</span> call is placed within a <tt>while</tt> loop rather than an <tt>if</tt> statement in the next section.)</p><p class="docText">In
+ the above code, both accesses to the shared variable must be 
+mutex-protected for the reasons that we explained earlier. In other 
+words, there is a natural association of a mutex with a condition 
+variable:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">The thread locks the mutex in preparation for checking the state of the shared variable.</p></div></li><li><div style="font-weight:normal"><p class="docList">The state of the shared variable is checked.</p></div></li><li><div style="font-weight:normal"><p class="docList">If
+ the shared variable is not in the desired state, then the thread must 
+unlock the mutex (so that other threads can access the shared variable) 
+before it goes to sleep on the condition variable.</p></div></li><li><div style="font-weight:normal"><p class="docList">When
+ the thread is reawakened because the condition variable has been 
+signaled, the mutex must once more be locked, since, typically, the 
+thread then immediately accesses the shared variable.</p></div></li></ol></div><p class="docText">The <span class="docEmphasis">pthread_cond_wait()</span>
+ function automatically performs the mutex unlocking and locking 
+required in the last two of these steps. In the third step, releasing 
+the mutex and blocking on the condition variable are performed 
+atomically. In other words, it is not possible for some other thread to 
+acquire the mutex and signal the condition variable before the thread 
+calling <span class="docEmphasis">pthread_cond_wait()</span> has blocked on the condition variable.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">There
+ is a corollary to the observation that there is a natural relationship 
+between a condition variable and a mutex: all threads that concurrently 
+wait on a particular condition variable must specify the same mutex in 
+their <span class="docEmphasis">pthread_cond_wait()</span> (or <span class="docEmphasis">pthread_cond_timedwait()</span>) calls. In effect, a <span class="docEmphasis">pthread_cond_wait()</span>
+ call dynamically binds a condition variable to a unique mutex for the 
+duration of the call. SUSv3 notes that the result of using more than one
+ mutex for concurrent <span class="docEmphasis">pthread_cond_wait()</span> calls on the same condition variable is undefined.</p><hr noshade="noshade" size="1"/><p class="docText">Putting the above details together, we can now modify the main (consumer) thread to use <span class="docEmphasis">pthread_cond_wait()</span>, as follows:</p><pre>for (;;) {
+    s = pthread_mutex_lock(&amp;mtx);
+    if (s != 0)
+        errExitEN(s, "pthread_mutex_lock");
+
+    while (avail == 0) {            /* Wait for something to consume */
+        s = pthread_cond_wait(&amp;cond, &amp;mtx);
+        if (s != 0)
+            errExitEN(s, "pthread_cond_wait");
+    }
+
+    while (avail &gt; 0) {             /* Consume all available units */
+        /* Do something with produced unit */
+        avail--;
+    }
+
+    s = pthread_mutex_unlock(&amp;mtx);
+    if (s != 0)
+        errExitEN(s, "pthread_mutex_unlock");
+
+    /* Perhaps do other work here that doesn’t require mutex lock */
+}</pre><br/>
+<p class="docText">We conclude with one final observation about the use of <span class="docEmphasis">pthread_cond_signal()</span> (and <span class="docEmphasis">pthread_cond_broadcast()</span>). In the producer code shown earlier, we called <span class="docEmphasis">pthread_mutex_unlock()</span>, and then called <span class="docEmphasis">pthread_cond_signal()</span>;
+ that is, we first unlocked the mutex associated with the shared 
+variable, and then signaled the corresponding condition variable. We 
+could have reversed these two steps; SUSv3 permits them to be done in 
+either order.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">[Butenhof,
+ 1996] points out that, on some implementations, unlocking the mutex and
+ then signaling the condition variable may yield better performance than
+ performing these steps in the reverse sequence. If the mutex is 
+unlocked only after the condition variable is signaled, the thread 
+performing <span class="docEmphasis">pthread_cond_wait()</span>
+ may wake up while the mutex is still locked, and then immediately go 
+back to sleep again when it finds that the mutex is locked. This results
+ in two superfluous context switches. Some implementations eliminate 
+this problem by employing a technique called <span class="docEmphasis">wait morphing</span>,
+ which moves the signaled thread from the condition variable wait queue 
+to the mutex wait queue without performing a context switch if the mutex
+ is locked.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0ERVEK">30.2.3. Testing a Condition Variable’s Predicate</h4><p class="docText">Each
+ condition variable has an associated predicate involving one or more 
+shared variables. For example, in the code segment in the preceding 
+section, the predicate associated with <span class="docEmphasis">cond</span> is <span class="docEmphasis">(avail == 0)</span>. This code segment demonstrates a general design principle: a <span class="docEmphasis">pthread_cond_wait()</span> call must be governed by a <tt>while</tt> loop rather than an <tt>if</tt> statement. This is so because, on return from <span class="docEmphasis">pthread_cond_wait()</span>,
+ there are no guarantees about the state of the predicate; therefore, we
+ should immediately recheck the predicate and resume sleeping if it is 
+not in the desired state.</p><p class="docText">We can’t make any assumptions about the state of the predicate upon return from <span class="docEmphasis">pthread_cond_wait()</span>, for the following reasons:</p><ul><li><p class="docList"><span class="docEmphasis">Other threads may be woken up first</span>.
+ Perhaps several threads were waiting to acquire the mutex associated 
+with the condition variable. Even if the thread that signaled the mutex 
+set the predicate to the desired state, it is still possible that 
+another thread might acquire the mutex first and change the state of the
+ associated shared variable(s), and thus the state of the predicate.</p></li><li><p class="docList"><span class="docEmphasis">Designing for “loose” predicates may be simpler</span>. Sometimes, it is easier to design applications based on condition variables that indicate <span class="docEmphasis">possibility</span> rather than <span class="docEmphasis">certainty</span>. In other words, signaling a condition variable would mean “there <span class="docEmphasis">may be</span> something” for the signaled thread to do, rather than “there <span class="docEmphasis">is</span>
+ something” to do. Using this approach, the condition variable can be 
+signaled based on approximations of the predicate’s state, and the 
+signaled thread can ascertain if there really is something to do by 
+rechecking the predicate.</p></li><li><p class="docList"><span class="docEmphasis">Spurious wake-ups can occur</span>.
+ On some implementations, a thread waiting on a condition variable may 
+be woken up even though no other thread actually signaled the condition 
+variable. Such spurious wake-ups are a (rare) consequence of the 
+techniques required for efficient implementation on some multiprocessor 
+systems, and are explicitly permitted by SUSv3.</p></li></ul><h4 class="docSection2Title" id="title-ID0EVXEK">30.2.4. Example Program: Joining Any Terminated Thread</h4><p class="docText">We noted earlier that <span class="docEmphasis">pthread_join()</span> can be used to join with only a specific thread. It provides no mechanism for joining with <span class="docEmphasis">any</span> terminated thread. We now show how a condition variable can be used to circumvent this restriction.</p><p class="docText">The program in Example 30-4
+ creates one thread for each of its command-line arguments. Each thread 
+sleeps for the number of seconds specified in the corresponding 
+command-line argument and then terminates. The sleep interval is our 
+means of simulating the idea of a thread that does work for a period of 
+time.</p><p class="docText">The 
+program maintains a set of global variables recording information about 
+all of the threads that have been created. For each thread, an element 
+in the global <span class="docEmphasis">thread</span> array records the ID of the thread (the <span class="docEmphasis">tid</span> field) and its current state (the <span class="docEmphasis">state</span> field). The <span class="docEmphasis">state</span> field has one of the following values: <tt>TS_ALIVE</tt>, meaning the thread is alive; <tt>TS_TERMINATED</tt>, meaning the thread has terminated but not yet been joined; or <tt>TS_JOINED</tt>, meaning the thread has terminated and been joined.</p><p class="docText">As each thread terminates, it assigns the value <tt>TS_TERMINATED</tt> to the <span class="docEmphasis">state</span> field for its element in the <span class="docEmphasis">thread</span> array, increments a global counter of terminated but as yet unjoined threads (<span class="docEmphasis">numUnjoined</span>), and signals the condition variable <span class="docEmphasis">threadDied</span>.</p><p class="docText">The main thread employs a loop that continuously waits on the condition variable <span class="docEmphasis">threadDied</span>. Whenever <span class="docEmphasis">threadDied</span> is signaled and there are terminated threads that have not been joined, the main thread scans the <span class="docEmphasis">thread</span> array, looking for elements with <span class="docEmphasis">state</span> set to <tt>TS_TERMINATED</tt>. For each thread in this state, <span class="docEmphasis">pthread_join()</span> is called using the corresponding <span class="docEmphasis">tid</span> field from the <span class="docEmphasis">thread</span> array, and then the <span class="docEmphasis">state</span> is set to <tt>TS_JOINED</tt>. The main loop terminates when all of the threads created by the main thread have died—that is, when the global variable <span class="docEmphasis">numLive</span> is 0.</p><p class="docText">The following shell session log demonstrates the use of the program in Example 30-4:</p><pre>$ <b>./thread_multijoin 1 1 2 3 3 </b>              <i> Create 5 threads</i>
+Thread 0 terminating
+Thread 1 terminating
+Reaped thread 0 (numLive=4)
+Reaped thread 1 (numLive=3)
+Thread 2 terminating
+Reaped thread 2 (numLive=2)
+Thread 3 terminating
+Thread 4 terminating
+Reaped thread 3 (numLive=1)
+Reaped thread 4 (numLive=0)</pre><br/>
+<p class="docText">Finally, note that although
+ the threads in the example program are created as joinable and are 
+immediately reaped on termination using <span class="docEmphasis">pthread_join()</span>,
+ we don’t need to use this approach in order to find out about thread 
+termination. We could have made the threads detached, removed the use of
+ <span class="docEmphasis">pthread_join()</span>, and simply used the <span class="docEmphasis">thread</span> array (and associated global variables) as the means of recording the termination of each thread.</p><h5 class="docExampleTitle" id="title-ID0EV2EK">Example 30-4. A main thread that can join with any terminated thread</h5><p></p><div class="box"><pre class="preFixedHeight"><b>threads/thread_multijoin.c</b>
+#include &lt;pthread.h&gt;
+#include "tlpi_hdr.h"
+
+static pthread_cond_t threadDied = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t threadMutex = PTHREAD_MUTEX_INITIALIZER;
+                /* Protects all of the following global variables */
+
+static int totThreads = 0;      /* Total number of threads created */
+static int numLive = 0;         /* Total number of threads still alive or
+                                   terminated but not yet joined */
+static int numUnjoined = 0;     /* Number of terminated threads that
+                                   have not yet been joined */
+enum tstate {                   /* Thread states */
+    TS_ALIVE,                   /* Thread is alive */
+    TS_TERMINATED,              /* Thread terminated, not yet joined */
+    TS_JOINED                   /* Thread terminated, and joined */
+};
+
+static struct {                 /* Info about each thread */
+    pthread_t tid;              /* ID of this thread */
+    enum tstate state;          /* Thread state (TS_* constants above) */
+    int sleepTime;              /* Number seconds to live before terminating */
+} *thread;
+
+static void *                   /* Start function for thread */
+threadFunc(void *arg)
+{
+    int idx = *((int *) arg);
+    int s;
+
+    sleep(thread[idx].sleepTime);       /* Simulate doing some work */
+    printf("Thread %d terminating\n", idx);
+
+    s = pthread_mutex_lock(&amp;threadMutex);
+    if (s != 0)
+        errExitEN(s, "pthread_mutex_lock");
+
+    numUnjoined++;
+    thread[idx].state = TS_TERMINATED;
+
+    s = pthread_mutex_unlock(&amp;threadMutex);
+    if (s != 0)
+        errExitEN(s, "pthread_mutex_unlock");
+    s = pthread_cond_signal(&amp;threadDied);
+    if (s != 0)
+        errExitEN(s, "pthread_cond_signal");
+
+    return NULL;
+}
+
+int
+main(int argc, char *argv[])
+{
+    int s, idx;
+
+    if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s nsecs...\n", argv[0]);
+
+    thread = calloc(argc - 1, sizeof(*thread));
+    if (thread == NULL)
+        errExit("calloc");
+
+    /* Create all threads */
+
+    for (idx = 0; idx &lt; argc - 1; idx++) {
+        thread[idx].sleepTime = getInt(argv[idx + 1], GN_NONNEG, NULL);
+        thread[idx].state = TS_ALIVE;
+        s = pthread_create(&amp;thread[idx].tid, NULL, threadFunc, &amp;idx);
+        if (s != 0)
+            errExitEN(s, "pthread_create");
+    }
+
+    totThreads = argc - 1;
+    numLive = totThreads;
+
+    /* Join with terminated threads */
+
+    while (numLive &gt; 0) {
+        s = pthread_mutex_lock(&amp;threadMutex);
+        if (s != 0)
+            errExitEN(s, "pthread_mutex_lock");
+
+        while (numUnjoined == 0) {
+            s = pthread_cond_wait(&amp;threadDied, &amp;threadMutex);
+            if (s != 0)
+                errExitEN(s, "pthread_cond_wait");
+        }
+
+        for (idx = 0; idx &lt; totThreads; idx++) {
+            if (thread[idx].state == TS_TERMINATED){
+                s = pthread_join(thread[idx].tid, NULL);
+                if (s != 0)
+                    errExitEN(s, "pthread_join");
+
+                thread[idx].state = TS_JOINED;
+                numLive--;
+                numUnjoined--;
+
+                printf("Reaped thread %d (numLive=%d)\n", idx, numLive);
+            }
+        }
+
+        s = pthread_mutex_unlock(&amp;threadMutex);
+        if (s != 0)
+            errExitEN(s, "pthread_mutex_unlock");
+    }
+
+    exit(EXIT_SUCCESS);
+}
+      <b>threads/thread_multijoin.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0EA3EK">30.2.5. Dynamically Allocated Condition Variables</h4><p class="docText">The <span class="docEmphasis">pthread_cond_init()</span> function is used to dynamically initialize a condition variable. The circumstances in which we need to use <span class="docEmphasis">pthread_cond_init()</span> are analogous to those where <span class="docEmphasis">pthread_mutex_init()</span> is needed to dynamically initialize a mutex (Section 30.1.5); that is, we must use <span class="docEmphasis">pthread_cond_init()</span>
+ to initialize automatically and dynamically allocated condition 
+variables, and to initialize a statically allocated condition variable 
+with attributes other than the defaults.</p><pre class="preFixedWidth">#include &lt;pthread.h&gt;
+
+int <b>pthread_cond_init</b>(pthread_cond_t *<span class="docEmphasis">cond</span>, const pthread_condattr_t *<span class="docEmphasis">attr</span>);
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or a positive error number on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">cond</span> argument identifies the condition variable to be initialized. As with mutexes, we can specify an <span class="docEmphasis">attr</span>
+ argument that has been previously initialized to determine attributes 
+for the condition variable. Various Pthreads functions can be used to 
+initialize the attributes in the <span class="docEmphasis">pthread_condattr_t</span> object pointed to by <span class="docEmphasis">attr</span>. If <span class="docEmphasis">attr</span> is <tt>NULL</tt>, a default set of attributes is assigned to the condition variable.</p><p class="docText">SUSv3
+ specifies that initializing an already initialized condition variable 
+results in undefined behavior; we should not do this.</p><p class="docText">When an automatically or dynamically allocated condition variable is no longer required, then it should be destroyed using <span class="docEmphasis">pthread_cond_destroy()</span>. It is not necessary to call <span class="docEmphasis">pthread_cond_destroy()</span> on a condition variable that was statically initialized using <tt>PTHREAD_COND_INITIALIZER</tt>.</p><pre>#include &lt;pthread.h&gt;
+
+int <b>pthread_cond_destroy</b>(pthread_cond_t *<span class="docEmphasis">cond</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or a positive error number on error</p><hr noshade="noshade" size="1"/><p class="docText">It
+ is safe to destroy a condition variable only when no threads are 
+waiting on it. If the condition variable resides in a region of 
+dynamically allocated memory, then it should be destroyed before freeing
+ that memory region. An automatically allocated condition variable 
+should be destroyed before its host function returns.</p><p class="docText">A condition variable that has been destroyed with <span class="docEmphasis">pthread_cond_destroy()</span> can subsequently be reinitialized by <span class="docEmphasis">pthread_cond_init()</span>.</p>
+</div>
+</body>
+</html>

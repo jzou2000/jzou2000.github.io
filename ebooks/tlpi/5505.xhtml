@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>55.5. The /proc/locks File</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">55.5. The <tt>/proc/locks</tt> File</h3><p class="docText">We can view the set of locks currently held in the system by examining the contents of the Linux-specific <tt>/proc/locks</tt> file. Here is an example of the information we can see in this file (in this case, for four locks):</p><pre>$ <b>cat /proc/locks</b>
+1: POSIX  ADVISORY  WRITE 458 03:07:133880 0 EOF
+2: FLOCK  ADVISORY  WRITE 404 03:07:133875 0 EOF
+3: POSIX  ADVISORY  WRITE 312 03:07:133853 0 EOF
+4: FLOCK  ADVISORY  WRITE 274 03:07:81908 0 EOF</pre><br/>
+<p class="docText">The <tt>/proc/locks</tt> file displays information about locks created by both <span class="docEmphasis">flock()</span> and <span class="docEmphasis">fcntl()</span>. The eight fields shown for each lock are as follows (from left to right):</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">The ordinal number of the lock within the set of all locks held for this file. (Refer to Section 55.3.4.)</p></div></li><li><div style="font-weight:normal"><p class="docList">The type of lock. Here, <tt>FLOCK</tt> indicates a lock created by <span class="docEmphasis">flock()</span>, and <tt>POSIX</tt> indicates a lock created by <span class="docEmphasis">fcntl()</span>.</p></div></li><li><div style="font-weight:normal"><p class="docList">The mode of the lock, either <tt>ADVISORY</tt> or <tt>MANDATORY</tt>.</p></div></li><li><div style="font-weight:normal"><p class="docList">The type of lock, either <tt>READ</tt> or <tt>WRITE</tt> (corresponding to shared and exclusive locks for <span class="docEmphasis">fcntl()</span>).</p></div></li><li><div style="font-weight:normal"><p class="docList">The process ID of the process holding the lock.</p></div></li><li><div style="font-weight:normal"><p class="docList">Three
+ colon-separated numbers that identify the file on which the lock is 
+held. These numbers are the major and minor device numbers of the file 
+system on which the file resides, followed by the i-node number of the 
+file.</p></div></li><li><div style="font-weight:normal"><p class="docList">The starting byte of the lock. This is always 0 for <span class="docEmphasis">flock()</span> locks.</p></div></li><li><div style="font-weight:normal"><p class="docList">The ending byte of the lock. Here, <tt>EOF</tt> indicates that the lock runs to the end of the file (i.e., <span class="docEmphasis">l_len</span> was specified as 0 for a lock created by <span class="docEmphasis">fcntl()</span>). For <span class="docEmphasis">flock()</span> locks, this column is always <tt>EOF</tt>.</p></div></li></ol></div><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In Linux 2.4 and earlier, each line of <tt>/proc/locks</tt>
+ includes five additional hexadecimal values. These are pointer 
+addresses used by the kernel to record locks in various lists. These 
+values are not useful in application programs.</p><hr noshade="noshade" size="1"/><p class="docText">Using the information in <tt>/proc/locks</tt>,
+ we can find out which process is holding a lock, and on what file. The 
+following shell session shows how to do this for lock number 3 in the 
+list above. This lock is held by process ID 312, on the i-node 133853 on
+ the device with major ID 3 and minor ID 7. We begin by using <span class="docEmphasis">ps(1)</span> to list information about the process with process ID 312:</p><pre>$ <b>ps -p 312</b>
+  PID TTY          TIME CMD
+  312 ?        00:00:00 atd</pre><br/>
+<p class="docText">The above output shows that the program holding the lock is <span class="docEmphasis">atd</span>, the daemon that executes scheduled batch jobs.</p><p class="docText">In order to find the locked file, we first search the files in the <tt>/dev</tt> directory, and thus determine that the device with ID 3:7 is <tt>/dev/sda7</tt>:</p><pre>$ <b>ls -li /dev/sda7 | awk '$6 == "3," &amp;&amp; $7 == 10'</b>
+  1311 brw-rw----    1 root   disk    3,  7 May 12  2006 /dev/<b>sda</b>7</pre><br/>
+<p class="docText">We then determine the mount point for the device <tt>/dev/sda7</tt> and search that part of the file system for the file whose i-node number is 133853:</p><pre class="preFixedWidth">$ <b>mount | grep sda7 </b>
+/dev/sda7 on / type reiserfs (rw)             <i> Device is mounted on</i> /
+$ <b>su </b>                                          <i> So we can search all directories</i>
+Password:
+# <b>find / -mount -inum 133853 </b>                  <i> Search for i-node 133853</i>
+/var/run/atd.pid
+
+					  </pre><br/>
+<p class="docText">The <span class="docEmphasis">find -mount</span> option prevents <span class="docEmphasis">find</span> from descending into subdirectories under <tt>/</tt> that are mount points for other file systems.</p><p class="docText">Finally, we display the contents of the locked file:</p><pre># <b>cat /var/run/atd.pid</b>
+312</pre><br/>
+<p class="docText">Thus, we see that the <span class="docEmphasis">atd</span> daemon is holding a lock on the file <tt>/var/run/atd.pid</tt>, and that the content of this file is the process ID of the process running <span class="docEmphasis">atd</span>.
+ This daemon is employing a technique to ensure that only one instance 
+of the daemon is running at a time. We describe this technique in 
+Section 55.6.</p><p class="docText">We can also use <tt>/proc/locks</tt> to obtain information about blocked lock requests, as demonstrated in the following output:</p><pre>$ <b>cat /proc/locks</b>
+1: POSIX  ADVISORY  WRITE 11073 03:07:436283 100 109
+1: -&gt; POSIX  ADVISORY  WRITE 11152 03:07:436283 100 109
+2: POSIX  MANDATORY WRITE 11014 03:07:436283 0 9
+2: -&gt; POSIX  MANDATORY WRITE 11024 03:07:436283 0 9
+2: -&gt; POSIX  MANDATORY READ  11122 03:07:436283 0 19
+3: FLOCK  ADVISORY  WRITE 10802 03:07:134447 0 EOF
+3: -&gt; FLOCK  ADVISORY  WRITE 10840 03:07:134447 0 EOF</pre><br/>
+<p class="docText">Lines shown with the characters <tt>-&gt;</tt>
+ immediately after a lock number represent lock requests blocked by the 
+corresponding lock number. Thus, we see one request blocked on lock 1 
+(an advisory lock created with <span class="docEmphasis">fcntl()</span>), two requests blocked on lock 2 (a mandatory lock created with <span class="docEmphasis">fcntl()</span>), and one request blocked on lock 3 (a lock created with <span class="docEmphasis">flock()</span>).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <tt>/proc/locks</tt>
+ file also displays information about any file leases that are held by 
+processes on the system. File leases are a Linux-specific mechanism 
+available in Linux 2.4 and later. If a process takes out a lease on a 
+file, then it is notified (by delivery of a signal) if another process 
+tries to <span class="docEmphasis">open()</span> or <span class="docEmphasis">truncate()</span> that file. (The inclusion of <span class="docEmphasis">truncate()</span>
+ is necessary because it is the only system call that can be used to 
+change the contents of a file without first opening it.) File leases are
+ provided in order to allow Samba to support the <span class="docEmphasis">opportunistic locks</span> (<span class="docEmphasis">oplocks</span>) functionality of the Microsoft SMB protocol and to allow NFS version 4 to support <span class="docEmphasis">delegations</span> (which are similar to SMB oplocks). Further details about file leases can be found under the description of the <tt>F_SETLEASE</tt> operation in the <span class="docEmphasis">fcntl(2)</span> manual page.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

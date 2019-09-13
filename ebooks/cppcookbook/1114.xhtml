@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 11.13. Implementing a Stride Iterator</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 11.13. Implementing a Stride Iterator</h3>
+
+<h4 class="docSection2Title" id="title-ID0EZYDI">Problem</h4>
+<p class="docText">You have a contiguous series 
+
+
+of numbers and you
+want to iterate through the elements <tt><i>n</i></tt> at
+a time.</p>
+
+<h4 class="docSection2Title" id="title-ID0E2ZDI">Solution</h4>
+<p class="docText">Example 11-24 presents a stride iterator class as a
+separate header file.</p>
+<h5 class="docExampleTitle" id="title-ID0EH1DI">Example 11-24. stride_iter.hpp</h5><p></p><div class="box">
+<pre class="preFixedHeight">#ifndef STRIDE_ITER_HPP
+#define STRIDE_ITER_HPP
+
+#include &lt;iterator&gt;
+#include &lt;cassert&gt;
+
+template&lt;class Iter_T&gt;
+class stride_iter
+{
+public:
+  // public typedefs
+  typedef typename std::iterator_traits&lt;Iter_T&gt;::value_type value_type;
+  typedef typename std::iterator_traits&lt;Iter_T&gt;::reference reference;
+  typedef typename std::iterator_traits&lt;Iter_T&gt;::difference_type
+    difference_type;
+  typedef typename std::iterator_traits&lt;Iter_T&gt;::pointer pointer;
+  typedef std::random_access_iterator_tag iterator_category;
+  typedef stride_iter self;
+
+  // constructors
+  stride_iter( ) : m(NULL), step(0) { };
+  stride_iter(const self&amp; x) : m(x.m), step(x.step) { }
+  stride_iter(Iter_T x, difference_type n) : m(x), step(n) { }
+
+  // operators
+  self&amp; operator++( ) { m += step; return *this; }
+  self operator++(int) { self tmp = *this; m += step; return tmp; }
+  self&amp; operator+=(difference_type x) { m += x * step; return *this; }
+  self&amp; operator--( ) { m -= step; return *this; }
+  self operator--(int) { self tmp = *this; m -= step; return tmp; }
+  self&amp; operator-=(difference_type x) { m -= x * step; return *this; }
+  reference operator[](difference_type n) { return m[n * step]; }
+  reference operator*( ) { return *m; }
+
+  // friend operators
+  friend bool operator==(const self&amp; x, const self&amp; y) {
+    assert(x.step == y.step);
+    return x.m == y.m;
+  }
+  friend bool operator!=(const self&amp; x, const self&amp; y) {
+    assert(x.step == y.step);
+    return x.m != y.m;
+  }
+  friend bool operator&lt;(const self&amp; x, const self&amp; y) {
+    assert(x.step == y.step);
+    return x.m &lt; y.m;
+  }
+  friend difference_type operator-(const self&amp; x, const self&amp; y) {
+    assert(x.step == y.step);
+    return (x.m - y.m) / x.step;
+  }
+  friend self operator+(const self&amp; x, difference_type y) {
+    assert(x.step == y.step);
+    return x += y * x.step;
+  }
+  friend self operator+(difference_type x, const self&amp; y) {
+    assert(x.step == y.step);
+    return y += x * x.step;
+  }
+private:
+  Iter_T m;
+  difference_type step;
+};
+
+#endif
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Example 11-25 shows how to use the
+<tt>stride_iter</tt>
+
+from Example 11-24 to iterate over a sequence of
+elements two at a time.</p>
+<h5 class="docExampleTitle" id="title-ID0EE2DI">Example 11-25. Using stride_iter</h5><p></p><div class="box">
+<pre>#include "stride_iter.hpp"
+
+#include &lt;algorithm&gt;
+#include &lt;iterator&gt;
+#include &lt;iostream&gt;
+
+using namespace std;
+
+int main( ) {
+  int a[] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+  stride_iter&lt;int*&gt; first(a, 2);
+  stride_iter&lt;int*&gt; last(a + 8, 2);
+  copy(first, last, ostream_iterator&lt;int&gt;(cout, "\n"));
+}</pre><br/>
+</div><p></p>
+<p class="docText">The program in Example 11-25 produces the following
+output:</p>
+<pre>0
+2
+4
+6</pre><br/>
+
+<h4 class="docSection2Title" id="title-ID0EW2DI">Discussion</h4>
+<p class="docText">Stride iterators are commonplace in matrix implementations. They
+provide a simple and efficient way to implement matricies as a
+sequential series of numbers. The stride iterator implementation
+presented in Example 11-24 acts as a wrapper around
+another iterator that is passed as a template parameter.</p>
+<p class="docText">I wanted the stride iterator to be compatible with the STL so I had
+to choose one of the standard iterator concepts and satisfy the
+requirements. The stride iterator in Example 11-24
+models a random-access iterator.</p>
+<p class="docText">In Example 11-26, I have provided a separate
+implementation for stride iterators when the step size is known at
+compile time, called a
+<tt>kstride_iter</tt>.
+Since the step size is passed as a template parameter, the compiler
+can much more effectively optimize the code for the iterator, and the
+size of the iterator is reduced.</p>
+<h5 class="docExampleTitle" id="title-ID0EW3DI">Example 11-26. kstride_iter.hpp</h5><p></p><div class="box">
+<pre class="preFixedHeight">#ifndef KSTRIDE_ITER_HPP
+#define KSTRIDE_ITER_HPP
+
+#include &lt;iterator&gt;
+
+template&lt;class Iter_T, int Step_N&gt;
+class kstride_iter
+{
+public:
+  // public typedefs
+  typedef typename std::iterator_traits&lt;Iter_T&gt;::value_type value_type;
+  typedef typename std::iterator_traits&lt;Iter_T&gt;::reference reference;
+  typedef typename std::iterator_traits&lt;Iter_T&gt;::difference_type difference_type;
+  typedef typename std::iterator_traits&lt;Iter_T&gt;::pointer pointer;
+  typedef std::random_access_iterator_tag iterator_category;
+  typedef kstride_iter self;
+
+  // constructors
+  kstride_iter( ) : m(NULL) { }
+  kstride_iter(const self&amp; x) : m(x.m) { }
+  explicit kstride_iter(Iter_T x) : m(x) { }
+
+  // operators
+  self&amp; operator++( ) { m += Step_N; return *this; }
+  self operator++(int) { self tmp = *this; m += Step_N; return tmp; }
+  self&amp; operator+=(difference_type x) { m += x * Step_N; return *this; }
+  self&amp; operator--( ) { m -= Step_N; return *this; }
+  self operator--(int) { self tmp = *this; m -= Step_N; return tmp; }
+  self&amp; operator-=(difference_type x) { m -= x * Step_N; return *this; }
+  reference operator[](difference_type n) { return m[n * Step_N]; }
+  reference operator*( ) { return *m; }
+
+  // friend operators
+  friend bool operator==(self x, self y) { return x.m == y.m; }
+  friend bool operator!=(self x, self y) { return x.m != y.m; }
+  friend bool operator&lt;(self x, self y) { return x.m &lt; y.m; }
+  friend difference_type operator-(self x, self y) {
+    return (x.m - y.m) / Step_N;
+  }
+  friend self operator+(self x, difference_type y) { return x += y * Step_N; }
+  friend self operator+(difference_type x, self y) { return y += x * Step_N; }
+private:
+  Iter_T m;
+};
+
+#endif
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Example 11-27 shows how 
+
+
+to use the
+<tt>kstride_iter</tt>.</p>
+<h5 class="docExampleTitle" id="title-ID0E24DI">Example 11-27. Using kstride_iter</h5><p></p><div class="box">
+<pre>#include "kstride_iter.hpp"
+
+#include &lt;algorithm&gt;
+#include &lt;iterator&gt;
+#include &lt;iostream&gt;
+
+using namespace std;
+
+int main( ) {
+  int a[] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+  kstride_iter&lt;int*, 2&gt; first(a);
+  kstride_iter&lt;int*, 2&gt; last(a + 8);
+  copy(first, last, ostream_iterator&lt;int&gt;(cout, "\n"));
+}</pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

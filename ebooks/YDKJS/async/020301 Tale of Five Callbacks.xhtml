@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Tale of Five Callbacks</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <section data-type="chapter" xmlns:epub="http://www.idpf.org/2007/ops" epub:type="chapter" data-pdf-bookmark="Chapter 2. Callbacks">
+  <div class="epub__chapter" id="chapter-2-callbacks">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<section data-type="sect1" data-pdf-bookmark="Trust Issues"><div class="epub__sect1" id="trust-issues">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<section data-type="sect2" data-pdf-bookmark="Tale of Five Callbacks"><div class="epub__sect2" id="tale-of-five-callbacks">
+<h2>Tale of Five Callbacks</h2>
+
+<p>It might not be terribly obvious why this is such a big deal. Let me
+construct an exaggerated scenario to illustrate the hazards of trust at
+play.</p>
+
+<p>Imagine you’re a developer tasked with building out an ecommerce
+checkout system for a site that sells expensive TVs. You already have
+all the various pages of the checkout system built out just fine. On the
+last page, when the user clicks “confirm” to buy the TV, you need to
+call a third-party function (provided, say, by some analytics tracking
+company) so that the sale can be tracked.</p>
+
+<p>You notice that they’ve provided what looks like an async tracking
+utility, probably for the sake of performance best practices, which
+means you need to pass in a callback function. In this continuation that
+you pass in, you will have the final code that charges the customer’s
+credit card and displays the thank you page.</p>
+
+<p>This code might look like:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__nx">analytics</code><code class="epub__p">.</code><code class="epub__nx">trackPurchase</code><code class="epub__p">(</code> <code class="epub__nx">purchaseData</code><code class="epub__p">,</code> <code class="epub__kd">function</code><code class="epub__p">(){</code>
+    <code class="epub__nx">chargeCreditCard</code><code class="epub__p">();</code>
+    <code class="epub__nx">displayThankyouPage</code><code class="epub__p">();</code>
+<code class="epub__p">}</code> <code class="epub__p">);</code></pre>
+
+<p>Easy enough, right? You write the code, test it, everything works, and
+you deploy to production. Everyone’s happy!</p>
+
+<p>Six months go by and no issues. You’ve almost forgotten you even wrote
+that code. One morning, you’re at a coffee shop before work, casually
+enjoying your latte, when you get a panicked call from your boss
+insisting you drop the coffee and rush into work right away.</p>
+
+<p>When you arrive, you find out that a high-profile customer has had his
+credit card charged five times for the same TV, and he’s understandably
+upset. Customer service has already issued an apology and processed a
+refund. But your boss demands to know how this could possibly have
+happened. “Don’t we have tests for stuff like this!?”</p>
+
+<p>You don’t even remember the code you wrote. But you dig back in and
+start trying to find out what could have gone awry.</p>
+
+<p>After digging through some logs, you come to the conclusion that the
+only explanation is that the analytics utility somehow, for some reason,
+called your callback five times instead of once. Nothing in their
+documentation mentions anything about this.</p>
+
+<p>Frustrated, you contact customer support, who of course is as astonished
+as you are. They agree to escalate it to their developers, and promise
+to get back to you. The next day, you receive a lengthy email explaining
+what they found, which you promptly forward to your boss.</p>
+
+<p>Apparently, the developers at the analytics company had been working on
+some experimental code that, under certain conditions, would retry the
+provided callback once per second, for five seconds, before failing with
+a timeout. They had never intended to push that into production, but
+somehow they did, and they’re totally embarrassed and apologetic. They
+go into plenty of detail about how they’ve identified the breakdown and
+what they’ll do to ensure it never happens again. Yadda, yadda.</p>
+
+<p>What’s next?</p>
+
+<p>You talk it over with your boss, but he’s not feeling particularly
+comfortable with the state of things. He insists, and you reluctantly
+agree, that you can’t trust them anymore (that’s what bit you), and
+that you’ll need to figure out how to protect the checkout code from
+such a vulnerability again.</p>
+
+<p>After some tinkering, you implement some simple ad hoc code like the
+following, which the team seems happy with:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">var</code> <code class="epub__nx">tracked</code> <code class="epub__o">=</code> <code class="epub__kc">false</code><code class="epub__p">;</code>
+
+<code class="epub__nx">analytics</code><code class="epub__p">.</code><code class="epub__nx">trackPurchase</code><code class="epub__p">(</code> <code class="epub__nx">purchaseData</code><code class="epub__p">,</code> <code class="epub__kd">function</code><code class="epub__p">(){</code>
+    <code class="epub__k">if</code> <code class="epub__p">(</code><code class="epub__o">!</code><code class="epub__nx">tracked</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+        <code class="epub__nx">tracked</code> <code class="epub__o">=</code> <code class="epub__kc">true</code><code class="epub__p">;</code>
+        <code class="epub__nx">chargeCreditCard</code><code class="epub__p">();</code>
+        <code class="epub__nx">displayThankyouPage</code><code class="epub__p">();</code>
+    <code class="epub__p">}</code>
+<code class="epub__p">}</code> <code class="epub__p">);</code></pre>
+<div data-type="note" epub:type="note"><h6>Note</h6>
+<p>This should look familiar to you from Chapter 1, because we’re
+essentially creating a latch to handle any multiple
+concurrent invocations of our callback.</p>
+</div>
+
+<p>But then one of your QA engineers asks, “what happens if they never call
+the callback?” Oops. Neither of you had thought about that.</p>
+
+<p>You begin to chase down the rabbit hole, and think of all the possible
+things that could go wrong with them calling your callback. Here’s
+roughly the list you come up with of ways the analytics utility could
+misbehave:</p>
+
+<ul>
+<li>
+<p>Call the callback too early (before it’s been tracked)</p>
+</li>
+<li>
+<p>Call the callback too late (or never)</p>
+</li>
+<li>
+<p>Call the callback too few or too many times (like the problem you
+encountered!)</p>
+</li>
+<li>
+<p>Fail to pass along any necessary environment/parameters to your
+callback</p>
+</li>
+<li>
+<p>Swallow any errors/exceptions that may happen</p>
+</li>
+<li>
+<p>…</p>
+</li>
+</ul>
+
+<p>That should feel like a troubling list, because it is. You’re probably
+slowly starting to realize that you’re going to have to invent an awful
+lot of ad hoc logic <em>in each and every single callback</em> that’s passed to
+a utility you’re not positive you can trust.</p>
+
+<p>Now you realize a bit more completely just how hellish callback hell
+is.</p>
+</div></section>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</div></section>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</div>
+</section>
+
+
+</body>
+</html>

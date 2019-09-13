@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Things to Remember When Using new in Constructors</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Things to Remember When Using <tt>new</tt> in Constructors</h3>
+<p class="docText">By now you’ve noticed that you must take special care when using <tt>new</tt> to initialize pointer members of an object. In particular, you should do the following:</p>
+<ul><li><p class="docList">If you use <tt>new</tt> to initialize a pointer member in a constructor, you should use <tt>delete</tt> in the destructor.</p></li><li><p class="docList">The uses of <tt>new</tt> and <tt>delete</tt> should be compatible. You should pair <tt>new</tt> with <tt>delete</tt> and <tt>new []</tt> with <tt>delete []</tt>.</p></li><li><p class="docList">If there are multiple constructors, all should use <tt>new</tt>
+ the same way—either all with brackets or all without brackets. There’s 
+only one destructor, so all constructors have to be compatible with that
+ destructor. However, it is permissible to initialize a pointer with <tt>new</tt> in one constructor and with the null pointer (<tt>0</tt>, or, with C++11, <tt>nullptr</tt>) in another constructor because it’s okay to apply the <tt>delete</tt> operation (with or without brackets) to the null pointer.</p><p></p><div class="box">
+<h2 class="docSidebarTitle"><tt>NULL</tt> or <tt>0</tt> or <tt>nullptr</tt>?</h2>
+<p class="docText">Historically, the null pointer can be represented by <tt>0</tt> or by <tt>NULL</tt>, a symbolic constant defined as <tt>0</tt> in several header files. C programmers often use <tt>NULL</tt> instead of <tt>0</tt> as a visual reminder that the value is a pointer value, just as they use <tt>'\0'</tt> instead of <tt>0</tt> for the null character as a visual reminder that this value is a character. The C++ tradition, however, has favored a simple <tt>0</tt> instead of the equivalent <tt>NULL</tt>. And, as mentioned earlier, C++11 offers the <tt>nullptr</tt> keyword as a better alternative.</p>
+</div><p></p><br/></li><li><p class="docList">You
+ should define a copy constructor that initializes one object to another
+ by doing deep copying. Typically, the constructor should emulate the 
+following example:</p><div class="docText"><pre>String::String(const String &amp; st)
+{
+     num_strings++;            // handle static member update if necessary
+     len = st.len;             // same length as copied string
+     str = new char [len + 1]; // allot space
+     std::strcpy(str, st.str); // copy string to new location
+}</pre></div><p class="docList">In particular, 
+the copy constructor should allocate space to hold the copied data, and 
+it should copy the data, not just the address of the data. Also it 
+should update any static class members whose value would be affected by 
+the process.</p></li><li><p class="docList">You
+ should define an assignment operator that copies one object to another 
+by doing deep copying. Typically, the class method should emulate the 
+following example:</p><div class="docText"><pre>String &amp; String::operator=(const String &amp; st)
+{
+     if (this == &amp;st)            // object assigned to itself
+          return *this;          // all done
+     delete [] str;              // free old string
+     len = st.len;
+     str = new char [len + 1];   // get space for new string
+     std::strcpy(str, st.str);   // copy the string
+     return *this;               // return reference to invoking object
+}</pre></div></li></ul>
+<p class="docText">In particular, the method 
+should check for self-assignment; it should free memory formerly pointed
+ to by the member pointer; it should copy the data, not just the address
+ of the data; and it should return a reference to the invoking object.</p>
+
+<h4 class="docSection2Title" id="title-ID0ENECK">Don’ts and Dos</h4>
+<p class="docText">The following excerpt contains two examples of what not to do and one example of a good constructor:</p>
+<div class="docText"><pre>String::String()
+{
+   str = "default string";     // oops, no new []
+   len = std::strlen(str);
+}
+
+String::String(const char * s)
+{
+   len = std::strlen(s);
+   str = new char;             // oops, no []
+   std::strcpy(str, s);        // oops, no room
+}
+
+String::String(const String &amp; st)
+{
+       len = st.len;
+       str = new char[len + 1];      // good, allocate space
+       std::strcpy(str, st.str);     // good, copy value
+}</pre></div><br/>
+<p class="docText">The first constructor fails to use <tt>new</tt> to initialize <tt>str</tt>. The destructor, when called for a default object, applies <tt>delete</tt> to <tt>str</tt>. The result of applying <tt>delete</tt> to a pointer not initialized by <tt>new</tt> is undefined, but it is probably bad. Any of the following would be okay:</p>
+<div class="docText"><pre>String::String()
+{
+    len = 0;
+    str = new char[1];  // uses new with []
+    str[0] = '\0';
+}
+
+String::String()
+{
+    len = 0;
+    str = 0;  // or, with C++11, str = nullptr;
+}
+
+String::String()
+{
+    static const char * s = "C++";     // initialized just once
+    len = std::strlen(s);
+    str = new char[len + 1];           // uses new with []
+    std::strcpy(str, s);
+}</pre></div><br/>
+<p class="docText">Next, the second constructor in the original excerpt applies <tt>new</tt>, but it fails to request the correct amount of memory; hence, <tt>new</tt>
+ returns a block containing space for just one character. Attempting to 
+copy a longer string to that location is asking for memory problems. 
+Also the use of <tt>new</tt> without brackets is inconsistent with the correct form of the other constructors.</p>
+<p class="docText">The third constructor is fine.</p>
+<p class="docText">Finally, here’s a destructor that <span class="docEmphasis">doesn’t</span> work correctly with the previous constructors:</p>
+<div class="docText"><pre>String::~String()
+{
+    delete str;      // oops, should be delete [] str;
+}</pre></div><br/>
+<p class="docText">The destructor uses <tt>delete</tt> incorrectly. Because the constructors request arrays of characters, the destructor should delete an array.</p>
+
+<h4 class="docSection2Title" id="title-ID0ERGCK">Memberwise Copying for Classes with Class Members</h4>
+<p class="docText">Suppose you use the <tt>String</tt> class, or, for that matter, the standard <tt>string</tt> class as a type for class members:</p>
+<div class="docText"><pre>class Magazine
+{
+private:
+    String title;
+    string publisher;
+...
+};</pre></div><br/>
+<p class="docText"><tt>String</tt> and <tt>string</tt> both use dynamic memory allocation. Does that mean you need to write a copy constructor and assignment operator for the <tt>Magazine</tt>
+ class? No—at least not in itself. The default memberwise copying and 
+assignment behavior does have some smarts. If you copy or assign one <tt>Magazine</tt>
+ object to another, memberwise copying uses the copy constructors and 
+assignment operators defined for the member types. That is, the <tt>String</tt> copy constructor will be used to copy the <tt>title</tt> member from one <tt>Magazine</tt> object to another, the <tt>String</tt> assignment operator will be used to assign the <tt>title</tt> member of one <tt>Magazine</tt> object to another, and so on. Things get more complicated, however, if the <tt>Magazine</tt>
+ class needs a copy constructor and assignment operator for some other 
+class member. In that case, those functions have to call the <tt>String</tt> and <tt>string</tt> copy constructors and assignment operators explicitly. But that’s a tale for Chapter 13, “Class Inheritance.”</p>
+</div>
+</body>
+</html>

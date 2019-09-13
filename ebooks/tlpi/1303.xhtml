@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>13.3. Controlling Kernel Buffering of File I/O</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">13.3. Controlling Kernel Buffering of File I/O</h3><p class="docText">It
+ is possible to force flushing of kernel buffers for output files. 
+Sometimes, this is necessary if an application (e.g., a database 
+journaling process) must ensure that output really has been written to 
+the disk (or at least to the disk’s hardware cache) before continuing.</p><p class="docText">Before
+ we describe the system calls used to control kernel buffering, it is 
+useful to consider a few relevant definitions from SUSv3.</p><h4 class="docSection2Title" id="title-ID0EXNBI">13.3.1. </h4><h5 class="docSection3Title" id="title-ID0E2NBI">13.3.1.1. Synchronized I/O data integrity and synchronized I/O file integrity</h5><p class="docText">SUSv3 defines the term <span class="docEmphasis">synchronized I/O completion</span> to mean “an I/O operation that has either been successfully transferred [to the disk] or diagnosed as unsuccessful.”</p><p class="docText">SUSv3 defines two different types of synchronized I/O completion. The difference between the types involves the <span class="docEmphasis">metadata</span>
+ (“data about data”) describing the file, which the kernel stores along 
+with the data for a file. We consider file metadata in detail when we 
+look at file i-nodes in Section 14.4,
+ but for now, it is sufficient to note that the file metadata includes 
+information such as the file owner and group; file permissions; file 
+size; number of (hard) links to the file; timestamps indicating the time
+ of the last file access, last file modification, and last metadata 
+change; and file data block pointers.</p><p class="docText">The first type of synchronized I/O completion defined by SUSv3 is <span class="docEmphasis">synchronized I/O data integrity completion</span>.
+ This is concerned with ensuring that a file data update transfers 
+sufficient information to allow a later retrieval of that data to 
+proceed.</p><ul><li><p class="docList">For
+ a read operation, this means that the requested file data has been 
+transferred (from the disk) to the process. If there were any pending 
+write operations affecting the requested data, these are transferred to 
+the disk before performing the read.</p></li><li><p class="docList">For
+ a write operation, this means that the data specified in the write 
+request has been transferred (to the disk) and all file metadata 
+required to retrieve that data has also been transferred. The key point 
+to note here is that not all modified file metadata attributes need to 
+be transferred to allow the file data to be retrieved. An example of a 
+modified file metadata attribute that would need to be transferred is 
+the file size (if the write operation extended the file). By contrast, 
+modified file timestamps would not need to be transferred to disk before
+ a subsequent data retrieval could proceed.</p></li></ul><p class="docText">The other type of synchronized I/O completion defined by SUSv3 is <span class="docEmphasis">synchronized I/O file integrity completion</span>,
+ which is a superset of synchronized I/O data integrity completion. The 
+difference with this mode of I/O completion is that during a file 
+update, <span class="docEmphasis">all</span> updated
+ file metadata is transferred to disk, even if it is not necessary for 
+the operation of a subsequent read of the file data.</p><h5 class="docSection3Title" id="title-ID0ELPBI">13.3.1.2. System calls for controlling kernel buffering of file I/O</h5><p class="docText">The <span class="docEmphasis">fsync()</span> system call causes the buffered data and all metadata associated with the open file descriptor <span class="docEmphasis">fd</span> to be flushed to disk. Calling <span class="docEmphasis">fsync()</span> forces the file to the synchronized I/O file integrity completion state.</p><pre>#include &lt;unistd.h&gt;
+
+int <b>fsync</b>(int <span class="docEmphasis">fd</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">An <span class="docEmphasis">fsync()</span> call returns only after the transfer to the disk device (or at least its cache) has completed.</p><p class="docText">The <span class="docEmphasis">fdatasync()</span> system call operates similarly to <span class="docEmphasis">fsync()</span>, but only forces the file to the synchronized I/O data integrity completion state.</p><pre>#include &lt;unistd.h&gt;
+
+int <b>fdatasync</b>(int <span class="docEmphasis">fd</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">Using <span class="docEmphasis">fdatasync()</span> potentially reduces the number of disk operations from the two required by <span class="docEmphasis">fsync()</span> to one. For example, if the file data has changed, but the file size has not, then calling <span class="docEmphasis">fdatasync()</span>
+ only forces the data to be updated. (We noted above that changes to 
+file metadata attributes such as the last modification timestamp don’t 
+need to be transferred for synchronized I/O data completion.) By 
+contrast, calling <span class="docEmphasis">fsync()</span> would also force the metadata to be transferred to disk.</p><p class="docText">Reducing
+ the number of disk I/O operations in this manner is useful for certain 
+applications in which performance is crucial and the accurate 
+maintenance of certain metadata (such as timestamps) is not essential. 
+This can make a considerable performance difference for applications 
+that are making multiple file updates: because the file data and 
+metadata normally reside on different parts of the disk, updating them 
+both would require repeated seek operations backward and forward across 
+the disk.</p><p class="docText">In Linux 2.2 and earlier, <span class="docEmphasis">fdatasync()</span> is implemented as a call to <span class="docEmphasis">fsync()</span>, and thus carries no performance gain.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Starting with kernel 2.6.17, Linux provides the nonstandard <span class="docEmphasis">sync_file_range()</span> system call, which allows more precise control than <span class="docEmphasis">fdatasync()</span>
+ when flushing file data. The caller can specify the file region to be 
+flushed, and specify flags controlling whether the system call blocks on
+ disk writes. See the <span class="docEmphasis">sync_file_range(2)</span> manual page for further details.</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">sync()</span>
+ system call causes all kernel buffers containing updated file 
+information (i.e., data blocks, pointer blocks, metadata, and so on) to 
+be flushed to disk.</p><pre>#include &lt;unistd.h&gt;
+
+void <b>sync</b>(void);</pre><br/>
+<p class="docText">In the Linux implementation, <span class="docEmphasis">sync()</span>
+ returns only after all data has been transferred to the disk device (or
+ at least to its cache). However, SUSv3 permits an implementation of <span class="docEmphasis">sync()</span> to simply schedule the I/O transfer and return before it has completed.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">A
+ permanently running kernel thread ensures that modified kernel buffers 
+are flushed to disk if they are not explicitly synchronized within 30 
+seconds. This is done to ensure that buffers don’t remain unsynchronized
+ with the corresponding disk file (and thus vulnerable to loss in the 
+event of a system crash) for long periods. In Linux 2.6, this task is 
+performed by the <span class="docEmphasis">pdflush</span> kernel thread. (In Linux 2.4, it is performed by the <span class="docEmphasis">kupdated</span> kernel thread.)</p><p class="docText">The file <tt>/proc/sys/vm/dirty_expire_centisecs</tt> specifies the age (in hundredths of a second) that a dirty buffer must reach before it is flushed by <span class="docEmphasis">pdflush</span>. Additional files in the same directory control other aspects of the operation of <span class="docEmphasis">pdflush</span>.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EMUBI">13.3.1.3. Making all writes synchronous: <tt>O_SYNC</tt></h5><p class="docText">Specifying the <tt>O_SYNC</tt> flag when calling <span class="docEmphasis">open()</span> makes all subsequent output <span class="docEmphasis">synchronous</span>:</p><pre>fd = open(pathname, O_WRONLY | O_SYNC);</pre><br/>
+<p class="docText">After this <span class="docEmphasis">open()</span> call, every <span class="docEmphasis">write()</span>
+ to the file automatically flushes the file data and metadata to the 
+disk (i.e., writes are performed according to synchronized I/O file 
+integrity completion).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Older BSD systems used the <tt>O_FSYNC</tt> flag to provide <tt>O_SYNC</tt> functionality. In <span class="docEmphasis">glibc</span>, <tt>O_FSYNC</tt> is defined as a synonym for <tt>O_SYNC</tt>.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EWWBI">13.3.1.4. Performance impact of <tt>O_SYNC</tt></h5><p class="docText">Using the <tt>O_SYNC</tt> flag (or making frequent calls to <span class="docEmphasis">fsync()</span>, <span class="docEmphasis">fdatasync()</span>, or <span class="docEmphasis">sync()</span>) can strongly affect performance. Table 13-3 shows the time required to write 1 million bytes to a newly created file (on an <span class="docEmphasis">ext2</span> file system) for a range of buffer sizes with and without <tt>O_SYNC</tt>. The results were obtained (using the <tt>filebuff/write_bytes.c</tt> program provided in the source code distribution for this book) using a vanilla 2.6.30 kernel and an <span class="docEmphasis">ext2</span> file system with a block size of 4096 bytes. Each row shows the average of 20 runs for the given buffer size.</p><p class="docText">As can be seen from the table, <tt>O_SYNC</tt>
+ increases elapsed times enormously—in the 1-byte buffer case, by a 
+factor of more than 1000. Note also the large differences between the 
+elapsed and CPU times for writes with <tt>O_SYNC</tt>. This is a consequence of the program being blocked while each buffer is actually transferred to disk.</p><p class="docText">The results shown in Table 13-3 omit a further factor that affects performance when using <tt>O_SYNC</tt>. Modern disk drives have large internal caches, and by default, <tt>O_SYNC</tt> merely causes data to be transferred to the cache. If we disable caching on the disk (using the command <span class="docEmphasis">hdparm -W0</span>), then the performance impact of <tt>O_SYNC</tt>
+ becomes even more extreme. In the 1-byte case, the elapsed time rises 
+from 1030 seconds to around 16,000 seconds. In the 4096-byte case, the 
+elapsed time rises from 0.34 seconds to 4 seconds.</p><p class="docText">In
+ summary, if we need to force flushing of kernel buffers, we should 
+consider whether we can design our application to use large <span class="docEmphasis">write()</span> buffer sizes or make judicious use of occasional calls to <span class="docEmphasis">fsync()</span> or <span class="docEmphasis">fdatasync()</span>, instead of using the <tt>O_SYNC</tt> flag when opening the file.</p><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 13-3. Impact of the <tt>O_SYNC</tt> flag on the speed of writing 1 million bytes</h5></caption><colgroup span="5"><col></col><col></col><col></col><col></col><col></col></colgroup><thead><tr><th align="center" class="docTableCell thead" rowspan="3" scope="col" style="text-align:center" valign="bottom"><tt>BUF_SIZE</tt></th><th align="center" class="docTableCell thead" colspan="4" scope="col" style="text-align:center" valign="bottom">Time required (seconds)</th></tr><tr><th align="center" class="docTableCell thead" colspan="2" scope="col" style="text-align:center" valign="bottom">Without <tt>O_SYNC</tt></th><th align="center" class="docTableCell thead" colspan="2" scope="col" style="text-align:center" valign="bottom">With <tt>O_SYNC</tt></th></tr><tr><th align="center" class="docTableCell thead" scope="col" style="text-align:center" valign="bottom">Elapsed</th><th align="center" class="docTableCell thead" scope="col" style="text-align:center" valign="bottom">Total CPU</th><th align="center" class="docTableCell thead" scope="col" style="text-align:center" valign="bottom">Elapsed</th><th align="center" class="docTableCell thead" scope="col" style="text-align:center" valign="bottom">Total CPU</th></tr></thead><tbody><tr><td align="right" class="docTableCell" valign="top"><tt>1</tt></td><td align="right" class="docTableCell" valign="top"><tt>0.73</tt></td><td align="right" class="docTableCell" valign="top"><tt>0.73</tt></td><td align="right" class="docTableCell" valign="top"><tt>1030</tt></td><td align="right" class="docTableCell" valign="top"><tt>98.8</tt></td></tr><tr><td align="right" class="docTableCell" valign="top"><tt>16</tt></td><td align="right" class="docTableCell" valign="top"><tt>0.05</tt></td><td align="right" class="docTableCell" valign="top"><tt>0.05</tt></td><td align="right" class="docTableCell" valign="top"><tt>65.0</tt></td><td align="right" class="docTableCell" valign="top"><tt>0.40</tt></td></tr><tr><td align="right" class="docTableCell" valign="top"><tt>256</tt></td><td align="right" class="docTableCell" valign="top"><tt>0.02</tt></td><td align="right" class="docTableCell" valign="top"><tt>0.02</tt></td><td align="right" class="docTableCell" valign="top"><tt>4.07</tt></td><td align="right" class="docTableCell" valign="top"><tt>0.03</tt></td></tr><tr><td align="right" class="docTableCell" valign="top"><tt>4096</tt></td><td align="right" class="docTableCell" valign="top"><tt>0.01</tt></td><td align="right" class="docTableCell" valign="top"><tt>0.01</tt></td><td align="right" class="docTableCell" valign="top"><tt>0.34</tt></td><td align="right" class="docTableCell" valign="top"><tt>0.03</tt></td></tr></tbody></table><p></p><br/><h5 class="docSection3Title" id="title-ID0EMACI">13.3.1.5. The <tt>O_DSYNC</tt> and <tt>O_RSYNC</tt> flags</h5><p class="docText">SUSv3 specifies two further open file status flags related to synchronized I/O: <tt>O_DSYNC</tt> and <tt>O_RSYNC</tt>.</p><p class="docText">The <tt>O_DSYNC</tt> flag causes writes to be performed according to the requirements of synchronized I/O data integrity completion (like <span class="docEmphasis">fdatasync()</span>). This contrasts with <tt>O_SYNC</tt>, which causes writes to be performed according to the requirements of synchronized I/O file integrity completion (like <span class="docEmphasis">fsync()</span>).</p><p class="docText">The <tt>O_RSYNC</tt> flag is specified in conjunction with either <tt>O_SYNC</tt> or <tt>O_DSYNC</tt>, and extends the write behaviors of these flags to read operations. Specifying both <tt>O_RSYNC</tt> and <tt>O_DSYNC</tt>
+ when opening a file means that all subsequent reads are completed 
+according to the requirements of synchronized I/O data integrity (i.e., 
+prior to performing the read, all pending file writes are completed as 
+though carried out with <tt>O_DSYNC</tt>). Specifying both <tt>O_RSYNC</tt> and <tt>O_SYNC</tt>
+ when opening a file means that all subsequent reads are completed 
+according to the requirements of synchronized I/O file integrity (i.e., 
+prior to performing the read, all pending file writes are completed as 
+though carried out with <tt>O_SYNC</tt>).</p><p class="docText">Before kernel 2.6.33, the <tt>O_DSYNC</tt> and <tt>O_RSYNC</tt> flags were not implemented on Linux, and the <span class="docEmphasis">glibc</span> headers defined these constants to be the same as <tt>O_SYNC</tt>. (This isn’t actually correct in the case of <tt>O_RSYNC</tt>, since <tt>O_SYNC</tt> doesn’t provide any functionality for read operations.)</p><p class="docText">Starting with kernel 2.6.33, Linux implements <tt>O_DSYNC</tt>, and an implementation of <tt>O_RSYNC</tt> is likely to be added in a future kernel release.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Before kernel 2.6.33, Linux didn’t fully implement <tt>O_SYNC</tt> semantics. Instead, <tt>O_SYNC</tt> was implemented as <tt>O_DSYNC</tt>.
+ To maintain consistent behavior for applications that were built for 
+older kernels, applications that were linked against older versions of 
+the GNU C library continue to provide <tt>O_DSYNC</tt> semantics for <tt>O_SYNC</tt>, even on Linux 2.6.33 and later.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

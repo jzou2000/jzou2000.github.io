@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>25.3. Exit Handlers</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">25.3. Exit Handlers</h3><p class="docText">Sometimes,
+ an application needs to automatically perform some operations on 
+process termination. Consider the example of an application library 
+that, if used during the life of the process, needs to have some cleanup
+ actions performed automatically when the process exits. Since the 
+library doesn’t have control of when and how the process exits, and 
+can’t mandate that the main program call a library-specific cleanup 
+function before exiting, cleanup is not guaranteed to occur. One 
+approach in such situations is to use an <span class="docEmphasis">exit handler</span> (older System V manuals used the term <span class="docEmphasis">program termination routine</span>).</p><p class="docText">An
+ exit handler is a programmer-supplied function that is registered at 
+some point during the life of the process and is then automatically 
+called during <span class="docEmphasis">normal</span> process termination via <span class="docEmphasis">exit()</span>. Exit handlers are not called if a program calls <span class="docEmphasis">_exit()</span> directly or if the process is terminated abnormally by a signal.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">To
+ some extent, the fact that exit handlers are not called when a process 
+is terminated by a signal limits their utility. The best we can do is to
+ establish handlers for the signals that might be sent to the process, 
+and have these handlers set a flag that causes the main program to call <span class="docEmphasis">exit()</span>. (Because <span class="docEmphasis">exit()</span> is not one of the async-signal-safe functions listed in Table 21-1, in Section 21.1.2.4, we generally can’t call it from a signal handler.) Even then, this doesn’t handle the case of <tt>SIGKILL</tt>, whose default action can’t be changed. This is one more reason we should avoid using <tt>SIGKILL</tt> to terminate a process (as noted in Section 20.2), and instead use <tt>SIGTERM</tt>, which is the default signal sent by the <span class="docEmphasis">kill</span> command.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0EKPCK">25.3.1. </h4><h5 class="docSection3Title" id="title-ID0EOPCK">25.3.1.1. Registering exit handlers</h5><p class="docText">The GNU C library provides two ways of registering exit handlers. The first method, specified in SUSv3, is to use the <span class="docEmphasis">atexit()</span> function.</p><pre>#include &lt;stdlib.h&gt;
+
+int <b>atexit</b>(void (*<span class="docEmphasis">func</span>)(void));</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or nonzero on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">atexit()</span> function adds <span class="docEmphasis">func</span> to a list of functions that are called when the process terminates. The function <span class="docEmphasis">func</span> should be defined to take no arguments and return no value, thus having the following general form:</p><pre>void
+func(void)
+{
+    /* Perform some actions */
+}</pre><br/>
+<p class="docText">Note that <span class="docEmphasis">atexit()</span> returns a nonzero value (not necessarily -1) on error.</p><p class="docText">It is possible to register multiple exit handlers (and even the same exit handler multiple times). When the program invokes <span class="docEmphasis">exit()</span>, these functions are called <span class="docEmphasis">in reverse order</span>
+ of registration. This ordering is logical because, typically, functions
+ that are registered earlier are those that carry out more fundamental 
+types of cleanups that may need to be performed after later-registered 
+functions.</p><p class="docText">Essentially, any 
+desired action can be performed inside an exit handler, including 
+registering additional exit handlers, which are placed at the head of 
+the list of exit handlers that remain to be called. However, if one of 
+the exit handlers fails to return—either because it called <span class="docEmphasis">_exit()</span> or because the process was terminated by a signal (e.g., the exit handler called <span class="docEmphasis">raise()</span>)—then the remaining exit handlers are not called. In addition, the remaining actions that would normally be performed by <span class="docEmphasis">exit()</span> (i.e., flushing <span class="docEmphasis">stdio</span> buffers) are not performed.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">SUSv3 states that if an exit handler itself calls <span class="docEmphasis">exit()</span>,
+ the results are undefined. On Linux, the remaining exit handlers are 
+invoked as normal. However, on some systems, this causes all of the exit
+ handlers to once more be invoked, which can result in an infinite 
+recursion (until a stack overflow kills the process). Portable 
+applications should avoid calling <span class="docEmphasis">exit()</span> inside an exit handler.</p><hr noshade="noshade" size="1"/><p class="docText">SUSv3 requires that an implementation allow a process to be able to register at least 32 exit handlers. Using the call <span class="docEmphasis">sysconf(_SC_ATEXIT_MAX)</span>,
+ a program can determine the implementation-defined upper limit on the 
+number of exit handlers that can be registered. (However, there is no 
+way to find out how many exit handlers have already been registered.) By
+ chaining the registered exit handlers in a dynamically allocated linked
+ list, <span class="docEmphasis">glibc</span> allows a virtually unlimited number of exit handlers to be registered. On Linux, <span class="docEmphasis">sysconf(_SC_ATEXIT_MAX)</span>
+ returns 2,147,482,647 (i.e., the maximum signed 32-bit integer). In 
+other words, something else will break (e.g., lack of memory) before we 
+reach the limit on the number of functions that can be registered.</p><p class="docText">A child process created via <span class="docEmphasis">fork()</span> inherits a copy of its parent’s exit handler registrations. When a process performs an <span class="docEmphasis">exec()</span>, all exit handler registrations are removed. (This is necessarily so, since an <span class="docEmphasis">exec()</span> replaces the code of the exit handlers along with the rest of the existing program code.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">We can’t deregister an exit handler that has been registered with <span class="docEmphasis">atexit()</span> (or <span class="docEmphasis">on_exit()</span>,
+ described below). However, we can have the exit handler check whether a
+ global flag is set before it performs its actions, and disable the exit
+ handler by clearing the flag.</p><hr noshade="noshade" size="1"/><p class="docText">Exit handlers registered with <span class="docEmphasis">atexit()</span> suffer a couple of limitations. The first is that when called, an exit handler doesn’t know what status was passed to <span class="docEmphasis">exit()</span>.
+ Occasionally, knowing the status could be useful; for example, we may 
+like to perform different actions depending on whether the process is 
+exiting successfully or unsuccessfully. The second limitation is that we
+ can’t specify an argument to the exit handler when it is called. Such a
+ facility could be useful to define an exit handler that performs 
+different actions depending on its argument, or to register a function 
+multiple times, each time with a different argument.</p><p class="docText">To address these limitations, <span class="docEmphasis">glibc</span> provides a (nonstandard) alternative method of registering exit handlers: <span class="docEmphasis">on_exit()</span>.</p><pre>#define _BSD_SOURCE           /* Or: #define _SVID_SOURCE */
+#include &lt;stdlib.h&gt;
+
+int <b>on_exit</b>(void (*<span class="docEmphasis">func</span>)(int, void *), void *<span class="docEmphasis">arg</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or nonzero on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">func</span> argument of <span class="docEmphasis">on_exit()</span> is a pointer to a function of the following type:</p><pre>void
+func(int status, void *arg)
+{
+    /* Perform cleanup actions */
+}</pre><br/>
+<p class="docText">When called, <span class="docEmphasis">func()</span> is passed two arguments: the <span class="docEmphasis">status</span> argument supplied to <span class="docEmphasis">exit()</span>, and a copy of the <span class="docEmphasis">arg</span> argument supplied to <span class="docEmphasis">on_exit()</span> at the time the function was registered. Although defined as a pointer type, <span class="docEmphasis">arg</span>
+ is open to programmer-defined interpretation. It could be used as a 
+pointer to some structure; equally, through judicious use of casting, it
+ could be treated as an integer or other scalar type.</p><p class="docText">Like <span class="docEmphasis">atexit()</span>, <span class="docEmphasis">on_exit()</span> returns a nonzero value (not necessarily -1) on error.</p><p class="docText">As with <span class="docEmphasis">atexit()</span>, multiple exit handlers can be registered with <span class="docEmphasis">on_exit()</span>. Functions registered using <span class="docEmphasis">atexit()</span> and <span class="docEmphasis">on_exit()</span>
+ are placed on the same list. If both methods are used in the same 
+program, then the exit handlers are called in reverse order of their 
+registration using the two methods.</p><p class="docText">Although more flexible than <span class="docEmphasis">atexit()</span>, <span class="docEmphasis">on_exit()</span>
+ should be avoided in programs intended to be portable, since it is not 
+covered by any standards and is available on few other UNIX 
+implementations.</p><h5 class="docSection3Title" id="title-ID0ELVCK">25.3.1.2. Example program</h5><p class="docText">Example 25-1 demonstrates the use of <span class="docEmphasis">atexit()</span> and <span class="docEmphasis">on_exit()</span> to register exit handlers. When we run this program, we see the following output:</p><pre>$ <b>./exit_handlers</b>
+on_exit function called: status=2, arg=20
+atexit function 2 called
+atexit function 1 called
+on_exit function called: status=2, arg=10</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EFWCK">Example 25-1. Using exit handlers</h5><p></p><div class="box"><pre class="preFixedHeight"><b>procexec/exit_handlers.c</b>
+#define _BSD_SOURCE     /* Get on_exit() declaration from &lt;stdlib.h&gt; */
+#include &lt;stdlib.h&gt;
+#include "tlpi_hdr.h"
+
+static void
+atexitFunc1(void)
+{
+    printf("atexit function 1 called\n");
+}
+
+static void
+atexitFunc2(void)
+{
+    printf("atexit function 2 called\n");
+}
+
+static void
+onexitFunc(int exitStatus, void *arg)
+{
+    printf("on_exit function called: status=%d, arg=%ld\n",
+                exitStatus, (long) arg);
+}
+
+int
+main(int argc, char *argv[])
+{
+    if (on_exit(onexitFunc, (void *) 10) != 0)
+        fatal("on_exit 1");
+    if (atexit(atexitFunc1) != 0)
+        fatal("atexit 1");
+    if (atexit(atexitFunc2) != 0)
+        fatal("atexit 2");
+    if (on_exit(onexitFunc, (void *) 20) != 0)
+        fatal("on_exit 2");
+
+    exit(2);
+}
+      <b>procexec/exit_handlers.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

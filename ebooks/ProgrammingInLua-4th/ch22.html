@@ -1,0 +1,745 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 22. The Environment</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 22. The Environment"><div class="titlepage"><div><h1><span class="partLabel">22</span> The Environment</h1></div></div><p id="N148DC" style="text-indent: 0">
+Global variables are a necessary evil of most programming languages.
+On one hand,
+the use of global variables can easily lead to complex code,
+entangling apparently unrelated parts of a program.
+On the other hand,
+the judicious use of global variables
+can better express truly global aspects of a program;
+moreover,
+global constants are innocuous,
+but dynamic languages like Lua have no way to
+distinguish constants from variables.
+An embedded language like Lua adds
+another ingredient to this mix:
+a global variable is a variable that is visible in the whole program,
+but Lua has no clear concept of a program,
+having instead pieces of code (chunks)
+called by the host application.
+</p><p id="N148DE" style="text-indent: 0">
+Lua solves this conundrum by not having global variables,
+but going to great lengths to pretend it has.
+In a first approximation,
+<a class="indexterm" id="N148E0"/>
+we can think that Lua keeps all its
+<a class="indexterm" id="N148E4"/>global variables in a regular table,
+called the <a class="indexterm" id="N148E8"/><em class="firstterm">global environment</em>.
+Later in this chapter,
+we will see that Lua can keep
+its <span class="quote">“<span class="quote">global</span>”</span> variables in several environments.
+For now,
+we will stick to that first approximation.
+</p><p id="N148F2" style="text-indent: 0">
+The use of a table to store global variables
+simplifies the internal implementation of Lua,
+because there is no need for
+a different data structure for global variables.
+Another advantage is that
+we can manipulate this table like any other table.
+To help such manipulations,
+Lua stores the global environment itself
+in the global variable <a class="indexterm" id="N148F4"></a><code class="function">_G</code>.
+(As a result, <code class="literal">_G._G</code> is equal to <code class="literal">_G</code>.)
+For instance,
+the following code prints the names of
+all the variables defined in the global environment:
+</p><pre class="programlisting" id="N14902">      for n in pairs(_G) do print(n) end
+</pre><p style="text-indent: 0">
+</p><div class="sect1" title="Global Variables with Dynamic Names"><div class="titlepage"><div><div><h2 class="title"><a id="L213"/>Global Variables with Dynamic Names</h2></div></div></div><p id="N14909" style="text-indent: 0">
+Usually,
+assignment is enough for accessing and setting global variables.
+However, sometimes we need some form of <a class="indexterm" id="N1490B"></a>meta-programming,
+such as when we need to manipulate a <a class="indexterm" id="N1490F"></a>global variable whose
+name is stored in another variable
+or is somehow computed at run time.
+To get the value of such a variable,
+some programmers are tempted to write something like this:
+</p><pre class="programlisting" id="N14913">      value = load("return " .. varname)()
+</pre><p style="text-indent: 0">
+If <code class="literal">varname</code> is <code class="literal">x</code>, for example,
+the concatenation will result in <code class="literal">"return x"</code>,
+which when run achieves the desired result.
+However,
+this code involves the creation and compilation of a new chunk,
+which is somewhat expensive.
+We can accomplish the same effect with the following code,
+which is more than an order of magnitude more efficient
+than the previous one:
+</p><pre class="programlisting" id="N1491F">      value = _G[varname]
+</pre><p style="text-indent: 0">
+Because the environment is a regular table,
+we can simply index it with the desired key (the variable name).
+</p><p id="N14922" style="text-indent: 0">
+In a similar way,
+we can assign a value to a <a class="indexterm" id="N14924"/>global variable
+whose name is computed dynamically
+by writing <code class="literal">_G[varname] = value</code>.
+Beware, however:
+some programmers get a little excited with these facilities
+and end up writing code like
+<code class="literal">_G["a"] = _G["b"]</code>,
+which is just a complicated way to write <code class="literal">a = b</code>.
+</p><p id="N14931" style="text-indent: 0">
+A generalization of the previous problem
+is to allow fields in the dynamic name,
+such as <code class="literal">"io.read"</code> or <code class="literal">"a.b.c.d"</code>.
+If we write <code class="literal">_G["io.read"]</code>,
+clearly we will not get the field <code class="literal">read</code> from the table <code class="literal">io</code>.
+But we can write a function <code class="literal">getfield</code> such
+that <code class="literal">getfield("io.read")</code> returns the expected result.
+This function is mainly a loop,
+which starts at <a class="indexterm" id="N14948"></a><code class="function">_G</code>
+and evolves field by field:
+</p><pre class="programlisting" id="N1494F">      function getfield (f)
+        local v = _G    -- start with the table of globals
+        for w in string.gmatch(f, "[%a_][%w_]*") do
+          v = v[w]
+        end
+        return v
+      end
+</pre><p style="text-indent: 0">
+We rely on <a class="indexterm" id="N14952"></a><code class="function">gmatch</code>
+to iterate over all identifiers in <code class="literal">f</code>.
+</p><p id="N1495D" style="text-indent: 0">
+The corresponding function to set fields is a little more complex.
+An assignment like <code class="literal">a.b.c.d = v</code> is equivalent to
+the following code:
+</p><pre class="programlisting" id="N14962">      local temp = a.b.c
+      temp.d = v
+</pre><p style="text-indent: 0">
+That is, we must retrieve up to the last name and
+then handle this last name separately.
+The function <code class="literal">setfield</code>, in <a class="xref" href="ch22.html#setfield" title="Figure 22.1. The function setfield">Figure 22.1, “The function <code class="literal">setfield</code>”</a>,
+does the task and also creates intermediate tables
+in a path when they do not exist.
+</p><div class="figure-float"><div class="figure"><a id="setfield"/><p class="title" style="text-indent: 0"><strong>Figure 22.1. The function <code class="literal">setfield</code></strong></p><div class="figure-contents"><pre class="programlisting" id="N14972">      function setfield (f, v)
+        local t = _G            -- start with the table of globals
+        for w, d in string.gmatch(f, "([%a_][%w_]*)(%.?)") do
+          if d == "." then      -- not last name?
+            t[w] = t[w] or {}   -- create table if absent
+            t = t[w]            -- get the table
+          else                  -- last name
+            t[w] = v            -- do the assignment
+          end
+        end
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+The pattern there <a class="indexterm" id="N14975"></a>captures
+the field name in the variable <code class="literal">w</code>
+and an optional following dot in the variable <code class="literal">d</code>.
+If a field name is not followed by a dot, then it is the last name.
+</p><p id="N1497F" style="text-indent: 0">
+With the previous functions in place,
+the next call creates a global table <code class="literal">t</code>,
+another table <code class="literal">t.x</code>,
+and assigns 10 to <code class="literal">t.x.y</code>:
+</p><pre class="programlisting" id="N1498A">      setfield("t.x.y", 10)
+      
+      print(t.x.y)               --&gt; 10
+      print(getfield("t.x.y"))   --&gt; 10
+</pre><p style="text-indent: 0">
+</p></div><div class="sect1" title="Global-Variable Declarations"><div class="titlepage"><div><div><h2 class="title"><a id="L214"/>Global-Variable Declarations</h2></div></div></div><p id="N14991" style="text-indent: 0">
+Global variables in Lua do not need declarations.
+Although this behavior is handy for small programs,
+in larger programs a simple typo
+can cause bugs that are difficult to find.
+However, we can change this behavior if we like.
+Because Lua keeps its <a class="indexterm" id="N14993"/>global variables in a regular table,
+we can use metatables to detect when
+Lua accesses non-existent variables.
+</p><p id="N14997" style="text-indent: 0">
+A first approach simply detects any access to absent keys
+in the global table:
+</p><pre class="programlisting" id="N14999">      setmetatable(_G, {
+        __newindex = function (_, n)
+          error("attempt to write to undeclared variable " .. n, 2)
+        end,
+        __index = function (_, n)
+          error("attempt to read undeclared variable " .. n, 2)
+        end,
+      })
+</pre><p style="text-indent: 0">
+After this code, any attempt to access a non-existent global
+variable will trigger an error:
+</p><pre class="programlisting" id="N1499C">      &gt; print(a)
+      stdin:1: attempt to read undeclared variable a
+</pre><p style="text-indent: 0">
+</p><p id="N1499F" style="text-indent: 0">
+But how do we declare new variables?
+One option is to use <a class="indexterm" id="N149A1"></a><code class="function">rawset</code>,
+which bypasses the metamethod:
+</p><pre class="programlisting" id="N149A7">      function declare (name, initval)
+        rawset(_G, name, initval or false)
+      end
+</pre><p style="text-indent: 0">
+(The <a class="indexterm" id="N149AA"></a><strong>or</strong> with <strong>false</strong> ensures that the new global always
+gets a value different from nil.)
+</p><p id="N149B7" style="text-indent: 0">
+A simpler option is to restrict assignments to new <a class="indexterm" id="N149B9"/>global variables
+only inside functions,
+allowing free assignments in the outer level of a chunk.
+</p><p id="N149BD" style="text-indent: 0">
+To check whether an assignment is in the main chunk,
+we must use the debug library.
+The call <code class="literal">debug.getinfo(2, "S")</code> returns a table
+whose field <code class="literal">what</code> tells whether the function that called
+the metamethod is a main chunk, a regular Lua function,
+or a C function.
+(We will see <a class="indexterm" id="N149C5"></a><code class="function">debug.getinfo</code> in more detail in
+<a class="xref" href="ch25.html#introspect" title="Introspective Facilities">the section called “Introspective Facilities”</a>.)
+Using this function,
+we can rewrite the <a class="indexterm" id="N149D0"></a><code class="literal">__newindex</code> metamethod like this:
+</p><pre class="programlisting" id="N149D9">        __newindex = function (t, n, v)
+          local w = debug.getinfo(2, "S").what
+          if w ~= "main" and w ~= "C" then
+            error("attempt to write to undeclared variable " .. n, 2)
+          end
+          rawset(t, n, v)
+        end
+</pre><p style="text-indent: 0">
+This new version also accepts assignments from C code,
+as this kind of code usually knows what it is doing.
+</p><p id="N149DC" style="text-indent: 0">
+If we need to test whether a variable exists,
+we cannot simply compare it to nil because,
+if it is nil, the access will raise an error.
+Instead, we use <a class="indexterm" id="N149DE"></a><code class="function">rawget</code>,
+which avoids the metamethod:
+</p><pre class="programlisting" id="N149E4">      if rawget(_G, var) == nil then
+        -- 'var' is undeclared
+        ...
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N149E7" style="text-indent: 0">
+As it is,
+our scheme does not allow global variables with nil values,
+as they would be automatically considered undeclared.
+But it is not difficult to correct this problem.
+All we need is an auxiliary table that keeps the names of
+declared variables.
+Whenever a metamethod is called,
+it checks in this table whether the variable is
+undeclared.
+The code can be like the one in <a class="xref" href="ch22.html#declaredNames" title="Figure 22.2. Checking global-variable declaration">Figure 22.2, “Checking global-variable declaration”</a>.
+</p><div class="figure-float"><div class="figure"><a id="declaredNames"/><p class="title" style="text-indent: 0"><strong>Figure 22.2. Checking global-variable declaration</strong></p><div class="figure-contents"><pre class="programlisting" id="N149F1">      local declaredNames = {}
+      
+      setmetatable(_G, {
+        __newindex = function (t, n, v)
+          if not declaredNames[n] then
+            local w = debug.getinfo(2, "S").what
+            if w ~= "main" and w ~= "C" then
+              error("attempt to write to undeclared variable "..n, 2)
+            end
+            declaredNames[n] = true
+          end
+          rawset(t, n, v)   -- do the actual set
+        end,
+      
+        __index = function (_, n)
+          if not declaredNames[n] then
+            error("attempt to read undeclared variable "..n, 2)
+          else
+            return nil
+          end
+        end,
+      })
+</pre></div></div></div><p style="text-indent: 0">
+
+Now, even an assignment like <code class="literal">x = nil</code> is enough to declare
+a <a class="indexterm" id="N149F7"></a>global variable.
+</p><p id="N149FB" style="text-indent: 0">
+The overhead for both solutions is negligible.
+With the first solution,
+the metamethods are never called during normal operation.
+In the second, they can be called,
+but only when the program accesses a variable holding a nil.
+</p><p id="N149FD" style="text-indent: 0">
+The Lua distribution comes with a module <code class="literal">strict.lua</code>
+that implements a global-variable check that uses essentially
+the code in <a class="xref" href="ch22.html#declaredNames" title="Figure 22.2. Checking global-variable declaration">Figure 22.2, “Checking global-variable declaration”</a>.
+It is a good habit to use it when developing Lua code.
+</p></div><div class="sect1" title="Non-Global Environments"><div class="titlepage"><div><div><h2 class="title"><a id="L215"/>Non-Global Environments</h2></div></div></div><p id="N14A09" style="text-indent: 0">
+In Lua, global variables do not need to be truly global.
+As I already hinted, Lua does not even have global variables.
+That may sound strange at first,
+as we have been using global variables all along this text.
+As I said, Lua goes to great lengths to give the programmer
+an illusion of global variables.
+Now we will see how Lua builds this illusion.<sup>[<a href="#ftn.N14A0B" id="N14A0B" class="footnote">19</a>]</sup>
+</p><p id="N14A0F" style="text-indent: 0">
+First, let us forget about global variables.
+Instead, we will start with the concept of free names.
+A <a class="indexterm" id="N14A11"></a><em class="firstterm">free name</em> is a name that is not bound to
+an explicit declaration,
+that is,
+it does not occur inside the scope of a
+corresponding local variable.
+For instance, both <code class="literal">x</code> and <code class="literal">y</code>
+are free names in the following chunk,
+but <code class="literal">z</code> is not:
+</p><pre class="programlisting" id="N14A21">      local z = 10
+      x = y + z
+</pre><p style="text-indent: 0">
+Now comes the important part:
+The Lua compiler translates
+any free name <code class="literal">x</code> in the chunk to <code class="literal">_ENV.x</code>.
+So, the previous chunk is fully equivalent to this one:
+</p><pre class="programlisting" id="N14A2A">      local z = 10
+      _ENV.x = _ENV.y + z
+</pre><p style="text-indent: 0">
+But what is this new <a class="indexterm" id="N14A2D"></a><code class="function">_ENV</code> variable?
+</p><p id="N14A34" style="text-indent: 0">
+<a class="indexterm" id="N14A36"></a><code class="function">_ENV</code> cannot be a global variable;
+we just said that Lua has no global variables.
+Again, the compiler does the trick.
+I already mentioned that Lua treats any chunk
+as an anonymous function.
+Actually, Lua compiles our original chunk as the following code:
+</p><pre class="programlisting" id="N14A3D">      local _ENV = <em class="replaceable"><code>some value</code></em>
+      return function (...)
+        local z = 10
+        _ENV.x = _ENV.y + z
+      end
+</pre><p style="text-indent: 0">
+That is, Lua compiles any chunk in the presence of a predefined
+<a class="indexterm" id="N14A43"></a>upvalue (an external local variable) called <a class="indexterm" id="N14A47"></a><code class="function">_ENV</code>.
+So, any variable is either local, if it is a bounded name,
+or a field in <a class="indexterm" id="N14A4E"></a><code class="function">_ENV</code>,
+which itself is a local variable (an upvalue).
+</p><p id="N14A55" style="text-indent: 0">
+The initial value for <a class="indexterm" id="N14A57"></a><code class="function">_ENV</code> can be any table.
+(Actually, it does not need to be a table;
+more about that later.)
+Any such table is called an environment.
+To preserve the illusion of global variables,
+Lua keeps internally a table
+that it uses as a <a class="indexterm" id="N14A5E"></a><em>global environment</em>.
+Usually, when we load a chunk,
+the function <a class="indexterm" id="N14A64"></a><code class="function">load</code> initializes this predefined upvalue
+with that global environment.
+So, our original chunk becomes equivalent to this one:
+</p><pre class="programlisting" id="N14A6A">      local _ENV = <em class="replaceable"><code>the global environment</code></em>
+      return function (...)
+        local z = 10
+        _ENV.x = _ENV.y + z
+      end
+</pre><p style="text-indent: 0">
+The result of all these arrangements is that
+the <code class="literal">x</code> field of the global environment gets
+the value of the <code class="literal">y</code> field plus 10.
+</p><p id="N14A76" style="text-indent: 0">
+At first sight,
+this may seem a rather convoluted way to manipulate global variables.
+I will not argue that it is the simplest way,
+but it offers a flexibility that
+is difficult to achieve with a simpler implementation.
+</p><p id="N14A78" style="text-indent: 0">
+Before we go on,
+let us summarize the handling of global variables in Lua:
+</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem"><p id="N14A7C" style="text-indent: 0">
+The compiler creates a local variable <code class="literal">_ENV</code>
+outside any chunk that it compiles.
+</p></li><li class="listitem"><p id="N14A82" style="text-indent: 0">
+The compiler translates any free name <code class="literal">var</code>
+to <code class="literal">_ENV.var</code>.
+</p></li><li class="listitem"><p id="N14A8B" style="text-indent: 0">
+The function <a class="indexterm" id="N14A8D"/><code class="function">load</code> (or <a class="indexterm" id="N14A93"/><code class="function">loadfile</code>)
+initializes the first upvalue of a chunk
+with the global environment,
+which is a regular table kept internally by Lua.
+</p></li></ul></div><p style="text-indent: 0">
+After all,
+it is not that complicated.
+</p><p id="N14A9A" style="text-indent: 0">
+Some people get confused because they try to infer
+extra magic from these rules.
+There is no extra magic.
+In particular,
+the first two rules are done entirely by the compiler.
+Except for being predefined by the compiler,
+<a class="indexterm" id="N14A9C"/><code class="function">_ENV</code> is a plain regular variable.
+Outside the compiler,
+the name <a class="indexterm" id="N14AA3"/><code class="function">_ENV</code> has no special meaning at all to Lua.<sup>[<a href="#ftn.N14AAA" id="N14AAA" class="footnote">20</a>]</sup>
+Similarly, the translation from <code class="literal">x</code> to <code class="literal">_ENV.x</code>
+is a plain syntactic translation,
+with no hidden meanings.
+In particular, after the translation,
+<code class="literal">_ENV</code> will refer to whatever
+<code class="literal">_ENV</code> variable is visible at that point in the code,
+following the standard visibility rules.
+</p></div><div class="sect1" title="Using _ENV"><div class="titlepage"><div><div><h2 class="title"><a id="L216"/>Using <code class="literal">_ENV</code></h2></div></div></div><p id="N14AC6" style="text-indent: 0">
+In this section, we will see some ways to explore
+the flexibility brought by <a class="indexterm" id="N14AC8"/><code class="function">_ENV</code>.
+Keep in mind that
+we must run most examples in this section
+as a single chunk.
+If we enter code line by line in interactive mode,
+each line becomes a different chunk
+and therefore each will have a distinct <a class="indexterm" id="N14ACF"/><code class="function">_ENV</code> variable.
+To run a piece of code as a single chunk,
+we can either run it from a file or
+enclose it in a <a class="indexterm" id="N14AD6"/><strong>do</strong>—<a class="indexterm" id="N14ADF"/><strong>end</strong> block.
+</p><p id="N14AE8" style="text-indent: 0">
+Because <a class="indexterm" id="N14AEA"></a><code class="function">_ENV</code> is a regular variable,
+we can assign to and access it as any other variable.
+The assignment <code class="literal">_ENV = nil</code> will invalidate
+any direct access to global variables in the rest of the chunk.
+This can be useful to control what variables our code uses:
+</p><pre class="programlisting" id="N14AF4">      local print, sin = print, math.sin
+      _ENV = nil
+      print(13)                 --&gt; 13
+      print(sin(13))            --&gt; 0.42016703682664
+      print(math.cos(13))       -- error!
+</pre><p style="text-indent: 0">
+Any assignment to a free name (a <span class="quote">“<span class="quote">global variable</span>”</span>)
+will raise a similar error.
+</p><p id="N14AFA" style="text-indent: 0">
+We can write the <a class="indexterm" id="N14AFC"></a><code class="function">_ENV</code> explicitly
+to bypass a local declaration:
+</p><pre class="programlisting" id="N14B03">      a = 13          -- global
+      local a = 12
+      print(a)        --&gt; 12  (local)
+      print(_ENV.a)   --&gt; 13  (global)
+</pre><p style="text-indent: 0">
+We can do the same with <a class="indexterm" id="N14B06"></a><code class="function">_G</code>:
+</p><pre class="programlisting" id="N14B0D">      a = 13          -- global
+      local a = 12
+      print(a)        --&gt; 12  (local)
+      print(_G.a)   --&gt; 13  (global)
+</pre><p style="text-indent: 0">
+Usually,
+<a class="indexterm" id="N14B10"></a><code class="function">_G</code> and <a class="indexterm" id="N14B17"></a><code class="function">_ENV</code> refer to the same table but,
+despite that, they are quite different entities.
+<a class="indexterm" id="N14B1E"></a><code class="function">_ENV</code> is a local variable,
+and all accesses to <span class="quote">“<span class="quote">global variables</span>”</span>
+in reality are accesses to it.
+<a class="indexterm" id="N14B28"></a><code class="function">_G</code> is a global variable with no special status whatsoever.
+By definition,
+<a class="indexterm" id="N14B2F"></a><code class="function">_ENV</code> always refers to the current environment;
+<a class="indexterm" id="N14B36"></a><code class="function">_G</code> usually refers to the global environment,
+provided it is visible and no one changed its value.
+</p><p id="N14B3D" style="text-indent: 0">
+The main use for <a class="indexterm" id="N14B3F"></a><code class="function">_ENV</code> is
+to change the environment used by a piece of code.
+Once we change the environment,
+all global accesses will use the new table:
+</p><pre class="programlisting" id="N14B46">      -- change current environment to a new empty table
+      _ENV = {}
+      a = 1       -- create a field in _ENV
+      print(a)
+        --&gt; stdin:4: attempt to call global 'print' (a nil value)
+</pre><p style="text-indent: 0">
+If the new environment is empty,
+we have lost all our global variables,
+including <a class="indexterm" id="N14B49"></a><code class="function">print</code>.
+So, we should first populate it with some useful values,
+for instance with the global environment:
+</p><pre class="programlisting" id="N14B4F">      a = 15                      -- create a global variable
+      _ENV = {g = _G}             -- change current environment
+      a = 1                       -- create a field in _ENV
+      g.print(_ENV.a, g.a)        --&gt; 1    15
+</pre><p style="text-indent: 0">
+Now, when we access the <span class="quote">“<span class="quote">global</span>”</span> <code class="literal">g</code>
+(which lives in <code class="literal">_ENV</code>,
+not in the global environment)
+we get the global environment,
+wherein Lua will find the function <code class="literal">print</code>.
+</p><p id="N14B5E" style="text-indent: 0">
+We can rewrite the previous example using the name <code class="literal">_G</code>
+instead of <code class="literal">g</code>:
+</p><pre class="programlisting" id="N14B66">      a = 15                      -- create a global variable
+      _ENV = {_G = _G}            -- change current environment
+      a = 1                       -- create a field in _ENV
+      _G.print(_ENV.a, _G.a)     --&gt; 1    15
+</pre><p style="text-indent: 0">
+The only special status of <code class="literal">_G</code>
+happens when Lua creates the initial global table and makes
+its field <code class="literal">_G</code> points to itself.
+Lua does not care about the current value of this variable.
+Nevertheless, it is customary to use this same name
+whenever we have a reference to the global environment,
+as we did in the rewritten example.
+</p><p id="N14B6F" style="text-indent: 0">
+Another way to populate our new environment is with inheritance:
+</p><pre class="programlisting" id="N14B71">      a = 1
+      local newgt = {}        -- create new environment
+      setmetatable(newgt, {__index = _G})
+      _ENV = newgt            -- set it
+      print(a)                --&gt; 1
+</pre><p style="text-indent: 0">
+In this code,
+the new environment inherits both <a class="indexterm" id="N14B74"></a><code class="function">print</code> and <code class="literal">a</code> from
+the global one.
+However, any assignment goes to the new table.
+There is no danger of changing a variable
+in the global environment by mistake,
+although we still can change them through <a class="indexterm" id="N14B7D"></a><code class="function">_G</code>:
+</p><pre class="programlisting" id="N14B84">      -- continuing the previous chunk
+      a = 10
+      print(a, _G.a)          --&gt; 10    1
+      _G.a = 20
+      print(_G.a)             --&gt; 20
+</pre><p style="text-indent: 0">
+</p><p id="N14B87" style="text-indent: 0">
+Being a regular variable, <a class="indexterm" id="N14B89"></a><code class="function">_ENV</code> follows the usual scoping rules.
+In particular,
+functions defined inside a chunk access <a class="indexterm" id="N14B90"></a><code class="function">_ENV</code> as they access
+any other external variable:
+</p><pre class="programlisting" id="N14B97">      _ENV = {_G = _G}
+      local function foo ()
+        _G.print(a)     -- compiled as '_ENV._G.print(_ENV.a)'
+      end
+      a = 10
+      foo()             --&gt; 10
+      _ENV = {_G = _G, a = 20}
+      foo()             --&gt; 20
+</pre><p style="text-indent: 0">
+</p><p id="N14B9A" style="text-indent: 0">
+If we define a new local variable called <a class="indexterm" id="N14B9C"></a><code class="function">_ENV</code>,
+references to free names will bind to that new variable:
+</p><pre class="programlisting" id="N14BA3">      a = 2
+      do
+        local _ENV = {print = print, a = 14}
+        print(a)     --&gt; 14
+      end
+      print(a)       --&gt; 2   (back to the original _ENV)
+</pre><p style="text-indent: 0">
+Therefore, it is not difficult to define a function
+with a private environment:
+</p><pre class="programlisting" id="N14BA6">      function factory (_ENV)
+        return function () return a end
+      end
+      
+      f1 = factory{a = 6}
+      f2 = factory{a = 7}
+      print(f1())        --&gt; 6
+      print(f2())        --&gt; 7
+</pre><p style="text-indent: 0">
+The <code class="literal">factory</code> function creates simple closures that
+return the value of their <span class="quote">“<span class="quote">global</span>”</span> <code class="literal">a</code>.
+When the closure is created,
+its visible <code class="literal">_ENV</code> variable
+is the parameter <code class="literal">_ENV</code> of the enclosing <code class="literal">factory</code> function;
+therefore, each closure will use its own external variable
+(as an <a class="indexterm" id="N14BBB"></a>upvalue) to access its free names.
+</p><p id="N14BBF" style="text-indent: 0">
+Using the usual scoping rules,
+we can manipulate environments in several other ways.
+For instance,
+we may have several functions sharing a common environment,
+or a function that changes the environment
+that it shares with other functions.
+</p></div><div class="sect1" title="Environments and Modules"><div class="titlepage"><div><div><h2 class="title"><a id="L217"/>Environments and Modules</h2></div></div></div><p id="N14BC5" style="text-indent: 0">
+In <a class="xref" href="ch17.html#basicmod" title="The Basic Approach for Writing Modules in Lua">the section called “The Basic Approach for Writing Modules in Lua”</a>,
+when we discussed how to write modules,
+I mentioned that one drawback of those methods was
+that it was all too easy to pollute the global space,
+for instance by forgetting a <a class="indexterm" id="N14BCA"></a><strong>local</strong> in a private declaration.
+Environments offer
+an interesting technique for solving that problem.
+Once the module main chunk has an exclusive environment,
+not only all its functions share this table,
+but also all its global variables go to this table.
+We can declare all public functions as global variables
+and they will go to a separate table automatically.
+All the module has to do is to assign this table to
+the <a class="indexterm" id="N14BD3"></a><code class="function">_ENV</code> variable.
+After that, when we declare a function <code class="literal">add</code>,
+it goes to <code class="literal">M.add</code>:
+</p><pre class="programlisting" id="N14BE0">      local M = {}
+      _ENV = M
+      function add (c1, c2)
+        return new(c1.r + c2.r, c1.i + c2.i)
+      end
+</pre><p style="text-indent: 0">
+Moreover, we can call other functions from
+the same module without any prefix.
+In the previous code,
+<code class="literal">add</code> gets <code class="literal">new</code> from its environment,
+that is, it calls <code class="literal">M.new</code>.
+</p><p id="N14BEC" style="text-indent: 0">
+This method offers a good support for modules,
+with little extra work for the programmer.
+It needs no prefixes at all.
+There is no difference between calling an exported function
+and a private one.
+If the programmer forgets a <a class="indexterm" id="N14BEE"/><strong>local</strong>,
+he does not pollute the global namespace;
+instead, a private function simply becomes public.
+</p><p id="N14BF7" style="text-indent: 0">
+Nevertheless, currently I still prefer the original basic method.
+It may need more work,
+but the resulting code states clearly what it does.
+To avoid creating a global by mistake,
+I use the simple method of assigning nil to <a class="indexterm" id="N14BF9"/><code class="function">_ENV</code>.
+After that,
+any assignment to a global name will raise an error.
+This approach has the extra advantage that it works
+without changes in older versions of Lua.
+(In Lua 5.1, the assignment to <a class="indexterm" id="N14C00"/><code class="function">_ENV</code>
+will not prevent errors,
+but it will not cause any harm, either.)
+</p><p id="N14C07" style="text-indent: 0">
+To access other modules,
+we can use one of the methods we discussed in the previous section.
+For instance,
+we can declare a local variable
+that holds the global environment:
+</p><pre class="programlisting" id="N14C09">      local M = {}
+      local _G = _G
+      _ENV = nil
+</pre><p style="text-indent: 0">
+We then prefix global names with <code class="literal">_G</code>
+and module names with <code class="literal">M</code>.
+</p><p id="N14C12" style="text-indent: 0">
+A more disciplined approach is to declare as locals only
+the functions we need or,
+at most, the modules we need:
+</p><pre class="programlisting" id="N14C14">      -- module setup
+      local M = {}
+      
+      -- Import Section:
+      -- declare everything this module needs from outside
+      local sqrt = math.sqrt
+      local io = io
+      
+      -- no more external access after this point
+      _ENV = nil
+</pre><p style="text-indent: 0">
+This technique demands more work,
+but it documents the module dependencies better.
+</p></div><div class="sect1" title="_ENV and load"><div class="titlepage"><div><div><h2 class="title"><a id="sc_envload"/><code class="literal">_ENV</code> and <code class="literal">load</code></h2></div></div></div><p id="N14C1F" style="text-indent: 0">
+As I mentioned earlier,
+<a class="indexterm" id="N14C21"/><code class="function">load</code> usually initializes the <a class="indexterm" id="N14C27"/><code class="function">_ENV</code> <a class="indexterm" id="N14C2E"/>upvalue
+of a loaded chunk with the global environment.
+However, <a class="indexterm" id="N14C32"/><code class="function">load</code> has an optional fourth parameter that
+allows us to give a different initial value for <a class="indexterm" id="N14C38"/><code class="function">_ENV</code>.
+(The function <a class="indexterm" id="N14C3F"/><code class="function">loadfile</code> has a similar parameter.)
+</p><p id="N14C45" style="text-indent: 0">
+For an initial example,
+consider that we have a typical configuration file,
+defining several constants and functions to be used by a program;
+it can be something like this:
+</p><pre class="programlisting" id="N14C47">      -- file 'config.lua'
+      width = 200
+      height = 300
+      ...
+</pre><p style="text-indent: 0">
+We can load it with the following code:
+</p><pre class="programlisting" id="N14C4A">      env = {}
+      loadfile("config.lua", "t", env)()
+</pre><p style="text-indent: 0">
+The whole code in the configuration file
+will run in the empty environment <code class="literal">env</code>,
+which works as a kind of <a class="indexterm" id="N14C50"></a>sandbox.
+In particular,
+all definitions will go into this environment.
+The configuration file has no way
+to affect anything else,
+even by mistake.
+Even malicious code cannot do much damage.
+It can do a <a class="indexterm" id="N14C54"></a>denial of service (DoS) attack,
+by wasting CPU time and memory,
+but nothing else.
+</p><p id="N14C58" style="text-indent: 0">
+Sometimes, we may want to run a chunk several times,
+each time with a different environment table.
+In that case, the extra argument to <a class="indexterm" id="N14C5A"/><code class="function">load</code> is not useful.
+Instead, we have two other options.
+</p><p id="N14C60" style="text-indent: 0">
+The first option is to use the function <a class="indexterm" id="N14C62"></a><code class="function">debug.setupvalue</code>,
+from the <a class="indexterm" id="N14C6A"></a>debug library.
+As its name implies,
+<code class="literal">setupvalue</code> allows us to change any <a class="indexterm" id="N14C71"></a>upvalue
+of a given function.
+The next fragment illustrates its use:
+</p><pre class="programlisting" id="N14C75">      f = load("b = 10; return a")
+      env = {a = 20}
+      debug.setupvalue(f, 1, env)
+      print(f())              --&gt; 20
+      print(env.b)            --&gt; 10
+</pre><p style="text-indent: 0">
+The first argument in the call to <code class="literal">setupvalue</code> is the function,
+the second is the upvalue index,
+and the third is the new value for the upvalue.
+For this kind of use, the second argument is always one:
+when a function represents a chunk,
+Lua assures that it has only one <a class="indexterm" id="N14C7B"></a>upvalue
+and that this upvalue is <a class="indexterm" id="N14C7F"></a><code class="function">_ENV</code>.
+</p><p id="N14C86" style="text-indent: 0">
+A small drawback of this option is
+its dependence on the <a class="indexterm" id="N14C88"/>debug library.
+This library breaks some usual assumptions about programs.
+For instance, <a class="indexterm" id="N14C8C"/><code class="function">debug.setupvalue</code> breaks
+Lua’s visibility rules,
+which ensures that we cannot access a local variable
+from outside its lexical scope.
+</p><p id="N14C94" style="text-indent: 0">
+Another option to run a chunk with several different environments
+is to twist the chunk a little when loading it.
+Imagine that we add the following line just before the chunk:
+</p><pre class="programlisting" id="N14C96">      _ENV = ...;
+</pre><p style="text-indent: 0">
+Remember that Lua compiles any chunk as a <a class="indexterm" id="N14C99"></a>variadic function.
+So, that extra line of code
+will assign to the <a class="indexterm" id="N14C9D"></a><code class="function">_ENV</code> variable
+the first argument passed to the chunk,
+thereby setting that argument as the environment.
+The following code snippet illustrates the idea,
+using the function <code class="literal">loadwithprefix</code>
+that you implemented in <a class="link" href="ch16.html#ex_loadwithprefix">Exercise 16.1</a>:
+</p><pre class="programlisting" id="N14CAB">      prefix = "_ENV = ...;"
+      f = loadwithprefix(prefix, io.lines(filename, "*L"))
+      ...
+      env1 = {}
+      f(env1)
+      env2 = {}
+      f(env2)
+</pre><p style="text-indent: 0">
+</p></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L218"/>Exercises</h2></div></div></div><p id="N14CB2" style="text-indent: 0">
+Exercise 22.1:<a id="L219"/> 
+The function <code class="literal">getfield</code> that we defined in the beginning
+of this chapter is too forgiving,
+as it accepts <span class="quote">“<span class="quote">fields</span>”</span> like <code class="literal">math?sin</code> or <code class="literal">string!!!gsub</code>.
+Rewrite it so that it accepts
+only single dots as name separators.
+
+
+</p><p id="N14CC3" style="text-indent: 0">
+Exercise 22.2:<a id="L220"></a> 
+Explain in detail what happens in the following program
+and what it will print.
+</p><pre class="programlisting" id="N14CC8">      local foo
+      do
+        local _ENV = _ENV
+        function foo ()  print(X) end
+      end
+      X = 13
+      _ENV = nil
+      foo()
+      X = 0
+</pre><p style="text-indent: 0">
+
+
+</p><p id="N14CCB" style="text-indent: 0">
+Exercise 22.3:<a id="L221"></a> 
+Explain in detail what happens in the following program
+and what it will print.
+</p><pre class="programlisting" id="N14CD0">      local print = print
+      function foo (_ENV, a)
+        print(a + b)
+      end
+      
+      foo({b = 14}, 12)
+      foo({b = 10}, 1)
+</pre><p style="text-indent: 0">
+
+
+</p></div><div class="footnotes"><br/><hr/><div class="footnote"><p id="N14A0C" style="text-indent: 0"><sup>[<a href="#N14A0B" id="ftn.N14A0B" class="para">19</a>] </sup>This mechanism was one of the parts of Lua
+that changed most from version 5.1 to 5.2.
+Very little of the following discussion applies to Lua 5.1.</p></div><div class="footnote"><p id="N14AAB" style="text-indent: 0"><sup>[<a href="#N14AAA" id="ftn.N14AAA" class="para">20</a>] </sup>To be completely honest,
+Lua uses that name for error messages,
+so that it reports an error involving a variable <code class="literal">_ENV.x</code>
+as being about <code class="literal">global x</code>.</p></div></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

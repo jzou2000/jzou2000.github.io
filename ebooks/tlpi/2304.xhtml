@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>23.4. Suspending Execution for a Fixed Interval (Sleeping)</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">23.4. Suspending Execution for a Fixed Interval (Sleeping)</h3><p class="docText">Sometimes,
+ we want to suspend execution of a process for a fixed amount of time. 
+While it is possible to do this using a combination of <span class="docEmphasis">sigsuspend()</span> and the timer functions already described, it is easier to use one of the sleep functions instead.</p><h4 class="docSection2Title" id="title-ID0E6WBK">23.4.1. Low-Resolution Sleeping: <span class="docEmphasis">sleep()</span></h4><p class="docText">The <span class="docEmphasis">sleep()</span> function suspends execution of the calling process for the number of seconds specified in the <span class="docEmphasis">seconds</span> argument or until a signal is caught (thus interrupting the call).</p><pre>#include &lt;unistd.h&gt;
+
+unsigned int <b>sleep</b>(unsigned int <span class="docEmphasis">seconds</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on normal completion, or number of unslept seconds if prematurely terminated</p><hr noshade="noshade" size="1"/><p class="docText">If the sleep completes, <span class="docEmphasis">sleep()</span> returns 0. If the sleep is interrupted by a signal, <span class="docEmphasis">sleep()</span> returns the number of remaining (unslept) seconds. As with timers set by <span class="docEmphasis">alarm()</span> and <span class="docEmphasis">setitimer()</span>, system load may mean that the process is rescheduled only at some (normally short) time after the completion of the <span class="docEmphasis">sleep()</span> call.</p><p class="docText">SUSv3 leaves possible interactions of <span class="docEmphasis">sleep()</span> with <span class="docEmphasis">alarm()</span> and <span class="docEmphasis">setitimer()</span> unspecified. On Linux, <span class="docEmphasis">sleep()</span> is implemented as a call to <span class="docEmphasis">nanosleep()</span> (Section 23.4.2), with the consequence that there is no interaction between <span class="docEmphasis">sleep()</span> and the timer functions. However, on many implementations, especially older ones, <span class="docEmphasis">sleep()</span> is implemented using <span class="docEmphasis">alarm()</span> and a handler for the <tt>SIGALRM</tt> signal. For portability, we should avoid mixing the use of <span class="docEmphasis">sleep()</span> with <span class="docEmphasis">alarm()</span> and <span class="docEmphasis">setitimer()</span>.</p><h4 class="docSection2Title" id="title-ID0E5ZBK">23.4.2. High-Resolution Sleeping: <span class="docEmphasis">nanosleep()</span></h4><p class="docText">The <span class="docEmphasis">nanosleep()</span> function performs a similar task to <span class="docEmphasis">sleep()</span>, but provides a number of advantages, including finer resolution when specifying the sleep interval.</p><pre>#define _POSIX_C_SOURCE 199309
+#include &lt;time.h&gt;
+
+int <b>nanosleep</b>(const struct timespec *<span class="docEmphasis">request</span>, struct timespec *<span class="docEmphasis">remain</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on successfully completed sleep, or -1 on error or interrupted sleep</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">request</span> argument specifies the duration of the sleep interval and is a pointer to a structure of the following form:</p><pre>struct timespec {
+    time_t tv_sec;         /* Seconds */
+    long   tv_nsec;        /* Nanoseconds */
+};</pre><br/>
+<p class="docText">The <span class="docEmphasis">tv_nsec</span> field specifies a nanoseconds value. It must be a number in the range 0 to 999,999,999.</p><p class="docText">A further advantage of <span class="docEmphasis">nanosleep()</span> is that SUSv3 explicitly specifies that it should not be implemented using signals. This means that, unlike the situation with <span class="docEmphasis">sleep()</span>, we can portably mix calls to <span class="docEmphasis">nanosleep()</span> with calls to <span class="docEmphasis">alarm()</span> or <span class="docEmphasis">setitimer()</span>.</p><p class="docText">Although it is not implemented using signals, <span class="docEmphasis">nanosleep()</span> may still be interrupted by a signal handler. In this case, <span class="docEmphasis">nanosleep()</span> returns -1, with <span class="docEmphasis">errno</span> set to the usual <tt>EINTR</tt> and, if the argument <span class="docEmphasis">remain</span> is not <tt>NULL</tt>,
+ the buffer it points to returns the remaining unslept time. If desired,
+ we can use the returned value to restart the system call and complete 
+the sleep. This is demonstrated in Example 23-3. As command-line arguments, this program expects seconds and nanosecond values for <span class="docEmphasis">nanosleep()</span>. The program loops repeatedly, executing <span class="docEmphasis">nanosleep()</span> until the total sleep interval is passed. If <span class="docEmphasis">nanosleep()</span> is interrupted by the handler for <tt>SIGINT</tt> (generated by typing <span class="docEmphasis">Control-C</span>), then the call is restarted using the value returned in <span class="docEmphasis">remain</span>. When we run this program, we see the following:</p><pre>$ <b>./t_nanosleep 10 0 </b>                      <i> Sleep for 10 seconds</i>
+<i> Type Control-C</i>
+Slept for:  1.853428 secs
+Remaining:  8.146617000
+<i> Type Control-C</i>
+Slept for:  4.370860 secs
+Remaining:  5.629800000
+<i> Type Control-C</i>
+Slept for:  6.193325 secs
+Remaining:  3.807758000
+Slept for: 10.008150 secs
+Sleep complete</pre><br/>
+<p class="docText">Although <span class="docEmphasis">nanosleep()</span>
+ allows nanosecond precision when specifying the sleep interval, the 
+accuracy of the sleep interval is limited to the granularity of the 
+software clock (Section 10.6). If we specify an interval that is not a multiple of the software clock, then the interval is rounded up.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">As
+ noted earlier, on systems that support high-resolution timers, the 
+accuracy of the sleep interval can be much finer than the granularity of
+ the software clock.</p><hr noshade="noshade" size="1"/><p class="docText">This
+ rounding behavior means that if signals are received at a high rate, 
+then there is a problem with the approach employed in the program in Example 23-3. The problem is that each restart of <span class="docEmphasis">nanosleep()</span> will be subject to rounding errors, since the returned <span class="docEmphasis">remain</span> time is unlikely to be an exact multiple of the granularity of the software clock. Consequently, each restarted <span class="docEmphasis">nanosleep()</span> will sleep longer than the value returned in <span class="docEmphasis">remain</span>
+ by the previous call. In the case of an extremely high rate of signal 
+delivery (i.e., as or more frequent than the software clock 
+granularity), the process may never be able to complete its sleep. On 
+Linux 2.6, this problem can be avoided by making use of <span class="docEmphasis">clock_nanosleep()</span> with the <tt>TIMER_ABSTIME</tt> option. We describe <span class="docEmphasis">clock_nanosleep()</span> in Section 23.5.4.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In Linux 2.4 and earlier, there is an eccentricity in the implementation of <span class="docEmphasis">nanosleep()</span>. Suppose that a process performing a <span class="docEmphasis">nanosleep()</span> call is stopped by a signal. When the process is later resumed via delivery of <tt>SIGCONT</tt>, then the <span class="docEmphasis">nanosleep()</span> call fails with the error <tt>EINTR</tt>, as expected. However, if the program subsequently restarts the <span class="docEmphasis">nanosleep()</span> call, then the time that the process has spent in the stopped state is <span class="docEmphasis">not</span>
+ counted against the sleep interval, so that the process will sleep 
+longer than expected. This eccentricity is eliminated in Linux 2.6, 
+where the <span class="docEmphasis">nanosleep()</span> call automatically resumes on delivery of the <tt>SIGCONT</tt> signal, and the time spent in the sleep state is counted against the sleep interval.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0ESBCK">Example 23-3. Using <span class="docEmphasis">nanosleep()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>timers/t_nanosleep.c</b>
+#define _POSIX_C_SOURCE 199309
+#include &lt;sys/time.h&gt;
+#include &lt;time.h&gt;
+#include &lt;signal.h&gt;
+#include "tlpi_hdr.h"
+
+static void
+sigintHandler(int sig)
+{
+    return;                     /* Just interrupt nanosleep() */
+}
+
+int
+main(int argc, char *argv[])
+{
+    struct timeval start, finish;
+    struct timespec request, remain;
+    struct sigaction sa;
+    int s;
+
+    if (argc != 3 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s secs nanosecs\n", argv[0]);
+
+    request.tv_sec = getLong(argv[1], 0, "secs");
+    request.tv_nsec = getLong(argv[2], 0, "nanosecs");
+
+    /* Allow SIGINT handler to interrupt nanosleep() */
+
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = 0;
+    sa.sa_handler = sigintHandler;
+    if (sigaction(SIGINT, &amp;sa, NULL) == -1)
+        errExit("sigaction");
+
+    if (gettimeofday(&amp;start, NULL) == -1)
+        errExit("gettimeofday");
+
+    for (;;) {
+        s = nanosleep(&amp;request, &amp;remain);
+        if (s == -1 &amp;&amp; errno != EINTR)
+            errExit("nanosleep");
+
+        if (gettimeofday(&amp;finish, NULL) == -1)
+            errExit("gettimeofday");
+        printf("Slept for: %9.6f secs\n", finish.tv_sec - start.tv_sec +
+                        (finish.tv_usec - start.tv_usec) / 1000000.0);
+
+        if (s == 0)
+            break;                      /* nanosleep() completed */
+
+        printf("Remaining: %2ld.%09ld\n", (long) remain.tv_sec,
+                remain.tv_nsec);
+        request = remain;               /* Next sleep is with remaining time */
+    }
+
+    printf("Sleep complete\n");
+    exit(EXIT_SUCCESS);
+}
+      <b>timers/t_nanosleep.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

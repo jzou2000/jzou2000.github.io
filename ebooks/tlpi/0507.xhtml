@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>5.7. Scatter-Gather I/O: readv() and writev()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">5.7. Scatter-Gather I/O: <span class="docEmphasis">readv()</span> and <span class="docEmphasis">writev()</span></h3><p class="docText">The <span class="docEmphasis">readv()</span> and <span class="docEmphasis">writev()</span> system calls perform scatter-gather I/O.</p><pre>#include &lt;sys/uio.h&gt;
+
+ssize_t <b>readv</b>(int <span class="docEmphasis">fd</span>, const struct iovec *<span class="docEmphasis">iov</span>, int <span class="docEmphasis">iovcnt</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of bytes read, 0 on EOF, or -1 on error</p><hr noshade="noshade" size="1"/><pre>ssize_t <b>writev</b>(int <span class="docEmphasis">fd</span>, const struct iovec *<span class="docEmphasis">iov</span>, int <span class="docEmphasis">iovcnt</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of bytes written, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">Instead
+ of accepting a single buffer of data to be read or written, these 
+functions transfer multiple buffers of data in a single system call. The
+ set of buffers to be transferred is defined by the array <span class="docEmphasis">iov</span>. The integer <span class="docEmphasis">iovcnt</span> specifies the number of elements in <span class="docEmphasis">iov</span>. Each element of <span class="docEmphasis">iov</span> is a structure of the following form:</p><pre class="preFixedWidth">struct iovec {
+    void  *iov_base;        /* Start address of buffer */
+    size_t iov_len;         /* Number of bytes to transfer to/from buffer */
+};
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">SUSv3 allows an implementation to place a limit on the number of elements in <span class="docEmphasis">iov</span>. An implementation can advertise its limit by defining <tt>IOV_MAX</tt> in <tt>&lt;limits.h&gt;</tt> or at run time via the return from the call <span class="docEmphasis">sysconf(_SC_IOV_MAX)</span>. (We describe <span class="docEmphasis">sysconf()</span> in Section 11.2.) SUSv3 requires that this limit be at least 16. On Linux, <tt>IOV_MAX</tt> is defined as 1024, which corresponds to the kernel’s limit on the size of this vector (defined by the kernel constant <tt>UIO_MAXIOV</tt>).</p><p class="docText">However, the <span class="docEmphasis">glibc</span> wrapper functions for <span class="docEmphasis">readv()</span> and <span class="docEmphasis">writev()</span> silently do some extra work. If the system call fails because <span class="docEmphasis">iovcnt</span>
+ is too large, then the wrapper function temporarily allocates a single 
+buffer large enough to hold all of the items described by <span class="docEmphasis">iov</span> and performs a <span class="docEmphasis">read()</span> or <span class="docEmphasis">write()</span> call (see the discussion below of how <span class="docEmphasis">writev()</span> could be implemented in terms of <span class="docEmphasis">write()</span>).</p><hr noshade="noshade" size="1"/><p class="docText">Figure 5-3 shows an example of the relationship between the <span class="docEmphasis">iov</span> and <span class="docEmphasis">iovcnt</span> arguments, and the buffers to which they refer.</p><p></p><center><h5 class="docFigureTitle">Figure 5-3. Example of an <span class="docEmphasis">iovec</span> array and associated buffers</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-7.png"/></p></center><p></p><br/><h4 class="docSection2Title" id="title-ID0EEFBG">5.7.1. </h4><h5 class="docSection3Title" id="title-ID0EIFBG">5.7.1.1. Scatter input</h5><p class="docText">The <span class="docEmphasis">readv()</span> system call performs <span class="docEmphasis">scatter input</span>: it reads a contiguous sequence of bytes from the file referred to by the file descriptor <span class="docEmphasis">fd</span> and places (“scatters”) these bytes into the buffers specified by <span class="docEmphasis">iov</span>. Each of the buffers, starting with the one defined by <span class="docEmphasis">iov[0]</span>, is completely filled before <span class="docEmphasis">readv()</span> proceeds to the next buffer.</p><p class="docText">An important property of <span class="docEmphasis">readv()</span>
+ is that it completes atomically; that is, from the point of view of the
+ calling process, the kernel performs a single data transfer between the
+ file referred to by <span class="docEmphasis">fd</span>
+ and user memory. This means, for example, that when reading from a 
+file, we can be sure that the range of bytes read is contiguous, even if
+ another process (or thread) sharing the same file offset attempts to 
+manipulate the offset at the same time as the <span class="docEmphasis">readv()</span> call.</p><p class="docText">On successful completion, <span class="docEmphasis">readv()</span>
+ returns the number of bytes read, or 0 if end-of-file was encountered. 
+The caller must examine this count to verify whether all requested bytes
+ were read. If insufficient data was available, then only some of the 
+buffers may have been filled, and the last of these may be only 
+partially filled.</p><p class="docText">Example 5-2 demonstrates the use of <span class="docEmphasis">readv()</span>.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Using the prefix <tt>t_</tt> followed by a function name as the name of an example program (e.g., <tt>t_readv.c</tt> in Example 5-2) is our way of indicating that the program primarily demonstrates the use of a single system call or library function.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0EZHBG">Example 5-2. Performing scatter input with <span class="docEmphasis">readv()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>fileio/t_readv.c</b>
+#include &lt;sys/stat.h&gt;
+#include &lt;sys/uio.h&gt;
+#include &lt;fcntl.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int fd;
+    struct iovec iov[3];
+    struct stat myStruct;       /* First buffer */
+    int x;                      /* Second buffer */
+#define STR_SIZE 100
+    char str[STR_SIZE];         /* Third buffer */
+    ssize_t numRead, totRequired;
+
+    if (argc != 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s file\n", argv[0]);
+
+    fd = open(argv[1], O_RDONLY);
+    if (fd == -1)
+        errExit("open");
+
+    totRequired = 0;
+
+    iov[0].iov_base = &myStruct;
+    iov[0].iov_len = sizeof(struct stat);
+    totRequired += iov[0].iov_len;
+
+    iov[1].iov_base = &x;
+    iov[1].iov_len = sizeof(x);
+    totRequired += iov[1].iov_len;
+
+    iov[2].iov_base = str;
+    iov[2].iov_len = STR_SIZE;
+    totRequired += iov[2].iov_len;
+
+    numRead = readv(fd, iov, 3);
+    if (numRead == -1)
+        errExit("readv");
+
+    if (numRead &lt; totRequired)
+        printf("Read fewer bytes than requested\n");
+
+    printf("total bytes requested: %ld; bytes read: %ld\n",
+            (long) totRequired, (long) numRead);
+    exit(EXIT_SUCCESS);
+}
+     <b>fileio/t_readv.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0EGIBG">5.7.1.2. Gather output</h5><p class="docText">The <span class="docEmphasis">writev()</span> system call performs <span class="docEmphasis">gather output</span>. It concatenates (“gathers”) data from all of the buffers specified by <span class="docEmphasis">iov</span> and writes them as a sequence of contiguous bytes to the file referred to by the file descriptor <span class="docEmphasis">fd</span>. The buffers are gathered in array order, starting with the buffer defined by <span class="docEmphasis">iov[0]</span>.</p><p class="docText">Like <span class="docEmphasis">readv()</span>, <span class="docEmphasis">writev()</span> completes atomically, with all data being transferred in a single operation from user memory to the file referred to by <span class="docEmphasis">fd</span>.
+ Thus, when writing to a regular file, we can be sure that all of the 
+requested data is written contiguously to the file, rather than being 
+interspersed with writes by other processes (or threads).</p><p class="docText">As with <span class="docEmphasis">write()</span>, a partial write is possible. Therefore, we must check the return value from <span class="docEmphasis">writev()</span> to see if all requested bytes were written.</p><p class="docText">The primary advantages of <span class="docEmphasis">readv()</span> and <span class="docEmphasis">writev()</span> are convenience and speed. For example, we could replace a call to <span class="docEmphasis">writev()</span> by either:</p><ul><li><p class="docList">code
+ that allocates a single large buffer, copies the data to be written 
+from other locations in the process’s address space into that buffer, 
+and then calls <span class="docEmphasis">write()</span> to output the buffer; or</p></li><li><p class="docList">a series of <span class="docEmphasis">write()</span> calls that output the buffers individually.</p></li></ul><p class="docText">The first of these options, while semantically equivalent to using <span class="docEmphasis">writev()</span>, leaves us with the inconvenience (and inefficiency) of allocating buffers and copying data in user space.</p><p class="docText">The second option is not semantically equivalent to a single call to <span class="docEmphasis">writev()</span>, since the <span class="docEmphasis">write()</span> calls are not performed atomically. Furthermore, performing a single <span class="docEmphasis">writev()</span> system call is cheaper than performing multiple <span class="docEmphasis">write()</span> calls (refer to the discussion of system calls in Section 3.1).</p><h5 class="docSection3Title" id="title-ID0ETKBG">5.7.1.3. Performing scatter-gather I/O at a specified offset</h5><p class="docText">Linux
+ 2.6.30 adds two new system calls that combine scatter-gather I/O 
+functionality with the ability to perform the I/O at a specified offset:
+ <span class="docEmphasis">preadv()</span> and <span class="docEmphasis">pwritev()</span>. These system calls are nonstandard, but are also available on the modern BSDs.</p><pre>#define _BSD_SOURCE
+#include &lt;sys/uio.h&gt;
+
+ssize_t <b>preadv</b>(int <span class="docEmphasis">fd</span>, const struct iovec *<span class="docEmphasis">iov</span>, int <span class="docEmphasis">iovcnt</span>, off_t <span class="docEmphasis">offset</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of bytes read, 0 on EOF, or -1 on error</p><hr noshade="noshade" size="1"/><pre>ssize_t <b>pwritev</b>(int <span class="docEmphasis">fd</span>, const struct iovec *<span class="docEmphasis">iov</span>, int <span class="docEmphasis">iovcnt</span>, off_t <span class="docEmphasis">offset</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of bytes written, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">preadv()</span> and <span class="docEmphasis">pwritev()</span> system calls perform the same task as <span class="docEmphasis">readv()</span> and <span class="docEmphasis">writev()</span>, but perform the I/O at the file location specified by <span class="docEmphasis">offset</span> (like <span class="docEmphasis">pread()</span> and <span class="docEmphasis">pwrite()</span>).</p><p class="docText">These
+ system calls are useful for applications (e.g., multithreaded 
+applications) that want to combine the benefits of scatter-gather I/O 
+with the ability to perform I/O at a location that is independent of the
+ current file offset.</p>
+</div>
+</body>
+</html>

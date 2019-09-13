@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>33.5. Linux Implementations of POSIX Threads</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">33.5. Linux Implementations of POSIX Threads</h3><p class="docText">Linux has two main implementations of the Pthreads API:</p><ul><li><p class="docList"><span class="docEmphasis">LinuxThreads</span>: This is the original Linux threading implementation, developed by Xavier Leroy.</p></li><li><p class="docList"><span class="docEmphasis">NPTL (Native POSIX Threads Library)</span>:
+ This is the modern Linux threading implementation, developed by Ulrich 
+Drepper and Ingo Molnar as a successor to LinuxThreads. NPTL provides 
+performance that is superior to LinuxThreads, and it adheres more 
+closely to the SUSv3 specification for Pthreads. Support for NPTL 
+required changes to the kernel, and these changes appeared in Linux 2.6.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">For
+ a while, it appeared that the successor to LinuxThreads would be 
+another implementation, called Next Generation POSIX Threads (NGPT), a 
+threading implementation developed at IBM. NGPT employed an M:N design 
+and performed significantly better than LinuxThreads. However, the NPTL 
+developers decided to pursue a new implementation. This approach was 
+justified—the 1:1-design NPTL was shown to perform better than NGPT. 
+Following the release of NPTL, development of NGPT was discontinued.</p><hr noshade="noshade" size="1"/><p class="docText">In
+ the following sections, we consider further details of these two 
+implementations, and note the points where they deviate from the SUSv3 
+requirements for Pthreads.</p><p class="docText">At this point, it is worth emphasizing that the LinuxThreads implementation is now obsolete; it is not supported in <span class="docEmphasis">glibc</span> 2.4 and later. All new thread library development occurs only in NPTL.</p><h4 class="docSection2Title" id="title-ID0ERBFK">33.5.1. LinuxThreads</h4><p class="docText">For
+ many years, LinuxThreads was the main threading implementation on 
+Linux, and it was sufficient for implementing a variety of threaded 
+applications. The essentials of the LinuxThreads implementation are as 
+follows:</p><ul><li><p class="docList">Threads are created using a <span class="docEmphasis">clone()</span> call that specifies the following flags:</p><pre>CLONE_VM | CLONE_FILES | CLONE_FS | CLONE_SIGHAND</pre><br/>
+<p class="docList">This means that 
+LinuxThreads threads share virtual memory, file descriptors, file 
+system-related information (umask, root directory, and current working 
+directory), and signal dispositions. However, threads don’t share 
+process IDs and parent process IDs.</p></li><li><p class="docList">In
+ addition to the threads created by the application, LinuxThreads 
+creates an additional “manager” thread that handles thread creation and 
+termination.</p></li><li><p class="docList">The
+ implementation uses signals for its internal operation. With kernels 
+that support realtime signals (Linux 2.2 and later), the first three 
+realtime signals are used. With older kernels, <tt>SIGUSR1</tt> and <tt>SIGUSR2</tt>
+ are used. Applications can’t use these signals. (The use of signals 
+results in high latency for various thread synchronization operations.)</p></li></ul><h5 class="docSection3Title" id="title-ID0ELCFK">33.5.1.1. LinuxThreads deviations from specified behavior</h5><p class="docText">LinuxThreads
+ doesn’t conform to the SUSv3 specification for Pthreads on a number of 
+points. (The LinuxThreads implementation was constrained by the kernel 
+features available at the time that it was developed; it was as 
+conformant as practicable within those constraints.) The following list 
+summarizes the nonconformances:</p><ul><li><p class="docList">Calls to <span class="docEmphasis">getpid()</span> return a different value in each of the threads of a process. Calls to <span class="docEmphasis">getppid()</span> reflect the fact that every thread other than the main thread is created by the process’s manager thread (i.e., <span class="docEmphasis">getppid()</span> returns the process ID of the manager thread). Calls to <span class="docEmphasis">getppid()</span> in the other threads should return the same value as a call to <span class="docEmphasis">getppid()</span> in the main thread.</p></li><li><p class="docList">If one thread creates a child using <span class="docEmphasis">fork()</span>, then any other thread should be able to obtain the termination status of that child using <span class="docEmphasis">wait()</span> (or similar). However, this is not so; only the thread that created the child process can <span class="docEmphasis">wait()</span> for it.</p></li><li><p class="docList">If a thread calls <span class="docEmphasis">exec()</span>, then, as required by SUSv3, all other threads are terminated. However, if the <span class="docEmphasis">exec()</span>
+ is done from any thread other than the main thread, then the resulting 
+process will have the same process ID as the calling thread—that is, a 
+process ID that is different from the main thread’s process ID. 
+According to SUSv3, the process ID should be the same as that of the 
+main thread.</p></li><li><p class="docList">Threads
+ don’t share credentials (user and group IDs). When a multithreaded 
+process is executing a set-user-ID program, this can lead to scenarios 
+in which one thread can’t send a signal to another thread using <span class="docEmphasis">pthread_kill()</span>,
+ because the credentials of the two threads have been changed in such a 
+way that the sending thread no longer has permission to signal the 
+target thread (refer to Figure 20-2, in Section 20.6).
+ Furthermore, since the LinuxThreads implementation uses signals 
+internally, various Pthreads operations can fail or hang if a thread 
+changes its credentials.</p></li><li><p class="docList">Various aspects of the SUSv3 specification for the interaction between threads and signals are not honored:</p><ul><li><p class="docList">A signal that is sent to a process using <span class="docEmphasis">kill()</span> or <span class="docEmphasis">sigqueue()</span>
+ should be delivered to, and handled by, an arbitrary thread in the 
+target process that is not blocking the signal. However, since 
+LinuxThreads threads have different process IDs, a signal can be 
+targeted only at a specific thread. If that thread is blocking the 
+signal, it remains pending, even if there are other threads that are not
+ blocking the signal.</p></li><li><p class="docList">LinuxThreads
+ doesn’t support the notion of signals that are pending for a process as
+ whole; only per-thread pending signals are supported.</p></li><li><p class="docList">If
+ a signal is directed at a process group that contains a multithreaded 
+application, then the signal will be handled by all threads in the 
+application (i.e., all threads that have established a signal handler), 
+rather than by a single (arbitrary) thread. Such a signal may, for 
+example, be generated by typing one of the terminal characters that 
+generates a job-control signal for the foreground process group.</p></li><li><p class="docList">The alternate signal stack settings (established by <span class="docEmphasis">sigaltstack()</span>) are per-thread. However, because a new thread wrongly inherits its alternate signal stack settings from the caller of <span class="docEmphasis">pthread_create()</span>,
+ the two threads share an alternate signal stack. SUSv3 requires that a 
+new thread should start with no alternate signal stack defined. The 
+consequence of this LinuxThreads nonconformance is that if two threads 
+happen to simultaneously handle different signals on their shared 
+alternate signal stacks at the same time, chaos is likely to result 
+(e.g., a program crash). This problem may be very hard to reproduce and 
+debug, since its occurrence depends on the probably rare event that the 
+two signals are handled at the same time.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In a program using LinuxThreads, a new thread could make a call to <span class="docEmphasis">sigaltstack()</span>
+ to ensure that it uses a different alternate signal stack from the 
+thread that created it (or no stack at all). However, portable programs 
+(and library functions that create threads) won’t know to do this, since
+ it is not a requirement on other implementations. Furthermore, even if 
+we employ this technique, there is still a possible race condition: the 
+new thread could receive and handle a signal on the alternate stack 
+before it has a chance to call <span class="docEmphasis">sigaltstack()</span>.</p><hr noshade="noshade" size="1"/></li></ul></li><li><p class="docList">Threads don’t share a common session ID and process group ID. The <span class="docEmphasis">setsid()</span> and <span class="docEmphasis">setpgid()</span> system calls can’t be used to change the session or process group membership of a multithreaded process.</p></li><li><p class="docList">Record locks established using <span class="docEmphasis">fcntl()</span> are not shared. Overlapping lock requests of the same type are not merged.</p></li><li><p class="docList">Threads don’t share resource limits. SUSv3 specifies that resource limits are process-wide attributes.</p></li><li><p class="docList">The CPU time returned by <span class="docEmphasis">times()</span> and the resource usage information returned by <span class="docEmphasis">getrusage()</span> are per-thread. These system calls should return process-wide totals.</p></li><li><p class="docList">Some versions of <span class="docEmphasis">ps(1)</span> show all of the threads in a process (including the manager thread) as separate items with distinct process IDs.</p></li><li><p class="docList">Threads don’t share nice value set by <span class="docEmphasis">setpriority()</span>.</p></li><li><p class="docList">Interval timers created using <span class="docEmphasis">setitimer()</span> are not shared between the threads.</p></li><li><p class="docList">Threads don’t share System V semaphore undo (<span class="docEmphasis">semadj</span>) values.</p></li></ul><h5 class="docSection3Title" id="title-ID0E3JFK">33.5.1.2. Other problems with LinuxThreads</h5><p class="docText">In addition to the above deviations from SUSv3, the LinuxThreads implementation has the following problems:</p><ul><li><p class="docList">If the manager thread is killed, then the remaining threads must be manually cleaned up.</p></li><li><p class="docList">A
+ core dump of a multithreaded program may not include all of the threads
+ of the process (or even the one that triggered the core dump).</p></li><li><p class="docList">The nonstandard <span class="docEmphasis">ioctl()</span> <tt>TIOCNOTTY</tt> operation can remove the process’s association with a controlling terminal only when called from the main thread.</p></li></ul><h4 class="docSection2Title" id="title-ID0EOKFK">33.5.2. NPTL</h4><p class="docText">NPTL was designed to address most of the shortcomings of LinuxThreads. In particular:</p><ul><li><p class="docList">NPTL provides much closer conformance to the SUSv3 specification for Pthreads.</p></li><li><p class="docList">Applications that employ large numbers of threads scale much better under NPTL than under LinuxThreads.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">NPTL
+ allows an application to create large numbers of threads. The NPTL 
+implementers were able to run test programs that created 100,000 
+threads. With LinuxThreads, the practical limit on the number of threads
+ is a few thousand. (Admittedly, very few applications need such large 
+numbers of threads.)</p><hr noshade="noshade" size="1"/></li></ul><p class="docText">Work
+ on implementing NPTL began in 2002 and progressed over the next year or
+ so. In parallel, various changes were made within the Linux kernel to 
+accommodate the requirements of NPTL. The changes that appeared in the 
+Linux 2.6 kernel to support NPTL included the following:</p><ul><li><p class="docList">refinements to the implementation of thread groups (Section 28.2.1);</p></li><li><p class="docList">the addition of futexes as a synchronization mechanism (futexes are a generic mechanism that was designed not just for NPTL);</p></li><li><p class="docList">the addition of new system calls (<span class="docEmphasis">get_thread_area()</span> and <span class="docEmphasis">set_thread_area()</span>) to support thread-local storage;</p></li><li><p class="docList">support for threaded core dumps and debugging of multithreaded processes;</p></li><li><p class="docList">modifications to support management of signals in a manner consistent with the Pthreads model;</p></li><li><p class="docList">the addition of a new <span class="docEmphasis">exit_group()</span> system call to terminate all of the threads in a process (starting with <span class="docEmphasis">glibc</span> 2.3, <span class="docEmphasis">_exit()</span>—and thus also the <span class="docEmphasis">exit()</span> library function—is aliased as a wrapper that invokes <span class="docEmphasis">exit_group()</span>, while a call to <span class="docEmphasis">pthread_exit()</span> invokes the true <span class="docEmphasis">_exit()</span> system call in the kernel, which terminates just the calling thread);</p></li><li><p class="docList">a rewrite of the kernel scheduler to allow efficient scheduling of very large numbers (i.e., thousands) of KSEs;</p></li><li><p class="docList">improved performance for the kernel’s process termination code; and</p></li><li><p class="docList">extensions to the <span class="docEmphasis">clone()</span> system call (Section 28.2).</p></li></ul><p class="docText">The essentials of the NPTL implementation are as follows:</p><ul><li><p class="docList">Threads are created using a <span class="docEmphasis">clone()</span> call that specifies the following flags:</p><pre>CLONE_VM | CLONE_FILES | CLONE_FS | CLONE_SIGHAND |
+CLONE_THREAD | CLONE_SETTLS | CLONE_PARENT_SETTID |
+CLONE_CHILD_CLEARTID | CLONE_SYSVSEM</pre><br/>
+<p class="docList">NPTL threads share all of the information that LinuxThreads threads share, and more. The <tt>CLONE_THREAD</tt>
+ flag means that a thread is placed in the same thread group as its 
+creator and shares the same process ID and parent process ID. The <tt>CLONE_SYSVSEM</tt> flag means that a thread shares System V semaphore undo values with its creator.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">When we use <span class="docEmphasis">ps(1)</span>
+ to list a multithreaded process running under NPTL, we see just a 
+single line of output. To see information about the threads within a 
+process, we can use the <span class="docEmphasis">ps -L</span> option.</p><hr noshade="noshade" size="1"/></li><li><p class="docList">The implementation makes internal use of the first two realtime signals. Applications can’t use these signals.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">One
+ of these signals is used to implement thread cancellation. The other 
+signal is used as part of a technique that ensures that all of the 
+threads in a process have the same user and group IDs. This technique is
+ required because, at the kernel level, threads have distinct user and 
+group credentials. Therefore, the NPTL implementation does some work in 
+the wrapper function for each system call that changes user and group 
+IDs (<span class="docEmphasis">setuid()</span>, <span class="docEmphasis">setresuid()</span>, and so on, and their group analogs) that causes the IDs to be changed in all of the threads of the process.</p><hr noshade="noshade" size="1"/></li><li><p class="docList">Unlike LinuxThreads, NPTL doesn’t use manager threads.</p></li></ul><h5 class="docSection3Title" id="title-ID0EDPFK">33.5.2.1. NPTL standards conformance</h5><p class="docText">These
+ changes mean that NPTL achieves much closer SUSv3 conformance than 
+LinuxThreads. At the time of writing, the following nonconformance 
+remains:</p><ul><li><p class="docList">Threads don’t share a nice value.</p></li></ul><p class="docText">There are some additional NPTL nonconformances in earlier 2.6.<span class="docEmphasis">x</span> kernels:</p><ul><li><p class="docList">In
+ kernels before 2.6.16, the alternate signal stack was per-thread, but a
+ new thread wrongly inherited alternate signal stack settings 
+(established by <span class="docEmphasis">sigaltstack()</span>) from the caller of <span class="docEmphasis">pthread_create()</span>, with the consequence that the two threads shared an alternate signal stack.</p></li><li><p class="docList">In kernels before 2.6.16, only a thread group leader (i.e., the main thread) could start a new session by calling <span class="docEmphasis">setsid()</span>.</p></li><li><p class="docList">In kernels before 2.6.16, only a thread group leader could use <span class="docEmphasis">setpgid()</span> to make the host process a process group leader.</p></li><li><p class="docList">In kernels prior to 2.6.12, interval timers created using <span class="docEmphasis">setitimer()</span> were not shared between the threads of a process.</p></li><li><p class="docList">In kernels prior to 2.6.10, resource limit settings were not shared between the threads of a process.</p></li><li><p class="docList">In kernels prior to 2.6.9, the CPU time returned by <span class="docEmphasis">times()</span> and the resource usage information returned by <span class="docEmphasis">getrusage()</span> were per-thread.</p></li></ul><p class="docText">NPTL
+ was designed to be ABI-compatible with LinuxThreads. This means that 
+programs that were linked against a GNU C library providing LinuxThreads
+ don’t need to be relinked in order to use NPTL. However, some behaviors
+ may change when the program is run with NPTL, primarily because NPTL 
+adheres more closely to the SUSv3 specification for Pthreads.</p><h4 class="docSection2Title" id="title-ID0E2SFK">33.5.3. Which Threading Implementation?</h4><p class="docText">Some
+ Linux distributions ship with a GNU C library that provides both 
+LinuxThreads and NPTL, with the default being determined by the dynamic 
+linker according to the underlying kernel on which the system is 
+running. (These distributions are by now historical because, since 
+version 2.4, <span class="docEmphasis">glibc</span> no longer provides LinuxThreads.) Therefore, we may sometimes need to answer the following questions:</p><ul><li><p class="docList">Which threading implementation is available in a particular Linux distribution?</p></li><li><p class="docList">On
+ a Linux distribution that provides both LinuxThreads and NPTL, which 
+implementation is used by default, and how can we explicitly select the 
+implementation that is used by a program?</p></li></ul><h5 class="docSection3Title" id="title-ID0EZTFK">33.5.3.1. Discovering the threading implementation</h5><p class="docText">We
+ can use a few techniques to discover the threading implementation that 
+is available on a particular system, or to discover the default 
+implementation that will be employed when a program is run on a system 
+that provides both threading implementations.</p><p class="docText">On a system providing <span class="docEmphasis">glibc</span>
+ version 2.3.2 or later, we can use the following command to discover 
+which threading implementation the system provides, or, if it provides 
+both implementation, then which one is used by default:</p><pre>$ <b>getconf GNU_LIBPTHREAD_VERSION</b></pre><br/>
+<p class="docText">On a system where NPTL is the only or the default implementation, this will display a string such as the following:</p><pre>NPTL 2.3.4</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Since <span class="docEmphasis">glibc</span> 2.3.2, a program can obtain similar information by using <span class="docEmphasis">confstr(3)</span> to retrieve the value of the <span class="docEmphasis">glibc</span>-specific <tt>_CS_GNU_LIBPTHREAD_VERSION</tt> configuration variable.</p><hr noshade="noshade" size="1"/><p class="docText">On
+ systems with older GNU C libraries, we must do a little more work. 
+First, the following command can be used to show the pathname of the GNU
+ C library that is used when we run a program (here, we use the example 
+of the standard <span class="docEmphasis">ls</span> program, which resides at <tt>/bin/ls</tt>):</p><pre>$ <b>ldd /bin/ls | grep libc.so</b>
+        libc.so.6 =&gt; /lib/tls/libc.so.6 (0x40050000)</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">We say a little more about the <span class="docEmphasis">ldd</span> (list dynamic dependencies) program in Section 41.5.</p><hr noshade="noshade" size="1"/><p class="docText">The pathname of the GNU C library is shown after the <tt>=&gt;</tt>. If we execute this pathname as a command, then <span class="docEmphasis">glibc</span> displays a range of information about itself. We can <span class="docEmphasis">grep</span> though this information to select the line that displays the threading implementation:</p><pre>$ <b>/lib/tls/libc.so.6 | egrep -i 'threads|nptl'</b>
+        Native POSIX Threads Library by Ulrich Drepper et al</pre><br/>
+<p class="docText">We include <span class="docEmphasis">nptl</span> in the <span class="docEmphasis">egrep</span> regular expression because some <span class="docEmphasis">glibc</span> releases containing NPTL instead display a string like this:</p><pre>NPTL 0.61 by Ulrich Drepper</pre><br/>
+<p class="docText">Since the <span class="docEmphasis">glibc</span>
+ pathname may vary from one Linux distribution to another, we can employ
+ shell command substitution to produce a command line that will display 
+the threading implementation in use on any Linux system, as follows:</p><pre class="preFixedWidth">$ <b>$(ldd /bin/ls | grep libc.so | awk '{print $3}') | egrep -i 'threads|nptl'</b>
+        Native POSIX Threads Library by Ulrich Drepper et al
+
+					  </pre><br/>
+<h5 class="docSection3Title" id="title-ID0EVWFK">33.5.3.2. Selecting the threading implementation used by a program</h5><p class="docText">On
+ a Linux system that provides both NPTL and LinuxThreads, it is 
+sometimes useful to be able to explicitly control which threading 
+implementation is used. The most common example of this requirement is 
+when we have an older program that depends on some (probably 
+nonstandard) behavior of LinuxThreads, so that we want to force the 
+program to run with that threading implementation, instead of the 
+default NPTL.</p><p class="docText">For this purpose, we can employ a special environment variable understood by the dynamic linker: <tt>LD_ASSUME_KERNEL</tt>.
+ As its name suggests, this environment variable tells the dynamic 
+linker to operate as though it is running on top of a particular Linux 
+kernel version. By specifying a kernel version that doesn’t provide 
+support for NPTL (e.g., <tt>2.2.5</tt>), we 
+can ensure that LinuxThreads is used. Thus, we could run a multithreaded
+ program with LinuxThreads using the following command:</p><pre>$ <b>LD_ASSUME_KERNEL=2.2.5 ./prog</b></pre><br/>
+<p class="docText">When we combine this 
+environment variable setting with the command that we described earlier 
+to show the threading implementation that is used, we see something like
+ the following:</p><pre class="preFixedWidth">$ <b>export LD_ASSUME_KERNEL=2.2.5</b>
+$ <b>$(ldd /bin/ls | grep libc.so | awk '{print $3}') | egrep -i 'threads|nptl'</b>
+        linuxthreads-0.10 by Xavier Leroy
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The range of kernel version numbers that can be specified in <tt>LD_ASSUME_KERNEL</tt>
+ is subject to some limits. In several common distributions that supply 
+both NPTL and LinuxThreads, specifying the version number as 2.2.5 is 
+sufficient to ensure the use of LinuxThreads. For a fuller description 
+of the use of this environment variable, see http://people.redhat.com/drepper/assumekernel.html.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

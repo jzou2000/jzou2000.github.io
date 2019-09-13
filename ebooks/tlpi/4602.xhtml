@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>46.2. Exchanging Messages</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">46.2. Exchanging Messages</h3><p class="docText">The <span class="docEmphasis">msgsnd()</span> and <span class="docEmphasis">msgrcv()</span> system calls perform I/O on message queues. The first argument to both system calls (<span class="docEmphasis">msqid</span>) is a message queue identifier. The second argument, <span class="docEmphasis">msgp</span>,
+ is a pointer to a programmer-defined structure used to hold the message
+ being sent or received. This structure has the following general form:</p><pre>struct mymsg {
+    long mtype;                 /* Message type */
+    char mtext[];               /* Message body */
+}</pre><br/>
+<p class="docText">This definition is really just
+ shorthand for saying that the first part of a message contains the 
+message type, specified as a long integer, while the remainder of the 
+message is a programmer-defined structure of arbitrary length and 
+content; it need not be an array of characters. Thus, the <span class="docEmphasis">mgsp</span> argument is typed as <span class="docEmphasis">void *</span> to allow it to be a pointer to any type of structure.</p><p class="docText">A zero-length <span class="docEmphasis">mtext</span>
+ field is permitted, and is sometimes useful if the information to be 
+conveyed can be encoded solely in the message type or if the existence 
+of a message is in itself sufficient information for the receiving 
+process.</p><h4 class="docSection2Title" id="title-ID0E4PBM">46.2.1. Sending Messages</h4><p class="docText">The <span class="docEmphasis">msgsnd()</span> system call writes a message to a message queue.</p><pre>#include &lt;sys/types.h&gt;        /* For portability */
+#include &lt;sys/msg.h&gt;
+
+int <b>msgsnd</b>(int <span class="docEmphasis">msqid</span>, const void *<span class="docEmphasis">msgp</span>, size_t <span class="docEmphasis">msgsz</span>, int <span class="docEmphasis">msgflg</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">To send a message with <span class="docEmphasis">msgsnd()</span>, we must set the <span class="docEmphasis">mtype</span> field of the message structure to a value greater than 0 (we see how this value is used when we discuss <span class="docEmphasis">msgrcv()</span> in the next section) and copy the desired information into the programmer-defined <span class="docEmphasis">mtext</span> field. The <span class="docEmphasis">msgsz</span> argument specifies the number of bytes contained in the <span class="docEmphasis">mtext</span> field.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">When sending messages with <span class="docEmphasis">msgsnd()</span>, there is no concept of a partial write as with <span class="docEmphasis">write()</span>. This is why a successful <span class="docEmphasis">msgsnd()</span> needs only to return 0, rather than the number of bytes sent.</p><hr noshade="noshade" size="1"/><p class="docText">The final argument, <span class="docEmphasis">msgflg</span>, is a bit mask of flags controlling the operation of <span class="docEmphasis">msgsnd()</span>. Only one such flag is defined:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">IPC_NOWAIT</span></span></span></p></dt><dd><p class="docList">Perform a nonblocking send. Normally, if a message queue is full, <span class="docEmphasis">msgsnd()</span>
+ blocks until enough space has become available to allow the message to 
+be placed on the queue. However, if this flag is specified, then <span class="docEmphasis">msgsnd()</span> returns immediately with the error <tt>EAGAIN</tt>.</p></dd></dl><p class="docText">A <span class="docEmphasis">msgsnd()</span> call that is blocked because the queue is full may be interrupted by a signal handler. In this case, <span class="docEmphasis">msgsnd()</span> always fails with the error <tt>EINTR</tt>. (As noted in Section 21.5, <span class="docEmphasis">msgsnd()</span> is among those system calls that are never automatically restarted, regardless of the setting of the <tt>SA_RESTART</tt> flag when the signal handler is established.)</p><p class="docText">Writing a message to a message queue requires write permission on the queue.</p><p class="docText">The program in Example 46-2 provides a command-line interface to the <span class="docEmphasis">msgsnd()</span> system call. The command-line format accepted by this program is shown in the <span class="docEmphasis">usageError()</span> function. Note that this program doesn’t use the <span class="docEmphasis">msgget()</span> system call. (We noted that a process doesn’t need to use a <span class="docEmphasis">get</span>
+ call in order to access an IPC object in Section 45.1.) Instead, we 
+specify the message queue by providing its identifier as a command-line 
+argument. We demonstrate the use of this program in Section 46.2.2.</p><h5 class="docExampleTitle" id="title-ID0EBVBM">Example 46-2. Using <span class="docEmphasis">msgsnd()</span> to send a message</h5><p></p><div class="box"><pre class="preFixedHeight"><b>svmsg/svmsg_send.c</b>
+#include &lt;sys/types.h&gt;
+#include &lt;sys/msg.h&gt;
+#include "tlpi_hdr.h"
+
+#define MAX_MTEXT 1024
+
+struct mbuf {
+    long mtype;                         /* Message type */
+    char mtext[MAX_MTEXT];              /* Message body */
+};
+
+static void             /* Print (optional) message, then usage description */
+usageError(const char *progName, const char *msg)
+{
+    if (msg != NULL)
+        fprintf(stderr, "%s", msg);
+    fprintf(stderr, "Usage: %s [-n] msqid msg-type [msg-text]\n", progName);
+    fprintf(stderr, "    -n       Use IPC_NOWAIT flag\n");
+    exit(EXIT_FAILURE);
+}
+
+int
+main(int argc, char *argv[])
+{
+    int msqid, flags, msgLen;
+    struct mbuf msg;                    /* Message buffer for msgsnd() */
+    int opt;                            /* Option character from getopt() */
+
+    /* Parse command-line options and arguments */
+
+    flags = 0;
+    while ((opt = getopt(argc, argv, "n")) != -1) {
+        if (opt == 'n')
+            flags |= IPC_NOWAIT;
+        else
+            usageError(argv[0], NULL);
+    }
+
+    if (argc &lt; optind + 2 || argc &gt; optind + 3)
+        usageError(argv[0], "Wrong number of arguments\n");
+
+    msqid = getInt(argv[optind], 0, "msqid");
+    msg.mtype = getInt(argv[optind + 1], 0, "msg-type");
+
+    if (argc &gt; optind + 2) {            /* 'msg-text' was supplied */
+        msgLen = strlen(argv[optind + 2]) + 1;
+        if (msgLen &gt; MAX_MTEXT)
+            cmdLineErr("msg-text too long (max: %d characters)\n", MAX_MTEXT);
+
+        memcpy(msg.mtext, argv[optind + 2], msgLen);
+
+    } else {                            /* No 'msg-text' ==&gt; zero-length msg */
+        msgLen = 0;
+    }
+
+    /* Send message */
+
+    if (msgsnd(msqid, &amp;msg, msgLen, flags) == -1)
+        errExit("msgsnd");
+
+    exit(EXIT_SUCCESS);
+}
+      <b>svmsg/svmsg_send.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0EPVBM">46.2.2. Receiving Messages</h4><p class="docText">The <span class="docEmphasis">msgrcv()</span> system call reads (and removes) a message from a message queue, and copies its contents into the buffer pointed to by <span class="docEmphasis">msgp</span>.</p><pre>#include &lt;sys/types.h&gt;        /* For portability */
+#include &lt;sys/msg.h&gt;
+
+ssize_t <b>msgrcv</b>(int <span class="docEmphasis">msqid</span>, void *<span class="docEmphasis">msgp</span>, size_t <span class="docEmphasis">maxmsgsz</span>, long
+ <span class="docEmphasis">msgtyp</span>, int <span class="docEmphasis">msgflg</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of bytes copied into <span class="docEmphasis">mtext</span> field, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The maximum space available in the <span class="docEmphasis">mtext</span> field of the <span class="docEmphasis">msgp</span> buffer is specified by the argument <span class="docEmphasis">maxmsgsz</span>. If the body of the message to be removed from the queue exceeds <span class="docEmphasis">maxmsgsz</span> bytes, then no message is removed from the queue, and <span class="docEmphasis">msgrcv()</span> fails with the error <tt>E2BIG</tt>. (This default behavior can be changed using the <tt>MSG_NOERROR</tt> flag described shortly.)</p><p class="docText">Messages need not be read in the order in which they were sent. Instead, we can select messages according to the value in the <span class="docEmphasis">mtype</span> field. This selection is controlled by the <span class="docEmphasis">msgtyp</span> argument, as follows:</p><ul><li><p class="docList">If <span class="docEmphasis">msgtyp</span> equals 0, the first message from the queue is removed and returned to the calling process.</p></li><li><p class="docList">If <span class="docEmphasis">msgtyp</span> is greater than 0, the first message in the queue whose <span class="docEmphasis">mtype</span> equals <span class="docEmphasis">msgtyp</span> is removed and returned to the calling process. By specifying different values for <span class="docEmphasis">msgtyp</span>,
+ multiple processes can read from a message queue without racing to read
+ the same messages. One useful technique is to have each process select 
+messages matching its process ID.</p></li><li><p class="docList">If <span class="docEmphasis">msgtyp</span> is less than 0, treat the waiting messages as a <span class="docEmphasis">priority queue</span>. The first message of the lowest <span class="docEmphasis">mtype</span> less than or equal to the absolute value of <span class="docEmphasis">msgtyp</span> is removed and returned to the calling process.</p></li></ul><p class="docText">An example helps clarify the behavior when <span class="docEmphasis">msgtyp</span> is less than 0. Suppose that we have a message queue containing the sequence of messages shown in Figure 46-1 and we performed a series of <span class="docEmphasis">msgrcv()</span> calls of the following form:</p><pre>msgrcv(id, &amp;msg, maxmsgsz, -300, 0);</pre><br/>
+<p class="docText">These <span class="docEmphasis">msgrcv()</span>
+ calls would retrieve messages in the order 2 (type 100), 5 (type 100), 3
+ (type 200), and 1 (type 300). A further call would block, since the 
+type of the remaining message (400) exceeds 300.</p><p class="docText">The <span class="docEmphasis">msgflg</span> argument is a bit mask formed by ORing together zero or more of the following flags:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">IPC_NOWAIT</span></span></span></p></dt><dd><p class="docList">Perform a nonblocking receive. Normally, if no message matching <span class="docEmphasis">msgtyp</span> is in the queue, <span class="docEmphasis">msgrcv()</span> blocks until such a message becomes available. Specifying the <tt>IPC_NOWAIT</tt> flag causes <span class="docEmphasis">msgrcv()</span> to instead return immediately with the error <tt>ENOMSG</tt>. (The error <tt>EAGAIN</tt> would be more consistent, as occurs on a nonblocking <span class="docEmphasis">msgsnd()</span> or a nonblocking read from a FIFO. However, failing with <tt>ENOMSG</tt> is historical behavior, and required by SUSv3.)</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MSG_EXCEPT</span></span></span></p></dt><dd><p class="docList">This flag has an effect only if <span class="docEmphasis">msgtyp</span>
+ is greater than 0, in which case it forces the complement of the usual 
+operation; that is, the first message from the queue whose <span class="docEmphasis">mtype</span> is <span class="docEmphasis">not</span> equal to <span class="docEmphasis">msgtyp</span> is removed from the queue and returned to the caller. This flag is Linux-specific, and is made available from <tt>&lt;sys/msg.h&gt;</tt> only if <tt>_GNU_SOURCE</tt> is defined. Performing a series of calls of the form <span class="docEmphasis">msgrcv(id, &amp;msg, maxmsgsz, 100, MSG_EXCEPT)</span> on the message queue shown in Figure 46-1 would retrieve messages in the order 1, 3, 4, and then block.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MSG_NOERROR</span></span></span></p></dt><dd><p class="docList">By default, if the size of the <span class="docEmphasis">mtext</span> field of the message exceeds the space available (as defined by the <span class="docEmphasis">maxmsgsz</span> argument), <span class="docEmphasis">msgrcv()</span> fails. If the <tt>MSG_NOERROR</tt> flag is specified, then <span class="docEmphasis">msgrcv()</span> instead removes the message from the queue, truncates its <span class="docEmphasis">mtext</span> field to <span class="docEmphasis">maxmsgsz</span> bytes, and returns it to the caller. The truncated data is lost.</p></dd></dl><p class="docText">Upon successful completion, <span class="docEmphasis">msgrcv()</span> returns the size of the <span class="docEmphasis">mtext</span> field of the received message; on error, -1 is returned.</p><p></p><center><h5 class="docFigureTitle">Figure 46-1. Example of a message queue containing messages of different types</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-87.png"/></p></center><p></p><br/><p class="docText">As with <span class="docEmphasis">msgsnd()</span>, if a blocked <span class="docEmphasis">msgrcv()</span> call is interrupted by a signal handler, then the call fails with the error <tt>EINTR</tt>, regardless of the setting of the <tt>SA_RESTART</tt> flag when the signal handler was established.</p><p class="docText">Reading a message from a message queue requires read permission on the queue.</p><h5 class="docSection3Title" id="title-ID0E44BM">46.2.2.1. Example program</h5><p class="docText">The program in Example 46-3 provides a command-line interface to the <span class="docEmphasis">msgrcv()</span> system call. The command-line format accepted by this program is shown in the <span class="docEmphasis">usageError()</span> function. Like the program in Example 46-2, which demonstrated the use of <span class="docEmphasis">msgsnd()</span>, this program doesn’t use the <span class="docEmphasis">msgget()</span> system call, but instead expects a message queue identifier as its command-line argument.</p><p class="docText">The following shell session demonstrates the use of the programs in Example 46-1, Example 46-2, and Example 46-3. We begin by creating a message queue using the <tt>IPC_PRIVATE</tt> key, and then write three messages with different types to the queue:</p><pre>$ <b>./svmsg_create -p </b>
+32769                                               <i> ID of message queue</i>
+$ <b>./svmsg_send 32769 20 "I hear and I forget." </b>
+$ <b>./svmsg_send 32769 10 "I see and I remember." </b>
+$ <b>./svmsg_send 32769 30 "I do and I understand." </b></pre><br/>
+<p class="docText">We then use the program in Example 46-3 to read messages with a type less than or equal to 20 from the queue:</p><pre>$ <b>./svmsg_receive -t -20 32769</b>
+Received: type=10; length=22; body=I see and I remember.
+$ <b>./svmsg_receive -t -20 32769</b>
+Received: type=20; length=21; body=I hear and I forget.
+$ <b>./svmsg_receive -t -20 32769</b></pre><br/>
+<p class="docText">The last of the above commands 
+blocked, because there was no message in the queue whose type was less 
+than or equal to 20. So, we continue by typing <span class="docEmphasis">Control-C</span> to terminate the command, and then execute a command that reads a message of any type from the queue:</p><pre><i> Type Control-C to terminate program</i>
+$ <b>./svmsg_receive 32769 </b>
+Received: type=30; length=23; body=I do and I understand.</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0E4BCM">Example 46-3. Using <span class="docEmphasis">msgrcv()</span> to read a message</h5><p></p><div class="box"><pre class="preFixedHeight"><b>svmsg/svmsg_receive.c</b>
+#define _GNU_SOURCE     /* Get definition of MSG_EXCEPT */
+#include &lt;sys/types.h&gt;
+#include &lt;sys/msg.h&gt;
+#include "tlpi_hdr.h"
+
+#define MAX_MTEXT 1024
+
+struct mbuf {
+    long mtype;                 /* Message type */
+    char mtext[MAX_MTEXT];      /* Message body */
+};
+
+static void
+usageError(const char *progName, const char *msg)
+{
+    if (msg != NULL)
+        fprintf(stderr, "%s", msg);
+    fprintf(stderr, "Usage: %s [options] msqid [max-bytes]\n", progName);
+    fprintf(stderr, "Permitted options are:\n");
+    fprintf(stderr, "    -e       Use MSG_NOERROR flag\n");
+    fprintf(stderr, "    -t type  Select message of given type\n");
+    fprintf(stderr, "    -n       Use IPC_NOWAIT flag\n");
+#ifdef MSG_EXCEPT
+    fprintf(stderr, "    -x       Use MSG_EXCEPT flag\n");
+#endif
+    exit(EXIT_FAILURE);
+}
+
+int
+main(int argc, char *argv[])
+{
+    int msqid, flags, type;
+    ssize_t msgLen;
+    size_t maxBytes;
+    struct mbuf msg;            /* Message buffer for msgrcv() */
+    int opt;                    /* Option character from getopt() */
+
+    /* Parse command-line options and arguments */
+
+    flags = 0;
+    type = 0;
+    while ((opt = getopt(argc, argv, "ent:x")) != -1) {
+        switch (opt) {
+        case 'e':       flags |= MSG_NOERROR;   break;
+        case 'n':       flags |= IPC_NOWAIT;    break;
+        case 't':       type = atoi(optarg);    break;
+#ifdef MSG_EXCEPT
+        case 'x':       flags |= MSG_EXCEPT;    break;
+#endif
+        default:        usageError(argv[0], NULL);
+        }
+    }
+
+    if (argc &lt; optind + 1 || argc &gt; optind + 2)
+        usageError(argv[0], "Wrong number of arguments\n");
+
+    msqid = getInt(argv[optind], 0, "msqid");
+    maxBytes = (argc &gt; optind + 1) ?
+                getInt(argv[optind + 1], 0, "max-bytes") : MAX_MTEXT;
+
+    /* Get message and display on stdout */
+
+    msgLen = msgrcv(msqid, &amp;msg, maxBytes, type, flags);
+    if (msgLen == -1)
+        errExit("msgrcv");
+
+    printf("Received: type=%ld; length=%ld", msg.mtype, (long) msgLen);
+    if (msgLen &gt; 0)
+        printf("; body=%s", msg.mtext);
+    printf("\n");
+
+    exit(EXIT_SUCCESS);
+}
+      <b>svmsg/svmsg_receive.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

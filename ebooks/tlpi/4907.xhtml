@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>49.7. Anonymous Mappings</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">49.7. Anonymous Mappings</h3><p class="docText">An <span class="docEmphasis">anonymous mapping</span>
+ is one that doesn’t have a corresponding file. In this section, we show
+ how to create anonymous mappings, and look at the purposes served by 
+private and shared anonymous mappings.</p><h4 class="docSection2Title" id="title-ID0EQCDM">49.7.1. </h4><h5 class="docSection3Title" id="title-ID0EUCDM">49.7.1.1. <tt>MAP_ANONYMOUS</tt> and <tt>/dev/zero</tt></h5><p class="docText">On Linux, there are two different, equivalent methods of creating an anonymous mapping with <span class="docEmphasis">mmap()</span>:</p><ul><li><p class="docList">Specify <tt>MAP_ANONYMOUS</tt> in <span class="docEmphasis">flags</span> and specify <span class="docEmphasis">fd</span> as -1. (On Linux, the value of <span class="docEmphasis">fd</span> is ignored when <tt>MAP_ANONYMOUS</tt> is specified. However, some UNIX implementations require fd to be -1 when employing <tt>MAP_ANONYMOUS</tt>, and portable applications should ensure that they do this.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">We must define either the <tt>_BSD_SOURCE</tt> or the <tt>_SVID_SOURCE</tt> feature test macros to get the definition of <tt>MAP_ANONYMOUS</tt> from <tt>&lt;sys/mman.h&gt;</tt>. Linux provides the constant <tt>MAP_ANON</tt> as a synonym for <tt>MAP_ANONYMOUS</tt> for compatibility with some other UNIX implementations using this alternative name.</p><hr noshade="noshade" size="1"/></li><li><p class="docList">Open the <tt>/dev/zero</tt> device file and pass the resulting file descriptor to <span class="docEmphasis">mmap()</span>.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText"><tt>/dev/zero</tt>
+ is a virtual device that always returns zeros when we read from it. 
+Writes to this device are always discarded. A common use of <tt>/dev/zero</tt> is to populate a file with zeros (e.g., using the <span class="docEmphasis">dd(1)</span> command).</p><hr noshade="noshade" size="1"/></li></ul><p class="docText">With both the <tt>MAP_ANONYMOUS</tt> and the <tt>/dev/zero</tt> techniques, the bytes of the resulting mapping are initialized to 0. For both techniques, the <span class="docEmphasis">offset</span>
+ argument is ignored (since there is no underlying file in which to 
+specify an offset). We show examples of each technique shortly.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <tt>MAP_ANONYMOUS</tt> and <tt>/dev/zero</tt>
+ techniques are not specified in SUSv3, although most UNIX 
+implementations support one or both of them. The reason for the 
+existence of two different techniques with the same semantics is that 
+one (<tt>MAP_ANONYMOUS</tt>) derives from BSD, while the other (<tt>/dev/zero</tt>) derives from System V.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EBGDM">49.7.1.2. <tt>MAP_PRIVATE</tt> anonymous mappings</h5><p class="docText"><tt>MAP_PRIVATE</tt> anonymous mappings are used to allocate blocks of process-private memory initialized to 0. We can use the <tt>/dev/zero</tt> technique to create a <tt>MAP_PRIVATE</tt> anonymous mapping as follows:</p><pre>fd = open("/dev/zero", O_RDWR);
+if (fd == -1)
+    errExit("open");
+addr = mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+if (addr == MAP_FAILED)
+    errExit("mmap");</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">glibc</span> implementation of <span class="docEmphasis">malloc()</span> uses <tt>MAP_PRIVATE</tt> anonymous mappings to allocate blocks of memory larger than <tt>MMAP_THRESHOLD</tt> bytes. This makes it possible to efficiently deallocate such blocks (via <span class="docEmphasis">munmap()</span>) if they are later given to <span class="docEmphasis">free()</span>. (It also reduces the possibility of memory fragmentation when repeatedly allocating and deallocating large blocks of memory.) <tt>MMAP_THRESHOLD</tt> is 128 kB by default, but this parameter is adjustable via the <span class="docEmphasis">mallopt()</span> library function.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0E3HDM">49.7.1.3. <tt>MAP_SHARED</tt> anonymous mappings</h5><p class="docText">A <tt>MAP_SHARED</tt>
+ anonymous mapping allows related processes (e.g., parent and child) to 
+share a region of memory without needing a corresponding mapped file.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText"><tt>MAP_SHARED</tt> anonymous mappings are available only with Linux 2.4 and later.</p><hr noshade="noshade" size="1"/><p class="docText">We can use the <tt>MAP_ANONYMOUS</tt> technique to create a <tt>MAP_SHARED</tt> anonymous mapping as follows:</p><pre>addr = mmap(NULL, length, PROT_READ | PROT_WRITE,
+            MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+if (addr == MAP_FAILED)
+    errExit("mmap");</pre><br/>
+<p class="docText">If the above code is followed by a call to <span class="docEmphasis">fork()</span>, then, because the child produced by <span class="docEmphasis">fork()</span> inherits the mapping, both processes share the memory region.</p><h5 class="docSection3Title" id="title-ID0EHJDM">49.7.1.4. Example program</h5><p class="docText">The program in Example 49-3 demonstrates the use of either <tt>MAP_ANONYMOUS</tt> or <tt>/dev/zero</tt> to share a mapped region between parent and child processes. The choice of technique is determined by whether <tt>USE_MAP_ANON</tt> is defined when compiling the program. The parent initializes an integer in the shared region to 1 prior to calling <span class="docEmphasis">fork()</span>.
+ The child then increments the shared integer and exits, while the 
+parent waits for the child to exit and then prints the value of the 
+integer. When we run this program, we see the following:</p><pre>$ <b>./anon_mmap</b>
+Child started, value = 1
+In parent, value = 2</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0E1LDM">Example 49-3. Sharing an anonymous mapping between parent and child processes</h5><p></p><div class="box"><pre class="preFixedHeight"><b>mmap/anon_mmap.c</b>
+#ifdef USE_MAP_ANON
+#define _BSD_SOURCE             /* Get MAP_ANONYMOUS definition */
+#endif
+#include &lt;sys/wait.h&gt;
+#include &lt;sys/mman.h&gt;
+#include &lt;fcntl.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int *addr;                  /* Pointer to shared memory region */
+
+#ifdef USE_MAP_ANON             /* Use MAP_ANONYMOUS */
+    addr = mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE,
+                MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (addr == MAP_FAILED)
+        errExit("mmap");
+
+#else                           /* Map /dev/zero */
+    int fd;
+
+    fd = open("/dev/zero", O_RDWR);
+    if (fd == -1)
+        errExit("open");
+
+    addr = mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (addr == MAP_FAILED)
+        errExit("mmap");
+
+    if (close(fd) == -1)        /* No longer needed */
+        errExit("close");
+#endif
+
+    *addr = 1;                  /* Initialize integer in mapped region */
+
+    switch (fork()) {           /* Parent and child share mapping */
+    case -1:
+        errExit("fork");
+
+    case 0:                     /* Child: increment shared integer and exit */
+        printf("Child started, value = %d\n", *addr);
+        (*addr)++;
+
+        if (munmap(addr, sizeof(int)) == -1)
+            errExit("munmap");
+        exit(EXIT_SUCCESS);
+
+    default:                    /* Parent: wait for child to terminate */
+        if (wait(NULL) == -1)
+            errExit("wait");
+        printf("In parent, value = %d\n", *addr);
+        if (munmap(addr, sizeof(int)) == -1)
+            errExit("munmap");
+        exit(EXIT_SUCCESS);
+    }
+}
+      <b>mmap/anon_mmap.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

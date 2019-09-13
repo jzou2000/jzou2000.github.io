@@ -1,0 +1,321 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Cooperation</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <section data-type="chapter" xmlns:epub="http://www.idpf.org/2007/ops" epub:type="chapter" class="epub__pagenumrestart" data-pdf-bookmark="Chapter 1. Asynchrony: Now &amp; Later">
+  <div class="epub__chapter" id="chapter-1-asynchrony-now-later">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<section data-type="sect1" data-pdf-bookmark="Concurrency"><div class="epub__sect1" id="concurrency">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<section data-type="sect2" class="epub__pagebreak-before" data-pdf-bookmark="Cooperation"><div class="epub__sect2" id="cooperation">
+<h2>Cooperation</h2>
+
+<p>Another expression of concurrency coordination is called <em>cooperative
+concurrency</em>. Here, the focus isn’t so much on interacting via value
+sharing in scopes (though that’s obviously still allowed!). The goal is
+to take a long-running “process” and break it up into steps or batches
+so that other concurrent “processes” have a chance to interleave their
+operations into the event loop queue.</p>
+
+<p>For example, consider an Ajax response handler that needs to run through
+a long list of results to transform the values. We’ll use
+<code>Array#map(..)</code> to keep the code shorter:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">var</code> <code class="epub__nx">res</code> <code class="epub__o">=</code> <code class="epub__p">[];</code>
+
+<code class="epub__c1">// `response(..)` receives array of results from the Ajax call</code>
+<code class="epub__kd">function</code> <code class="epub__nx">response</code><code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__c1">// add onto existing `res` array</code>
+    <code class="epub__nx">res</code> <code class="epub__o">=</code> <code class="epub__nx">res</code><code class="epub__p">.</code><code class="epub__nx">concat</code><code class="epub__p">(</code>
+        <code class="epub__c1">// make a new transformed array with all</code>
+        <code class="epub__c1">// `data` values doubled</code>
+        <code class="epub__nx">data</code><code class="epub__p">.</code><code class="epub__nx">map</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__p">(</code><code class="epub__nx">val</code><code class="epub__p">){</code>
+            <code class="epub__k">return</code> <code class="epub__nx">val</code> <code class="epub__o">*</code> <code class="epub__mi">2</code><code class="epub__p">;</code>
+        <code class="epub__p">}</code> <code class="epub__p">)</code>
+    <code class="epub__p">);</code>
+<code class="epub__p">}</code>
+
+<code class="epub__c1">// ajax(..) is some arbitrary Ajax function given by a library</code>
+<code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.1"</code><code class="epub__p">,</code> <code class="epub__nx">response</code> <code class="epub__p">);</code>
+<code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.2"</code><code class="epub__p">,</code> <code class="epub__nx">response</code> <code class="epub__p">);</code></pre>
+
+<p>If <code>"http://some.url.1"</code> gets its results back first, the entire list
+will be mapped into <code>res</code> all at once. If it’s a few thousand or less
+records, this is not generally a big deal. But if it’s, say, 10 million
+records, that can take a while to run (several seconds on a powerful
+laptop, much longer on a mobile device, etc.).</p>
+
+<p>While such a “process” is running, nothing else in the page can happen,
+including no other <code>response(..)</code> calls, no UI updates, not even user
+events like scrolling, typing, button clicking, and the like. That’s
+pretty painful.</p>
+
+<p>So, to make a more cooperatively concurrent system, one that’s
+friendlier and doesn’t hog the event loop queue, you can process these
+results in asynchronous batches, after each one yielding back to the
+event loop to let other waiting events happen.</p>
+
+<p>Here’s a very simple approach:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">var</code> <code class="epub__nx">res</code> <code class="epub__o">=</code> <code class="epub__p">[];</code>
+
+<code class="epub__c1">// `response(..)` receives array of results from the Ajax call</code>
+<code class="epub__kd">function</code> <code class="epub__nx">response</code><code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__c1">// let's just do 1000 at a time</code>
+    <code class="epub__kd">var</code> <code class="epub__nx">chunk</code> <code class="epub__o">=</code> <code class="epub__nx">data</code><code class="epub__p">.</code><code class="epub__nx">splice</code><code class="epub__p">(</code> <code class="epub__mi">0</code><code class="epub__p">,</code> <code class="epub__mi">1000</code> <code class="epub__p">);</code>
+
+    <code class="epub__c1">// add onto existing `res` array</code>
+    <code class="epub__nx">res</code> <code class="epub__o">=</code> <code class="epub__nx">res</code><code class="epub__p">.</code><code class="epub__nx">concat</code><code class="epub__p">(</code>
+        <code class="epub__c1">// make a new transformed array with all</code>
+        <code class="epub__c1">// `chunk` values doubled</code>
+        <code class="epub__nx">chunk</code><code class="epub__p">.</code><code class="epub__nx">map</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__p">(</code><code class="epub__nx">val</code><code class="epub__p">){</code>
+            <code class="epub__k">return</code> <code class="epub__nx">val</code> <code class="epub__o">*</code> <code class="epub__mi">2</code><code class="epub__p">;</code>
+        <code class="epub__p">}</code> <code class="epub__p">)</code>
+    <code class="epub__p">);</code>
+
+    <code class="epub__c1">// anything left to process?</code>
+    <code class="epub__k">if</code> <code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">.</code><code class="epub__nx">length</code> <code class="epub__o">&gt;</code> <code class="epub__mi">0</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+        <code class="epub__c1">// async schedule next batch</code>
+        <code class="epub__nx">setTimeout</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__p">(){</code>
+            <code class="epub__nx">response</code><code class="epub__p">(</code> <code class="epub__nx">data</code> <code class="epub__p">);</code>
+        <code class="epub__p">},</code> <code class="epub__mi">0</code> <code class="epub__p">);</code>
+    <code class="epub__p">}</code>
+<code class="epub__p">}</code>
+
+<code class="epub__c1">// ajax(..) is some arbitrary Ajax function given by a library</code>
+<code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.1"</code><code class="epub__p">,</code> <code class="epub__nx">response</code> <code class="epub__p">);</code>
+<code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.2"</code><code class="epub__p">,</code> <code class="epub__nx">response</code> <code class="epub__p">);</code></pre>
+
+<p>We process the data set in maximum-sized chunks of 1,000 items. By doing
+so, we ensure a short-running “process,” even if that means many more
+subsequent “processes,” as the interleaving onto the event loop queue
+will give us a much more responsive (performant) site/app.</p>
+
+<p>Of course, we’re not interaction-coordinating the ordering of any of
+these “processes,” so the order of results in <code>res</code> won’t be
+predictable. If ordering was required, you’d need to use interaction
+techniques like those we discussed earlier, or ones we will cover in
+later chapters of this book.</p>
+
+<p>We use the <code>setTimeout(..0)</code> (hack) for async scheduling, which
+basically just means “stick this function at the end of the current
+event loop queue.”</p>
+<div data-type="note" epub:type="note"><h6>Note</h6>
+<p><code>setTimeout(..0)</code> is not technically inserting an item directly
+onto the event loop queue. The timer will insert the event at its next
+opportunity. For example, two subsequent <code>setTimeout(..0)</code> calls would
+not be strictly guaranteed to be processed in call order, so it <em>is</em>
+possible to see various conditions like timer drift where the ordering
+of such events isn’t predictable. In Node.js, a similar approach is
+<code>process.nextTick(..)</code>. Despite how convenient (and usually more
+performant) it would be, there’s not a single direct way (at least yet)
+across all environments to ensure async event ordering. We cover this
+topic in more detail in the next section.</p>
+</div>
+</div></section>
+
+
+
+
+
+</div></section>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</div>
+</section>
+
+
+</body>
+</html>

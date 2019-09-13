@@ -1,0 +1,1001 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 27. An Overview of the C API</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 27. An Overview of the C API"><div class="titlepage"><div><h1><span class="partLabel">27</span> An Overview of the C API</h1></div></div><p id="N15A1F" style="text-indent: 0">
+Lua is an <a class="indexterm" id="N15A21"/><em class="firstterm">embedded language</em>.
+This means that Lua is not a stand-alone application,
+but a library that we can link with other applications
+to incorporate Lua facilities into them.
+</p><p id="N15A28" style="text-indent: 0">
+You may be wondering:
+if Lua is not a stand-alone program,
+how come we have been using Lua stand-alone
+through the whole book until now?
+The solution to this puzzle is the Lua interpreter
+—the executable <a class="indexterm" id="N15A2A"/><code class="literal">lua</code>.
+This executable is a small application,
+around six hundred lines of code,
+that uses the Lua library to implement
+the <a class="indexterm" id="N15A30"/>stand-alone interpreter.
+The program handles the interface with the user,
+taking her files and strings to feed them to the Lua library,
+which does the bulk of the work (such as actually running Lua code).
+</p><p id="N15A34" style="text-indent: 0">
+This ability to be used as a library to extend an application
+is what makes Lua an <a class="indexterm" id="N15A36"/><em>embeddable language</em>.
+At the same time, a program that uses Lua can register new
+functions in the Lua environment;
+such functions are implemented in C (or another language),
+so that they can add facilities that cannot be
+written directly in Lua.
+This is what makes Lua an <a class="indexterm" id="N15A3C"/><em class="firstterm">extensible language</em>.
+</p><p id="N15A43" style="text-indent: 0">
+These two views of Lua
+(as an embeddable language and as an extensible language)
+correspond to two kinds of interaction between C and Lua.
+In the first kind, C has the control and Lua is the library.
+The C code in this kind of interaction
+is what we call <a class="indexterm" id="N15A45"/><em class="firstterm">application code</em>.
+In the second kind, Lua has the control and C is the library.
+Here, the C code is called <a class="indexterm" id="N15A4C"/><em class="firstterm">library code</em>.
+Both application code and library code use
+the same API to communicate with Lua,
+the so-called C API.
+</p><p id="N15A53" style="text-indent: 0">
+The C API is the set of functions, constants, and types that allow C code
+to interact with Lua.<sup>[<a href="#ftn.N15A55" id="N15A55" class="footnote">23</a>]</sup>
+It comprises functions to read and write Lua global variables,
+to call Lua functions,
+to run pieces of Lua code,
+to register C functions so that they can
+later be called by Lua code,
+and so on.
+Virtually anything that Lua code can do
+can also be done by C code through the C API.
+</p><p id="N15A5F" style="text-indent: 0">
+The C API follows the <em>modus operandi</em> of C,
+which is quite different from that of Lua.
+When programming in C,
+we must care about type checking,
+error recovery, memory-allocation errors,
+and several other sources of complexity.
+Most functions in the API do not check
+the correctness of their arguments;
+it is our responsibility to make sure that the arguments
+are valid before calling a function.<sup>[<a href="#ftn.N15A64" id="N15A64" class="footnote">24</a>]</sup>
+If we make mistakes,
+we can get a crash instead of a well-behaved error message.
+Moreover, the API emphasizes flexibility and simplicity,
+sometimes at the cost of ease of use.
+Common tasks may involve several API calls.
+This may be boring,
+but it gives us full control over all details.
+</p><p id="N15A71" style="text-indent: 0">
+As its title says,
+the goal of this chapter is to give an overview of what is
+involved when we use Lua from C.
+Do not try to understand all the details of what is going on now;
+we will fill them in later.
+Nevertheless,
+do not forget that you always can find more
+details about specific functions
+in the Lua <a class="indexterm" id="N15A73"/>reference manual.
+Moreover, you can find several examples of API uses
+in the Lua distribution itself.
+The Lua <a class="indexterm" id="N15A77"/>stand-alone interpreter (<a class="indexterm" id="N15A7B"/><code class="filename">lua.c</code>)
+provides examples of application code,
+while the <a class="indexterm" id="N15A81"/>standard libraries
+(<a class="indexterm" id="N15A85"/><code class="filename">lmathlib.c</code>, <a class="indexterm" id="N15A8B"/><code class="filename">lstrlib.c</code>, etc.)
+provide examples of library code.
+</p><p id="N15A91" style="text-indent: 0">
+From now on, we are wearing a C programmer’s hat.
+</p><div class="sect1" title="A First Example"><div class="titlepage"><div><div><h2 class="title"><a id="first-ex"/>A First Example</h2></div></div></div><p id="N15A97" style="text-indent: 0">
+We will start this overview with a simple example of an
+application program:
+a stand-alone Lua interpreter.
+We can write a bare-bones <a class="indexterm" id="N15A99"></a>stand-alone interpreter as in
+<a class="xref" href="ch27.html#basic-interp" title="Figure 27.1. A bare-bones stand-alone Lua interpreter">Figure 27.1, “A bare-bones stand-alone Lua interpreter”</a>.
+</p><div class="figure-float"><div class="figure"><a id="basic-interp"/><p class="title" style="text-indent: 0"><strong>Figure 27.1. A bare-bones stand-alone Lua interpreter</strong></p><div class="figure-contents"><pre class="programlisting" id="N15AA5">      #include &lt;stdio.h&gt;
+      #include &lt;string.h&gt;
+      #include "lua.h"
+      #include "lauxlib.h"
+      #include "lualib.h"
+      
+      int main (void) {
+        char buff[256];
+        int error;
+        lua_State *L = luaL_newstate();             /* opens Lua */
+        luaL_openlibs(L);        /* opens the standard libraries */
+      
+        while (fgets(buff, sizeof(buff), stdin) != NULL) {
+          error = luaL_loadstring(L, buff) || lua_pcall(L, 0, 0, 0);
+          if (error) {
+            fprintf(stderr, "%s\n", lua_tostring(L, -1));
+            lua_pop(L, 1);  /* pop error message from the stack */
+          }
+        }
+      
+        lua_close(L);
+        return 0;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+The header file <a class="indexterm" id="N15AA8"></a><code class="filename">lua.h</code>
+declares the basic functions provided by Lua.
+It includes functions to create a new Lua environment,
+to invoke Lua functions,
+to read and write global variables in the environment,
+to register new functions to be called by Lua, and so on.
+Everything declared in <a class="indexterm" id="N15AAF"></a><code class="filename">lua.h</code> has a <code class="literal">lua_</code> prefix
+(e.g., <a class="indexterm" id="N15AB8"></a><code class="function">lua_pcall</code>).
+</p><p id="N15AC0" style="text-indent: 0">
+The header file <a class="indexterm" id="N15AC2"/><code class="filename">lauxlib.h</code> declares the functions provided
+by the <a class="indexterm" id="N15AC9"/><em class="firstterm">auxiliary library</em> (auxlib).
+All its declarations start with <code class="literal">luaL_</code>
+(e.g., <a class="indexterm" id="N15AD3"/><code class="function">luaL_loadstring</code>).
+The auxiliary library uses the basic API provided by <a class="indexterm" id="N15ADB"/><code class="filename">lua.h</code>
+to provide a higher abstraction level,
+in particular with abstractions
+used by the <a class="indexterm" id="N15AE1"/>standard libraries.
+The basic API strives for economy and orthogonality,
+whereas the auxiliary library strives for
+practicality for a few common tasks.
+Of course, it is very easy for your program to create other
+abstractions that it needs, too.
+Keep in mind that the auxiliary library
+has no access to the internals of Lua.
+It does its entire job through the official basic API
+declared in <a class="indexterm" id="N15AE5"/><code class="filename">lua.h</code>.
+Whatever it does,
+your program can do too.
+</p><p id="N15AEB" style="text-indent: 0">
+The Lua library defines no C global variables at all.
+It keeps all its state in the dynamic structure <a class="indexterm" id="N15AED"/><code class="function">lua_State</code>;
+all functions inside Lua receive
+a pointer to this structure as an argument.
+This design makes Lua reentrant
+and ready to be used in multithreaded code.
+</p><p id="N15AF6" style="text-indent: 0">
+As its name implies,
+the function <a class="indexterm" id="N15AF8"/><code class="function">luaL_newstate</code> creates a new <a class="indexterm" id="N15B01"/>Lua state.
+When <a class="indexterm" id="N15B05"/><code class="function">luaL_newstate</code> creates a fresh state,
+its environment contains no predefined functions,
+not even <a class="indexterm" id="N15B0D"/><code class="function">print</code>.
+To keep Lua small, all <a class="indexterm" id="N15B13"/>standard libraries
+come as separate packages,
+so that we do not have to use them if we do not need to.
+The header file <a class="indexterm" id="N15B17"/><code class="filename">lualib.h</code>
+declares functions to open the libraries.
+The function <a class="indexterm" id="N15B1E"/><code class="function">luaL_openlibs</code> opens all
+<a class="indexterm" id="N15B27"/>standard libraries.
+</p><p id="N15B2B" style="text-indent: 0">
+After creating a state and populating it
+with the <a class="indexterm" id="N15B2D"/>standard libraries,
+it is time to handle user input.
+For each line the user enters,
+the program first compiles it
+with <a class="indexterm" id="N15B31"/><code class="function">luaL_loadstring</code>.
+If there are no errors, the call returns zero
+and pushes the resulting function on the stack.
+(We will discuss this mysterious stack in the next section.)
+Then the program calls <a class="indexterm" id="N15B39"/><code class="function">lua_pcall</code>,
+which pops the function from the stack
+and runs it in <a class="indexterm" id="N15B41"/>protected mode.
+Like <a class="indexterm" id="N15B45"/><code class="function">luaL_loadstring</code>,
+<a class="indexterm" id="N15B4D"/><code class="function">lua_pcall</code> returns zero if there are no errors.
+In case of error,
+both functions push an error message on the stack;
+we then get this message with <a class="indexterm" id="N15B55"/><code class="function">lua_tostring</code> and,
+after printing it, remove it from the stack
+with <a class="indexterm" id="N15B5D"/><code class="function">lua_pop</code>.
+</p><p id="N15B65" style="text-indent: 0">
+Real error handling can be quite complex in C,
+and how to do it depends on the nature of our application.
+The Lua core never writes anything directly to any output stream;
+it signals errors by returning error messages.
+Each application can handle these messages in a
+way most appropriate to its needs.
+To simplify our discussions,
+we will assume for our next examples a simple
+error handler like the following one,
+which prints an error message,
+closes the <a class="indexterm" id="N15B67"></a>Lua state, and finishes the whole application:
+</p><pre class="programlisting" id="N15B6B">      #include &lt;stdarg.h&gt;
+      #include &lt;stdio.h&gt;
+      #include &lt;stdlib.h&gt;
+      
+      void error (lua_State *L, const char *fmt, ...) {
+        va_list argp;
+        va_start(argp, fmt);
+        vfprintf(stderr, fmt, argp);
+        va_end(argp);
+        lua_close(L);
+        exit(EXIT_FAILURE);
+      }
+</pre><p style="text-indent: 0">
+Later we will discuss more about error handling in the
+application code.
+</p><p id="N15B6E" style="text-indent: 0">
+Because we can compile Lua as either C or <a class="indexterm" id="N15B70"></a>C++ code,
+<a class="indexterm" id="N15B74"></a><code class="filename">lua.h</code> does not include the following boilerplate
+commonly used in C libraries:
+<a class="indexterm" id="N15B7A"></a>
+</p><pre class="programlisting" id="N15B80">      #ifdef __cplusplus
+      extern "C" {
+      #endif
+         ...
+      #ifdef __cplusplus
+      }
+      #endif
+</pre><p style="text-indent: 0">
+If we have compiled Lua as C code
+and are using it in C++,
+we can include <a class="indexterm" id="N15B83"></a><code class="function">lua.hpp</code> instead of <a class="indexterm" id="N15B8B"></a><code class="filename">lua.h</code>.
+It is defined as follows:
+</p><pre class="programlisting" id="N15B91">      extern "C" {
+      #include "lua.h"
+      }
+</pre><p style="text-indent: 0">
+</p></div><div class="sect1" title="The Stack"><div class="titlepage"><div><div><h2 class="title"><a id="API-stack"/>The Stack</h2></div></div></div><p id="N15B98" style="text-indent: 0">
+A major component in the communication between Lua and C is an
+omnipresent virtual <em>stack</em>.
+Almost all API calls operate on values on this stack.
+All data exchange from Lua to C and from C to Lua occurs
+through this stack.
+Moreover, we can use the stack to keep intermediate
+results, too.
+</p><p id="N15B9D" style="text-indent: 0">
+<a class="indexterm" id="N15B9F"/>
+We face two problems when trying
+to exchange values between Lua and C:
+the mismatch between a dynamic and a static type system
+and the mismatch between
+automatic and manual <a class="indexterm" id="N15BA3"/>memory management.
+</p><p id="N15BA7" style="text-indent: 0">
+In Lua, when we write <code class="literal">t[k] = v</code>,
+both <code class="literal">k</code> and <code class="literal">v</code> can have several different types;
+even <code class="literal">t</code> can have different types,
+due to metatables.
+If we want to offer this operation in C, however,
+any given <code class="literal">settable</code> function must have a fixed type.
+We would need dozens of different functions
+for this single operation
+(one function for each combination
+of types for the three arguments).
+</p><p id="N15BB8" style="text-indent: 0">
+We could solve this problem
+by declaring some kind of union type in C
+—let us call it <code class="literal">lua_Value</code>—
+that could represent all Lua values.
+Then, we could declare <code class="literal">settable</code> as
+</p><pre class="programlisting" id="N15BC0">      void lua_settable (lua_Value a, lua_Value k, lua_Value v);
+</pre><p style="text-indent: 0">
+This solution has two drawbacks.
+First, it can be difficult to map
+such a complex type to other languages;
+we designed Lua to
+interface easily not only with C/<a class="indexterm" id="N15BC3"></a>C++,
+but also with <a class="indexterm" id="N15BC7"></a>Java, <a class="indexterm" id="N15BCB"></a>Fortran, <a class="indexterm" id="N15BCF"></a>C#, and the like.
+Second, Lua does <a class="indexterm" id="N15BD3"></a>garbage collection:
+if we keep a Lua table in a C variable,
+the Lua engine has no way to know about this use;
+it may (wrongly) assume that this table is garbage
+and collect it.
+</p><p id="N15BD7" style="text-indent: 0">
+Therefore, the Lua API does not define
+anything like a <code class="literal">lua_Value</code> type.
+Instead,
+it uses the stack to exchange values between Lua and C.
+Each slot in this stack can hold any Lua value.
+Whenever we want to ask for a value from Lua
+(such as the value of a global variable),
+we call Lua, which pushes the required value onto the stack.
+Whenever we want to pass a value to Lua,
+we first push the value onto the stack,
+and then we call Lua (which will pop the value).
+We still need a different function to push each C type onto the stack
+and a different function to get each C type from the stack,
+but we avoid combinatorial explosion.
+Moreover, because this stack is part of the Lua state,
+the garbage collector knows which values C is using.
+</p><p id="N15BDC" style="text-indent: 0">
+Nearly all functions in the API use the stack.
+As we saw in our first example,
+<a class="indexterm" id="N15BDE"/><code class="function">luaL_loadstring</code> leaves its result on the stack
+(either the compiled chunk or an error message);
+<a class="indexterm" id="N15BE6"/><code class="function">lua_pcall</code> gets the function to be called from the stack
+and leaves any error message there too.
+</p><p id="N15BEE" style="text-indent: 0">
+Lua manipulates this stack in a strict LIFO discipline
+(Last In, First Out).
+When we call Lua, it changes only the top part of the stack.
+Our C code has more freedom;
+specifically, it can inspect any element in the stack
+and even insert and delete elements at any position.
+</p><div class="sect2" title="Pushing elements"><div class="titlepage"><div><div><h3 class="title"><a id="L255"/>Pushing elements</h3></div></div></div><p id="N15BF4" style="text-indent: 0">
+The API has a push function for each Lua type
+with a direct representation in C:
+<a class="indexterm" id="N15BF6"></a><code class="function">lua_pushnil</code> for the constant nil,
+<a class="indexterm" id="N15BFF"></a><code class="function">lua_pushboolean</code> for Booleans (integers, in C),
+<a class="indexterm" id="N15C08"></a><code class="function">lua_pushnumber</code> for doubles,<sup>[<a href="#ftn.N15C11" id="N15C11" class="footnote">25</a>]</sup>
+<a class="indexterm" id="N15C18"></a><code class="function">lua_pushinteger</code> for integers,
+<a class="indexterm" id="N15C21"></a><code class="function">lua_pushlstring</code> for arbitrary strings
+(a pointer to <code class="literal">char</code> plus a length),
+and <a class="indexterm" id="N15C2D"></a><code class="function">lua_pushstring</code> for zero-terminated strings:
+</p><pre class="programlisting" id="N15C36">      void lua_pushnil      (lua_State *L);
+      void lua_pushboolean  (lua_State *L, int bool);
+      void lua_pushnumber   (lua_State *L, lua_Number n);
+      void lua_pushinteger  (lua_State *L, lua_Integer n);
+      void lua_pushlstring  (lua_State *L, const char *s, size_t len);
+      void lua_pushstring   (lua_State *L, const char *s);
+</pre><p style="text-indent: 0">
+There are also functions to push C functions and userdata
+values onto the stack; we will discuss them later.
+</p><p id="N15C39" style="text-indent: 0">
+The type <a class="indexterm" id="N15C3B"/><code class="function">lua_Number</code> is the numeric float type in Lua.
+It is <code class="literal">double</code> by default,
+but we can configure Lua at compile time to use <code class="literal">float</code>
+or even <code class="literal">long double</code>.
+The type <a class="indexterm" id="N15C4D"/><code class="function">lua_Integer</code> is the numeric integer type in Lua.
+Usually, it is defined as <code class="literal">long long</code>,
+which is a signed 64-bit integer.
+Again, it is trivial to configure Lua to use
+<code class="literal">int</code> or <code class="literal">long</code> for this type.
+The combination <code class="literal">float</code>–<code class="literal">int</code>,
+with 32-bit floats and integers,
+creates what we call <a class="indexterm" id="N15C65"/>Small Lua,
+which is particularly interesting for small machines
+and restricted hardware.<sup>[<a href="#ftn.N15C69" id="N15C69" class="footnote">26</a>]</sup>
+</p><p id="N15C73" style="text-indent: 0">
+Strings in Lua are not zero-terminated;
+they can contain arbitrary <a class="indexterm" id="N15C75"/>binary data.
+In consequence,
+the basic function to push a string onto
+the stack is <a class="indexterm" id="N15C79"/><code class="function">lua_pushlstring</code>,
+which requires an explicit length as an argument.
+For zero-terminated strings, we can use also <a class="indexterm" id="N15C81"/><code class="function">lua_pushstring</code>,
+which uses <code class="literal">strlen</code> to supply the string length.
+Lua never keeps pointers to external strings
+(or to any other external object except C functions,
+which are always static).
+For any string that it has to keep,
+Lua either makes an internal copy or reuses one.
+Therefore, we can free or modify our buffers
+as soon as these functions return.
+</p><p id="N15C8C" style="text-indent: 0">
+Whenever we push an element onto the stack,
+it is our responsibility to ensure that the stack has space for it.
+Remember, you are a C programmer now; Lua will not spoil you.
+When Lua starts and any time that Lua calls C,
+the stack has at least 20 free slots.
+(The header file <a class="indexterm" id="N15C8E"></a><code class="filename">lua.h</code> defines
+this constant as <a class="indexterm" id="N15C94"></a><code class="function">LUA_MINSTACK</code>.)
+This space is more than enough for most common uses,
+so usually we do not even think about it.
+However, some tasks need more stack space,
+in particular if we have a loop pushing elements onto the stack.
+In those cases, we need to call <a class="indexterm" id="N15C9D"></a><code class="function">lua_checkstack</code>,
+which checks whether the stack has enough space for our needs:
+</p><pre class="programlisting" id="N15CA6">      int lua_checkstack (lua_State *L, int sz);
+</pre><p style="text-indent: 0">
+Here, <code class="literal">sz</code> is the number of extra slots we need.
+If possible,
+<a class="indexterm" id="N15CAC"></a><code class="function">lua_checkstack</code> grows the stack
+to accommodate the required extra size.
+Otherwise, it returns zero.
+</p><p id="N15CB4" style="text-indent: 0">
+The auxiliary library offers a higher-level function
+to check for stack space:
+</p><pre class="programlisting" id="N15CB6">      void luaL_checkstack (lua_State *L, int sz, const char *msg);
+</pre><p style="text-indent: 0">
+<a class="indexterm" id="N15CB9"></a>
+This function is similar to <a class="indexterm" id="N15CC0"></a><code class="function">lua_checkstack</code> but,
+if it cannot fulfill the request,
+it raises an error with the given message,
+instead of returning an error code.
+</p></div><div class="sect2" title="Querying elements"><div class="titlepage"><div><div><h3 class="title"><a id="L256"/>Querying elements</h3></div></div></div><p id="N15CCC" style="text-indent: 0">
+To refer to elements on the stack,
+the API uses <em>indices</em>.
+The first element pushed on the stack has index 1,
+the next one has index 2, and so on.
+We can also access elements using the
+top of the stack as our reference,
+with negative indices.
+In this case, -1 refers to the element on top
+(that is, the last element pushed),
+-2 to the previous element, and so on.
+For instance, the call <code class="literal">lua_tostring(L, -1)</code> returns
+the value on the top of the stack as a string.
+As we will see,
+there are several occasions when it is natural to index
+the stack from the bottom (that is, with positive indices),
+and several other occasions when the natural way is to use
+negative indices.
+</p><p id="N15CD4" style="text-indent: 0">
+To check whether a stack element has a specific type,
+the API offers a family of functions called <code class="literal">lua_is*</code>,
+where the <code class="literal">*</code> can be any Lua type.
+So, there are
+<a class="indexterm" id="N15CDC"></a><code class="function">lua_isnil</code>,
+<a class="indexterm" id="N15CE5"></a><code class="function">lua_isnumber</code>, <a class="indexterm" id="N15CEE"></a><code class="function">lua_isstring</code>,
+<a class="indexterm" id="N15CF7"></a><code class="function">lua_istable</code>, and the like.
+All these functions have the same prototype:
+</p><pre class="programlisting" id="N15D00">      int lua_is* (lua_State *L, int index);
+</pre><p style="text-indent: 0">
+Actually,
+<a class="indexterm" id="N15D03"></a><code class="function">lua_isnumber</code> does not check whether
+the value has that specific type,
+but whether the value can be converted to that type;
+<a class="indexterm" id="N15D0B"></a><code class="function">lua_isstring</code> is similar:
+in particular, any number satisfies <a class="indexterm" id="N15D13"></a><code class="function">lua_isstring</code>.
+</p><p id="N15D1B" style="text-indent: 0">
+There is also a function <a class="indexterm" id="N15D1D"/><code class="function">lua_type</code>,
+which returns the type of an element on the stack.
+Each type is represented by a respective constant:
+<a class="indexterm" id="N15D26"/><code class="function">LUA_TNIL</code>,
+<a class="indexterm" id="N15D2F"/><code class="function">LUA_TBOOLEAN</code>,
+<a class="indexterm" id="N15D38"/><code class="function">LUA_TNUMBER</code>,
+<a class="indexterm" id="N15D41"/><code class="function">LUA_TSTRING</code>, etc.
+We use this function mainly in conjunction with a switch statement.
+It is also useful when we need to check for strings and
+numbers without potential <a class="indexterm" id="N15D4A"/>coercions.
+</p><p id="N15D4E" style="text-indent: 0">
+To get a value from the stack,
+there are the <code class="literal">lua_to*</code> functions:
+</p><pre class="programlisting" id="N15D53">      int          lua_toboolean (lua_State *L, int index);
+      const char  *lua_tolstring (lua_State *L, int index,
+                                                size_t *len);
+      lua_State   *lua_tothread (lua_State *L, int index);
+      lua_Number   lua_tonumber  (lua_State *L, int index);
+      lua_Integer  lua_tointeger (lua_State *L, int index);
+</pre><p style="text-indent: 0">
+</p><p id="N15D56" style="text-indent: 0">
+We can call any of these functions
+even when the given element does not have
+an appropriate type.
+The function <a class="indexterm" id="N15D58"></a><code class="function">lua_toboolean</code> works for any type,
+converting any Lua value
+to a C Boolean according to the Lua rules for conditions:
+zero for the values nil and <strong>false</strong>,
+and one for any other Lua value.
+The functions <a class="indexterm" id="N15D65"></a><code class="function">lua_tolstring</code> and <a class="indexterm" id="N15D6D"></a><code class="function">lua_tothread</code>
+return <code class="literal">NULL</code> for values with incorrect types.
+The numeric functions, however,
+have no way to signal a wrong type,
+so they simply return zero.
+Formerly we would need to call
+<code class="literal">lua_isnumber</code> to check the type,
+but Lua 5.2 introduced the following new functions:
+</p><pre class="programlisting" id="N15D7C">      lua_Number   lua_tonumberx (lua_State *L, int idx, int *isnum);
+      lua_Integer  lua_tointegerx (lua_State *L, int idx, int *isnum);
+</pre><p style="text-indent: 0">
+The out parameter <code class="literal">isnum</code> returns a Boolean that indicates
+whether the Lua value was successfully coerced to the desired type.
+</p><p id="N15D82" style="text-indent: 0">
+The function <a class="indexterm" id="N15D84"/><code class="function">lua_tolstring</code> returns a pointer to an internal
+copy of the string and stores the string’s length in the
+position given by <code class="literal">len</code>.
+We must not change this internal copy
+(there is a <code class="literal">const</code> there to remind us).
+Lua ensures that this pointer is valid as long as the
+corresponding string value is on the stack.
+When a C function called by Lua returns,
+Lua clears its stack;
+therefore, as a rule,
+we should never store pointers to Lua strings
+outside the function that got them.
+</p><p id="N15D93" style="text-indent: 0">
+Any string that <a class="indexterm" id="N15D95"></a><code class="function">lua_tolstring</code> returns always has an
+extra zero at its end,
+but it can have other zeros inside it.
+The size returned through the third argument, <code class="literal">len</code>,
+is the real string’s length.
+In particular,
+assuming that the value on the top of the stack is a string,
+the following assertions are always valid:
+</p><pre class="programlisting" id="N15DA0">      size_t len;
+      const char *s = lua_tolstring(L, -1, &amp;len); /* any Lua string */
+      assert(s[len] == '\0');
+      assert(strlen(s) &lt;= len);
+</pre><p style="text-indent: 0">
+</p><p id="N15DA3" style="text-indent: 0">
+We can call <a class="indexterm" id="N15DA5"/><code class="function">lua_tolstring</code> with <code class="literal">NULL</code>
+as its third argument if we do not need the length.
+Better yet, we can use the macro <a class="indexterm" id="N15DB0"/><code class="function">lua_tostring</code>,
+which simply calls <a class="indexterm" id="N15DB9"/><code class="function">lua_tolstring</code> with a <code class="literal">NULL</code>
+third argument.
+</p><p id="N15DC4" style="text-indent: 0">
+To illustrate the use of these functions,
+<a class="xref" href="ch27.html#stackdump" title="Figure 27.2. Dumping the stack">Figure 27.2, “Dumping the stack”</a> presents a useful helper function that dumps
+the entire content of the stack.
+<a class="indexterm" id="N15DC9"></a>
+</p><div class="figure-float"><div class="figure"><a id="stackdump"/><p class="title" style="text-indent: 0"><strong>Figure 27.2. Dumping the stack</strong></p><div class="figure-contents"><pre class="programlisting" id="N15DD2">      static void stackDump (lua_State *L) {
+        int i;
+        int top = lua_gettop(L);  /* depth of the stack */
+        for (i = 1; i &lt;= top; i++) {  /* repeat for each level */
+          int t = lua_type(L, i);
+          switch (t) {
+            case LUA_TSTRING: {  /* strings */
+              printf("'%s'", lua_tostring(L, i));
+              break;
+            }
+            case LUA_TBOOLEAN: {  /* Booleans */
+              printf(lua_toboolean(L, i) ? "true" : "false");
+              break;
+            }
+            case LUA_TNUMBER: {  /* numbers */
+              printf("%g", lua_tonumber(L, i));
+              break;
+            }
+            default: {  /* other values */
+              printf("%s", lua_typename(L, t));
+              break;
+            }
+          }
+          printf("  ");  /* put a separator */
+        }
+        printf("\n");  /* end the listing */
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+This function traverses the stack from bottom to top,
+printing each element according to its type.
+It prints strings between quotes;
+for numbers it uses a <code class="literal">"%g"</code> format;
+for values with no C equivalents (tables, functions, etc.),
+it prints only their types.
+(<a class="indexterm" id="N15DD8"></a><code class="function">lua_typename</code> converts a type code to a type name.)
+</p><p id="N15DE0" style="text-indent: 0">
+In Lua 5.3,
+we can still print all numbers with <a class="indexterm" id="N15DE2"></a><code class="function">lua_tonumber</code>
+and the <code class="literal">"%g"</code> format,
+as integers are always coercible to floats.
+However, we may prefer to print integers as integers,
+to avoid losing precision.
+In that case,
+we can use the new function <a class="indexterm" id="N15DED"></a><code class="function">lua_isinteger</code>
+to distinguish integers from floats:
+</p><pre class="programlisting" id="N15DF5">            case LUA_TNUMBER: {  /* numbers */
+              if (lua_isinteger(L, i))  /* integer? */
+                printf("%lld", lua_tointeger(L, i));
+              else  /* float */
+                printf("%g", lua_tonumber(L, i));
+              break;
+            }
+</pre><p style="text-indent: 0">
+</p></div><div class="sect2" title="Other stack operations"><div class="titlepage"><div><div><h3 class="title"><a id="L257"/>Other stack operations</h3></div></div></div><p id="N15DFC" style="text-indent: 0">
+Besides the previous functions,
+which exchange values between C and the stack,
+the API offers also the following operations
+for generic stack manipulation:
+</p><pre class="programlisting" id="N15DFE">      int  lua_gettop    (lua_State *L);
+      void lua_settop    (lua_State *L, int index);
+      void lua_pushvalue (lua_State *L, int index);
+      void lua_rotate    (lua_State *L, int index, int n);
+      void lua_remove    (lua_State *L, int index);
+      void lua_insert    (lua_State *L, int index);
+      void lua_replace   (lua_State *L, int index);
+      void lua_copy      (lua_State *L, int fromidx, int toidx);
+</pre><p style="text-indent: 0">
+The function <a class="indexterm" id="N15E01"></a><code class="function">lua_gettop</code>
+returns the number of elements on the stack,
+which is also the index of the top element.
+The function <a class="indexterm" id="N15E0A"></a><code class="function">lua_settop</code> sets the top
+(that is, the number of elements on the stack) to a specific value.
+If the previous top was higher than the new one,
+the function discards the extra top values.
+Otherwise, it pushes nils on the stack to get the
+given size.
+In particular, <code class="literal">lua_settop(L, 0)</code> empties the stack.
+We can also use negative indices with <a class="indexterm" id="N15E16"></a><code class="function">lua_settop</code>.
+Using this facility, the API offers the following macro,
+which pops <code class="literal">n</code> elements from the stack:<a class="indexterm" id="N15E21"></a>
+</p><pre class="programlisting" id="N15E28">      #define lua_pop(L,n)  lua_settop(L, -(n) - 1)
+</pre><p style="text-indent: 0">
+</p><p id="N15E2B" style="text-indent: 0">
+The function <a class="indexterm" id="N15E2D"/><code class="function">lua_pushvalue</code> pushes
+on the stack a copy of the element at the given index.
+</p><p id="N15E36" style="text-indent: 0">
+The function <a class="indexterm" id="N15E38"></a><code class="function">lua_rotate</code> is new in Lua 5.3.
+As the name implies,
+it rotates the stack elements
+from the given index to the top of the stack
+by <code class="literal">n</code> positions.
+A positive <code class="literal">n</code> rotates the elements in the direction of the top;
+a negative <code class="literal">n</code> rotates in the other direction.
+This is a quite versatile function,
+and two other API operations are defined as macros using it.
+One is <a class="indexterm" id="N15E4A"></a><code class="function">lua_remove</code>,
+which removes the element at the given index,
+shifting down the elements above this position
+to fill in the gap.
+Its definition is as follows:
+</p><pre class="programlisting" id="N15E53">      #define lua_remove(L,idx)  \
+                (lua_rotate(L, (idx), -1), lua_pop(L, 1))
+</pre><p style="text-indent: 0">
+That is, it rotates the stack by one position,
+moving the desired element to the top,
+and then pops that element.
+The other macro is <a class="indexterm" id="N15E56"></a><code class="function">lua_insert</code>,
+which moves the top element into the given position,
+shifting up the elements above this position to open space:
+</p><pre class="programlisting" id="N15E5F">      #define lua_insert(L,idx)       lua_rotate(L, (idx), 1)
+</pre><p style="text-indent: 0">
+</p><p id="N15E62" style="text-indent: 0">
+The function <a class="indexterm" id="N15E64"></a><code class="function">lua_replace</code> pops a value and
+sets it as the value of the given index,
+without moving anything;
+finally, <a class="indexterm" id="N15E6D"></a><code class="function">lua_copy</code> copies the value at one index to another,
+leaving the original untouched.<sup>[<a href="#ftn.N15E76" id="N15E76" class="footnote">27</a>]</sup>
+Note that the following operations have no effect
+on a non-empty stack:
+</p><pre class="programlisting" id="N15E82">      lua_settop(L, -1);  /* set top to its current value */
+      lua_insert(L, -1);  /* move top element to the top */
+      lua_copy(L, x, x);  /* copy an element to its own position */
+      lua_rotate(L, x, 0);  /* rotates by zero positions */
+</pre><p style="text-indent: 0">
+</p><p id="N15E85" style="text-indent: 0">
+The program in <a class="xref" href="ch27.html#stack-ex" title="Figure 27.3. Example of stack manipulation">Figure 27.3, “Example of stack manipulation”</a> uses <code class="literal">stackDump</code>
+(defined in <a class="xref" href="ch27.html#stackdump" title="Figure 27.2. Dumping the stack">Figure 27.2, “Dumping the stack”</a>)
+to illustrate these stack operations.
+</p><div class="figure-float"><div class="figure"><a id="stack-ex"/><p class="title" style="text-indent: 0"><strong>Figure 27.3. Example of stack manipulation</strong></p><div class="figure-contents"><pre class="programlisting" id="N15E95">      #include &lt;stdio.h&gt;
+      #include "lua.h"
+      #include "lauxlib.h"
+      
+      static void stackDump (lua_State *L) {
+        <em class="replaceable"><code>as in <a class="xref" href="ch27.html#stackdump" title="Figure 27.2. Dumping the stack">Figure 27.2, “Dumping the stack”</a></code></em>
+      }
+      
+      int main (void) {
+        lua_State *L = luaL_newstate();
+      
+        lua_pushboolean(L, 1);
+        lua_pushnumber(L, 10);
+        lua_pushnil(L);
+        lua_pushstring(L, "hello");
+      
+        stackDump(L);
+          /* will print:  true  10  nil  'hello'  */
+      
+        lua_pushvalue(L, -4); stackDump(L);
+          /* will print:  true  10  nil  'hello'  true  */
+      
+        lua_replace(L, 3); stackDump(L);
+          /* will print:  true  10  true  'hello'  */
+      
+        lua_settop(L, 6); stackDump(L);
+          /* will print:  true  10  true  'hello'  nil  nil  */
+      
+        lua_rotate(L, 3, 1); stackDump(L);
+          /* will print:  true  10  nil  true  'hello'  nil  */
+      
+        lua_remove(L, -3); stackDump(L);
+          /* will print:  true  10  nil  'hello'  nil */
+      
+        lua_settop(L, -5); stackDump(L);
+          /* will print:  true  */
+      
+        lua_close(L);
+        return 0;
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+</p></div></div><div class="sect1" title="Error Handling with the C API"><div class="titlepage"><div><div><h2 class="title"><a id="L258"/>Error Handling with the C API</h2></div></div></div><p id="N15EA1" style="text-indent: 0">
+All structures in Lua are dynamic:
+they grow as needed, and eventually shrink again when possible.
+This means that the possibility of a memory-allocation failure
+is pervasive in Lua.
+Almost any operation can face this eventuality.
+Moreover, many operations can raise other errors;
+for instance, an access to a global variable can
+trigger an <a class="indexterm" id="N15EA3"/><code class="literal">__index</code> metamethod and
+that metamethod may raise an error.
+Finally, operations that allocate memory
+eventually trigger the garbage collector,
+which may invoke <a class="indexterm" id="N15EAC"/>finalizers, which can raise errors too.
+In short,
+the vast majority of functions in the Lua API can result in errors.
+</p><p id="N15EB0" style="text-indent: 0">
+Instead of using error codes for each operation in its API,
+Lua uses exceptions to signal errors.
+Unlike <a class="indexterm" id="N15EB2"/>C++ or <a class="indexterm" id="N15EB6"/>Java,
+the C language does not offer an <a class="indexterm" id="N15EBA"/>exception handling mechanism.
+To circumvent this difficulty,
+Lua uses the <a class="indexterm" id="N15EBE"/><code class="literal">setjmp</code> facility from C,
+which results in a mechanism somewhat similar to <a class="indexterm" id="N15EC6"/>exception handling.
+Therefore, most API functions can raise an error
+(that is, call <a class="indexterm" id="N15ECA"/><code class="literal">longjmp</code>) instead of returning.
+</p><p id="N15ED2" style="text-indent: 0">
+When we write library code
+(C functions to be called from Lua),
+the use of long jumps requires no extra work from our part,
+because Lua catches any error.
+When we write application code
+(C code that calls Lua), however,
+we must provide a way to catch those errors.
+</p><div class="sect2" title="Error handling in application code"><div class="titlepage"><div><div><h3 class="title"><a id="L259"/>Error handling in application code</h3></div></div></div><p id="N15ED8" style="text-indent: 0">
+When our application calls functions in the Lua API,
+it is exposed to errors.
+As we just discussed,
+Lua usually signals these errors through long jumps.
+However, if there is no corresponding <a class="indexterm" id="N15EDA"/><code class="literal">setjmp</code>,
+the interpreter cannot make a long jump.
+In that case, any error in the API causes Lua
+to call a <a class="indexterm" id="N15EE2"/>panic function and,
+if that function returns,
+exit the application.
+We can set our own panic function with <a class="indexterm" id="N15EE6"/><code class="function">lua_atpanic</code>,
+but there is not much that it can do.
+</p><p id="N15EEF" style="text-indent: 0">
+To properly handle errors in our application code,
+we must call our code through Lua,
+so that it sets an appropriate context to catch errors
+—that is, it runs the code in the context of a <a class="indexterm" id="N15EF1"></a><code class="literal">setjmp</code>.
+In the same way that we can run Lua code in <a class="indexterm" id="N15EF9"></a>protected mode
+using <a class="indexterm" id="N15EFD"></a><code class="function">pcall</code>,
+we can run C code using <a class="indexterm" id="N15F03"></a><code class="function">lua_pcall</code>.
+More specifically,
+we pack the code in a function and call that function
+through Lua, using <a class="indexterm" id="N15F0B"></a><code class="function">lua_pcall</code>.
+With this setting,
+our C code will run in <a class="indexterm" id="N15F13"></a>protected mode.
+Even in case of memory-allocation failure,
+<a class="indexterm" id="N15F17"></a><code class="function">lua_pcall</code> returns a proper error code,
+leaving the interpreter in a consistent state.
+The following fragment shows the idea:
+</p><pre class="programlisting" id="N15F1F">      static int foo (lua_State *L) {
+        <em class="replaceable"><code>code to run in protected mode</code></em>
+        return 0;
+      }
+      
+      int secure_foo (lua_State *L) {
+        lua_pushcfunction(L, foo);  /* push 'foo' as a Lua function */
+        return (lua_pcall(L, 0, 0, 0) == 0);
+      }
+</pre><p style="text-indent: 0">
+In this example,
+no matter what happens,
+a call to <code class="literal">secure_foo</code> will return a Boolean
+signaling the success of <code class="literal">foo</code>.
+In particular,
+note that the stack already has some preallocated slots
+and that <a class="indexterm" id="N15F2B"></a><code class="function">lua_pushcfunction</code> does not allocate memory,
+so it cannot raise any error.
+(The prototype of the function <code class="literal">foo</code> is a requirement
+of <a class="indexterm" id="N15F36"></a><code class="function">lua_pushcfunction</code>,
+which creates a function in Lua representing a C function.
+We will cover the details about C functions
+in Lua in <a class="xref" href="ch29.html#c-functions" title="C Functions">the section called “C Functions”</a>.)
+</p></div><div class="sect2" title="Error handling in library code"><div class="titlepage"><div><div><h3 class="title"><a id="L260"/>Error handling in library code</h3></div></div></div><p id="N15F45" style="text-indent: 0">
+Lua is a <em>safe</em> language.
+<a class="indexterm" id="N15F4A"/>
+This means that no matter what we write in Lua,
+no matter how wrong it is,
+we can always understand the behavior of a program
+in terms of Lua itself.
+Moreover, errors are detected and explained in terms of Lua, too.
+You can contrast that with C,
+where the behavior of many wrong programs
+can be explained only in terms of the underlying hardware
+(e.g., error positions are given as instruction addresses).
+</p><p id="N15F4E" style="text-indent: 0">
+Whenever we add new C functions to Lua,
+we can break its safety.
+For instance, a function equivalent to
+the <a class="indexterm" id="N15F50"/>BASIC command <code class="literal">poke</code>,
+which stores an arbitrary byte at an arbitrary memory address,
+could cause all sorts of memory corruption.
+We must strive to ensure that our add-ons are safe to Lua
+and provide good error handling.
+</p><p id="N15F57" style="text-indent: 0">
+As we discussed earlier,
+C programs have to set their error handling
+through <a class="indexterm" id="N15F59"/><code class="function">lua_pcall</code>.
+When we write library functions for Lua, however,
+usually they do not need to handle errors.
+Errors raised by a library function will be caught
+either by a <a class="indexterm" id="N15F61"/><code class="function">pcall</code> in Lua or by a <a class="indexterm" id="N15F67"/><code class="function">lua_pcall</code>
+in the application code.
+So, whenever a function in a C library detects an error,
+it can simply call <a class="indexterm" id="N15F6F"/><code class="function">lua_error</code>
+(or better yet <a class="indexterm" id="N15F77"/><code class="function">luaL_error</code>,
+which formats the error message and then
+calls <a class="indexterm" id="N15F7F"/><code class="function">lua_error</code>).
+The function <a class="indexterm" id="N15F87"/><code class="function">lua_error</code> tidies
+any loose ends in the Lua system
+and jumps back to the protected call
+that originated that execution,
+passing along the error message.
+</p></div></div><div class="sect1" title="Memory Allocation"><div class="titlepage"><div><div><h2 class="title"><a id="L261"/>Memory Allocation</h2></div></div></div><p id="N15F93" style="text-indent: 0">
+The Lua core does not assume anything about how
+to allocate memory.
+It calls neither <a class="indexterm" id="N15F95"/><code class="literal">malloc</code> nor <a class="indexterm" id="N15F9D"/><code class="literal">realloc</code> to allocate memory.
+Instead,
+it does all its memory allocation and deallocation through
+one single <a class="indexterm" id="N15FA5"/><em class="firstterm">allocation function</em>,
+which the user must provide when she creates a <a class="indexterm" id="N15FAC"/>Lua state.
+</p><p id="N15FB0" style="text-indent: 0">
+The function <a class="indexterm" id="N15FB2"></a><code class="function">luaL_newstate</code>,
+which we have been using to create states,
+is an auxiliary function that creates a Lua state
+with a default allocation function.
+This default allocation function uses
+the standard functions <a class="indexterm" id="N15FBA"></a><code class="literal">malloc</code>–<a class="indexterm" id="N15FC2"></a><code class="literal">realloc</code>–<a class="indexterm" id="N15FCA"></a><code class="literal">free</code>
+from the C standard library,
+which are (or should be) good enough for most applications.
+However,
+it is quite easy to get full control over Lua allocation,
+by creating our state with the primitive <a class="indexterm" id="N15FD2"></a><code class="function">lua_newstate</code>:
+</p><pre class="programlisting" id="N15FDB">      lua_State *lua_newstate (lua_Alloc f, void *ud);
+</pre><p style="text-indent: 0">
+This function takes two arguments:
+an allocation function and a user data.
+A state created in this way does all its
+allocation and deallocation by calling <code class="literal">f</code>;
+even the structure <a class="indexterm" id="N15FE1"></a><code class="function">lua_State</code> is
+allocated by <code class="literal">f</code>.
+</p><p id="N15FEC" style="text-indent: 0">
+An allocation function must match
+the type <a class="indexterm" id="N15FEE"></a><code class="function">lua_Alloc</code>:
+</p><pre class="programlisting" id="N15FF7">      typedef void * (*lua_Alloc) (void *ud,
+                                   void *ptr,
+                                   size_t osize,
+                                   size_t nsize);
+</pre><p style="text-indent: 0">
+The first parameter is always the user data
+provided to <a class="indexterm" id="N15FFA"></a><code class="function">lua_newstate</code>;
+the second parameter is the address of the block being
+(re)allocated or released;
+the third parameter is the original block size;
+and the last parameter is the requested block size.
+If <code class="literal">ptr</code> is not <code class="literal">NULL</code>,
+Lua ensures that it was previously allocated with size <code class="literal">osize</code>.
+(When <code class="literal">ptr</code> is <code class="literal">NULL</code>,
+the previous size of the block was clearly zero,
+so Lua uses <code class="literal">osize</code> for some debug information.)
+</p><p id="N16014" style="text-indent: 0">
+Lua uses <code class="literal">NULL</code> to represent a block of size zero.
+When <code class="literal">nsize</code> is zero,
+the allocation function must free the block pointed to by <code class="literal">ptr</code>
+and return <code class="literal">NULL</code>,
+which corresponds to a block of the required size (zero).
+When <code class="literal">ptr</code> is <code class="literal">NULL</code>,
+the function must allocate and return a block with the given size;
+if it cannot allocate the given block,
+it must return <code class="literal">NULL</code>.
+If <code class="literal">ptr</code> is <code class="literal">NULL</code> and <code class="literal">nsize</code> is zero,
+both rules apply:
+the net result is that the allocation function does
+nothing and returns <code class="literal">NULL</code>.
+</p><p id="N16037" style="text-indent: 0">
+Finally,
+when <code class="literal">ptr</code> is non-<code class="literal">NULL</code> and <code class="literal">nsize</code> is non-zero,
+the allocation function should reallocate the block,
+like <a class="indexterm" id="N16042"/><code class="literal">realloc</code>,
+and return the new address
+(which may or may not be the same as the original).
+Again, in case of errors, it must return <code class="literal">NULL</code>.
+Lua assumes that the allocation function never fails
+when the new size is smaller than or equal to the old one.
+(Lua shrinks some structures during <a class="indexterm" id="N1604D"/>garbage collection,
+and it is unable to recover from errors there.)
+</p><p id="N16051" style="text-indent: 0">
+The standard allocation function
+used by <a class="indexterm" id="N16053"></a><code class="function">luaL_newstate</code>
+has the following definition
+(extracted directly from the file <code class="literal">lauxlib.c</code>):
+</p><pre class="programlisting" id="N1605E">      void *l_alloc (void *ud, void *ptr, size_t osize, size_t nsize) {
+        (void)ud; (void)osize;  /* not used */
+        if (nsize == 0) {
+          free(ptr);
+          return NULL;
+        }
+        else
+          return realloc(ptr, nsize);
+      }
+</pre><p style="text-indent: 0">
+It assumes that <code class="literal">free(NULL)</code> does nothing
+and that <code class="literal">realloc(NULL, size)</code> is equivalent to <code class="literal">malloc(size)</code>.
+The ISO C standard mandates both behaviors.
+</p><p id="N1606A" style="text-indent: 0">
+We can recover the memory allocator of a <a class="indexterm" id="N1606C"></a>Lua state by calling
+<a class="indexterm" id="N16070"></a><code class="function">lua_getallocf</code>:
+</p><pre class="programlisting" id="N16079">      lua_Alloc lua_getallocf (lua_State *L, void **ud);
+</pre><p style="text-indent: 0">
+If <code class="literal">ud</code> is not <code class="literal">NULL</code>,
+the function sets <code class="literal">*ud</code> with the value of the user data
+for this allocator.
+We can change the memory allocator of a Lua state by calling
+<a class="indexterm" id="N16085"></a><code class="function">lua_setallocf</code>:
+</p><pre class="programlisting" id="N1608E">      void lua_setallocf (lua_State *L, lua_Alloc f, void *ud);
+</pre><p style="text-indent: 0">
+Keep in mind that any new allocator will be responsible
+for freeing blocks that were allocated by the previous one.
+More often than not,
+the new function is a wrapper around the old one,
+for instance to trace allocations or
+to synchronize accesses to the heap.
+</p><p id="N16091" style="text-indent: 0">
+Internally, Lua does not cache free memory blocks for reuse.
+It assumes that the allocation function does this caching;
+good allocators do.
+Lua also does not attempt to minimize fragmentation.
+Studies show that fragmentation is more the
+result of poor allocation strategies than of program behavior;
+good allocators do not create much fragmentation.
+</p><p id="N16093" style="text-indent: 0">
+It is difficult to beat a well-implemented allocator,
+but sometimes you may try.
+For instance,
+Lua gives you the old size of any block
+that it frees or reallocates.
+Therefore,
+a specialized allocator does not need to keep
+information about the block size,
+reducing the memory overhead for each block.
+</p><p id="N16095" style="text-indent: 0">
+Another situation where you can improve memory allocation
+is in <a class="indexterm" id="N16097"/>multithreading systems.
+Such systems typically demand synchronization
+for their memory-allocation functions,
+as they use a global resource (the heap).
+However, the access to a <a class="indexterm" id="N1609B"/>Lua state must be synchronized too
+—or, better yet, restricted to one thread,
+as in our implementation of <code class="literal">lproc</code> in <a class="xref" href="ch33.html" title="Chapter 33. Threads and States">Chapter 33, <em>Threads and States</em></a>.
+So, if each Lua state allocates memory from a private pool,
+the allocator can avoid the costs of extra synchronization.
+</p></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L262"/>Exercises</h2></div></div></div><p id="N160A9" style="text-indent: 0">
+Exercise 27.1:<a id="L263"/> 
+Compile and run the simple stand-alone interpreter
+(<a class="xref" href="ch27.html#basic-interp" title="Figure 27.1. A bare-bones stand-alone Lua interpreter">Figure 27.1, “A bare-bones stand-alone Lua interpreter”</a>).
+
+
+</p><p id="N160B1" style="text-indent: 0">
+Exercise 27.2:<a id="L264"></a> 
+Assume the stack is empty.
+What will be its contents after the following
+sequence of calls?
+</p><pre class="programlisting" id="N160B6">      lua_pushnumber(L, 3.5);
+      lua_pushstring(L, "hello");
+      lua_pushnil(L);
+      lua_rotate(L, 1, -1);
+      lua_pushvalue(L, -2);
+      lua_remove(L, 1);
+      lua_insert(L, -2);
+</pre><p style="text-indent: 0">
+
+
+</p><p id="N160B9" style="text-indent: 0">
+Exercise 27.3:<a id="L265"/> 
+Use the function <code class="literal">stackDump</code> (<a class="xref" href="ch27.html#stackdump" title="Figure 27.2. Dumping the stack">Figure 27.2, “Dumping the stack”</a>)
+to check your answer to the previous exercise.
+
+
+</p><p id="N160C4" style="text-indent: 0">
+Exercise 27.4:<a id="L266"/> 
+Write a library that allows a script to limit the total amount
+of memory used by its <a class="indexterm" id="N160C9"/>Lua state.
+It may offer a single function, <code class="literal">setlimit</code>,
+to set that limit.
+</p><p id="N160D0" style="text-indent: 0">
+The library should set its own <a class="indexterm" id="N160D2"/>allocation function.
+This function,
+before calling the original allocator,
+checks the total memory in use and returns <code class="literal">NULL</code>
+if the requested memory exceeds the limit.
+</p><p id="N160D9" style="text-indent: 0">
+(Hint: the library can use the user data of
+the <a class="indexterm" id="N160DB"/>allocation function to keep its state:
+the byte count, the current memory limit, etc.;
+remember to use the original user data
+when calling the original allocation function.)
+
+
+</p></div><div class="footnotes"><br/><hr/><div class="footnote"><p id="N15A56" style="text-indent: 0"><sup>[<a href="#N15A55" id="ftn.N15A55" class="para">23</a>] </sup>Throughout this text, the term <span class="quote">“<span class="quote">function</span>”</span> actually means
+<span class="quote">“<span class="quote">function or macro</span>”</span>.
+The API implements several facilities as macros.</p></div><div class="footnote"><p id="N15A65" style="text-indent: 0"><sup>[<a href="#N15A64" id="ftn.N15A64" class="para">24</a>] </sup>You can compile Lua with the macro
+<a class="indexterm" id="N15A67"/><code class="function">LUA_USE_APICHECK</code> defined to enable some checks;
+this option is particularly useful when debugging your C code.
+Nevertheless,
+several errors simply cannot be detected in C,
+such as invalid pointers.</p></div><div class="footnote"><p id="N15C12" style="text-indent: 0"><sup>[<a href="#N15C11" id="ftn.N15C11" class="para">25</a>] </sup>For historical reasons,
+the term <span class="quote">“<span class="quote">number</span>”</span> in the API refers to doubles.</p></div><div class="footnote"><p id="N15C6A" style="text-indent: 0"><sup>[<a href="#N15C69" id="ftn.N15C69" class="para">26</a>] </sup>For these configurations, have a look
+in the file <a class="indexterm" id="N15C6C"/><code class="filename">luaconf.h</code>.</p></div><div class="footnote"><p id="N15E77" style="text-indent: 0"><sup>[<a href="#N15E76" id="ftn.N15E76" class="para">27</a>] </sup>The function <a class="indexterm" id="N15E79"/><code class="function">lua_copy</code> was introduced in Lua 5.2.</p></div></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

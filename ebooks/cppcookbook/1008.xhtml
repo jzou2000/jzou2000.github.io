@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 10.7. Copying a File</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 10.7. Copying a File</h3>
+
+<h4 class="docSection2Title" id="title-ID0EL3CI">Problem</h4>
+<p class="docText">You need to copy one file to another in a 
+portable
+manner, i.e., without using OS-specific APIs.</p>
+
+<h4 class="docSection2Title" id="title-ID0EA4CI">Solution</h4>
+<p class="docText">Use C++ file streams in <tt>&lt;fstream&gt;</tt> to copy
+data from one stream to another. Example 10-9 gives
+an example of a buffered stream copy.</p>
+<h5 class="docExampleTitle" id="title-ID0EP4CI">Example 10-9. Copying a file</h5><p></p><div class="box">
+<pre>#include &lt;iostream&gt;
+#include &lt;fstream&gt;
+
+const static int BUF_SIZE = 4096;
+
+using std::ios_base;
+
+int main(int argc, char** argv) {
+
+   std::ifstream in(argv[1],
+      ios_base::in | ios_base::binary);  // Use binary mode so we can
+   std::ofstream out(argv[2],            // handle all kinds of file
+      ios_base::out | ios_base::binary); // content.
+   
+   // Make sure the streams opened okay...
+
+   char buf[BUF_SIZE];
+
+   do {
+      in.read(&amp;buf[0], BUF_SIZE);      // Read at most n bytes into
+      out.write(&amp;buf[0], in.gcount( )); // buf, then write the buf to
+   } while (in.gcount( ) &gt; 0);          // the output.
+
+   // Check streams for problems...
+
+   in.close( );
+   out.close( );
+}</pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0EY4CI">Discussion</h4>
+<p class="docText">Copying a file may appear to be a simple matter of reading from one
+stream and writing to another. But the C++ streams library is large,
+and there are a number of different ways to do the reading and the
+writing, so you should know a little about the library to avoid
+costly performance mistakes.</p>
+<p class="docText">Example 10-9 runs fast because it buffers input and
+output. The <tt>read</tt> and <tt>write</tt>
+functions operate on entire buffers at a time—instead of a
+character-at-a-time copy loop—by reading from the input stream
+to the buffer and writing from the buffer to the output stream in
+chunks. They also do not do any kind of formatting on the data like
+the left- and right-shift operators, which keeps things fast.
+Additionally, since the streams are in binary mode, EOF characters
+can be read and written without incident. Depending on your hardware,
+OS, and so on, you will get different results for different buffer
+sizes. Experiment to find the best parameters for your system.</p>
+<p class="docText">But there's more to it than this. All C++ streams
+already buffer data when reading or writing, so Example 10-9 is actually doing <span class="docEmphasis">double</span>
+buffering. The input stream has its own internal stream buffer that
+holds characters that have been read from the source but not
+extracted with <tt>read</tt>,
+<tt>operator&lt;&lt;</tt>, <tt>getc</tt>, or any
+other member functions, and the output stream has a buffer that holds
+output that has been written to the stream but not the destination
+(in the case of an <tt>ofstream</tt>, it's
+a file but it could be a string, a network connection, or
+who-knows-what). Therefore, the best thing to do is to let the
+buffers exchange data directly. You can do this with
+<tt>operator&lt;&lt;</tt>, which behaves differently than
+usual when used with stream buffers. For example, instead of the
+<tt>do</tt>/<tt>while</tt> loop in Example 10-9, use this:</p>
+<pre>out &lt;&lt; in.rdbuf( );</pre><br/>
+<p class="docText">Don't place this statement in the body of the loop,
+replace the loop with this single line. It looks a little odd, since,
+typically, <tt>operator&lt;&lt;</tt> says,
+"take the righthand side and send it to the lefthand
+stream," but bear with me and it will make sense.
+<tt>rdbuf</tt> returns the buffer from the input stream,
+and the implementation of <tt>operator&lt;&lt;</tt> that
+takes a stream buffer as a righthand argument reads a character at a
+time from the input buffer and writes it to the output buffer. When
+the input buffer is emptied, it knows it has to refill itself with
+data from the real source, and <tt>operator&lt;&lt;</tt> is
+none the wiser.</p>
+<p class="docText">Example 10-9 shows how to copy the
+<span class="docEmphasis">contents</span> of a file yourself, but your OS is
+responsible for managing the filesystem, which encompasses copying
+them, so why not let the OS do the work? In most cases, the answer to
+this question is that a direct call to the OS API is, of course, not
+portable.
+Boost's Filesystem
+library masks a lot of the OS-specific APIs for you by providing the
+function <tt>copy_file</tt>, which makes different OS calls
+based on the platform it was compiled for. Example 10-10 contains a short program that copies a file
+from one location to another.</p>
+<h5 class="docExampleTitle" id="title-ID0EGADI">Example 10-10. Copying a file with Boost</h5><p></p><div class="box">
+<pre>#include &lt;iostream&gt;
+#include &lt;string&gt;
+#include &lt;boost/filesystem/operations.hpp&gt;
+#include &lt;boost/filesystem/fstream.hpp&gt;
+
+using namespace std;
+using namespace boost::filesystem;
+
+int main(int argc, char** argv) {
+
+   // Parameter checking...
+
+   try {
+      // Turn the args into absolute paths using native formatting
+      path src = complete(path(argv[1], native));
+      path dst = complete(path(argv[2], native));
+
+      copy_file(src, dst);
+   }
+   catch (exception&amp; e) {
+      cerr &lt;&lt; e.what( ) &lt;&lt; endl;
+   }
+
+   return(EXIT_SUCCESS);
+}</pre><br/>
+</div><p></p>
+<p class="docText">This a small program, but there are a few key parts that need
+explaining because other recipes in this chapter use the Boost
+Filesystem library. To begin with, the central component of the
+
+Boost
+Filesystem library is the <tt>path</tt> class, which
+represents, in an OS-independent way, a path to a file or directory.
+You can create a <tt>path</tt> using either a portable or
+OS-native string. In Example 10-10, I create a
+<tt>path</tt> out of the program arguments (that I then
+pass to <tt>complete</tt>, which I discuss in a moment):</p>
+<pre>path src = complete(<b>path(argv[1], native)</b>);</pre><br/>
+<p class="docText">The first argument is the text of the path, e.g.,
+"<tt>tmp\\foo.txt</tt>" and the second argument is the name
+of a function that accepts a <tt>string</tt> argument and
+returns a <tt>boolean</tt> that validates that a path is
+valid according to certain rules. The <tt>native</tt>
+function means to use the OS's native format for
+validation. I used it in Example 10-10 because the
+arguments are passed in from the command line where they are
+presumably typed in by a human user, who will probably use the native
+OS format when specifying files. There are a number of functions that
+you can use to validate file and directory names, all of which are
+self-explanatory: <tt>portable_posix_name</tt>,
+<tt>windows_name</tt>, <tt>portable_name</tt>,
+<tt>portable_directory_name</tt>,
+<tt>portable_file_name</tt>, and
+<tt>no_check</tt>. See the documentation for specifics.</p>
+<p class="docText"><tt>complete</tt> composes an absolute path using the
+current working directory and the relative path you pass it. Thus, I
+can do this to create an absolute path to the source file:</p>
+<pre>path src = complete(path("tmp\\foo.txt", native));</pre><br/>
+<p class="docText"><tt>complete</tt> handles the case where the first argument
+is already an absolute filename by using the value given rather than
+trying to merge it with the current working directory. In other
+words, the following code invoked from a current directory of
+"<tt>c:\myprograms</tt>" ignores the current working
+directory since the path given is already complete:</p>
+<pre>path src = complete(path("c:\\windows\\garbage.txt", native));</pre><br/>
+<p class="docText">Many of the Boost Filesystem functions will throw an exception if a
+precondition is not met. The documentation has all the details, but a
+good example is with the <tt>copy_file</tt> function
+itself. A file must exist before it can be copied, so if the source
+file does not exist, the operation cannot succeed; therefore,
+<tt>copy_file</tt> will throw an exception. Catch the
+exception as I did in Example 10-10
+ and you will get an
+error message that explains the problem.</p>
+</div>
+</body>
+</html>

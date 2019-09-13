@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>46.8. A File-Server Application Using Message Queues</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">46.8. A File-Server Application Using Message Queues</h3><p class="docText">In
+ this section, we describe a client-server application that uses one 
+message queue per client. The application is a simple file server. The 
+client sends a request message to the server’s message queue asking for 
+the contents of a named file. The server responds by returning the file 
+contents as a series of messages to the client’s private message queue. Figure 46-3 provides an overview of the application.</p><p class="docText">Because
+ the server performs no authentication of the client, any user that can 
+run the client can obtain any of the files accessible to the server. A 
+more sophisticated server would require some type of authentication from
+ the client before serving the requested file.</p><p></p><center><h5 class="docFigureTitle">Figure 46-3. Client-server IPC using one message queue per client</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-89.png"/></p></center><p></p><br/><h4 class="docSection2Title" id="title-ID0ETWBM">46.8.1. </h4><h5 class="docSection3Title" id="title-ID0EXWBM">46.8.1.1. Common header file</h5><p class="docText">Example 46-7
+ is the header file included by both the server and the client. This 
+header defines the well-known key to be used for the server’s message 
+queue (<tt>SERVER_KEY</tt>), and defines the formats of the messages to be passed between the client and the server.</p><p class="docText">The <span class="docEmphasis">requestMsg</span> structure defines the format of the request sent from the client to the server. In this structure, the <span class="docEmphasis">mtext</span>
+ component consists of two fields: the identifier of the client’s 
+message queue and the pathname of the file requested by the client. The 
+constant <tt>REQ_MSG_SIZE</tt> equates to the combined size of these two fields and is used as the <span class="docEmphasis">msgsz</span> argument in calls to <span class="docEmphasis">msgsnd()</span> using this structure.</p><p class="docText">The <span class="docEmphasis">responseMsg</span> structure defines the format of the response messages sent from the server back to the client. The <span class="docEmphasis">mtype</span> field is used in response messages to supply information about the message content, as defined by the <tt>RESP_MT_*</tt> constants.</p><h5 class="docExampleTitle" id="title-ID0EZXBM">Example 46-7. Header file for <tt>svmsg_file_server.c</tt> and <tt>svmsg_file_client.c</tt></h5><p></p><div class="box"><pre class="preFixedHeight"><b>svmsg/svmsg_file.h</b>
+#include &lt;sys/types.h&gt;
+#include &lt;sys/msg.h&gt;
+#include &lt;sys/stat.h&gt;
+#include &lt;stddef.h&gt;                       /* For definition of offsetof() */
+#include &lt;limits.h&gt;
+#include &lt;fcntl.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;sys/wait.h&gt;
+#include "tlpi_hdr.h"
+
+#define SERVER_KEY 0x1aaaaaa1             /* Key for server's message queue */
+
+struct requestMsg {                       /* Requests (client to server) */
+    long mtype;                           /* Unused */
+    int  clientId;                        /* ID of client's message queue */
+    char pathname[PATH_MAX];              /* File to be returned */
+};
+
+/* REQ_MSG_SIZE computes size of 'mtext' part of 'requestMsg' structure.
+   We use offsetof() to handle the possibility that there are padding
+   bytes between the 'clientId' and 'pathname' fields. */
+
+#define REQ_MSG_SIZE (offsetof(struct requestMsg, pathname) - \
+                      offsetof(struct requestMsg, clientId) + PATH_MAX)
+
+#define RESP_MSG_SIZE 8192
+
+struct responseMsg {                      /* Responses (server to client) */
+    long mtype;                           /* One of RESP_MT_* values below */
+    char data[RESP_MSG_SIZE];             /* File content / response message */
+};
+
+/* Types for response messages sent from server to client */
+
+#define RESP_MT_FAILURE 1                 /* File couldn't be opened */
+#define RESP_MT_DATA    2                 /* Message contains file data */
+#define RESP_MT_END     3                 /* File data complete */
+     <b>svmsg/svmsg_file.h</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0EKYBM">46.8.1.2. Server program</h5><p class="docText">Example 46-8 is the server program for the application. Note the following points about the server:</p><ul><li><p class="docList">The
+ server is designed to handle requests concurrently. A concurrent server
+ design is preferable to the iterative design employed in Example 44-7
+ (page 912), since we want to avoid the possibility that a client 
+request for a large file would cause all other client requests to wait.</p></li><li><p class="docList">Each client request is handled by creating a child process that serves the requested file <img alt="" border="0" id="" src="Images/getfile_005-37.png"/>. In the meantime, the main server process waits upon further client requests. Note the following points about the server child:</p><ul><li><p class="docList">Since the child produced via <span class="docEmphasis">fork()</span> inherits a copy of the parent’s stack, it thus obtains a copy of the request message read by the main server process.</p></li><li><p class="docList">The server child terminates after handling its associated client request <img alt="" border="0" id="" src="Images/getfile_008-16.png"/>.</p></li></ul></li><li><p class="docList">In order to avoid the creation of zombie processes (Section 26.2), the server establishes a handler for <tt>SIGCHLD</tt> <img alt="" border="0" id="" src="Images/getfile_010-12.png"/> and calls <span class="docEmphasis">waitpid()</span> within this handler <img alt="" border="0" id="" src="Images/getfile_004-17.png"/>.</p></li><li><p class="docList">The <span class="docEmphasis">msgrcv()</span> call in the parent server process may block, and consequently be interrupted by the <tt>SIGCHLD</tt> handler. To handle this possibility, a loop is used to restart the call if it fails with the <tt>EINTR</tt> error <img alt="" border="0" id="" src="Images/getfile_007-23.png"/>.</p></li><li><p class="docList">The server child executes the <span class="docEmphasis">serveRequest()</span> function <img alt="" border="0" id="" src="Images/getfile_003-44.png"/>, which sends three message types back to the client. A request with an <span class="docEmphasis">mtype</span> of <tt>RESP_MT_FAILURE</tt> indicates that the server could not open the requested file <img alt="" border="0" id="" src="Images/getfile_002-46.png"/>; <tt>RESP_MT_DATA</tt> is used for a series of messages containing file data <img alt="" border="0" id="" src="Images/getfile_006-28.png"/>; and <tt>RESP_MT_END</tt> (with a zero-length data field) is used to indicate that transmission of file data is complete <img alt="" border="0" id="" src="Images/getfile_009-15.png"/>.</p></li></ul><p class="docText">We consider a number of ways to improve and extend the server program in Exercise 46-4.</p><h5 class="docExampleTitle" id="title-ID0EI4BM">Example 46-8. A file server using System V message queues</h5><p></p><div class="box"><pre class="preFixedHeight"><b>svmsg/svmsg_file_server.c</b>
+    #include "svmsg_file.h"
+
+    static void             /* SIGCHLD handler */
+    grimReaper(int sig)
+    {
+        int savedErrno;
+
+        savedErrno = errno;                 /* waitpid() might change 'errno' */
+<img alt="" border="0" id="" src="Images/getfile_004-18.png"/>    while (waitpid(-1, NULL, WNOHANG) &gt; 0)
+            continue;
+        errno = savedErrno;
+    }
+
+        static void             /* Executed in child process: serve a single client */
+<img alt="" border="0" id="" src="Images/getfile_003-45.png"/> serveRequest(const struct requestMsg *req)
+    {
+        int fd;
+        ssize_t numRead;
+        struct responseMsg resp;
+
+        fd = open(req-&gt;pathname, O_RDONLY);
+        if (fd == -1) {                     /* Open failed: send error text */
+<img alt="" border="0" id="" src="Images/getfile_002-47.png"/>        resp.mtype = RESP_MT_FAILURE;
+            snprintf(resp.data, sizeof(resp.data), "%s", "Couldn't open");
+            msgsnd(req-&gt;clientId, &amp;resp, strlen(resp.data) + 1, 0);
+            exit(EXIT_FAILURE);              /* and terminate */
+        }
+
+        /* Transmit file contents in messages with type RESP_MT_DATA. We don't
+           diagnose read() and msgsnd() errors since we can't notify client. */
+<img alt="" border="0" id="" src="Images/getfile_006-29.png"/>    resp.mtype = RESP_MT_DATA;
+        while ((numRead = read(fd, resp.data, RESP_MSG_SIZE)) &gt; 0)
+            if (msgsnd(req-&gt;clientId, &amp;resp, numRead, 0) == -1)
+                break;
+
+        /* Send a message of type RESP_MT_END to signify end-of-file */
+<img alt="" border="0" id="" src="Images/getfile_009-16.png"/>    resp.mtype = RESP_MT_END;
+        msgsnd(req-&gt;clientId, &amp;resp, 0, 0);         /* Zero-length mtext */
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        struct requestMsg req;
+        pid_t pid;
+        ssize_t msgLen;
+        int serverId;
+        struct sigaction sa;
+
+        /* Create server message queue */
+
+        serverId = msgget(SERVER_KEY, IPC_CREAT | IPC_EXCL |
+                                S_IRUSR | S_IWUSR | S_IWGRP);
+        if (serverId == -1)
+            errExit("msgget");
+
+        /* Establish SIGCHLD handler to reap terminated children */
+
+        sigemptyset(&amp;sa.sa_mask);
+        sa.sa_flags = SA_RESTART;
+        sa.sa_handler = grimReaper;
+<img alt="" border="0" id="" src="Images/getfile_010-13.png"/>    if (sigaction(SIGCHLD, &amp;sa, NULL) == -1)
+            errExit("sigaction");
+
+            /* Read requests, handle each in a separate child process */
+
+        for (;;) {
+            msgLen = msgrcv(serverId, &amp;req, REQ_MSG_SIZE, 0, 0);
+            if (msgLen == -1) {
+<img alt="" border="0" id="" src="Images/getfile_007-24.png"/>            if (errno == EINTR)         /* Interrupted by SIGCHLD handler? */
+                    continue;               /* ... then restart msgrcv() */
+                errMsg("msgrcv");           /* Some other error */
+                break;                      /* ... so terminate loop */
+            }
+<img alt="" border="0" id="" src="Images/getfile_005-38.png"/>        pid = fork();                   /* Create child process */
+            if (pid == -1) {
+                errMsg("fork");
+                break;
+            }
+
+            if (pid == 0) {                 /* Child handles request */
+                serveRequest(&amp;req);
+<img alt="" border="0" id="" src="Images/getfile_008-17.png"/>            _exit(EXIT_SUCCESS);
+            }
+
+            /* Parent loops to receive next client request */
+        }
+
+        /* If msgrcv() or fork() fails, remove server MQ and exit */
+
+        if (msgctl(serverId, IPC_RMID, NULL) == -1)
+            errExit("msgctl");
+        exit(EXIT_SUCCESS);
+    }
+         <b>svmsg/svmsg_file_server.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0ES6BM">46.8.1.3. Client program</h5><p class="docText">Example 46-9 is the client program for the application. Note the following:</p><ul><li><p class="docList">The client creates a message queue with the <tt>IPC_PRIVATE</tt> key <img alt="" border="0" id="" src="Images/getfile_003-46.png"/> and uses <span class="docEmphasis">atexit()</span> <img alt="" border="0" id="" src="Images/getfile_002-48.png"/> to establish an exit handler <img alt="" border="0" id="" src="Images/getfile_004-19.png"/> to ensure that the queue is deleted when the client exits.</p></li><li><p class="docList">The client passes the identifier for its queue, as well as the pathname of the file to be served, in a request to the server <img alt="" border="0" id="" src="Images/getfile_006-30.png"/>.</p></li><li><p class="docList">The client handles the possibility that the first response message sent by the server may be a failure notification (<span class="docEmphasis">mtype</span> equals <tt>RESP_MT_FAILURE</tt>) by printing the text of the error message returned by the server and exiting <img alt="" border="0" id="" src="Images/getfile_009-17.png"/>.</p></li><li><p class="docList">If the file is successfully opened, then the client loops <img alt="" border="0" id="" src="Images/getfile_010-14.png"/>, receiving a series of messages containing the file contents (<span class="docEmphasis">mtype</span> equals <tt>RESP_MT_DATA</tt>). The loop is terminated by receipt of an end-of-file message (<span class="docEmphasis">mtype</span> equals <tt>RESP_MT_END</tt>).</p></li></ul><p class="docText">This
+ simple client doesn’t handle various possibilities resulting from 
+failures in the server. We consider some improvements in Exercise 46-5.</p><h5 class="docExampleTitle" id="title-ID0EZDCM">Example 46-9. Client for file server using System V message queues</h5><p></p><div class="box"><pre class="preFixedHeight"><b>svmsg/svmsg_file_client.c</b>
+    #include "svmsg_file.h"
+
+    static int clientId;
+
+    static void
+    removeQueue(void)
+    {
+        if (msgctl(clientId, IPC_RMID, NULL) == -1)
+<img alt="" border="0" id="" src="Images/getfile_004-20.png"/>        errExit("msgctl");
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        struct requestMsg req;
+        struct responseMsg resp;
+        int serverId, numMsgs;
+        ssize_t msgLen, totBytes;
+
+        if (argc != 2 || strcmp(argv[1], "--help") == 0)
+            usageErr("%s pathname\n", argv[0]);
+
+        if (strlen(argv[1]) &gt; sizeof(req.pathname) - 1)
+            cmdLineErr("pathname too long (max: %ld bytes)\n",
+                    (long) sizeof(req.pathname) - 1);
+
+        /* Get server's queue identifier; create queue for response */
+
+        serverId = msgget(SERVER_KEY, S_IWUSR);
+        if (serverId == -1)
+            errExit("msgget - server message queue");
+<img alt="" border="0" id="" src="Images/getfile_003-47.png"/>    clientId = msgget(IPC_PRIVATE, S_IRUSR | S_IWUSR | S_IWGRP);
+        if (clientId == -1)
+            errExit("msgget - client message queue");
+<img alt="" border="0" id="" src="Images/getfile_002-49.png"/>    if (atexit(removeQueue) != 0)
+            errExit("atexit");
+
+        /* Send message asking for file named in argv[1] */
+
+        req.mtype = 1;                      /* Any type will do */
+        req.clientId = clientId;
+        strncpy(req.pathname, argv[1], sizeof(req.pathname) - 1);
+        req.pathname[sizeof(req.pathname) - 1] = '\0';
+                                            /* Ensure string is terminated */
+<img alt="" border="0" id="" src="Images/getfile_006-31.png"/>    if (msgsnd(serverId, &amp;req, REQ_MSG_SIZE, 0) == -1)
+            errExit("msgsnd");
+            /* Get first response, which may be failure notification */
+
+        msgLen = msgrcv(clientId, &amp;resp, RESP_MSG_SIZE, 0, 0);
+        if (msgLen == -1)
+            errExit("msgrcv");
+<img alt="" border="0" id="" src="Images/getfile_009-18.png"/>    if (resp.mtype == RESP_MT_FAILURE) {
+            printf("%s\n", resp.data);      /* Display msg from server */
+            if (msgctl(clientId, IPC_RMID, NULL) == -1)
+                errExit("msgctl");
+            exit(EXIT_FAILURE);
+        }
+
+        /* File was opened successfully by server; process messages
+           (including the one already received) containing file data */
+
+        totBytes = msgLen;                  /* Count first message */
+<img alt="" border="0" id="" src="Images/getfile_010-15.png"/>    for (numMsgs = 1; resp.mtype == RESP_MT_DATA; numMsgs++) {
+            msgLen = msgrcv(clientId, &amp;resp, RESP_MSG_SIZE, 0, 0);
+            if (msgLen == -1)
+                errExit("msgrcv");
+
+            totBytes += msgLen;
+        }
+
+        printf("Received %ld bytes (%d messages)\n", (long) totBytes, numMsgs);
+
+        exit(EXIT_SUCCESS);
+    }
+         <b>svmsg/svmsg_file_client.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The following shell session demonstrates the use of the programs in Example 46-8 and Example 46-9:</p><pre class="preFixedWidth">$ <b>./svmsg_file_server &amp; </b>                   <i> Run server in background</i>
+[1] 9149
+$ <b>wc -c /etc/services </b>
+                     <i> Show size of file that client will request</i>
+764360 /etc/services
+$ <b>./svmsg_file_client /etc/services </b>
+Received 764360 bytes (95 messages)       <i> Bytes received matches size above</i>
+$ <b>kill %1 </b>                                 <i> Terminate server</i>
+[1]+  Terminated        ./svmsg_file_server
+
+					  </pre><br/>
+</div>
+</body>
+</html>

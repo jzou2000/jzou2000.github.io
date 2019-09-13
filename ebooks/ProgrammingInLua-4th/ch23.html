@@ -1,0 +1,904 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 23. Garbage</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 23. Garbage"><div class="titlepage"><div><h1><span class="partLabel">23</span> Garbage</h1></div></div><p id="N14CD7" style="text-indent: 0">
+Lua does automatic <a class="indexterm" id="N14CD9"/>memory management.
+Programs can create objects (tables, closures, etc.),
+but there is no function to delete objects.
+Lua automatically deletes objects that become garbage,
+using <em><a class="indexterm" id="N14CDE"/>garbage collection</em>.
+This frees us from most of the burden of <a class="indexterm" id="N14CE3"/>memory management and,
+more importantly,
+frees us from most of the bugs related to this activity,
+such as <a class="indexterm" id="N14CE7"/>dangling pointers and <a class="indexterm" id="N14CEB"/>memory leaks.
+</p><p id="N14CEF" style="text-indent: 0">
+In an ideal world,
+the garbage collector would be invisible to the programmer,
+like a good cleaner that does not interfere with other workers.
+However, sometimes even the smarter collector needs our help.
+We may need to stop it at some performance-critical periods
+or allow it to work only in some specific times.
+Moreover,
+a garbage collector can collect only what it can be sure is garbage;
+it cannot guess what we consider garbage.
+No garbage collector allows us to forget all worries about
+resource management,
+such as hoarding memory and external resources.
+</p><p id="N14CF1" style="text-indent: 0">
+Weak tables, finalizers,
+and the function <a class="indexterm" id="N14CF3"/><code class="function">collectgarbage</code>
+are the main mechanisms that
+we can use in Lua to help the garbage collector.
+Weak tables allow the collection of Lua objects
+that are still accessible to the program;
+finalizers allow the collection of external objects
+that are not directly under control of the garbage collector.
+The function <a class="indexterm" id="N14CF9"/><code class="function">collectgarbage</code> allows us to control
+the pace of the collector.
+In this chapter, we will discuss these mechanisms.
+</p><div class="sect1" title="Weak Tables"><div class="titlepage"><div><div><h2 class="title"><a id="L222"/>Weak Tables</h2></div></div></div><p id="N14D03" style="text-indent: 0">
+As we said,
+a garbage collector cannot guess what we consider garbage.
+A typical example is a stack,
+implemented with an array and an index to the top.
+We know that the valid part of the array goes only up to the top,
+but Lua does not.
+If we pop an element by simply decrementing the top,
+the object left in the array is not garbage to Lua.
+Similarly,
+any object stored in a global variable is not garbage to Lua,
+even if our program will never use it again.
+In both cases, it is up to us (i.e., our program) to
+assign nil to these positions so that they do not lock
+an otherwise disposable object.
+</p><p id="N14D05" style="text-indent: 0">
+However, simply cleaning our references is not always enough.
+Some constructions need extra collaboration
+between the program and the collector.
+A typical example happens when we want to keep a list of all
+live objects of some kind (e.g., files) in our program.
+This task seems simple:
+all we have to do is to insert each new object into the list.
+However, once the object is part of the list,
+it will never be collected!
+Even if nothing else points to it,
+the list does.
+Lua cannot know that this reference should not prevent the
+reclamation of the object,
+unless we tell Lua about this fact.
+</p><p id="N14D07" style="text-indent: 0">
+Weak tables are the mechanism that we use to tell Lua
+that a reference should not prevent the reclamation of an object.
+A <a class="indexterm" id="N14D09"/><em class="firstterm">weak reference</em> is a reference to an object that is not
+considered by the garbage collector.
+If all references pointing to an object are weak,
+the collector will collect the object
+and delete these <a class="indexterm" id="N14D10"/>weak references.
+Lua implements weak references through <em>weak tables</em>:
+a <a class="indexterm" id="N14D17"/>weak table is a table whose entries are weak.
+This means that,
+if an object is held only in weak tables,
+Lua will eventually collect the object.
+</p><p id="N14D1B" style="text-indent: 0">
+Tables have keys and values,
+and both can contain any kind of object.
+Under normal circumstances,
+the garbage collector does not collect objects that
+appear as keys or as values of an accessible table.
+That is, both keys and values are <em>strong</em> references,
+as they prevent the reclamation of objects they refer to.
+In a weak table, both keys and values can be weak.
+This means that there are three kinds of <a class="indexterm" id="N14D20"/>weak tables:
+tables with weak keys, tables with weak values,
+and tables where both keys and values are weak.
+Irrespective of the kind of table,
+when a key or a value is collected the whole entry
+disappears from the table.
+</p><p id="N14D24" style="text-indent: 0">
+The weakness of a table is given by the field <a class="indexterm" id="N14D26"></a><code class="literal">__mode</code>
+of its <a class="indexterm" id="N14D2F"></a>metatable.
+The value of this field, when present,
+should be a string:
+if this string is <code class="literal">"k"</code>,
+the keys in the table are weak;
+if this string is <code class="literal">"v"</code>,
+the values in the table are weak;
+if this string is <code class="literal">"kv"</code>,
+both keys and values are weak.
+The following example, although artificial,
+illustrates the basic behavior of <a class="indexterm" id="N14D3C"></a>weak tables:
+</p><pre class="programlisting" id="N14D40">      a = {}
+      mt = {__mode = "k"}
+      setmetatable(a, mt)    -- now 'a' has weak keys
+      key = {}               -- creates first key
+      a[key] = 1
+      key = {}               -- creates second key
+      a[key] = 2
+      collectgarbage()       -- forces a garbage collection cycle
+      for k, v in pairs(a) do print(v) end
+        --&gt; 2
+</pre><p style="text-indent: 0">
+In this example,
+the second assignment <code class="literal">key = {}</code> overwrites
+the reference to the first key.
+The call to <a class="indexterm" id="N14D46"></a><code class="function">collectgarbage</code> forces the garbage collector
+to do a full collection.
+As there is no other reference to the first key,
+Lua collects this key
+and removes the corresponding entry in the table.
+The second key, however, is still anchored in the variable <code class="literal">key</code>,
+so Lua does not collect it.
+</p><p id="N14D4F" style="text-indent: 0">
+Notice that only objects can be removed
+from a <a class="indexterm" id="N14D51"/>weak table.
+<a class="indexterm" id="N14D55"/>
+<a class="indexterm" id="N14D59"/>
+Values, such as numbers and Booleans,
+are not collectible.
+For instance, if we insert a numeric key in the table <code class="literal">a</code>
+(from our previous example),
+the collector will never remove it.
+Of course,
+if the value corresponding to a numeric key is collected
+in a table with weak values,
+then the whole entry is removed from the table.
+</p><p id="N14D60" style="text-indent: 0">
+Strings present a subtlety here:
+although strings are collectible
+from an implementation point of view,
+they are not like other collectible objects.
+Other objects, such as tables and closures,
+are created explicitly.
+For instance,
+whenever Lua evaluates the expression <code class="literal">{}</code>,
+it creates a new table.
+However, does Lua create a new string when it
+evaluates <code class="literal">"a".."b"</code>?
+What if there is already a string <code class="literal">"ab"</code> in the system?
+Does Lua create a new one?
+Can the compiler create this string before running the program?
+It does not matter:
+these are implementation details.
+From the programmer’s point of view,
+strings are values, not objects.
+Therefore, like a number or a Boolean,
+a string key is not removed from a <a class="indexterm" id="N14D6B"/>weak table
+unless its associated value is collected.
+</p></div><div class="sect1" title="Memorize Functions"><div class="titlepage"><div><div><h2 class="title"><a id="L223"/>Memorize Functions</h2></div></div></div><p id="N14D73" style="text-indent: 0">
+A common programming technique is to trade space for time.
+We can speed up a function by
+<em>memorizing</em> its results<a class="indexterm" id="N14D78"/>
+so that, later, when we call the function with the same argument,
+the function can reuse that result.<sup>[<a href="#ftn.N14D7C" id="N14D7C" class="footnote">21</a>]</sup>
+</p><p id="N14D8A" style="text-indent: 0">
+Imagine a generic server that takes
+requests in the form of strings with Lua code.
+Each time it gets a request,
+it runs <a class="indexterm" id="N14D8C"></a><code class="function">load</code> on the string,
+and then calls the resulting function.
+However, <a class="indexterm" id="N14D92"></a><code class="function">load</code> is an expensive function,
+and some commands to the server may be quite frequent.
+Instead of calling <a class="indexterm" id="N14D98"></a><code class="function">load</code> repeatedly
+each time it receives a common command like <code class="literal">"closeconnection()"</code>,
+the server can <em>memorize</em> the results from <a class="indexterm" id="N14DA4"></a><code class="function">load</code>
+using an auxiliary table.
+Before calling <a class="indexterm" id="N14DAA"></a><code class="function">load</code>,
+the server checks in the table whether the given string
+already has a translation.
+If it cannot find a match,
+then (and only then) the server calls <a class="indexterm" id="N14DB0"></a><code class="function">load</code>
+and stores the result into the table.
+We can pack this behavior in a new function:
+</p><pre class="programlisting" id="N14DB6">      local results = {}
+      function mem_loadstring (s)
+        local res = results[s]
+        if res == nil then                   -- result not available?
+          res = assert(load(s))              -- compute new result
+          results[s] = res                   -- save for later reuse
+        end
+        return res
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N14DB9" style="text-indent: 0">
+The savings with this scheme can be huge.
+However, it may also cause unsuspected waste.
+Although some commands repeat over and over,
+many other commands happen only once.
+Gradually,
+the table <code class="literal">results</code> accumulates
+all commands the server has ever received
+plus their respective codes;
+after enough time,
+this behavior will exhaust the server’s memory.
+</p><p id="N14DBE" style="text-indent: 0">
+A <a class="indexterm" id="N14DC0"></a>weak table provides a simple solution to this problem.
+If the <code class="literal">results</code> table has weak values,
+each garbage-collection
+<a class="indexterm" id="N14DC7"></a>
+cycle will remove all translations not in use at that moment
+(which means virtually all of them):
+</p><pre class="programlisting" id="N14DCB">      local results = {}
+      setmetatable(results, {__mode = "v"})  -- make values weak
+      function mem_loadstring (s)
+         <em class="replaceable"><code>as before</code></em>
+</pre><p style="text-indent: 0">
+Actually, because the indices are always strings,
+we can make this table fully weak, if we want:
+</p><pre class="programlisting" id="N14DD1">      setmetatable(results, {__mode = "kv"})
+</pre><p style="text-indent: 0">
+The net result is the same.
+</p><p id="N14DD4" style="text-indent: 0">
+The <a class="indexterm" id="N14DD6"></a>memorization technique is useful also to ensure the uniqueness of
+some kind of object.
+For instance, assume a system that represents colors as tables,
+with fields <code class="literal">red</code>, <code class="literal">green</code>, and <code class="literal">blue</code> in some range.
+A naive color factory generates a new color for each new request:
+</p><pre class="programlisting" id="N14DE3">      function createRGB (r, g, b)
+        return {red = r, green = g, blue = b}
+      end
+</pre><p style="text-indent: 0">
+Using <a class="indexterm" id="N14DE6"></a>memorization,
+we can reuse the same table for the same color.
+To create a unique key for each color,
+we simply concatenate the color indices with a separator in between:
+</p><pre class="programlisting" id="N14DEA">      local results = {}
+      setmetatable(results, {__mode = "v"})  -- make values weak
+      function createRGB (r, g, b)
+        local key = string.format("%d-%d-%d", r, g, b)
+        local color = results[key]
+        if color == nil then
+          color = {red = r, green = g, blue = b}
+          results[key] = color
+        end
+        return color
+      end
+</pre><p style="text-indent: 0">
+An interesting consequence of this implementation is that
+the user can compare colors using the primitive equality operator,
+because two coexistent equal colors
+are always represented by the same table.
+Any given color can be represented by
+different tables at different times,
+because from time to time the garbage collector
+clears the <code class="literal">results</code> table.
+However, as long as a given color is in use,
+it is not removed from <code class="literal">results</code>.
+So, whenever a color survives long enough
+to be compared with a new one,
+its representation also has survived long
+enough to be reused by the new color.
+</p></div><div class="sect1" title="Object Attributes"><div class="titlepage"><div><div><h2 class="title"><a id="att-table"/>Object Attributes</h2></div></div></div><p id="N14DF7" style="text-indent: 0">
+Another important use of <a class="indexterm" id="N14DF9"/>weak tables
+is to associate attributes with objects.
+There are endless situations where we need to attach some
+attribute to an object:
+names to functions,
+default values to tables,
+sizes to arrays,
+and so on.
+</p><p id="N14DFD" style="text-indent: 0">
+When the object is a table,
+we can store the attribute in the table itself,
+with an appropriate unique key.
+(As we saw before,
+a simple and error-proof way to create a unique key is
+to create a new table and use it as the key.)
+However, if the object is not a table,
+it cannot keep its own attributes.
+Even for tables, sometimes we may not want to store the attribute
+in the original object.
+For instance, we may want to keep the attribute private,
+or we do not want the attribute to disturb a table traversal.
+In all these cases,
+we need an alternative way to map attributes to objects.
+</p><p id="N14DFF" style="text-indent: 0">
+Of course, an external table provides an ideal way to map
+attributes to objects.
+It is what we called a
+<a class="indexterm" id="N14E01"/><em>dual representation</em> in <a class="xref" href="ch21.html#sc_dual" title="Dual Representation">the section called “Dual Representation”</a>.
+We use the objects as keys, and their attributes as values.
+An external table can keep attributes of any type of object,
+as Lua allows us to use any type of object as a key.
+Moreover, attributes kept in an external table do not interfere
+with other objects,
+and can be as private as the table itself.
+</p><p id="N14E0A" style="text-indent: 0">
+However, this seemingly perfect solution has a huge drawback:
+once we use an object as a key in a table,
+we lock the object into existence.
+Lua cannot collect an object that is being used as a key.
+For instance,
+if we use a regular table to map functions to its names,
+none of these functions will ever be collected.
+As you might expect,
+we can avoid this drawback by using a <a class="indexterm" id="N14E0C"/>weak table.
+This time, however, we need weak keys.
+The use of weak keys does not prevent any key from being collected,
+once there are no other references to it.
+On the other hand, the table cannot have weak values;
+otherwise, attributes of live objects could be collected.
+</p></div><div class="sect1" title="Revisiting Tables with Default Values"><div class="titlepage"><div><div><h2 class="title"><a id="L224"/>Revisiting Tables with Default Values</h2></div></div></div><p id="N14E14" style="text-indent: 0">
+In <a class="xref" href="ch20.html#defvalues" title="Tables with default values">the section called “Tables with default values”</a>, we discussed how to implement tables with
+non-nil <a class="indexterm" id="N14E19"/>default values.
+We saw one particular technique and commented that two other
+techniques needed <a class="indexterm" id="N14E1D"/>weak tables, so we postponed them.
+Now it is time to revisit the subject.
+As we will see, these two techniques for default values
+are actually particular applications of the two general
+techniques that we have just discussed:
+dual representation and <a class="indexterm" id="N14E21"/>memorization.
+</p><p id="N14E25" style="text-indent: 0">
+In the first solution,
+we use a <a class="indexterm" id="N14E27"></a>weak table to map each table to its default value:
+</p><pre class="programlisting" id="N14E2B">      local defaults = {}
+      setmetatable(defaults, {__mode = "k"})
+      local mt = {__index = function (t) return defaults[t] end}
+      function setDefault (t, d)
+        defaults[t] = d
+        setmetatable(t, mt)
+      end
+</pre><p style="text-indent: 0">
+This is a typical use of a dual representation,
+where we use <code class="literal">defaults[t]</code> to represent <code class="literal">t.default</code>.
+If the table <code class="literal">defaults</code> did not have weak keys,
+it would anchor all tables with default values
+into permanent existence.
+</p><p id="N14E37" style="text-indent: 0">
+In the second solution,
+we use distinct metatables for distinct default values,
+but we reuse the same <a class="indexterm" id="N14E39"></a>metatable whenever we repeat a default value.
+This is a typical use of <a class="indexterm" id="N14E3D"></a>memorization:
+</p><pre class="programlisting" id="N14E41">      local metas = {}
+      setmetatable(metas, {__mode = "v"})
+      function setDefault (t, d)
+        local mt = metas[d]
+        if mt == nil then
+          mt = {__index = function () return d end}
+          metas[d] = mt     -- memorize
+        end
+        setmetatable(t, mt)
+      end
+</pre><p style="text-indent: 0">
+In this case,
+we use weak values
+to allow the collection of metatables that are not
+being used anymore.
+</p><p id="N14E44" style="text-indent: 0">
+Given these two implementations for default values,
+which is best?
+As usual, it depends.
+Both have similar complexity and similar performance.
+The first implementation needs a few memory words for each
+table with a default value (an entry in <code class="literal">defaults</code>).
+The second implementation needs a few dozen memory words for
+each distinct default value
+(a new table, a new closure, plus an entry in the table <code class="literal">metas</code>).
+So, if your application has thousands of tables with a
+few distinct default values,
+the second implementation is clearly superior.
+On the other hand, if few tables share common defaults,
+then you should favor the first implementation.
+</p></div><div class="sect1" title="Ephemeron Tables"><div class="titlepage"><div><div><h2 class="title"><a id="L225"/>Ephemeron Tables</h2></div></div></div><p id="N14E50" style="text-indent: 0">
+A tricky situation occurs when,
+in a table with weak keys,
+a value refers to its own key.
+</p><p id="N14E52" style="text-indent: 0">
+This scenario is more common than it may seem.
+As a typical example,
+consider a constant-function factory.
+Such a factory takes an object and returns a function that,
+whenever called, returns that object:
+</p><pre class="programlisting" id="N14E54">      function factory (o)
+        return (function () return o end)
+      end
+</pre><p style="text-indent: 0">
+This factory is a good candidate for <a class="indexterm" id="N14E57"></a>memorization,
+to avoid the creation of a new closure when there
+is one already available.
+<a class="xref" href="ch23.html#constant-factory" title="Figure 23.1. Constant-function factory with memorization">Figure 23.1, “Constant-function factory with memorization”</a> shows this improvement.
+</p><div class="figure-float"><div class="figure"><a id="constant-factory"/><p class="title" style="text-indent: 0"><strong>Figure 23.1. Constant-function factory with memorization</strong></p><div class="figure-contents"><pre class="programlisting" id="N14E63">      do
+        local mem = {}     -- memorization table
+        setmetatable(mem, {__mode = "k"})
+        function factory (o)
+          local res = mem[o]
+          if not res then
+            res = (function () return o end)
+            mem[o] = res
+          end
+          return res
+        end
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+</p><p id="N14E66" style="text-indent: 0">
+There is a catch, however.
+Note that the value (the constant function)
+associated with an object in <code class="literal">mem</code>
+refers back to its own key (the object itself).
+Although the keys in that table are weak,
+the values are not.
+From a standard interpretation of <a class="indexterm" id="N14E6B"/>weak tables,
+nothing would ever be removed from that memorizing table.
+Because values are not weak,
+there is always a strong reference to each function.
+Each function refers to its corresponding object,
+so there is always a strong reference to each key.
+Therefore, these objects would not be collected,
+despite the weak keys.
+</p><p id="N14E6F" style="text-indent: 0">
+This strict interpretation,
+however,
+is not very useful.
+Most people expect that a value in a table is
+only accessible through its respective key.
+We can think of the above scenario as a kind of cycle,
+where the closure refers to the object that
+refers back (through the memorizing table) to the closure.
+</p><p id="N14E71" style="text-indent: 0">
+Lua solves the above problem with the
+concept of ephemeron tables.<sup>[<a href="#ftn.N14E73" id="N14E73" class="footnote">22</a>]</sup>
+In Lua, a table with weak keys and strong values
+is an <a class="indexterm" id="N14E77"/><em class="firstterm">ephemeron table</em>.
+In an ephemeron table,
+the accessibility of a key controls
+the accessibility of its corresponding value.
+More specifically, consider an entry <em>(k,v)</em> in an ephemeron table.
+The reference to <em>v</em> is only strong
+if there is some other external reference to <em>k</em>.
+Otherwise, the collector will eventually collect <em>k</em>
+and remove the entry from the table,
+even if <em>v</em> refers (directly or indirectly) to <em>k</em>.
+</p></div><div class="sect1" title="Finalizers"><div class="titlepage"><div><div><h2 class="title"><a id="tab-finalizer"/>Finalizers</h2></div></div></div><p id="N14E94" style="text-indent: 0">
+Although the goal of the garbage collector is
+to collect Lua objects,
+it can also help programs to release external resources.
+For that purpose,
+several programming languages offer finalizers.
+A <a class="indexterm" id="N14E96"/><em class="firstterm">finalizer</em> is a function associated with an object
+that is called when that object is about to be collected.
+</p><p id="N14E9D" style="text-indent: 0">
+Lua implements finalizers through the metamethod <a class="indexterm" id="N14E9F"></a><code class="literal">__gc</code>,
+as the following example illustrates:
+</p><pre class="programlisting" id="N14EA8">      o = {x = "hi"}
+      setmetatable(o, {__gc = function (o) print(o.x) end})
+      o = nil
+      collectgarbage()   --&gt; hi
+</pre><p style="text-indent: 0">
+In this example,
+we first create a table
+and give it a <a class="indexterm" id="N14EAB"></a>metatable that has a <a class="indexterm" id="N14EAF"></a><code class="literal">__gc</code> metamethod.
+Then we erase the only link to the table (the global variable <code class="literal">o</code>)
+and force a complete garbage collection.
+During the collection,
+Lua detects that the table is no longer accessible,
+and therefore calls its finalizer
+—the <a class="indexterm" id="N14EBB"></a><code class="literal">__gc</code> metamethod.
+</p><p id="N14EC4" style="text-indent: 0">
+A subtlety of <a class="indexterm" id="N14EC6"></a>finalizers in Lua is the concept of
+marking an object for finalization.
+We mark an object for finalization by setting a <a class="indexterm" id="N14ECA"></a>metatable
+for it with a non-null <a class="indexterm" id="N14ECE"></a><code class="literal">__gc</code> metamethod.
+If we do not mark the object,
+it will not be finalized.
+Most code we write works naturally,
+but some strange cases can occur,
+like here:
+</p><pre class="programlisting" id="N14ED7">      o = {x = "hi"}
+      mt = {}
+      setmetatable(o, mt)
+      mt.__gc = function (o) print(o.x) end
+      o = nil
+      collectgarbage()   --&gt; (prints nothing)
+</pre><p style="text-indent: 0">
+Here,
+the <a class="indexterm" id="N14EDA"></a>metatable we set for <code class="literal">o</code> does not have a <a class="indexterm" id="N14EE1"></a><code class="literal">__gc</code> metamethod,
+so the object is not marked for finalization.
+Even if we later add a <a class="indexterm" id="N14EEA"></a><code class="literal">__gc</code> field to the metatable,
+Lua does not detect that assignment as something special,
+so it will not mark the object.
+</p><p id="N14EF3" style="text-indent: 0">
+As we said, this is seldom a problem;
+it is not usual to change metamethods after setting a <a class="indexterm" id="N14EF5"></a>metatable.
+If you really need to set the metamethod later,
+you can  provide any value for the <a class="indexterm" id="N14EF9"></a><code class="literal">__gc</code> field,
+as a placeholder:
+</p><pre class="programlisting" id="N14F02">      o = {x = "hi"}
+      mt = {__gc = true}
+      setmetatable(o, mt)
+      mt.__gc = function (o) print(o.x) end
+      o = nil
+      collectgarbage()   --&gt; hi
+</pre><p style="text-indent: 0">
+Now, because the <a class="indexterm" id="N14F05"></a>metatable has a <a class="indexterm" id="N14F09"></a><code class="literal">__gc</code> field,
+<code class="literal">o</code> is properly marked for finalization.
+There is no problem if you do not set a metamethod later;
+Lua only calls the finalizer if it is a proper function.
+</p><p id="N14F15" style="text-indent: 0">
+When the collector finalizes several objects in the same cycle,
+it calls their <a class="indexterm" id="N14F17"></a>finalizers in the reverse order that the objects
+were marked for finalization.
+Consider the next example,
+which creates a linked list of objects with finalizers:
+</p><pre class="programlisting" id="N14F1B">      mt = {__gc = function (o) print(o[1]) end}
+      list = nil
+      for i = 1, 3 do
+        list = setmetatable({i, link = list}, mt)
+      end
+      list = nil
+      collectgarbage()
+        --&gt; 3
+        --&gt; 2
+        --&gt; 1
+</pre><p style="text-indent: 0">
+The first object to be finalized is object 3,
+which was the last to be marked.
+</p><p id="N14F1E" style="text-indent: 0">
+A common misconception is to think that links among objects
+being collected can affect the order that they are finalized.
+For instance,
+one can think that object 2 in the previous example
+must be finalized before object 1
+because there is a link from 2 to 1.
+However, links can form cycles.
+Therefore, they do not impose any order to <a class="indexterm" id="N14F20"/>finalizers.
+</p><p id="N14F24" style="text-indent: 0">
+Another tricky point about finalizers is <a class="indexterm" id="N14F26"/><em class="firstterm">resurrection</em>.
+When a finalizer is called,
+it gets the object being finalized as a parameter.
+So, the object becomes alive again,
+at least during the finalization.
+I call this a <em>transient resurrection</em>.
+While the finalizer runs,
+nothing stops it from storing the object in a
+global variable, for instance,
+so that it remains accessible after the finalizer returns.
+I call this a <em>permanent resurrection</em>.
+</p><p id="N14F33" style="text-indent: 0">
+Resurrection must be transitive.
+Consider the following piece of code:
+</p><pre class="programlisting" id="N14F35">      A = {x = "this is A"}
+      B = {f = A}
+      setmetatable(B, {__gc = function (o) print(o.f.x) end})
+      A, B = nil
+      collectgarbage()   --&gt; this is A
+</pre><p style="text-indent: 0">
+The finalizer for <code class="literal">B</code> accesses <code class="literal">A</code>,
+so <code class="literal">A</code> cannot be collected before the finalization of <code class="literal">B</code>.
+Lua must resurrect both <code class="literal">B</code> and <code class="literal">A</code>
+before running that finalizer.
+</p><p id="N14F4A" style="text-indent: 0">
+Because of resurrection,
+Lua collects objects with <a class="indexterm" id="N14F4C"/>finalizers in two phases.
+The first time the collector detects that an object with a finalizer
+is not reachable,
+the collector resurrects the object and queues it to be finalized.
+Once its finalizer runs,
+Lua marks the object as finalized.
+The next time the collector detects that the object
+is not reachable,
+it deletes the object.
+If we want to ensure that all garbage in our program
+has been actually released,
+we must call <a class="indexterm" id="N14F50"/><code class="function">collectgarbage</code> twice;
+the second call will delete the objects that were finalized
+during the first call.
+</p><p id="N14F56" style="text-indent: 0">
+The finalizer for each object runs exactly once,
+due to the mark that Lua puts on finalized objects.
+If an object is not collected until the end of a program,
+Lua will call its finalizer when the entire <a class="indexterm" id="N14F58"></a>Lua state is closed.
+This last feature allows a form of <a class="indexterm" id="N14F5C"></a><code class="literal">atexit</code> functions in Lua,
+that is,
+functions that will run immediately before the program terminates.
+All we have to do is to create a table with a finalizer and
+anchor it somewhere,
+for instance in a global variable:
+</p><pre class="programlisting" id="N14F62">      local t = {__gc = function ()
+        -- your 'atexit' code comes here
+        print("finishing Lua program")
+      end}
+      setmetatable(t, t)
+      _G["*AA*"] = t
+</pre><p style="text-indent: 0">
+</p><p id="N14F65" style="text-indent: 0">
+Another interesting technique allows a program
+to call a given function every time Lua completes
+a collection cycle.
+As a finalizer runs only once,
+the trick here is to make each finalization create
+a new object to run the next finalizer,
+as in <a class="xref" href="ch23.html#finalizer-loop" title="Figure 23.2. Running a function at every GC cycle">Figure 23.2, “Running a function at every GC cycle”</a>.
+</p><div class="figure-float"><div class="figure"><a id="finalizer-loop"/><p class="title" style="text-indent: 0"><strong>Figure 23.2. Running a function at every GC cycle</strong></p><div class="figure-contents"><pre class="programlisting" id="N14F6F">      do
+        local mt = {__gc = function (o)
+          -- whatever you want to do
+          print("new cycle")
+          -- creates new object for next cycle
+          setmetatable({}, getmetatable(o))
+        end}
+        -- creates first object
+        setmetatable({}, mt)
+      end
+      
+      collectgarbage()   --&gt; new cycle
+      collectgarbage()   --&gt; new cycle
+      collectgarbage()   --&gt; new cycle
+</pre></div></div></div><p style="text-indent: 0">
+
+</p><p id="N14F72" style="text-indent: 0">
+The interaction of objects with <a class="indexterm" id="N14F74"/>finalizers and <a class="indexterm" id="N14F78"/>weak tables
+also has a subtlety.
+At each cycle,
+the collector clears the values in weak tables
+before calling the finalizers,
+but it clears the keys after it.
+The rationale for this behavior is that frequently
+we use tables with weak keys to hold properties of an object
+(as we discussed in <a class="xref" href="ch23.html#att-table" title="Object Attributes">the section called “Object Attributes”</a>),
+and therefore <a class="indexterm" id="N14F7F"/>finalizers may need to access those attributes.
+However, we use tables with weak values to reuse live objects;
+in this case,
+objects being finalized are not useful anymore.
+</p></div><div class="sect1" title="The Garbage Collector"><div class="titlepage"><div><div><h2 class="title"><a id="gc-sect"/>The Garbage Collector</h2></div></div></div><p id="N14F87" style="text-indent: 0">
+Up to version 5.0,
+Lua used a simple mark-and-sweep garbage collector (GC).
+<a class="indexterm" id="N14F89"/>
+This kind of collector is sometimes called
+a <span class="quote">“<span class="quote">stop-the-world</span>”</span> collector.
+This means that, from time to time,
+Lua would stop running the main program to perform
+a whole garbage-collection cycle.
+Each cycle comprises four phases:
+<a class="indexterm" id="N14F90"/><a class="indexterm" id="N14F93"/>
+<em>mark</em>, <em>cleaning</em>, <em>sweep</em>,
+and <em>finalization</em>.
+</p><p id="N14FA3" style="text-indent: 0">
+The collector starts the mark phase
+by marking as alive its <a class="indexterm" id="N14FA5"/><em class="firstterm">root set</em>,
+which comprises the objects that Lua has direct access to.
+In Lua, this set is only the C registry.
+(As we will see in <a class="xref" href="ch30.html#sec_registry" title="The registry">the section called “The registry”</a>,
+both the main thread and the global environment are
+predefined entries in this registry.)
+</p><p id="N14FAF" style="text-indent: 0">
+Any object stored in a live object is reachable by the program,
+and therefore is marked as alive too.
+(Of course, entries in <a class="indexterm" id="N14FB1"/>weak tables do not follow this rule.)
+The mark phase ends when all reachable objects are marked as alive.
+</p><p id="N14FB5" style="text-indent: 0">
+Before starting the sweep phase,
+Lua performs the <a class="indexterm" id="N14FB7"/>cleaning phase,
+where it handles <a class="indexterm" id="N14FBB"/>finalizers and <a class="indexterm" id="N14FBF"/>weak tables.
+First, it traverses all objects marked for finalization
+looking for non-marked objects.
+Those objects are marked as alive (<a class="indexterm" id="N14FC3"/>resurrected)
+and put in a separate list,
+to be used in the finalization phase.
+Then, Lua traverses its weak tables and removes
+from them all entries wherein either the key or the value
+is not marked.
+</p><p id="N14FC7" style="text-indent: 0">
+The sweep phase traverses all Lua objects.
+(To allow this traversal,
+Lua keeps all objects it creates in a linked list.)
+If an object is not marked as alive,
+Lua collects it.
+Otherwise, Lua clears its mark,
+in preparation for the next cycle.
+</p><p id="N14FC9" style="text-indent: 0">
+Finally,
+in the finalization phase,
+Lua calls the <a class="indexterm" id="N14FCB"/>finalizers of the objects that were
+separated in the cleaning phase.
+</p><p id="N14FCF" style="text-indent: 0">
+The use of a real garbage collector means that
+Lua has no problems with cycles among object references.
+We do not need to take any special action
+when using <a class="indexterm" id="N14FD1"/>cyclic data structures;
+they are collected like any other data.
+</p><p id="N14FD5" style="text-indent: 0">
+In version 5.1, Lua got an <a class="indexterm" id="N14FD7"/><em class="firstterm">incremental collector</em>.
+This collector performs
+the same steps as the old one,
+but it does not need to stop the world while it runs.
+Instead, it runs interleaved with the interpreter.
+Every time the interpreter allocates
+some amount of memory,
+the collector runs a small step.
+(This means that, while the collector is working,
+the interpreter may change an object’s reachability.
+To ensure the correctness of the collector,
+some operations in the interpreter have barriers that detect
+dangerous changes and correct the marks of the objects involved.)
+</p><p id="N14FDE" style="text-indent: 0">
+Lua 5.2 introduced <a class="indexterm" id="N14FE0"/><em class="firstterm">emergency collection</em>.
+When a memory allocation fails,
+Lua forces a full collection cycle
+and tries again the allocation.
+These emergencies can occur any time Lua allocates memory,
+including points where Lua is not in a consistent state
+to run code;
+so, these collections are unable to run finalizers.
+</p></div><div class="sect1" title="Controlling the Pace of Collection"><div class="titlepage"><div><div><h2 class="title"><a id="L226"/>Controlling the Pace of Collection</h2></div></div></div><p id="N14FEB" style="text-indent: 0">
+The function <a class="indexterm" id="N14FED"/><code class="function">collectgarbage</code> allows us
+to exert some control over the garbage collector.
+It is actually several functions in one:
+its optional first argument, a string, specifies what to do.
+Some options have an integer as a second argument,
+which we call <code class="literal">data</code>.
+</p><p id="N14FF7" style="text-indent: 0">
+The options for the first argument are:
+</p><div class="variablelist"><dl><dt><span class="term"><code class="literal">"stop"</code>:</span></dt><dd><p id="N15000" style="text-indent: 0">
+stops the collector until
+another call to <a class="indexterm" id="N15002"/><code class="function">collectgarbage</code>
+with the option <code class="literal">"restart"</code>.
+</p></dd><dt><span class="term"><code class="literal">"restart"</code>:</span></dt><dd><p id="N15011" style="text-indent: 0">
+restarts the collector.
+</p></dd><dt><span class="term"><code class="literal">"collect"</code>:</span></dt><dd><p id="N15019" style="text-indent: 0">
+performs a complete garbage-collection cycle,
+so that all unreachable objects are collected
+and finalized.
+This is the default option.
+</p></dd><dt><span class="term"><code class="literal">"step"</code>:</span></dt><dd><p id="N15021" style="text-indent: 0">
+performs some garbage-collection work.
+The second argument, <code class="literal">data</code>,
+specifies the amount of work,
+which is equivalent to what the collector
+would do after allocating <code class="literal">data</code> bytes.
+</p></dd><dt><span class="term"><code class="literal">"count"</code>:</span></dt><dd><p id="N1502F" style="text-indent: 0">
+returns the number of kilobytes
+of memory currently in use by Lua.
+This result is a floating-point number that multiplied by 1024
+gives the exact total number of bytes.
+The count includes dead objects that have not yet been collected.
+</p></dd><dt><span class="term"><code class="literal">"setpause"</code>:</span></dt><dd><p id="N15037" style="text-indent: 0">
+sets the collector’s <code class="literal">pause</code> parameter.
+The <code class="literal">data</code> parameter gives the new value
+in percentage points:
+when <code class="literal">data</code> is 100,
+the parameter is set to 1 (100%).
+</p></dd><dt><span class="term"><code class="literal">"setstepmul"</code>:</span></dt><dd><p id="N15048" style="text-indent: 0">
+sets the collector’s <a class="indexterm" id="N1504A"/>step multiplier (<code class="literal">stepmul</code>) parameter.
+The new value is given by <code class="literal">data</code>, also in percentage points.
+</p></dd></dl></div><p style="text-indent: 0">
+</p><p id="N15055" style="text-indent: 0">
+The two parameters <code class="literal">pause</code> and <code class="literal">stepmul</code>
+control the collector’s character.
+Any garbage collector trades memory for CPU time.
+At one extreme,
+the collector might not run at all.
+It would spend zero CPU time,
+at the price of a huge memory consumption.
+At the other extreme,
+the collector might run a complete cycle
+after every single assignment.
+The program would use the minimum memory necessary,
+at the price of a huge CPU consumption.
+The default values for <code class="literal">pause</code> and <code class="literal">stepmul</code>
+try to find a balance
+between those two extremes
+and are good enough for most applications.
+In some scenarios, however,
+it is worth trying to optimize them.
+</p><p id="N15063" style="text-indent: 0">
+The <code class="literal">pause</code> parameter controls how long
+the collector waits between finishing
+a collection and starting a new one.
+A pause of zero makes Lua
+start a new collection as soon as the previous one ends.
+A pause of 200% waits for memory usage
+to double before restarting the collector.
+We can set a lower pause if
+we want to trade more CPU time for lower memory usage.
+Typically, we should keep this value between 0 and 200%.
+</p><p id="N15068" style="text-indent: 0">
+The step-multiplier parameter (<code class="literal">stepmul</code>) controls how much work
+the collector does for each kilobyte of memory allocated.
+The higher this value the less incremental the collector.
+A huge value like 100000000% makes the collector work like
+a non-incremental collector.
+The default value is 200%.
+Values lower than 100% make the collector so slow that it
+may never finish a collection.
+</p><p id="N1506D" style="text-indent: 0">
+The other options of <a class="indexterm" id="N1506F"/><code class="function">collectgarbage</code> give us control
+over when the collector runs.
+Again, the default control is good enough for most programs,
+but some specific applications may benefit from a manual control.
+<a class="indexterm" id="N15075"/>
+Games often need this kind of control.
+For instance, if we do not want any garbage-collection work
+during some periods,
+we can stop it with a call <code class="literal">collectgarbage("stop")</code> and
+then restart it with <code class="literal">collectgarbage("restart")</code>.
+In systems where we have periodic idle phases,
+we can keep the collector stopped and call
+<code class="literal">collectgarbage("step", n)</code> during the idle time.
+To set how much work to do at each idle period,
+we can either choose experimentally an appropriate value for <code class="literal">n</code>
+or call <a class="indexterm" id="N15085"/><code class="function">collectgarbage</code> in a loop,
+with <code class="literal">n</code> set to zero (meaning minimal steps),
+until the idle period expires.
+</p></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L227"/>Exercises</h2></div></div></div><p id="N15092" style="text-indent: 0">
+Exercise 23.1:<a id="L228"/> 
+Write an experiment to determine whether
+Lua actually implements ephemeron tables.
+(Remember to call <a class="indexterm" id="N15097"/><code class="function">collectgarbage</code>
+to force a garbage collection cycle.)
+If possible, try your code both in Lua 5.1 and in Lua 5.2/5.3
+to see the difference.
+
+
+</p><p id="N1509D" style="text-indent: 0">
+Exercise 23.2:<a id="L229"/> 
+Consider the first example of <a class="xref" href="ch23.html#tab-finalizer" title="Finalizers">the section called “Finalizers”</a>,
+which creates
+a table with a finalizer
+that only prints a message when activated.
+What happens if the program ends without a collection cycle?
+What happens if the program calls <a class="indexterm" id="N150A5"/><code class="function">os.exit</code>?
+What happens if the program ends with an error?
+
+
+</p><p id="N150AD" style="text-indent: 0">
+Exercise 23.3:<a id="L230"/> 
+Imagine you have to implement a memorizing table
+for a function from strings to strings.
+Making the table weak will not do the removal of entries,
+because <a class="indexterm" id="N150B2"/>weak tables do not consider
+strings as collectable objects.
+How can you implement <a class="indexterm" id="N150B6"/>memorization in that case?
+
+
+</p><p id="N150BA" style="text-indent: 0">
+Exercise 23.4:<a id="L231"></a> 
+Explain the output of the program in <a class="xref" href="ch23.html#memcount" title="Figure 23.3. Finalizers and memory">Figure 23.3, “Finalizers and memory”</a>.
+</p><div class="figure-float"><div class="figure"><a id="memcount"/><p class="title" style="text-indent: 0"><strong>Figure 23.3. Finalizers and memory</strong></p><div class="figure-contents"><pre class="programlisting" id="N150C7">      local count = 0
+      
+      local mt = {__gc = function () count = count - 1 end}
+      local a = {}
+      
+      for i = 1, 10000 do
+        count = count + 1
+        a[i] = setmetatable({}, mt)
+      end
+      
+      collectgarbage()
+      print(collectgarbage("count") * 1024, count)
+      a = nil
+      collectgarbage()
+      print(collectgarbage("count") * 1024, count)
+      collectgarbage()
+      print(collectgarbage("count") * 1024, count)
+</pre></div></div></div><p style="text-indent: 0">
+
+
+
+</p><p id="N150CA" style="text-indent: 0">
+Exercise 23.5:<a id="L232"/> 
+For this exercise,
+you need at least one Lua script that uses lots of memory.
+If you do not have one, write it.
+(It can be as simple as a loop creating tables.)
+</p><p id="N150CF" style="text-indent: 0">
+</p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem"><p id="N150D3" style="text-indent: 0">
+Run your script with different values for
+<code class="literal">pause</code> and <code class="literal">stepmul</code>.
+How they affect the performance and memory usage of the script?
+What happens if you set the pause to zero?
+What happens if you set the pause to 1000?
+What happens if you set the <a class="indexterm" id="N150DB"/>step multiplier to zero?
+What happens if you set the step multiplier to 1000000?
+</p></li><li class="listitem"><p id="N150E0" style="text-indent: 0">
+Adapt your script so that it keeps full control
+over the garbage collector.
+It should keep the collector stopped and
+call it from time to time to do some work.
+Can you improve the performance of your script with this approach?
+</p></li></ul></div><p style="text-indent: 0">
+
+
+</p></div><div class="footnotes"><br/><hr/><div class="footnote"><p id="N14D7D" style="text-indent: 0"><sup>[<a href="#N14D7C" id="ftn.N14D7C" class="para">21</a>] </sup>Although the established English word <span class="quote">“<span class="quote">memorize</span>”</span> describes
+precisely what we want to do,
+the programming community created a new word,
+<em>memoize</em>,<a class="indexterm" id="N14D85"/>
+to describe this technique.
+I will stick to the original word.</p></div><div class="footnote"><p id="N14E74" style="text-indent: 0"><sup>[<a href="#N14E73" id="ftn.N14E73" class="para">22</a>] </sup>Ephemeron tables were introduced in Lua 5.2.
+Lua 5.1 still has the problem we described.</p></div></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

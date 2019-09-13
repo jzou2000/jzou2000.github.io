@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>49.9. MAP_NORESERVE and Swap Space Overcommitting</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">49.9. <tt>MAP_NORESERVE</tt> and Swap Space Overcommitting</h3><p class="docText">Some
+ applications create large (usually private anonymous) mappings, but use
+ only a small part of the mapped region. For example, certain types of 
+scientific applications allocate a very large array, but operate on only
+ a few widely separated elements of the array (a so-called <span class="docEmphasis">sparse array</span>).</p><p class="docText">If
+ the kernel always allocated (or reserved) enough swap space for the 
+whole of such mappings, then a lot of swap space would potentially be 
+wasted. Instead, the kernel can reserve swap space for the pages of a 
+mapping only as they are actually required (i.e., when the application 
+accesses a page). This approach is called <span class="docEmphasis">lazy swap reservation</span>, and has the advantage that the total virtual memory used by applications can exceed the total size of RAM plus swap space.</p><p class="docText">To
+ put things another way, lazy swap reservation allows swap space to be 
+overcommitted. This works fine, as long as all processes don’t attempt 
+to access the entire range of their mappings. However, if all 
+applications do attempt to access the full range of their mappings, RAM 
+and swap space will be exhausted. In this situation, the kernel reduces 
+memory pressure by killing one or more of the processes on the system. 
+Ideally, the kernel attempts to select the process causing the memory 
+problems (see the discussion of the <span class="docEmphasis">OOM killer</span>
+ below), but this isn’t guaranteed. For this reason, we may choose to 
+prevent lazy swap reservation, instead forcing the system to allocate 
+all of the necessary swap space when the mapping is created.</p><p class="docText">How the kernel handles reservation of swap space is controlled by the use of the <tt>MAP_NORESERVE</tt> flag when calling <span class="docEmphasis">mmap()</span>, and via <tt>/proc</tt> interfaces that affect the system-wide operation of swap space overcommitting. These factors are summarized in Table 49-4.</p><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 49-4. Handling of swap space reservation during <span class="docEmphasis">mmap()</span></h5></caption><colgroup span="3"><col></col><col></col><col></col></colgroup><thead><tr><th align="center" class="docTableCell thead" rowspan="2" scope="col" style="text-align:center" valign="bottom"><tt>overcommit_memory</tt> value</th><th align="center" class="docTableCell thead" colspan="2" scope="col" style="text-align:center" valign="bottom"><tt>MAP_NORESERVE</tt> specified in <span class="docEmphasis">mmap()</span> call?</th></tr><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">No</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Yes</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top">0</td><td align="left" class="docTableCell" valign="top">Deny obvious overcommits</td><td align="left" class="docTableCell" valign="top">Allow overcommits</td></tr><tr><td align="left" class="docTableCell" valign="top">1</td><td align="left" class="docTableCell" valign="top">Allow overcommits</td><td align="left" class="docTableCell" valign="top">Allow overcommits</td></tr><tr><td align="left" class="docTableCell" valign="top">2 (since Linux 2.6)</td><td align="left" class="docTableCell" colspan="2" valign="top">Strict overcommitting</td></tr></tbody></table><p></p><br/><p class="docText">The Linux-specific <tt>/proc/sys/vm/overcommit_memory</tt>
+ file contains an integer value that controls the kernel’s handling of 
+swap space overcommits. Linux versions before 2.6 differentiated only 
+two values in this file: 0, meaning deny obvious overcommits (subject to
+ the use of the <tt>MAP_NORESERVE</tt> flag), and greater than 0, meaning that overcommits should be permitted in all cases.</p><p class="docText">Denying
+ obvious overcommits means that new mappings whose size doesn’t exceed 
+the amount of currently available free memory are permitted. Existing 
+allocations may be overcommitted (since they may not be using all of the
+ pages that they mapped).</p><p class="docText">Since Linux 2.6, a value of 1 has the same meaning as a positive value in earlier kernels, but the value 2 (or greater) causes <span class="docEmphasis">strict overcommitting</span> to be employed. In this case, the kernel performs strict accounting on all <span class="docEmphasis">mmap()</span> allocations and limits the system-wide total of all such allocations to be less than or equal to:</p><pre>[swap size] + [RAM size] * overcommit_ratio / 100</pre><br/>
+<p class="docText">The <tt>overcommit_ratio</tt> value is an integer—expressing a percentage—contained in the Linux-specific <tt>/proc/sys/vm/overcommit_ratio</tt>
+ file. The default value contained in this file is 50, meaning that the 
+kernel can overallocate up to 50% of the size of the system’s RAM, and 
+this will be successful, as long as not all processes try to use their 
+full allocation.</p><p class="docText">Note that overcommit monitoring comes into play only for the following types of mappings:</p><ul><li><p class="docList">private
+ writable mappings (both file and anonymous mappings), for which the 
+swap “cost” of the mapping is equal to the size of the mapping for each 
+process that employs the mapping; and</p></li><li><p class="docList">shared
+ anonymous mappings, for which the swap “cost” of the mapping is the 
+size of the mapping (since all processes share that mapping).</p></li></ul><p class="docText">Reserving
+ swap space for a read-only private mapping is unnecessary: since the 
+contents of the mapping can’t be modified, there is no need to employ 
+swap space. Swap space is also not required for shared file mappings, 
+because the mapped file itself acts as the swap space for the mapping.</p><p class="docText">When a child process inherits a mapping across a <span class="docEmphasis">fork()</span>, it inherits the <tt>MAP_NORESERVE</tt> setting for the mapping. The <tt>MAP_NORESERVE</tt> flag is not specified in SUSv3, but it is supported on a few other UNIX implementations.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In this section, we have discussed how a call to <span class="docEmphasis">mmap()</span> may fail to increase the address space of a process because of the system limitations on RAM and swap space. A call to <span class="docEmphasis">mmap()</span> can also fail because it encounters the per-process <tt>RLIMIT_AS</tt> resource limit (described in Section 36.3), which places an upper limit on the size of the address space of the calling process.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0ELKDM">49.9.1. </h4><h5 class="docSection3Title" id="title-ID0EPKDM">49.9.1.1. The OOM killer</h5><p class="docText">Above,
+ we noted that when we employ lazy swap reservation, memory may become 
+exhausted if applications attempt to employ the entire range of their 
+mappings. In this case, the kernel relieves memory exhaustion by killing
+ processes.</p><p class="docText">The
+ kernel code dedicated to selecting a process to kill when memory is 
+exhausted is commonly known as the out-of-memory (OOM) killer. The OOM 
+killer tries to choose the best process to kill in order to relieve the 
+memory exhaustion, where “best” is determined by a range of factors. For
+ example, the more memory a process is consuming, the more likely it 
+will be a candidate for the OOM killer. Other factors that increase a 
+process’s likelihood of selection are forking to create many child 
+processes and having a low nice value (i.e., one that is greater than 
+0). The kernel disfavors killing the following:</p><ul><li><p class="docList">processes that are privileged, since they are probably performing important tasks;</p></li><li><p class="docList">processes that are performing raw device access, since killing them may leave the device in an unusable state; and</p></li><li><p class="docList">processes
+ that have been running for a long time or have consumed a lot of CPU, 
+since killing them would result in a lot of lost “work.”</p></li></ul><p class="docText">To kill the selected process, the OOM killer delivers a <tt>SIGKILL</tt> signal.</p><p class="docText">The Linux-specific <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/oom_score</tt>
+ file, available since kernel 2.6.11, shows the weighting that the 
+kernel gives to a process if it is necessary to invoke the OOM killer. 
+The greater the value in this file, the more likely the process is to be
+ selected, if necessary, by the OOM killer. The Linux-specific <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/oom_adj</tt> file, also available since kernel 2.6.11, can be used to influence the <tt>oom_score</tt> of a process. This file can be set to any value in the range -16 to +15, where negative values decrease the <tt>oom_score</tt>
+ and positive values increase it. The special value -17 removes the 
+process altogether as a candidate for selection by the OOM killer. For 
+further details, see the <span class="docEmphasis">proc(5)</span> manual page.</p>
+</div>
+</body>
+</html>

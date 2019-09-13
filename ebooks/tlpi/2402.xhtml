@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>24.2. Creating a New Process: fork()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">24.2. Creating a New Process: <span class="docEmphasis">fork()</span></h3><p class="docText">In
+ many applications, creating multiple processes can be a useful way of 
+dividing up a task. For example, a network server process may listen for
+ incoming client requests and create a new child process to handle each 
+request; meanwhile, the server process continues to listen for further 
+client connections. Dividing tasks up in this way often makes 
+application design simpler. It also permits greater concurrency (i.e., 
+more tasks or requests can be handled simultaneously).</p><p class="docText">The <span class="docEmphasis">fork()</span> system call creates a new process, the <span class="docEmphasis">child</span>, which is an almost exact duplicate of the calling process, the <span class="docEmphasis">parent</span>.</p><pre>#include &lt;unistd.h&gt;
+
+pid_t <b>fork</b>(void);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In parent: returns process ID of child on success, or -1 on error; in successfully created child: always returns 0</p><hr noshade="noshade" size="1"/><p class="docText">The key point to understanding <span class="docEmphasis">fork()</span>
+ is to realize that after it has completed its work, two processes 
+exist, and, in each process, execution continues from the point where <span class="docEmphasis">fork()</span> returns.</p><p class="docText">The
+ two processes are executing the same program text, but they have 
+separate copies of the stack, data, and heap segments. The child’s 
+stack, data, and heap segments are initially exact duplicates of the 
+corresponding parts the parent’s memory. After the <span class="docEmphasis">fork()</span>, each process can modify the variables in its stack, data, and heap segments without affecting the other process.</p><p class="docText">Within the code of a program, we can distinguish the two processes via the value returned from <span class="docEmphasis">fork()</span>. For the parent, <span class="docEmphasis">fork()</span>
+ returns the process ID of the newly created child. This is useful 
+because the parent may create, and thus need to track, several children 
+(via <span class="docEmphasis">wait()</span> or one of its relatives). For the child, <span class="docEmphasis">fork()</span> returns 0. If necessary, the child can obtain its own process ID using <span class="docEmphasis">getpid()</span>, and the process ID of its parent using <span class="docEmphasis">getppid()</span>.</p><p class="docText">If a new process can’t be created, <span class="docEmphasis">fork()</span> returns -1. Possible reasons for failure are that the resource limit (<tt>RLIMIT_NPROC</tt>, described in Section 36.3)
+ on the number of processes permitted to this (real) user ID has been 
+exceeded or that the system-wide limit on the number of processes that 
+can be created has been reached.</p><p class="docText">The following idiom is sometimes employed when calling <span class="docEmphasis">fork()</span>:</p><pre>pid_t childPid;             /* Used in parent after successful fork()
+                               to record PID of child */
+switch (childPid = fork()) {
+case -1:                    /* fork() failed */
+    /* Handle error */
+
+case 0:                     /* Child of successful fork() comes here */
+    /* Perform actions specific to child */
+
+default:                    /* Parent comes here after successful fork() */
+    /* Perform actions specific to parent */
+}</pre><br/>
+<p class="docText">It is important to realize that after a <span class="docEmphasis">fork()</span>,
+ it is indeterminate which of the two processes is next scheduled to use
+ the CPU. In poorly written programs, this indeterminacy can lead to 
+errors known as race conditions, which we describe further in Section 
+24.4.</p><p class="docText">Example 24-1 demonstrates the use of <span class="docEmphasis">fork()</span>.
+ This program creates a child that modifies the copies of global and 
+automatic variables that it inherits during the during the <span class="docEmphasis">fork()</span>.</p><p class="docText">The use of <span class="docEmphasis">sleep()</span>
+ (in the code executed by the parent) in this program permits the child 
+to be scheduled for the CPU before the parent, so that the child can 
+complete its work and terminate before the parent continues execution. 
+Using <span class="docEmphasis">sleep()</span> in this manner is not a foolproof method of guaranteeing this result; we look at a better method in Section 24.5.</p><p class="docText">When we run the program in Example 24-1, we see the following output:</p><pre><b>./t_fork</b>
+PID=28557 (child)  idata=333 istack=666
+PID=28556 (parent) idata=111 istack=222</pre><br/>
+<p class="docText">The above output demonstrates that the child process gets its own copy of the stack and data segments at the time of the <span class="docEmphasis">fork()</span>, and it is able to modify variables in these segments without affecting the parent.</p><h5 class="docExampleTitle" id="title-ID0EDJCK">Example 24-1. Using <span class="docEmphasis">fork()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>procexec/t_fork.c</b>
+#include "tlpi_hdr.h"
+
+static int idata = 111;             /* Allocated in data segment */
+
+int
+main(int argc, char *argv[])
+{
+    int istack = 222;               /* Allocated in stack segment */
+    pid_t childPid;
+
+    switch (childPid = fork()) {
+    case -1:
+        errExit("fork");
+
+    case 0:
+        idata *= 3;
+        istack *= 3;
+        break;
+
+    default:
+        sleep(3);                   /* Give child a chance to execute */
+        break;
+    }
+
+    /* Both parent and child come here */
+
+    printf("PID=%ld %s idata=%d istack=%d\n", (long) getpid(),
+            (childPid == 0) ? "(child) " : "(parent)", idata, istack);
+
+    exit(EXIT_SUCCESS);
+}
+      <b>procexec/t_fork.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0EQJCK">24.2.1. File Sharing Between Parent and Child</h4><p class="docText">When a <span class="docEmphasis">fork()</span>
+ is performed, the child receives duplicates of all of the parent’s file
+ descriptors. These duplicates are made in the manner of <span class="docEmphasis">dup()</span>, which means that corresponding descriptors in the parent and the child refer to the same open file description. As we saw in Section 5.4, the open file description contains the current file offset (as modified by <span class="docEmphasis">read()</span>, <span class="docEmphasis">write()</span>, and <span class="docEmphasis">lseek()</span>) and the open file status flags (set by <span class="docEmphasis">open()</span> and changed by the <span class="docEmphasis">fcntl()</span> <tt>F_SETFL</tt>
+ operation). Consequently, these attributes of an open file are shared 
+between the parent and child. For example, if the child updates the file
+ offset, this change is visible through the corresponding descriptor in 
+the parent.</p><p class="docText">The fact that these attributes are shared by the parent and child after a <span class="docEmphasis">fork()</span> is demonstrated by the program in Example 24-2. This program opens a temporary file using <span class="docEmphasis">mkstemp()</span>, and then calls <span class="docEmphasis">fork()</span>
+ to create a child process. The child changes the file offset and open 
+file status flags of the temporary file, and exits. The parent then 
+retrieves the file offset and flags to verify that it can see the 
+changes made by the child. When we run the program, we see the 
+following:</p><pre>$ <b>./fork_file_sharing</b>
+File offset before fork(): 0
+O_APPEND flag before fork() is: off
+Child has exited
+File offset in parent: 1000
+O_APPEND flag in parent is: on</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">For an explanation of why we cast the return value from <span class="docEmphasis">lseek()</span> to <span class="docEmphasis">long long</span> in Example 24-2, see Section 5.10.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0ETOCK">Example 24-2. Sharing of file offset and open file status flags between parent and child</h5><p></p><div class="box"><pre class="preFixedHeight"><b>procexec/fork_file_sharing.c</b>
+#include &lt;sys/stat.h&gt;
+#include &lt;fcntl.h&gt;
+#include &lt;sys/wait.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int fd, flags;
+    char template[] = "/tmp/testXXXXXX";
+
+    setbuf(stdout, NULL);                   /* Disable buffering of stdout */
+
+    fd = mkstemp(template);
+    if (fd == -1)
+        errExit("mkstemp");
+
+    printf("File offset before fork(): %lld\n",
+            (long long) lseek(fd, 0, SEEK_CUR));
+
+    flags = fcntl(fd, F_GETFL);
+    if (flags == -1)
+        errExit("fcntl - F_GETFL");
+    printf("O_APPEND flag before fork() is: %s\n",
+            (flags &amp; O_APPEND) ? "on" : "off");
+
+    switch (fork()) {
+    case -1:
+        errExit("fork");
+
+    case 0:     /* Child: change file offset and status flags */
+        if (lseek(fd, 1000, SEEK_SET) == -1)
+            errExit("lseek");
+
+        flags = fcntl(fd, F_GETFL);         /* Fetch current flags */
+        if (flags == -1)
+            errExit("fcntl - F_GETFL");
+        flags |= O_APPEND;                  /* Turn O_APPEND on */
+        if (fcntl(fd, F_SETFL, flags) == -1)
+            errExit("fcntl - F_SETFL");
+        _exit(EXIT_SUCCESS);
+
+    default:    /* Parent: can see file changes made by child */
+        if (wait(NULL) == -1)
+            errExit("wait");                /* Wait for child exit */
+        printf("Child has exited\n");
+
+        printf("File offset in parent: %lld\n",
+                (long long) lseek(fd, 0, SEEK_CUR));
+
+        flags = fcntl(fd, F_GETFL);
+        if (flags == -1)
+            errExit("fcntl - F_GETFL");
+        printf("O_APPEND flag in parent is: %s\n",
+                (flags &amp; O_APPEND) ? "on" : "off");
+        exit(EXIT_SUCCESS);
+    }
+}
+     <b>procexec/fork_file_sharing.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Sharing
+ of open file attributes between the parent and child processes is 
+frequently useful. For example, if the parent and child are both writing
+ to a file, sharing the file offset ensures that the two processes don’t
+ overwrite each other’s output. It does not, however, prevent the output
+ of the two processes from being randomly intermingled. If this is not 
+desired, then some form of process synchronization is required. For 
+example, the parent can use the <span class="docEmphasis">wait()</span>
+ system call to pause until the child has exited. This is what the shell
+ does, so that it prints its prompt only after the child process 
+executing a command has terminated (unless the user explicitly runs the 
+command in the background by placing an ampersand character at the end 
+of the command).</p><p class="docText">If sharing of file descriptors in this manner is not required, then an application should be designed so that, after a <span class="docEmphasis">fork()</span>,
+ the parent and child use different file descriptors, with each process 
+closing unused descriptors (i.e., those used by the other process) 
+immediately after forking. (If one of the processes performs an <span class="docEmphasis">exec()</span>, the close-on-exec flag described in Section 27.4 can also be useful.) These steps are shown in Figure 24-2.</p><p></p><center><h5 class="docFigureTitle">Figure 24-2. Duplication of file descriptors during <span class="docEmphasis">fork()</span>, and closing of unused descriptors</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-43.png"/></p></center><p></p><br/><h4 class="docSection2Title" id="title-ID0E5PCK">24.2.2. Memory Semantics of <span class="docEmphasis">fork()</span></h4><p class="docText">Conceptually, we can consider <span class="docEmphasis">fork()</span>
+ as creating copies of the parent’s text, data, heap, and stack 
+segments. (Indeed, in some early UNIX implementations, such duplication 
+was literally performed: a new process image was created by copying the 
+parent’s memory to swap space, and making that swapped-out image the 
+child process while the parent kept its own memory.) However, actually 
+performing a simple copy of the parent’s virtual memory pages into the 
+new child process would be wasteful for a number of reasons—one being 
+that a <span class="docEmphasis">fork()</span> is often followed by an immediate <span class="docEmphasis">exec()</span>,
+ which replaces the process’s text with a new program and reinitializes 
+the process’s data, heap, and stack segments. Most modern UNIX 
+implementations, including Linux, use two techniques to avoid such 
+wasteful copying:</p><ul><li><p class="docList">The
+ kernel marks the text segment of each process as read-only, so that a 
+process can’t modify its own code. This means that the parent and child 
+can share the same text segment. The <span class="docEmphasis">fork()</span>
+ system call creates a text segment for the child by building a set of 
+per-process page-table entries that refer to the same virtual memory 
+page frames already used by the parent.</p></li><li><p class="docList">For the pages in the data, heap, and stack segments of the parent process, the kernel employs a technique known as <span class="docEmphasis">copy-on-write</span>.
+ (The implementation of copy-on-write is described in [Bach, 1986] and 
+[Bovet &amp; Cesati, 2005].) Initially, the kernel sets things up so 
+that the page-table entries for these segments refer to the same 
+physical memory pages as the corresponding page-table entries in the 
+parent, and the pages themselves are marked read-only. After the <span class="docEmphasis">fork()</span>,
+ the kernel traps any attempts by either the parent or the child to 
+modify one of these pages, and makes a duplicate copy of the 
+about-to-be-modified page. This new page copy is assigned to the 
+faulting process, and the corresponding page-table entry for the child 
+is adjusted appropriately. From this point on, the parent and child can 
+each modify their private copies of the page, without the changes being 
+visible to the other process. Figure 24-3 illustrates the copy-on-write technique.</p></li></ul><p></p><center><h5 class="docFigureTitle">Figure 24-3. Page tables before and after modification of a shared copy-on-write page</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_002-15.png"/></p></center><p></p><br/><h5 class="docSection3Title" id="title-ID0EXRCK">24.2.2.1. Controlling a process’s memory footprint</h5><p class="docText">We can combine the use of <span class="docEmphasis">fork()</span> and <span class="docEmphasis">wait()</span>
+ to control the memory footprint of a process. The process’s memory 
+footprint is the range of virtual memory pages used by the process, as 
+affected by factors such as the adjustment of the stack as functions are
+ called and return, calls to <span class="docEmphasis">exec()</span>, and, of particular interest to this discussion, modification of the heap as a consequence of calls to <span class="docEmphasis">malloc()</span> and <span class="docEmphasis">free()</span>.</p><p class="docText">Suppose that we bracket a call to some function, <span class="docEmphasis">func()</span>, using <span class="docEmphasis">fork()</span> and <span class="docEmphasis">wait()</span> in the manner shown in Example 24-3. After executing this code, we know that the memory footprint of the parent is unchanged from the point before <span class="docEmphasis">func()</span> was called, since all possible changes will have occurred in the child process. This can be useful for the following reasons:</p><ul><li><p class="docList">If we know that <span class="docEmphasis">func()</span>
+ causes memory leaks or excessive fragmentation of the heap, this 
+technique eliminates the problem. (We might not otherwise be able to 
+deal with these problems if we don’t have access to the source code of <span class="docEmphasis">func()</span>.)</p></li><li><p class="docList">Suppose
+ that we have some algorithm that performs memory allocation while doing
+ a tree analysis (for example, a game program that analyzes a range of 
+possible moves and their responses). We could code such a program to 
+make calls to <span class="docEmphasis">free()</span>
+ to deallocate all of the allocated memory. However, in some cases, it 
+is simpler to employ the technique we describe here in order to allow us
+ to backtrack, leaving the caller (the parent) with its original memory 
+footprint unchanged.</p></li></ul><p class="docText">In the implementation shown in Example 24-3, the result of <span class="docEmphasis">func()</span> must be expressed in the 8 bits that <span class="docEmphasis">exit()</span> passes from the terminating child to the parent calling <span class="docEmphasis">wait()</span>. However, we could employ a file, a pipe, or some other interprocess communication technique to allow <span class="docEmphasis">func()</span> to return larger results.</p><h5 class="docExampleTitle" id="title-ID0EBVCK">Example 24-3. Calling a function without changing the process's memory footprint</h5><p></p><div class="box"><pre><i> from</i> <b>procexec/footprint.c </b>
+    pid_t childPid;
+    int status;
+
+    childPid = fork();
+    if (childPid == -1)
+        errExit("fork");
+
+    if (childPid == 0)              /* Child calls func() and */
+        exit(func(arg));            /* uses return value as exit status */
+
+    /* Parent waits for child to terminate. It can determine the
+       result of func() by inspecting 'status'. */
+
+    if (wait(&amp;status) == -1)
+        errExit("wait");
+
+     <span class="docEmphasis">from</span> <b>procexec/footprint.c </b></pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

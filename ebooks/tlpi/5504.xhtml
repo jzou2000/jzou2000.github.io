@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>55.4. Mandatory Locking</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">55.4. Mandatory Locking</h3><p class="docText">The kinds of locks we have described so far are <span class="docEmphasis">advisory</span>. This means that a process is free to ignore the use of <span class="docEmphasis">fcntl()</span> (or <span class="docEmphasis">flock()</span>)
+ and simply perform I/O on the file. The kernel doesn’t prevent this. 
+When using advisory locking, it is up to the application designer to:</p><ul><li><p class="docList">set
+ appropriate ownership (or group ownership) and permissions for the 
+file, so as to prevent noncooperating process from performing file I/O; 
+and</p></li><li><p class="docList">ensure 
+that the processes composing the application cooperate by obtaining the 
+appropriate lock on the file before performing I/O.</p></li></ul><p class="docText">Linux, like many other UNIX implementations, also allows <span class="docEmphasis">fcntl()</span> record locks to be <span class="docEmphasis">mandatory</span>.
+ This means that every file I/O operation is checked to see whether it 
+is compatible with any locks held by other processes on the region of 
+the file on which I/O is being performed.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Advisory mode locking is sometimes referred to as <span class="docEmphasis">discretionary locking</span>, while mandatory locking is sometimes referred to as <span class="docEmphasis">enforcement-mode locking</span>.
+ SUSv3 doesn’t specify mandatory locking, but it is available (with some
+ variation in the details) on most modern UNIX implementations.</p><hr noshade="noshade" size="1"/><p class="docText">In
+ order to use mandatory locking on Linux, we must enable it on the file 
+system containing the files we wish to lock and on each file to be 
+locked. We enable mandatory locking on a file system by mounting it with
+ the (Linux-specific) <span class="docEmphasis">-o mand</span> option:</p><pre># <b>mount -o mand /dev/sda10 /testfs</b></pre><br/>
+<p class="docText">From a program, we can achieve the same result by specifying the <tt>MS_MANDLOCK</tt> flag when calling <span class="docEmphasis">mount(2)</span> (Section 14.8.1).</p><p class="docText">We can check whether a mounted file system has mandatory locking enabled by looking at the output of the <span class="docEmphasis">mount(8)</span> command with no options:</p><pre># <b>mount | grep sda10</b>
+/dev/sda10 on /testfs type ext3 (rw,mand)</pre><br/>
+<p class="docText">Mandatory locking is enabled
+ on a file by the combination of having the set-group-ID permission bit 
+turned on and the group-execute permission turned off. This combination 
+of permission bits was otherwise meaningless and unused in earlier UNIX 
+implementations. In this way, later UNIX systems added mandatory locking
+ without needing to change existing programs or add new system calls. 
+From the shell, we can enable mandatory locking on a file as follows:</p><pre>$ <b>chmod g+s,g-x /testfs/file</b></pre><br/>
+<p class="docText">From a program, we can enable mandatory locking for a file by setting permissions appropriately using <span class="docEmphasis">chmod()</span> or <span class="docEmphasis">fchmod()</span> (Section 15.4.7).</p><p class="docText">When displaying permissions for a file whose permission bits are set for mandatory locking, <span class="docEmphasis">ls(1)</span> displays an <span class="docEmphasis">S</span> in the group-execute permission column:</p><pre>$ <b>ls -l /testfs/file</b>
+-rw-r-Sr--    1 mtk      users       0 Apr 22 14:11 /testfs/file</pre><br/>
+<p class="docText">Mandatory locking is supported
+ for all native Linux and UNIX file systems, but may not be supported on
+ some network file systems or on non-UNIX file systems. For example, 
+Microsoft’s VFAT file system has no set-group-ID permission bit, so 
+mandatory locking can’t be used on VFAT file systems.</p><h4 class="docSection2Title" id="title-ID0EP5EM">55.4.1. </h4><h5 class="docSection3Title" id="title-ID0ET5EM">55.4.1.1. Effect of mandatory locking on file I/O operations</h5><p class="docText">If mandatory locking is enabled for a file, what happens when a system call that performs data transfer (e.g., <span class="docEmphasis">read()</span> or <span class="docEmphasis">write()</span>)
+ encounters a lock conflict (i.e., an attempt is made to write to a 
+region that is currently read or write locked, or to read from a region 
+that is currently write locked)? The answer depends on whether the file 
+has been opened in blocking or nonblocking mode. If the file was opened 
+in blocking mode, the system call blocks. If the file was opened with 
+the <tt>O_NONBLOCK</tt> flag, the system call immediately fails with the error <tt>EAGAIN</tt>. Similar rules apply for <span class="docEmphasis">truncate()</span> and <span class="docEmphasis">ftruncate()</span>,
+ if the bytes they are attempting to add or remove from the file overlap
+ a region currently locked (for reading or writing) by another process.</p><p class="docText">If we have opened a file in blocking mode (i.e., <tt>O_NONBLOCK</tt> is not specified in the <span class="docEmphasis">open()</span> call), then I/O system calls can be involved in deadlock situations. Consider the example shown in Figure 55-7,
+ involving two processes that open the same file for blocking I/O, 
+obtain write locks on different parts of the file, and then each attempt
+ to write to the region locked by the other process. The kernel resolves
+ this situation in the same way that deadlock between two <span class="docEmphasis">fcntl()</span> calls is resolved (Section 55.3.1): it selects one of the processes involved in the deadlock and causes its <span class="docEmphasis">write()</span> system call to fail with the error <tt>EDEADLK</tt>.</p><p></p><center><h5 class="docFigureTitle">Figure 55-7. Deadlock when mandatory locking is in force</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-108.png"/></p></center><p></p><br/><p class="docText">Attempts to <span class="docEmphasis">open()</span> a file with the <tt>O_TRUNC</tt> flag always fail immediately (with the error <tt>EAGAIN</tt>) if any other process holds a read or write lock on any part of the file.</p><p class="docText">It is not possible to create a shared memory mapping (i.e., <span class="docEmphasis">mmap()</span> with the <tt>MAP_SHARED</tt> flag) on a file if any other process holds a mandatory read or write lock on <span class="docEmphasis">any</span> part of the file. Conversely, it is not possible to place a mandatory lock on <span class="docEmphasis">any</span>
+ part of a file that is currently involved in a shared memory mapping. 
+In both cases, the relevant system call fails immediately with the error
+ <tt>EAGAIN</tt>. The reason for these restrictions becomes clear when we consider the implementation of memory mappings. In Section 49.4.2,
+ we saw that a shared file mapping both reads from and writes to a file 
+(and the latter operation, in particular, conflicts with any type of 
+lock on the file). Furthermore, this file I/O is performed by the 
+memory-management subsystem, which has no knowledge of the location of 
+any file locks in the system. Thus, to prevent a mapping from updating a
+ file on which a mandatory lock is held, the kernel performs a simple 
+check--testing at the time of the <span class="docEmphasis">mmap()</span> call whether there are locks anywhere in the file to be mapped (and vice versa for <span class="docEmphasis">fcntl()</span>).</p><h5 class="docSection3Title" id="title-ID0ESCFM">55.4.1.2. Mandatory locking caveats</h5><p class="docText">Mandatory locks do less for us than we might at first expect, and have some potential shortcomings and problems:</p><ul><li><p class="docList">Holding
+ a mandatory lock on a file doesn’t prevent another process from 
+deleting it, since all that is required to unlink a file is suitable 
+permissions on the parent directory.</p></li><li><p class="docList">Careful
+ consideration should be applied before enabling mandatory locks on a 
+publicly accessible file, since not even privileged processes can 
+override a mandatory lock. A malicious user could continuously hold a 
+lock on the file in order to create a denial-of-service attack. (While 
+in most cases, we could make the file accessible once more by turning 
+off the set-group-ID bit, this may not be possible if, for example, the 
+mandatory file lock is causing the system to hang.)</p></li><li><p class="docList">There
+ is a performance cost associated with the use of mandatory locking. For
+ each I/O system call made on a file with mandatory locking enabled, the
+ kernel must check for lock conflicts on the file. If the file has a 
+large number of locks, this check can slow I/O system calls 
+significantly.</p></li><li><p class="docList">Mandatory
+ locking also incurs a cost in application design. We need to handle the
+ possibility that each I/O system call can return EAGAIN (for 
+nonblocking I/O) or <tt>EDEADLK</tt> (for blocking I/O).</p></li><li><p class="docList">As
+ a consequence of some kernel race conditions in the current Linux 
+implementation, there are circumstances in which system calls that 
+perform I/O operations can succeed despite the presence of mandatory 
+locks that should deny those operations.</p></li></ul><p class="docText">In summary, the use of mandatory locks is best avoided.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>60.2. An Iterative UDP echo Server</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">60.2. An Iterative UDP <span class="docEmphasis">echo</span> Server</h3><p class="docText">In this and the next section, we present servers for the <span class="docEmphasis">echo</span> service. The <span class="docEmphasis">echo</span> service operates on both UDP and TCP port 7. (Since this is a reserved port, the <span class="docEmphasis">echo</span> server must be run with superuser privileges.)</p><p class="docText">The UDP <span class="docEmphasis">echo</span>
+ server continuously reads datagrams, returning a copy of each datagram 
+to the sender. Since the server needs to handle only a single message at
+ a time, an iterative server design suffices. The header file for the 
+server is shown in Example 60-1.</p><h5 class="docExampleTitle" id="title-ID0EKXGM">Example 60-1. Header file for <tt>id_echo_sv.c</tt> and <tt>id_echo_cl.c</tt></h5><p></p><div class="box"><pre><b>sockets/id_echo.h</b>
+#include "inet_sockets.h"       /* Declares our socket functions */
+#include "tlpi_hdr.h"
+
+#define SERVICE "echo"          /* Name of UDP service */
+
+#define BUF_SIZE 500            /* Maximum size of datagrams that can
+                                   be read by client and server */
+      <b>sockets/id_echo.h</b></pre><br/>
+</div><p></p><p class="docText">Example 60-2 shows the implementation of the server. Note the following points regarding the server implementation:</p><ul><li><p class="docList">We use the <span class="docEmphasis">becomeDaemon()</span> function of Section 37.2 to turn the server into a daemon.</p></li><li><p class="docList">To shorten this program, we employ the Internet domain sockets library developed in Section 59.12.</p></li><li><p class="docList">If the server can’t send a reply to the client, it logs a message using <span class="docEmphasis">syslog()</span>.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In a real-world application, we would probably apply some rate limit to the messages written with <span class="docEmphasis">syslog()</span>, both to prevent the possibility of an attacker filling the system log and because each call to <span class="docEmphasis">syslog()</span> is expensive, since (by default) <span class="docEmphasis">syslog()</span> in turn calls <span class="docEmphasis">fsync()</span>.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0EKZGM">Example 60-2. An iterative server that implements the UDP <span class="docEmphasis">echo</span> service</h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/id_echo_sv.c</b>
+#include &lt;syslog.h&gt;
+#include "id_echo.h"
+#include "become_daemon.h"
+
+int
+main(int argc, char *argv[])
+{
+    int sfd;
+    ssize_t numRead;
+    socklen_t addrlen, len;
+    struct sockaddr_storage claddr;
+    char buf[BUF_SIZE];
+    char addrStr[IS_ADDR_STR_LEN];
+
+    if (becomeDaemon(0) == -1)
+        errExit("becomeDaemon");
+
+    sfd = inetBind(SERVICE, SOCK_DGRAM, &amp;addrlen);
+    if (sfd == -1) {
+        syslog(LOG_ERR, "Could not create server socket (%s)", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    /* Receive datagrams and return copies to senders */
+
+    for (;;) {
+        len = sizeof(struct sockaddr_storage);
+        numRead = recvfrom(sfd, buf, BUF_SIZE, 0,
+                           (struct sockaddr *) &amp;claddr, &amp;len);
+        if (numRead == -1)
+            errExit("recvfrom");
+
+        if (sendto(sfd, buf, numRead, 0, (struct sockaddr *) &amp;claddr, len)
+                    != numRead)
+            syslog(LOG_WARNING, "Error echoing response to %s (%s)",
+                    inetAddressStr((struct sockaddr *) &amp;claddr, len,
+                                   addrStr, IS_ADDR_STR_LEN),
+                    strerror(errno));
+    }
+}
+     <b>sockets/id_echo_sv.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">To test the server, we use the client program shown in Example 60-3. This program also employs the Internet domain sockets library developed in Section 59.12.
+ As its first command-line argument, the client program expects the name
+ of the host on which the server resides. The client executes a loop in 
+which it sends each of its remaining command-line arguments to the 
+server as separate datagrams, and reads and prints each response 
+datagram sent back by the server.</p><h5 class="docExampleTitle" id="title-ID0ED1GM">Example 60-3. A client for the UDP <span class="docEmphasis">echo</span> service</h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/id_echo_cl.c</b>
+#include "id_echo.h"
+
+int
+main(int argc, char *argv[])
+{
+    int sfd, j;
+    size_t len;
+    ssize_t numRead;
+    char buf[BUF_SIZE];
+
+    if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s: host msg...\n", argv[0]);
+
+    /* Construct server address from first command-line argument */
+
+    sfd = inetConnect(argv[1], SERVICE, SOCK_DGRAM);
+    if (sfd == -1)
+        fatal("Could not connect to server socket");
+
+    /* Send remaining command-line arguments to server as separate datagrams */
+
+    for (j = 2; j &lt; argc; j++) {
+        len = strlen(argv[j]);
+        if (write(sfd, argv[j], len) != len)
+            fatal("partial/failed write");
+
+        numRead = read(sfd, buf, BUF_SIZE);
+        if (numRead == -1)
+            errExit("read");
+
+        printf("[%ld bytes] %.*s\n", (long) numRead, (int) numRead, buf);
+    }
+
+    exit(EXIT_SUCCESS);
+}
+     <b>sockets/id_echo_cl.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Here is an example of what we see when we run the server and two instances of the client:</p><pre class="preFixedWidth">$ <b>su </b>                                      <i> Need privilege to bind reserved port</i>
+Password:
+# <b>./id_echo_sv </b>                            <i> Server places itself in background</i>
+# <b>exit </b>                                    <i> Cease to be superuser</i>
+$ <b>./id_echo_cl localhost hello world </b>      <i> This client sends two datagrams</i>
+[5 bytes] hello                           <i> Client prints responses from server</i>
+[5 bytes] world
+$ <b>./id_echo_cl localhost goodbye </b>          <i> This client sends one datagram</i>
+[7 bytes] goodbye
+
+					  </pre><br/>
+</div>
+</body>
+</html>

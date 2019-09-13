@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>34.2. Process Groups</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">34.2. Process Groups</h3><p class="docText">Each
+ process has a numeric process group ID that defines the process group 
+to which it belongs. A new process inherits its parent’s process group 
+ID. A process can obtain its process group ID using <span class="docEmphasis">getpgrp()</span>.</p><pre>#include &lt;unistd.h&gt;
+
+pid_t <b>getpgrp</b>(void)</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Always successfully returns process group ID of calling process</p><hr noshade="noshade" size="1"/><p class="docText">If the value returned by <span class="docEmphasis">getpgrp()</span> matches the caller’s process ID, this process is the leader of its process group.</p><p class="docText">The <span class="docEmphasis">setpgid()</span> system call changes the process group of the process whose process ID is <span class="docEmphasis">pid</span> to the value specified in <span class="docEmphasis">pgid</span>.</p><pre>#include &lt;unistd.h&gt;
+
+int <b>setpgid</b>(pid_t <span class="docEmphasis">pid</span>, pid_t <span class="docEmphasis">pgid</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">If <span class="docEmphasis">pid</span> is specified as 0, the calling process’s process group ID is changed. If <span class="docEmphasis">pgid</span> is specified as 0, then the process group ID of the process specified by <span class="docEmphasis">pid</span> is made the same as its process ID. Thus, the following <span class="docEmphasis">setpgid()</span> calls are equivalent:</p><pre>setpgid(0, 0);
+setpgid(getpid(), 0);
+setpgid(getpid(), getpid());</pre><br/>
+<p class="docText">If the <span class="docEmphasis">pid</span> and <span class="docEmphasis">pgid</span> arguments specify the same process (i.e., <span class="docEmphasis">pgid</span> is 0 or matches the process ID of the process specified by <span class="docEmphasis">pid</span>),
+ then a new process group is created, and the specified process is made 
+the leader of the new group (i.e., the process group ID of the process 
+is made the same as its process ID). If the two arguments specify 
+different values (i.e., <span class="docEmphasis">pgid</span> is not 0 and doesn’t match the process ID of the process specified by <span class="docEmphasis">pid</span>), then <span class="docEmphasis">setpgid()</span> is being used to move a process between process groups.</p><p class="docText">The typical callers of <span class="docEmphasis">setpgid()</span> (and <span class="docEmphasis">setsid()</span>, described in Section 34.3) are programs such as the shell and <span class="docEmphasis">login(1)</span>. In Section 37.2, we’ll see that a program also calls <span class="docEmphasis">setsid()</span> as one of the steps on the way to becoming a daemon.</p><p class="docText">Several restrictions apply when calling <span class="docEmphasis">setpgid()</span>:</p><ul><li><p class="docList">The <span class="docEmphasis">pid</span> argument may specify only the calling process or one of its children. Violation of this rule results in the error <tt>ESRCH</tt>.</p></li><li><p class="docList">When moving a process between groups, the calling process and the process specified by <span class="docEmphasis">pid</span>
+ (which may be one and the same), as well as the target process group, 
+must all be part of the same session. Violation of this rule results in 
+the error <tt>EPERM</tt>.</p></li><li><p class="docList">The <span class="docEmphasis">pid</span> argument may not specify a process that is a session leader. Violation of this rule results in the error <tt>EPERM</tt>.</p></li><li><p class="docList">A process may not change the process group ID of one of its children after that child has performed an <span class="docEmphasis">exec()</span>. Violation of this rule results in the error <tt>EACCES</tt>.
+ The rationale for this constraint is that it could confuse a program if
+ its process group ID were changed after it had commenced.</p></li></ul><h4 class="docSection2Title" id="title-ID0EMMFK">34.2.1. </h4><h5 class="docSection3Title" id="title-ID0EQMFK">34.2.1.1. Using <span class="docEmphasis">setpgid()</span> in a job-control shell</h5><p class="docText">The restriction that a process may not change the process group ID of one of its children after that child has performed an <span class="docEmphasis">exec()</span> affects the programming of job-control shells, which have the following requirements:</p><ul><li><p class="docList">All
+ of the processes in a job (i.e., a command or a pipeline) must be 
+placed in a single process group. (We can see the desired result by 
+looking at the two process groups created by <span class="docEmphasis">bash</span> in Figure 34-1.) This step permits the shell to use <span class="docEmphasis">killpg()</span> (or, equivalently, <span class="docEmphasis">kill()</span> with a negative <span class="docEmphasis">pid</span>
+ argument) to simultaneously send job-control signals to all of the 
+members of the process group. Naturally, this step must be carried out 
+before any job-control signals are sent.</p></li><li><p class="docList">Each
+ of the child processes must be transferred to the process group before 
+it execs a program, since the program itself is ignorant of 
+manipulations of the process group ID.</p></li></ul><p class="docText">For each process in the job, either the parent or the child could use <span class="docEmphasis">setpgid()</span> to change the process group ID of the child. However, because the scheduling of the parent and child is indeterminate after a <span class="docEmphasis">fork()</span> (Section 24.4), we can’t rely on the parent changing the child’s process group ID before the child does an <span class="docEmphasis">exec()</span>;
+ nor can we rely on the child changing its process group ID before the 
+parent tries to send any job-control signals to it. (Dependence on 
+either one of these behaviors would result in a race condition.) 
+Therefore, job-control shells are programmed so that the parent and the 
+child process both call <span class="docEmphasis">setpgid()</span> to change the child’s process group ID to the same value immediately after a <span class="docEmphasis">fork()</span>, and the parent ignores any occurrence of the <tt>EACCES</tt> error on the <span class="docEmphasis">setpgid()</span> call. In other words, in a job-control shell, we’ll find code something like that shown in Example 34-1.</p><h5 class="docExampleTitle" id="title-ID0EPOFK">Example 34-1. How a job-control shell sets the process group ID of a child process</h5><p></p><div class="box"><pre>pid_t childPid;
+    pid_t pipelinePgid;         /* PGID to which processes in a pipeline
+                                    are to be assigned */
+    /* Other code */
+
+    childPid = fork();
+    switch (childPid) {
+    case -1: /* fork() failed */
+        /* Handle error */
+
+    case 0: /* Child */
+        if (setpgid(0, pipelinePgid) == -1)
+            /* Handle error */
+        /* Child carries on to exec the required program */
+
+    default: /* Parent (shell) */
+        if (setpgid(childPid, pipelinePgid) == -1 &amp;&amp; errno != EACCES)
+            /* Handle error */
+        /* Parent carries on to do other things */
+    }</pre><br/>
+</div><p></p><p class="docText">Things are slightly more complex than shown in Example 34-1,
+ since, when creating the processes for a pipeline, the parent shell 
+records the process ID of the first process in the pipeline and uses 
+this as the process group ID (<span class="docEmphasis">pipelinePgid</span>) for all of the processes in the group.</p><h5 class="docSection3Title" id="title-ID0E4OFK">34.2.1.2. Other (obsolete) interfaces for retrieving and modifying process group IDs</h5><p class="docText">The different suffixes in the names of the <span class="docEmphasis">getpgrp()</span> and <span class="docEmphasis">setpgid()</span> system calls deserve explanation.</p><p class="docText">In the beginning, 4.2BSD provided a <span class="docEmphasis">getprgp(pid)</span> system call that returned the process group ID of the process specified by <span class="docEmphasis">pid</span>. In practice, <span class="docEmphasis">pid</span>
+ was always used to specify the calling process. Consequently, the POSIX
+ committee deemed the call to be more complex than necessary, and 
+instead adopted the System V <span class="docEmphasis">getpgrp()</span> call, which took no arguments and returned the process group ID of the calling process.</p><p class="docText">In order to change the process group ID, 4.2BSD provided the call <span class="docEmphasis">setpgrp(pid, pgid)</span>, which operated in a similar manner to <span class="docEmphasis">setpgid()</span>. The principal difference was that the BSD <span class="docEmphasis">setpgrp()</span> could be used to set the process group ID to any value. (We noted earlier that <span class="docEmphasis">setpgid()</span>
+ can’t transfer a process into a process group in a different session.) 
+This resulted in some security issues and was also more flexible than 
+required for implementing job control. Consequently, the POSIX committee
+ settled on a more restrictive function and gave it the name <span class="docEmphasis">setpgid()</span>.</p><p class="docText">To further complicate matters, SUSv3 specifies <span class="docEmphasis">getpgid(pid)</span>, with the same semantics as the old BSD <span class="docEmphasis">getpgrp()</span>, and also weakly specifies an alternative, System V-derived version of <span class="docEmphasis">setpgrp()</span>, taking no arguments, as being approximately equivalent to <span class="docEmphasis">setpgid(0, 0)</span>.</p><p class="docText">Although the <span class="docEmphasis">setpgid()</span> and <span class="docEmphasis">getpgrp()</span>
+ system calls that we described earlier are sufficient for implementing 
+shell job control, Linux, like most other UNIX implementations, also 
+provides <span class="docEmphasis">getpgid(pid)</span> and <span class="docEmphasis">setpgrp(void)</span>. For backward compatibility, many BSD-derived implementations continue to provide <span class="docEmphasis">setprgp(pid, pgid)</span> as a synonym for <span class="docEmphasis">setpgid(pid, pgid)</span>.</p><p class="docText">If we explicitly define the <tt>_BSD_SOURCE</tt> feature test macro when compiling a program, then <span class="docEmphasis">glibc</span> provides the BSD-derived versions of <span class="docEmphasis">setpgrp()</span> and <span class="docEmphasis">getpgrp()</span>, instead of the default versions.</p>
+</div>
+</body>
+</html>

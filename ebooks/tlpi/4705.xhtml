@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>47.5. Semaphore Initialization</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">47.5. Semaphore Initialization</h3><p class="docText">According to SUSv3, an implementation is not required to initialize the values of the semaphores in a set created by <span class="docEmphasis">semget()</span>. Instead, the programmer must explicitly initialize the semaphores using the <span class="docEmphasis">semctl()</span> system call. (On Linux, the semaphores returned by <span class="docEmphasis">semget()</span>
+ are in fact initialized to 0, but we can’t portably rely on this.) As 
+stated earlier, the fact that semaphore creation and initialization must
+ be performed by separate system calls, instead of in a single atomic 
+step, leads to possible race conditions when initializing a semaphore. 
+In this section, we detail the nature of the race and look at a method 
+of avoiding it based on an idea described in [Stevens, 1999].</p><p class="docText">Suppose
+ that we have an application consisting of multiple peer processes 
+employing a semaphore to coordinate their actions. Since no single 
+process is guaranteed to be the first to use the semaphore (this is what
+ is meant by the term <span class="docEmphasis">peer</span>),
+ each process must be prepared to create and initialize the semaphore if
+ it doesn’t already exist. For this purpose, we might consider employing
+ the code shown in Example 47-5.</p><h5 class="docExampleTitle" id="title-ID0EKECM">Example 47-5. Incorrectly initializing a System V semaphore</h5><p></p><div class="box"><pre class="preFixedHeight"><span class="docEmphasis">from</span> <b>svsem/svsem_bad_init.c</b>
+    /* Create a set containing 1 semaphore */
+
+    semid = semget(key, 1, IPC_CREAT | IPC_EXCL | perms);
+
+    if (semid != -1) {                  /* Successfully created the semaphore */
+        union semun arg;
+
+        /* XXXX */
+
+        arg.val = 0;                    /* Initialize semaphore */
+        if (semctl(semid, 0, SETVAL, arg) == -1)
+            errExit("semctl");
+
+    } else {                            /* We didn't create the semaphore */
+        if (errno != EEXIST) {          /* Unexpected error from semget() */
+            errExit("semget");
+
+        semid = semget(key, 1, perms);  /* Retrieve ID of existing set */
+        if (semid == -1)
+           errExit("semget");
+    }
+
+    /* Now perform some operation on the semaphore */
+
+    sops[0].sem_op = 1;                 /* Add 1... */
+    sops[0].sem_num = 0;                /* to semaphore 0 */
+    sops[0].sem_flg = 0;
+    if (semop(semid, sops, 1) == -1)
+        errExit("semop");
+      <span class="docEmphasis">from</span> <b>svsem/svsem_bad_init.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The problem with the code in Example 47-5 is that if two processes execute it at the same time, then the sequence shown in Figure 47-2 could occur, if the first process’s time slice happens to expire at the point marked <tt>XXXX</tt> in the code. This sequence is problematic for two reasons. First, process B performs a <span class="docEmphasis">semop()</span> on an uninitialized semaphore (i.e., one whose value is arbitrary). Second, the <span class="docEmphasis">semctl()</span> call in process A overwrites the changes made by process B.</p><p class="docText">The solution to this problem relies on a historical, and now standardized, feature of the initialization of the <span class="docEmphasis">sem_otime</span> field in the <span class="docEmphasis">semid_ds</span> data structure associated with the semaphore set. When a semaphore set is first created, the <span class="docEmphasis">sem_otime</span> field is initialized to 0, and it is changed only by a subsequent <span class="docEmphasis">semop()</span>
+ call. We can exploit this feature to eliminate the race condition 
+described above. We do this by inserting extra code to force the second 
+process (i.e., the one that does not create the semaphore) to wait until
+ the first process has both initialized the semaphore <span class="docEmphasis">and</span> executed a <span class="docEmphasis">semop()</span> call that updates the <span class="docEmphasis">sem_otime</span> field, but does not modify the semaphore’s value. The modified code is shown in Example 47-6.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Unfortunately,
+ the solution to the initialization problem described in the main text 
+doesn’t work on all UNIX implementations. In some versions of the modern
+ BSD derivatives, <span class="docEmphasis">semop()</span> doesn’t update the <span class="docEmphasis">sem_otime</span> field.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0EHGCM">Example 47-6. Initializing a System V semaphore</h5><p></p><div class="box"><pre class="preFixedHeight"><span class="docEmphasis">from</span> <b>svsem/svsem_good_init.c</b>
+    semid = semget(key, 1, IPC_CREAT | IPC_EXCL | perms);
+
+    if (semid != -1) {                  /* Successfully created the semaphore */
+        union semun arg;
+        struct sembuf sop;
+
+        arg.val = 0;                    /* So initialize it to 0 */
+        if (semctl(semid, 0, SETVAL, arg) == -1)
+            errExit("semctl");
+
+        /* Perform a "no-op" semaphore operation - changes sem_otime
+           so other processes can see we've initialized the set. */
+
+        sop.sem_num = 0;                /* Operate on semaphore 0 */
+        sop.sem_op = 0;                 /* Wait for value to equal 0 */
+        sop.sem_flg = 0;
+        if (semop(semid, &amp;sop, 1) == -1)
+            errExit("semop");
+
+    } else {                            /* We didn't create the semaphore set */
+        const int MAX_TRIES = 10;
+        int j;
+        union semun arg;
+        struct semid_ds ds;
+
+        if (errno != EEXIST) {          /* Unexpected error from semget() */
+            errExit("semget");
+
+        semid = semget(key, 1, perms);  /* Retrieve ID of existing set */
+        if (semid == -1)
+            errExit("semget");
+
+        /* Wait until another process has called semop() */
+
+        arg.buf = &ds;
+        for (j = 0; j &lt; MAX_TRIES; j++) {
+            if (semctl(semid, 0, IPC_STAT, arg) == -1)
+                errExit("semctl");
+            if (ds.sem_otime != 0)      /* semop() performed? */
+                break;                  /* Yes, quit loop */
+            sleep(1);                   /* If not, wait and retry */
+        }
+
+        if (ds.sem_otime == 0)          /* Loop ran to completion! */
+            fatal("Existing semaphore not initialized");
+    }
+
+    /* Now perform some operation on the semaphore */
+      <span class="docEmphasis">from</span> <b>svsem/svsem_good_init.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">We can use variations of the technique shown in Example 47-6 to ensure that multiple semaphores in a set are correctly initialized, or that a semaphore is initialized to a nonzero value.</p><p class="docText">This
+ rather complex solution to the race problem is not required in all 
+applications. We don’t need it if one process is guaranteed to be able 
+to create and initialize the semaphore before any other processes 
+attempt to use it. This would be the case, for example, if a parent 
+creates and initializes the semaphore before creating child processes 
+with which it shares the semaphore. In such cases, it is sufficient for 
+the first process to follow its <span class="docEmphasis">semget()</span> call by a <span class="docEmphasis">semctl()</span> <tt>SETVAL</tt> or <tt>SETALL</tt> operation.</p><p></p><center><h5 class="docFigureTitle">Figure 47-2. Two processes racing to initialize the same semaphore</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-91.png"/></p></center><p></p><br/>
+</div>
+</body>
+</html>

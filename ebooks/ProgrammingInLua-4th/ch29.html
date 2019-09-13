@@ -1,0 +1,519 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 29. Calling C from Lua</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 29. Calling C from Lua"><div class="titlepage"><div><h1><span class="partLabel">29</span> Calling C from Lua</h1></div></div><p id="N16404" style="text-indent: 0">
+<a class="indexterm" id="N16406"/>
+When we say that Lua can call C functions,
+this does not mean that Lua can call any C function.<sup>[<a href="#ftn.N1640C" id="N1640C" class="footnote">28</a>]</sup>
+As we saw in the previous chapter,
+when C calls a Lua function,
+it must follow a simple protocol to pass the arguments and
+to get the results.
+Similarly,
+for Lua to call a C function,
+the C function must follow a protocol
+to get its arguments and to return its results.
+Moreover, for Lua to call a C function,
+we must register the function, that is,
+we must give its address to Lua in an appropriate way.
+</p><p id="N16410" style="text-indent: 0">
+When Lua calls a C function,
+it uses the same kind of stack that C uses to call Lua.
+The C function gets its arguments from the stack
+and pushes the results on the stack.
+</p><p id="N16412" style="text-indent: 0">
+An important point here is that
+the stack is not a global structure;
+each function has its own private local stack.
+When Lua calls a C function,
+the first argument will always be
+at index 1 of this local stack.
+Even when a C function calls Lua code that calls the
+same (or another) C function again,
+each of these invocations sees only its own private stack,
+with its first argument at index 1.
+</p><div class="sect1" title="C Functions"><div class="titlepage"><div><div><h2 class="title"><a id="c-functions"/>C Functions</h2></div></div></div><p id="N16418" style="text-indent: 0">
+As a first example,
+let us see how to implement a simplified version of
+a function that returns the sine of a given number:
+</p><pre class="programlisting" id="N1641A">      static int l_sin (lua_State *L) {
+        double d = lua_tonumber(L, 1);  /* get argument */
+        lua_pushnumber(L, sin(d));  /* push result */
+        return 1;  /* number of results */
+      }
+</pre><p style="text-indent: 0">
+Any function registered with Lua must have this same prototype,
+defined in <a class="indexterm" id="N1641D"></a><code class="filename">lua.h</code> as <a class="indexterm" id="N16423"></a><code class="function">lua_CFunction</code>:
+</p><pre class="programlisting" id="N1642C">      typedef int (*lua_CFunction) (lua_State *L);
+</pre><p style="text-indent: 0">
+From the point of view of C,
+a C function gets as its single argument the <a class="indexterm" id="N1642F"></a>Lua state
+and returns an integer with the number of
+values it is returning on the stack.
+Therefore, the function does not need to clear the stack before
+pushing its results.
+After it returns,
+Lua automatically saves its results and clears its entire stack.
+</p><p id="N16433" style="text-indent: 0">
+Before we can call this function from Lua,
+we must register it.
+We do this bit of magic with <a class="indexterm" id="N16435"/><code class="function">lua_pushcfunction</code>:
+it gets a pointer to a C function and creates
+a value of type <code class="literal">"function"</code> that represents
+this function inside Lua.
+Once registered,
+a C function behaves like any other function inside Lua.
+</p><p id="N16441" style="text-indent: 0">
+A quick-and-dirty way to test our function <code class="literal">l_sin</code> is to put
+its code directly into our basic interpreter
+(<a class="xref" href="ch27.html#basic-interp" title="Figure 27.1. A bare-bones stand-alone Lua interpreter">Figure 27.1, “A bare-bones stand-alone Lua interpreter”</a>)
+and add the following lines
+right after the call to <a class="indexterm" id="N16449"></a><code class="function">luaL_openlibs</code>:
+</p><pre class="programlisting" id="N16451">        lua_pushcfunction(L, l_sin);
+        lua_setglobal(L, "mysin");
+</pre><p style="text-indent: 0">
+The first line pushes a value of type function;
+the second line assigns it to the global variable <code class="literal">mysin</code>.
+After these modifications,
+we can use the new function
+<code class="literal">mysin</code> in our Lua scripts.
+In the next section,
+we will discuss better ways to link new C functions with Lua.
+Here, we will explore how to write better C functions.
+</p><p id="N1645A" style="text-indent: 0">
+For a more professional sine function,
+we must check the type of its argument.
+The auxiliary library helps us with this task.
+The function <a class="indexterm" id="N1645C"></a><code class="function">luaL_checknumber</code> checks whether a given
+argument is a number:
+in case of error, it throws an informative error message;
+otherwise, it returns the number.
+The modification to our function is minimal:
+</p><pre class="programlisting" id="N16465">      static int l_sin (lua_State *L) {
+        double d = luaL_checknumber(L, 1);
+        lua_pushnumber(L, sin(d));
+        return 1;  /* number of results */
+      }
+</pre><p style="text-indent: 0">
+With the above definition,
+if you call <code class="literal">mysin('a')</code>, you get an error like this one:
+</p><pre class="programlisting" id="N1646B">      bad argument #1 to 'mysin' (number expected, got string)
+</pre><p style="text-indent: 0">
+The function <a class="indexterm" id="N1646E"></a><code class="function">luaL_checknumber</code>
+automatically fills the message
+with the argument number (<code class="literal">#1</code>),
+the function name (<code class="literal">"mysin"</code>),
+the expected parameter type (<code class="literal">number</code>),
+and the actual parameter type (<code class="literal">string</code>).
+</p><p id="N16482" style="text-indent: 0">
+As a more complex example,
+let us write a function that
+returns the contents of a given directory.
+Lua does not provide this function in its <a class="indexterm" id="N16484"></a>standard libraries,
+because <a class="indexterm" id="N16488"></a>ISO C does not offer functions for this job.
+Here, we will assume that we have a <a class="indexterm" id="N1648C"></a>POSIX compliant system.
+Our function—we will call it <code class="literal">dir</code> in Lua,
+<code class="literal">l_dir</code> in C—gets as argument
+a string with the directory path
+and returns a list with the directory entries.
+For instance, a call like <code class="literal">dir("/home/lua")</code> may return
+the table <code class="literal">{".", "..", "src", "bin", "lib"}</code>.
+The complete code for this function is in <a class="xref" href="ch29.html#l_dir" title="Figure 29.1. A function to read a directory">Figure 29.1, “A function to read a directory”</a>.
+</p><div class="figure-float"><div class="figure"><a id="l_dir"/><p class="title" style="text-indent: 0"><strong>Figure 29.1. A function to read a directory</strong></p><div class="figure-contents"><pre class="programlisting" id="N164A4">      #include &lt;dirent.h&gt;
+      #include &lt;errno.h&gt;
+      #include &lt;string.h&gt;
+      
+      #include "lua.h"
+      #include "lauxlib.h"
+      
+      static int l_dir (lua_State *L) {
+        DIR *dir;
+        struct dirent *entry;
+        int i;
+        const char *path = luaL_checkstring(L, 1);
+      
+        /* open directory */
+        dir = opendir(path);
+        if (dir == NULL) {  /* error opening the directory? */
+          lua_pushnil(L);  /* return nil... */
+          lua_pushstring(L, strerror(errno));  /* and error message */
+          return 2;  /* number of results */
+        }
+      
+        /* create result table */
+        lua_newtable(L);
+        i = 1;
+        while ((entry = readdir(dir)) != NULL) {  /* for each entry */
+          lua_pushinteger(L, i++);  /* push key */
+          lua_pushstring(L, entry-&gt;d_name);  /* push value */
+          lua_settable(L, -3);    /* table[i] = entry name */
+        }
+      
+        closedir(dir);
+        return 1;  /* table is already on top */
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+It starts getting the directory path with <a class="indexterm" id="N164A7"></a><code class="function">luaL_checkstring</code>,
+which is the equivalent of <a class="indexterm" id="N164B0"></a><code class="function">luaL_checknumber</code> for strings.
+Then it opens this directory with <code class="literal">opendir</code>.
+In case it cannot open the directory,
+the function returns nil plus an error message
+that it gets with <code class="literal">strerror</code>.
+After opening the directory,
+the function creates a new table
+and populates it with the directory entries.
+(Each time we call <code class="literal">readdir</code>,
+it returns a next entry.)
+Finally, it closes the directory and returns 1, in C,
+meaning that it is returning the value on top of its stack
+to Lua.
+(Remember that <a class="indexterm" id="N164C1"></a><code class="function">lua_settable</code> pops the key and the value
+from the stack.
+Therefore, after the loop,
+the element on the top of the stack is the result table.)
+</p><p id="N164C9" style="text-indent: 0">
+In some conditions,
+this implementation of <code class="literal">l_dir</code> may cause a <a class="indexterm" id="N164CE"/>memory leak.
+Three of the Lua functions that it calls
+can fail due to insufficient memory:
+<a class="indexterm" id="N164D2"/><code class="function">lua_newtable</code>, <a class="indexterm" id="N164DA"/><code class="function">lua_pushstring</code>, and <a class="indexterm" id="N164E2"/><code class="function">lua_settable</code>.
+If any of these functions fails,
+it will raise an error and interrupt <code class="literal">l_dir</code>,
+which therefore will not call <code class="literal">closedir</code>.
+In <a class="xref" href="ch32.html" title="Chapter 32. Managing Resources">Chapter 32, <em>Managing Resources</em></a>, we will see an alternative
+implementation for a directory function that corrects this problem.
+</p></div><div class="sect1" title="Continuations"><div class="titlepage"><div><div><h2 class="title"><a id="sc_continuations"/>Continuations</h2></div></div></div><p id="N164F7" style="text-indent: 0">
+Through <a class="indexterm" id="N164F9"/><code class="function">lua_pcall</code> and <a class="indexterm" id="N16501"/><code class="function">lua_call</code>,
+a C function called from Lua can call Lua back.
+Several functions in the standard library do that:
+<a class="indexterm" id="N16509"/><code class="function">table.sort</code> can call an order function;
+<a class="indexterm" id="N16511"/><code class="function">string.gsub</code> can call a replacement function;
+<a class="indexterm" id="N16519"/><code class="function">pcall</code> and <a class="indexterm" id="N1651F"/><code class="function">xpcall</code> call functions in protected mode.
+If we remember that the main Lua code
+was itself called from C (the host program),
+we have a call sequence like
+C (host) calls Lua (script) that calls C (library)
+that calls Lua (callback).
+</p><p id="N16525" style="text-indent: 0">
+Usually, Lua handles these sequences of calls without problems;
+after all, this integration with C is a hallmark of the language.
+There is one situation, however,
+where this interlacement can cause difficulties:
+<a class="indexterm" id="N16527"/>coroutines.
+</p><p id="N1652B" style="text-indent: 0">
+Each coroutine in Lua has its own stack,
+which keeps information about the
+pending calls of the coroutine.
+Specifically, the stack stores the return address,
+the parameters, and the local variables of each call.
+For calls to Lua functions,
+the interpreter needs only this stack,
+which we call the <em>soft stack</em>.
+For calls to C functions, however,
+the interpreter must use the C stack, too.
+After all,
+the return address and the local variables
+of a C function live in the C stack.
+</p><p id="N16530" style="text-indent: 0">
+It is easy for the interpreter to have multiple soft stacks,
+but the runtime of <a class="indexterm" id="N16532"></a>ISO C has only one internal stack.
+Therefore, coroutines in Lua cannot suspend
+the execution of a C function:
+if there is a C function in the call path
+from a resume to its respective yield,
+Lua cannot save the state of that C function to restore
+it in the next resume.
+Consider the next example, in Lua 5.1:
+</p><pre class="programlisting" id="N16536">      co = coroutine.wrap(function ()
+                            print(pcall(coroutine.yield))
+                          end)
+      co()
+        --&gt; false    attempt to yield across metamethod/C-call boundary
+</pre><p style="text-indent: 0">
+The function <a class="indexterm" id="N16539"></a><code class="function">pcall</code> is a C function;
+therefore, Lua 5.1 cannot suspend it,
+because there is no way in <a class="indexterm" id="N1653F"></a>ISO C to suspend a
+C function and resume it later.
+</p><p id="N16543" style="text-indent: 0">
+Lua 5.2 and later versions
+ameliorated that difficulty with <a class="indexterm" id="N16545"/><em class="firstterm">continuations</em>.
+Lua 5.2 implements yields using long jumps,
+in the same way that it implements errors.
+A long jump simply throws away any information about
+C functions in the C stack,
+so it is impossible to resume those functions.
+However,
+a C function <code class="literal">foo</code> can specify a continuation function <code class="literal">foo_k</code>,
+which is another C function to be called when it is
+time to resume <code class="literal">foo</code>.
+That is,
+when the interpreter detects that it should resume <code class="literal">foo</code>,
+but that a long jump threw away the entry for <code class="literal">foo</code> in the C stack,
+it calls <code class="literal">foo_k</code> instead.
+</p><p id="N1655E" style="text-indent: 0">
+To make things a little more concrete,
+let us see
+the implementation of <a class="indexterm" id="N16560"></a><code class="function">pcall</code>
+as an example.
+In Lua 5.1,
+this function had the following code:
+</p><pre class="programlisting" id="N16566">      static int luaB_pcall (lua_State *L) {
+        int status;
+        luaL_checkany(L, 1);  /* at least one parameter */
+        status = lua_pcall(L, lua_gettop(L) - 1, LUA_MULTRET, 0);
+        lua_pushboolean(L, (status == LUA_OK));  /* status */
+        lua_insert(L, 1);  /* status is first result */
+        return lua_gettop(L);  /* return status + all results */
+      }
+</pre><p style="text-indent: 0">
+If the function being called through <a class="indexterm" id="N16569"></a><code class="function">lua_pcall</code> yielded,
+it would be impossible to resume <code class="literal">luaB_pcall</code> later.
+Therefore, the interpreter raised an error whenever we
+attempted to yield inside a protected call.
+Lua 5.3 implements <a class="indexterm" id="N16574"></a><code class="function">pcall</code> roughly like in <a class="xref" href="ch29.html#pcallcont" title="Figure 29.2. Implementation of pcall with continuations">Figure 29.2, “Implementation of <code class="function">pcall</code> with continuations”</a>.<sup>[<a href="#ftn.N1657D" id="N1657D" class="footnote">29</a>]</sup>
+</p><div class="figure-float"><div class="figure"><a id="pcallcont"/><p class="title" style="text-indent: 0"><strong>Figure 29.2. Implementation of <a class="indexterm" id="N16586"/><code class="function">pcall</code> with continuations</strong></p><div class="figure-contents"><pre class="programlisting" id="N1658C">      static int finishpcall (lua_State *L, int status, intptr_t ctx) {
+        (void)ctx;   /* unused parameter */
+        status = (status != LUA_OK &amp;&amp; status != LUA_YIELD);
+        lua_pushboolean(L, (status == 0));  /* status */
+        lua_insert(L, 1);  /* status is first result */
+        return lua_gettop(L);  /* return status + all results */
+      }
+      
+      static int luaB_pcall (lua_State *L) {
+        int status;
+        luaL_checkany(L, 1);
+        status = lua_pcallk(L, lua_gettop(L) - 1, LUA_MULTRET, 0,
+                            0, finishpcall);
+        return finishpcall(L, status, 0);
+      }
+</pre></div></div></div><p style="text-indent: 0">
+
+There are three important differences from the Lua 5.1 version:
+first,
+the new version replaces the call to <a class="indexterm" id="N1658F"></a><code class="function">lua_pcall</code>
+by a call to <a class="indexterm" id="N16597"></a><code class="function">lua_pcallk</code>;
+second,
+it puts everything done after that call
+in a new auxiliary function <code class="literal">finishpcall</code>;
+third,
+the status returned by <a class="indexterm" id="N165A2"></a><code class="function">lua_pcallk</code> can be <a class="indexterm" id="N165AA"></a><code class="function">LUA_YIELD</code>,
+besides <a class="indexterm" id="N165B2"></a><code class="function">LUA_OK</code> or an error.
+</p><p id="N165BA" style="text-indent: 0">
+If there are no yields,
+<a class="indexterm" id="N165BC"/><code class="function">lua_pcallk</code> works exactly like <a class="indexterm" id="N165C4"/><code class="function">lua_pcall</code>.
+If there is a yield, however,
+then things are quite different.
+If a function called by the original <a class="indexterm" id="N165CC"/><code class="function">lua_pcall</code> tries to yield,
+Lua 5.3 raises an error, like Lua 5.1.
+But when a function called by the new <a class="indexterm" id="N165D4"/><code class="function">lua_pcallk</code> yields,
+there is no error:
+Lua does a long jump and
+discards the entry for <code class="literal">luaB_pcall</code> from the C stack,
+but keeps in the soft stack of the coroutine a reference
+to the <em>continuation function</em> given to <a class="indexterm" id="N165E2"/><code class="function">lua_pcallk</code>
+(<code class="literal">finishpcall</code>, in our example).
+Later, when the interpreter detects that it should return
+to <code class="literal">luaB_pcall</code> (which is impossible),
+it instead calls the continuation function.
+</p><p id="N165F0" style="text-indent: 0">
+The continuation function <code class="literal">finishpcall</code> can also be called
+when there is an error.
+Unlike the original <code class="literal">luaB_pcall</code>,
+<code class="literal">finishpcall</code> cannot get the value returned by <a class="indexterm" id="N165FB"/><code class="function">lua_pcallk</code>.
+So, it gets this value as an extra parameter, <code class="literal">status</code>.
+When there are no errors,
+<code class="literal">status</code> is <a class="indexterm" id="N16609"/><code class="function">LUA_YIELD</code> instead of <a class="indexterm" id="N16611"/><code class="function">LUA_OK</code>,
+so that the continuation function can check
+how it is being called.
+In case of errors,
+<code class="literal">status</code> is the original error code.
+</p><p id="N1661C" style="text-indent: 0">
+Besides the status of the call,
+the continuation function also receives a <em>context</em>.
+The fifth parameter to <a class="indexterm" id="N16621"/><code class="function">lua_pcallk</code> is an arbitrary integer
+that is passed as the last parameter to the continuation function.
+(The type of this parameter, <code class="literal">intptr_t</code>,
+allows pointers to be passed as context, too.)
+This value allows the original function
+to pass some arbitrary information
+directly to its continuation.
+(Our example does not use this facility.)
+</p><p id="N1662C" style="text-indent: 0">
+The continuation system of Lua 5.3 is
+an ingenious mechanism to support yields,
+but it is not a panacea.
+Some C functions would need to pass too much context
+to their continuations.
+Examples include <a class="indexterm" id="N1662E"/><code class="function">table.sort</code>,
+which uses the C stack for recursion,
+and <a class="indexterm" id="N16636"/><code class="function">string.gsub</code>,
+which must keep track of <a class="indexterm" id="N1663E"/>captures and a buffer for its partial result.
+Although it is possible to rewrite them in a <span class="quote">“<span class="quote">yieldable</span>”</span> way,
+the gains do not seem to be worth the extra complexity
+and performance losses.
+</p></div><div class="sect1" title="C Modules"><div class="titlepage"><div><div><h2 class="title"><a id="C-libs"/>C Modules</h2></div></div></div><p id="N16649" style="text-indent: 0">
+A Lua module is a chunk that defines several Lua functions
+and stores them in appropriate places,
+typically as entries in a table.
+A <a class="indexterm" id="N1664B"/>C module for Lua mimics this behavior.
+Besides the definition of its C functions,
+it must also define a special function that plays the role
+of the main chunk in a Lua library.
+This function should register all C functions
+of the module and store them in appropriate places,
+again typically as entries in a table.
+Like a Lua main chunk,
+it should also initialize anything else that needs initialization
+in the module.
+</p><p id="N16651" style="text-indent: 0">
+Lua perceives C functions through this registration process.
+Once a C function is represented and stored in Lua,
+Lua calls it through a direct reference to its address
+(which is what we give to Lua when we register a function).
+In other words, Lua does not depend on a function name,
+package location, or visibility rules to call a function,
+once it is registered.
+Typically, a C module has one single public (extern) function,
+which is the function that opens the library.
+All other functions can be private,
+declared as <code class="literal">static</code> in C.
+</p><p id="N16656" style="text-indent: 0">
+When we extend Lua with C functions,
+it is a good idea to design our code as a C module,
+even when we want to register only one C function:
+sooner or later (usually sooner) we will need other functions.
+As usual,
+the auxiliary library offers a helper function for this job.
+The macro <a class="indexterm" id="N16658"></a><code class="function">luaL_newlib</code> takes an array of C functions
+with their respective names
+and registers all of them inside a new table.
+As an example, suppose we want to create a library with
+the function <code class="literal">l_dir</code> that we defined earlier.
+First, we must define the library functions:
+</p><pre class="programlisting" id="N16664">      static int l_dir (lua_State *L) {
+         <em class="replaceable"><code>as before</code></em>
+      }
+</pre><p style="text-indent: 0">
+Next, we declare an array with all functions in the module
+with their respective names.
+This array has elements of type <a class="indexterm" id="N1666A"></a><code class="function">luaL_Reg</code>,
+which is a structure with two fields:
+a function name (a string) and a function pointer.
+</p><pre class="programlisting" id="N16673">      static const struct luaL_Reg mylib [] = {
+        {"dir", l_dir},
+        {NULL, NULL}  /* sentinel */
+      };
+</pre><p style="text-indent: 0">
+In our example, there is only one function (<code class="literal">l_dir</code>) to declare.
+The last pair in the array is always <code class="literal">{NULL, NULL}</code>,
+to mark its end.
+Finally, we declare a main function,
+using <a class="indexterm" id="N1667C"></a><code class="function">luaL_newlib</code>:
+</p><pre class="programlisting" id="N16684">      int luaopen_mylib (lua_State *L) {
+        luaL_newlib(L, mylib);
+        return 1;
+      }
+</pre><p style="text-indent: 0">
+The call to <a class="indexterm" id="N16687"></a><code class="function">luaL_newlib</code> creates a new table
+and fills it with the pairs name–function specified by the
+array <code class="literal">mylib</code>.
+When it returns,
+<a class="indexterm" id="N16692"></a><code class="function">luaL_newlib</code> leaves on the stack the new table
+wherein it opened the library.
+The function <code class="literal">luaopen_mylib</code> then returns 1 to return
+this table to Lua.
+</p><p id="N1669D" style="text-indent: 0">
+After finishing the library,
+we must link it to the interpreter.
+The most convenient way to do it
+is with the <a class="indexterm" id="N1669F"></a>dynamic linking facility,
+if your Lua interpreter supports this facility.
+In this case, you must create a dynamic library with your code
+(<code class="literal">mylib.dll</code> in <a class="indexterm" id="N166A6"></a>Windows,
+<code class="literal">mylib.so</code> in <a class="indexterm" id="N166AD"></a>Linux-like systems)
+and put it somewhere in the C path.
+After these steps,
+you can load your library directly from Lua,
+with <a class="indexterm" id="N166B1"></a><code class="function">require</code>:
+</p><pre class="programlisting" id="N166B7">      local mylib = require "mylib"
+</pre><p style="text-indent: 0">
+This call links the dynamic library <code class="literal">mylib</code> with Lua,
+finds the function <code class="literal">luaopen_mylib</code>,
+registers it as a C function,
+and calls it,
+opening the module.
+(This behavior explains why <code class="literal">luaopen_mylib</code> must have the same
+prototype as any other C function.)
+</p><p id="N166C3" style="text-indent: 0">
+The dynamic linker must know the name
+of the function <code class="literal">luaopen_mylib</code> in order to find it.
+It will always look for <code class="literal">luaopen_</code> concatenated
+with the name of the module.
+Therefore, if our module is called <code class="literal">mylib</code>,
+that function should be called <code class="literal">luaopen_mylib</code>.
+(We discussed the details of this function name
+in <a class="xref" href="ch17.html" title="Chapter 17. Modules and Packages">Chapter 17, <em>Modules and Packages</em></a>.)
+</p><p id="N166D4" style="text-indent: 0">
+If your interpreter does not support dynamic linking,
+then you have to recompile Lua with your new library.
+Besides this recompilation,
+you need some way of telling the <a class="indexterm" id="N166D6"/>stand-alone interpreter
+that it should open this library when it opens a new state.
+A simple way to do this is to add <code class="literal">luaopen_mylib</code> into
+the list of standard libraries to be opened by <a class="indexterm" id="N166DD"/><code class="function">luaL_openlibs</code>,
+in the file <a class="indexterm" id="N166E5"/><code class="filename">linit.c</code>.
+</p></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L276"/>Exercises</h2></div></div></div><p id="N166EF" style="text-indent: 0">
+Exercise 29.1:<a id="L277"></a> 
+Write a variadic <code class="literal">summation</code> function, in C,
+that computes the sum of
+its variable number of numeric arguments:
+</p><pre class="programlisting" id="N166F7">      print(summation())                   --&gt;   0
+      print(summation(2.3, 5.4))           --&gt;   7.7
+      print(summation(2.3, 5.4, -34))      --&gt; -26.3
+      print(summation(2.3, 5.4, {}))
+        --&gt; stdin:1: bad argument #3 to 'summation'
+                       (number expected, got table)
+</pre><p style="text-indent: 0">
+
+
+</p><p id="N166FA" style="text-indent: 0">
+Exercise 29.2:<a id="L278"/> 
+Implement a function equivalent to <a class="indexterm" id="N166FF"/><code class="function">table.pack</code>,
+from the standard library.
+
+
+</p><p id="N16707" style="text-indent: 0">
+Exercise 29.3:<a id="L279"></a> 
+Write a function that takes any number of parameters
+and returns them in reverse order.
+</p><pre class="programlisting" id="N1670C">      print(reverse(1, "hello", 20))   --&gt; 20    hello    1
+</pre><p style="text-indent: 0">
+
+
+</p><p id="N1670F" style="text-indent: 0">
+Exercise 29.4:<a id="L280"></a> 
+Write a function <code class="literal">foreach</code> that takes a table and
+a function and calls that function for each key–value pair
+in the table.
+</p><pre class="programlisting" id="N16717">      foreach({x = 10, y = 20}, print)
+        --&gt; x    10
+        --&gt; y    20
+</pre><p style="text-indent: 0">
+(Hint: check the function <a class="indexterm" id="N1671A"></a><code class="function">lua_next</code> in the Lua manual.)
+
+
+</p><p id="N16722" style="text-indent: 0">
+Exercise 29.5:<a id="L281"/> 
+Rewrite the function <code class="literal">foreach</code>,
+from the previous exercise,
+so that the function being called can yield.
+
+
+</p><p id="N1672A" style="text-indent: 0">
+Exercise 29.6:<a id="L282"/> 
+Create a C module with all functions from the previous exercises.
+
+
+</p></div><div class="footnotes"><br/><hr/><div class="footnote"><p id="N1640D" style="text-indent: 0"><sup>[<a href="#N1640C" id="ftn.N1640C" class="para">28</a>] </sup>There are packages that allow Lua to call any C function,
+but they are neither as portable as Lua nor safe.</p></div><div class="footnote"><p id="N1657E" style="text-indent: 0"><sup>[<a href="#N1657D" id="ftn.N1657D" class="para">29</a>] </sup>The API for continuations in Lua 5.2
+is a little different.
+Check the reference manual for details.</p></div></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

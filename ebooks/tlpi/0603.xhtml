@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>6.3. Memory Layout of a Process</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">6.3. Memory Layout of a Process</h3><p class="docText">The memory allocated to each process is composed of a number of parts, usually referred to as <span class="docEmphasis">segments</span>. These segments are as follows:</p><ul><li><p class="docList">The <span class="docEmphasis">text segment</span>
+ contains the machine-language instructions of the program run by the 
+process. The text segment is made read-only so that a process doesn’t 
+accidentally modify its own instructions via a bad pointer value. Since 
+many processes may be running the same program, the text segment is made
+ sharable so that a single copy of the program code can be mapped into 
+the virtual address space of all of the processes.</p></li><li><p class="docList">The <span class="docEmphasis">initialized data segment</span>
+ contains global and static variables that are explicitly initialized. 
+The values of these variables are read from the executable file when the
+ program is loaded into memory.</p></li><li><p class="docList">The <span class="docEmphasis">uninitialized data segment</span>
+ contains global and static variables that are not explicitly 
+initialized. Before starting the program, the system initializes all 
+memory in this segment to 0. For historical reasons, this is often 
+called the <span class="docEmphasis">bss</span>
+ segment, a name derived from an old assembler mnemonic for “block 
+started by symbol.” The main reason for placing global and static 
+variables that are initialized into a separate segment from those that 
+are uninitialized is that, when a program is stored on disk, it is not 
+necessary to allocate space for the uninitialized data. Instead, the 
+executable merely needs to record the location and size required for the
+ uninitialized data segment, and this space is allocated by the program 
+loader at run time.</p></li><li><p class="docList">The <span class="docEmphasis">stack</span>
+ is a dynamically growing and shrinking segment containing stack frames.
+ One stack frame is allocated for each currently called function. A 
+frame stores the function’s local variables (so-called automatic 
+variables), arguments, and return value. Stack frames are discussed in 
+more detail in Section 6.5.</p></li><li><p class="docList">The <span class="docEmphasis">heap</span> is an area from which memory (for variables) can be dynamically allocated at run time. The top end of the heap is called the <span class="docEmphasis">program break</span>.</p></li></ul><p class="docText">Less commonly used, but more descriptive labels for the initialized and uninitialized data segments are <span class="docEmphasis">user-initialized data segment</span> and <span class="docEmphasis">zero-initialized data segment</span>.</p><p class="docText">The <span class="docEmphasis">size(1)</span> command displays the size of the text, initialized data, and uninitialized data (<span class="docEmphasis">bss</span>) segments of a binary executable.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The term <span class="docEmphasis">segment</span>
+ as used in the main text should not be confused with the hardware 
+segmentation used on some hardware architectures such as x86-32. Rather,
+ segments are logical divisions of a process’s virtual memory on UNIX 
+systems. Sometimes, the term <span class="docEmphasis">section</span> is used instead of <span class="docEmphasis">segment</span>, since <span class="docEmphasis">section</span> is more consistent with the terminology used in the now ubiquitous ELF specification for executable file formats.</p><p class="docText">In
+ many places in this book, we note that a library function returns a 
+pointer to statically allocated memory. By this, we mean that the memory
+ is allocated in either the initialized or the uninitialized data 
+segment. (In some cases, the library function may instead do a one-time 
+dynamic allocation of the memory on the heap; however, this 
+implementation detail is irrelevant to the semantic point we describe 
+here.) It is important to be aware of cases where a library function 
+returns information via statically allocated memory, since that memory 
+has an existence that is independent of the function invocation, and the
+ memory may be overwritten by subsequent calls to the same function (or 
+in some cases, by subsequent calls to related functions). The effect of 
+using statically allocated memory is to render a function nonreentrant. 
+We say more about reentrancy in Section 21.1.2 and Section 31.1.</p><hr noshade="noshade" size="1"/><p class="docText">Example 6-1
+ shows various types of C variables along with comments indicating in 
+which segment each variable is located. These comments assume a 
+nonoptimizing compiler and an application binary interface in which all 
+arguments are passed on the stack. In practice, an optimizing compiler 
+may allocate frequently used variables in registers, or optimize a 
+variable out of existence altogether. Furthermore, some ABIs require 
+function arguments and the function result to be passed via registers, 
+rather than on the stack. Nevertheless, this example serves to 
+demonstrate the mapping between C variables and the segments of a 
+process.</p><h5 class="docExampleTitle" id="title-ID0EZPBG">Example 6-1. Locations of program variables in process memory segments</h5><p></p><div class="box"><pre class="preFixedHeight"><b>proc/mem_segments.c</b>
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+char globBuf[65536];            /* Uninitialized data segment */
+int primes[] = { 2, 3, 5, 7 };  /* Initialized data segment */
+
+static int
+square(int x)                   /* Allocated in frame for square() */
+{
+    int result;                 /* Allocated in frame for square() */
+
+    result = x * x;
+    return result;              /* Return value passed via register */
+}
+
+static void
+doCalc(int val)                 /* Allocated in frame for doCalc() */
+{
+    printf("The square of %d is %d\n", val, square(val));
+
+    if (val &lt; 1000) {
+        int t;                  /* Allocated in frame for doCalc() */
+
+        t = val * val * val;
+        printf("The cube of %d is %d\n", val, t);
+    }
+}
+
+int
+main(int argc, char *argv[])    /* Allocated in frame for main() */
+{
+    static int key = 9973;      /* Initialized data segment */
+    static char mbuf[10240000]; /* Uninitialized data segment */
+    char *p;                    /* Allocated in frame for main() */
+
+    p = malloc(1024);           /* Points to memory in heap segment */
+
+    doCalc(key);
+
+    exit(EXIT_SUCCESS);
+}
+      <b>proc/mem_segments.c</b>
+
+					  </pre><br/>
+</div><p></p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">An <span class="docEmphasis">application binary interface</span>
+ (ABI) is a set of rules specifying how a binary executable should 
+exchange information with some service (e.g., the kernel or a library) 
+at run time. Among other things, an ABI specifies which registers and 
+stack locations are used to exchange this information, and what meaning 
+is attached to the exchanged values. Once compiled for a particular ABI,
+ a binary executable should be able to run on any system presenting the 
+same ABI. This contrasts with a standardized API (such as SUSv3), which 
+guarantees portability only for applications compiled from source code.</p><hr noshade="noshade" size="1"/><p class="docText">Although
+ not specified in SUSv3, the C program environment on most UNIX 
+implementations (including Linux) provides three global symbols: <span class="docEmphasis">etext</span>, <span class="docEmphasis">edata</span>, and <span class="docEmphasis">end</span>.
+ These symbols can be used from within a program to obtain the addresses
+ of the next byte past, respectively, the end of the program text, the 
+end of the initialized data segment, and the end of the uninitialized 
+data segment. To make use of these symbols, we must explicitly declare 
+them, as follows:</p><pre>extern char etext, edata, end;
+        /* For example, &amp;etext gives the address of the end
+           of the program text / start of initialized data */</pre><br/>
+<p class="docText">Figure 6-1 shows the arrangement of the various memory segments on the x86-32 architecture. The space labeled <span class="docEmphasis">argv, environ</span> at the top of this diagram holds the program command-line arguments (available in C via the <span class="docEmphasis">argv</span> argument of the <span class="docEmphasis">main()</span>
+ function) and the process environment list (which we discuss shortly). 
+The hexadecimal addresses shown in the diagram may vary, depending on 
+kernel configuration and program linking options. The grayed-out areas 
+represent invalid ranges in the process’s virtual address space; that 
+is, areas for which page tables have not been created (see the following
+ discussion of virtual memory management).</p><p class="docText">We revisit the topic of process memory layout in a little more detail in Section 48.5, where we consider where shared memory and shared libraries are placed in a process’s virtual memory.</p>
+</div>
+</body>
+</html>

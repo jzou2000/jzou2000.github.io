@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>64.1. Overview</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">64.1. Overview</h3><p class="docText">Figure 64-1
+ illustrates one of the problems that pseudoterminals help us solve: how
+ can we enable a user on one host to operate a terminal-oriented program
+ (e.g., <span class="docEmphasis">vi</span>) on another host connected via a network?</p><p class="docText">As
+ shown in the diagram, by permitting communication over a network, 
+sockets provide part of the machinery needed to solve this problem. 
+However, we can’t connect the standard input, output, and error of a 
+terminal-oriented program directly to a socket. This is because a 
+terminal-oriented program expects to be connected to a terminal—to be 
+able to perform the terminal-oriented operations described in Chapter 34 and Chapter 62.
+ Such operations include placing the terminal in noncanonical mode, 
+turning echoing on and off, and setting the terminal foreground process 
+group. If a program tries to perform these operations on a socket, then 
+the relevant system calls will fail.</p><p class="docText">Furthermore,
+ a terminal-oriented program expects a terminal driver to perform 
+certain kinds of processing of its input and output. For example, in 
+canonical mode, when the terminal driver sees the end-of-file character 
+(normally <span class="docEmphasis">Control-D</span>) at the start of a line, it causes the next <span class="docEmphasis">read()</span> to return no data.</p><p class="docText">Finally,
+ a terminal-oriented program must have a controlling terminal. This 
+allows the program to obtain a file descriptor for the controlling 
+terminal by opening <tt>/dev/tty</tt>, and also makes it possible to generate job-control and terminal-related signals (e.g., <tt>SIGTSTP</tt>, <tt>SIGTTIN</tt>, and <tt>SIGINT</tt>) for the program.</p><p class="docText">From
+ this description, it should be clear that the definition of a 
+terminal-oriented program is quite broad. It encompasses a wide range of
+ programs that we would normally run in an interactive terminal session.</p><p></p><center><h5 class="docFigureTitle">Figure 64-1. The problem: how to operate a terminal-oriented program over a network?</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_003-69.png"/></p></center><p></p><br/><h4 class="docSection2Title" id="title-ID0EVZIM">64.1.1. </h4><h5 class="docSection3Title" id="title-ID0EZZIM">64.1.1.1. The pseudoterminal master and slave devices</h5><p class="docText">A
+ pseudoterminal provides the missing link for creating a network 
+connection to a terminal-oriented program. A pseudoterminal is a pair of
+ connected virtual devices: a <span class="docEmphasis">pseudoterminal master</span> and a <span class="docEmphasis">pseudoterminal slave</span>, sometimes jointly referred to as a <span class="docEmphasis">pseudoterminal pair</span>.
+ A pseudoterminal pair provides an IPC channel somewhat like a 
+bidirectional pipe—two processes can open the master and slave and then 
+transfer data in either direction through the pseudoterminal.</p><p class="docText">The
+ key point about a pseudoterminal is that the slave device appears just 
+like a standard terminal. All of the operations that can be applied to a
+ terminal device can also be applied to a pseudoterminal slave device. 
+Some of these operations aren’t meaningful for a pseudoterminal (e.g., 
+setting the terminal line speed or parity), but that’s okay, because the
+ pseudoterminal slave silently ignores them.</p><h5 class="docSection3Title" id="title-ID0EV1IM">64.1.1.2. How programs use pseudoterminals</h5><p class="docText">Figure 64-2 shows how two programs typically employ a pseudoterminal. (The abbreviation <span class="docEmphasis">pty</span> in this diagram is a commonly used shorthand for <span class="docEmphasis">pseudoterminal</span>,
+ and we employ this abbreviation in various diagrams and function names 
+in this chapter.) The standard input, output, and error of the 
+terminal-oriented program are connected to the pseudoterminal slave, 
+which is also the controlling terminal for the program. On the other 
+side of the pseudoterminal, a driver program acts as a proxy for the 
+user, supplying input to the terminal-oriented program and reading that 
+program’s output.</p><p></p><center><h5 class="docFigureTitle">Figure 64-2. Two programs communicating via a pseudoterminal</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_002-70.png"/></p></center><p></p><br/><p class="docText">Typically,
+ the driver program is simultaneously reading from and writing to 
+another I/O channel. It is acting as a relay, passing data in both 
+directions between the pseudoterminal and another program. In order to 
+do this, the driver program must simultaneously monitor input arriving 
+from either direction. Typically, this is done using I/O multiplexing (<span class="docEmphasis">select()</span> or <span class="docEmphasis">poll()</span>), or using a pair of processes or threads to perform data transfer in each direction.</p><p class="docText">An application that uses a pseudoterminal typically does so as follows:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">The driver program opens the pseudoterminal master device.</p></div></li><li><div style="font-weight:normal"><p class="docList">The driver program calls <span class="docEmphasis">fork()</span> to create a child process. The child performs the following steps:</p><div style="font-weight:bold"><ol class="docList" type="a"><li><div style="font-weight:normal"><p class="docList">Call <span class="docEmphasis">setsid()</span>
+ to start a new session, of which the child is the session leader 
+(Section 34.3). This step also causes the child to lose its controlling 
+terminal.</p></div></li><li><div style="font-weight:normal"><p class="docList">Open
+ the pseudoterminal slave device that corresponds to the master device. 
+Since the child process is a session leader, and it doesn’t have a 
+controlling terminal, the pseudoterminal slave becomes the controlling 
+terminal for the child process.</p></div></li><li><div style="font-weight:normal"><p class="docList">Use <span class="docEmphasis">dup()</span> (or similar) to duplicate the file descriptor for the slave device on standard input, output, and error.</p></div></li><li><div style="font-weight:normal"><p class="docList">Call <span class="docEmphasis">exec()</span> to start the terminal-oriented program that is to be connected to the pseudoterminal slave.</p></div></li></ol></div></div></li></ol></div><p class="docText">At
+ this point, the two programs can now communicate via the 
+pseudoterminal. Anything that the driver program writes to the master 
+appears as input to the terminal-oriented program on the slave, and 
+anything that the terminal-oriented program writes to the slave can be 
+read by the driver program on the master. We consider further details of
+ pseudoterminal I/O in Section 64.5.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Pseudoterminals
+ can also be used to connect an arbitrary pair of processes (i.e., not 
+necessarily a parent and child). All that is required is that the 
+process that opens the pseudoterminal master informs the other process 
+of the name of the corresponding slave device, perhaps by writing that 
+name to a file or by transmitting it using some other IPC mechanism. 
+(When we use <span class="docEmphasis">fork()</span>
+ in the manner described above, the child automatically inherits 
+sufficient information from the parent to enable it to determine the 
+name of the slave.)</p><hr noshade="noshade" size="1"/><p class="docText">So far, our discussion of the use of pseudoterminals has been abstract. Figure 64-3 shows a specific example: the use of a pseudoterminal by <span class="docEmphasis">ssh</span><a name="securely run"></a>,
+ an application that allows a user to securely run a login session on a 
+remote system connected via a network. (In effect, this diagram combines
+ the information from Figure 64-1 and Figure 64-2.) On the remote host, the driver program for the pseudoterminal master is the <span class="docEmphasis">ssh</span> server (<span class="docEmphasis">sshd</span>), and the terminal-oriented program connected to the pseudoterminal slave is the login shell. The <span class="docEmphasis">ssh</span> server is the glue that connects the pseudoterminal via a socket to the <span class="docEmphasis">ssh</span> client. Once all of the details of logging in have been completed, the primary purpose of the <span class="docEmphasis">ssh</span>
+ server and client is to relay characters in either direction between 
+the user’s terminal on the local host and the shell on the remote host.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">We omit describing many details of the <span class="docEmphasis">ssh</span>
+ client and server. For example, these programs encrypt the data 
+transmitted in either direction across the network. We show a single <span class="docEmphasis">ssh</span> server process on the remote host, but, in fact, the <span class="docEmphasis">ssh</span>
+ server is a concurrent network server. It becomes a daemon and creates a
+ passive TCP socket to listen for incoming connections from <span class="docEmphasis">ssh</span> clients. For each connection, the master <span class="docEmphasis">ssh</span>
+ server forks a child process that handles all of the details for a 
+single client login session. (We refer to this child process as the <span class="docEmphasis">ssh</span> server in Figure 64-3.) Aside from the details of pseudoterminal setup described above, the <span class="docEmphasis">ssh</span> server child authenticates the user, updates the login accounting files on the remote host (as described in Chapter 40), and then execs the login shell.</p><hr noshade="noshade" size="1"/><p></p><center><h5 class="docFigureTitle">Figure 64-3. How <span class="docEmphasis">ssh</span> uses a pseudoterminal</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-128.png"/></p></center><p></p><br/><p class="docText">In some cases, multiple processes may be connected to the slave side of the pseudoterminal. Our <span class="docEmphasis">ssh</span>
+ example illustrates this point. The session leader for the slave is a 
+shell, which creates process groups to execute the commands entered by 
+the remote user. All of these processes have the pseudoterminal slave as
+ their controlling terminal. As with a conventional terminal, one of 
+these process groups can be the foreground process group for the 
+pseudoterminal slave, and only this process group is allowed to read 
+from the slave and (if the <tt>TOSTOP</tt> bit has been set) write to it.</p><h5 class="docSection3Title" id="title-ID0EAAJM">64.1.1.3. Applications of pseudoterminals</h5><p class="docText">Pseudoterminals are also used in many applications other than network services. Examples include the following:</p><ul><li><p class="docList">The <span class="docEmphasis">expect(1)</span> program uses a pseudoterminal to allow an interactive terminal-oriented program to be driven from a script file.</p></li><li><p class="docList">Terminal emulators such as <span class="docEmphasis">xterm</span> employ pseudoterminals to provide the terminal-related functionality that goes with a terminal window.</p></li><li><p class="docList">The <span class="docEmphasis">screen(1)</span>
+ program uses pseudoterminals to multiplex a single physical terminal 
+(or terminal window) between multiple processes (e.g., multiple shell 
+sessions).</p></li><li><p class="docList">Pseudoterminals are used in the <span class="docEmphasis">script(1)</span> program, which records all of the input and output that occurs during a shell session.</p></li><li><p class="docList">Sometimes a pseudoterminal is useful to circumvent the default block buffering performed by the <span class="docEmphasis">stdio</span>
+ functions when writing output to a disk file or pipe, as opposed to the
+ line buffering used for terminal output. (We consider this point 
+further in Exercise 64-7.)</p></li></ul><h5 class="docSection3Title" id="title-ID0ETBJM">64.1.1.4. System V (UNIX 98) and BSD pseudoterminals</h5><p class="docText">BSD
+ and System V provided different interfaces for finding and opening the 
+two halves of a pseudoterminal pair. The BSD pseudoterminal 
+implementation was historically the better known, since it was used with
+ many sockets-based network applications. For compatibility reasons, 
+many UNIX implementations eventually came to support both styles of 
+pseudoterminals.</p><p class="docText">The
+ System V interface is somewhat simpler to use than the BSD interface, 
+and the SUSv3 specification of pseudoterminals is based on the System V 
+interface. (A pseudoterminal specification first appeared in SUSv1.) For
+ historical reasons, on Linux systems, this type of pseudoterminal is 
+commonly referred to as a <span class="docEmphasis">UNIX 98</span>
+ pseudoterminal, even though the UNIX 98 standard (i.e., SUSv2) required
+ pseudoterminals to be STREAMS-based, and the Linux implementation of 
+pseudoterminals is not. (SUSv3 doesn’t require a STREAMS-based 
+implementation.)</p><p class="docText">Early 
+versions of Linux supported only BSD-style pseudoterminals, but, since 
+kernel 2.2, Linux has supported both types of pseudoterminals. In this 
+chapter, we focus on UNIX 98 pseudoterminals. We describe the 
+differences for BSD pseudoterminals in Section 64.8.</p>
+</div>
+</body>
+</html>

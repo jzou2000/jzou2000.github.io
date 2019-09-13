@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 12.1. Creating a Thread</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 12.1. Creating a Thread</h3>
+
+<h4 class="docSection2Title" id="title-ID0EWHAK">Problem</h4>
+<p class="docText">You want to create a thread 
+
+to
+perform some task while the main thread continues its work.</p>
+
+<h4 class="docSection2Title" id="title-ID0ESIAK">Solution</h4>
+<p class="docText">Create an object of the class <tt>thread</tt>, and pass it
+a functor that does the work. The creation of the thread object will
+instantiate an operating system thread that begins executing at
+<tt>operator( )</tt> on your functor (or the beginning of
+the function if you passed in a function pointer instead). Example 12-1 shows you how.</p>
+<h5 class="docExampleTitle" id="title-ID0EDJAK">Example 12-1. Creating a thread</h5><p></p><div class="box">
+<pre>#include &lt;iostream&gt;
+#include &lt;boost/thread/thread.hpp&gt;
+#include &lt;boost/thread/xtime.hpp&gt;
+
+struct MyThreadFunc {
+   void operator( )( ) {
+      // Do something long-running...
+   }
+} threadFun;
+
+int main( ) {
+
+   boost::thread myThread(threadFun); // Create a thread that starts
+                                      // running threadFun
+
+   boost::thread::yield( ); // Give up the main thread's timeslice
+                           // so the child thread can get some work
+                           // done.
+
+   // Go do some other work...
+
+   myThread.join( ); // The current (i.e., main) thread will wait
+                    // for myThread to finish before it returns
+
+}</pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0EMJAK">Discussion</h4>
+<p class="docText">Creating a thread is deceptively simple. All you have to do is create
+a <tt>thread</tt> object on the stack or the heap, and pass
+it a functor that tells it where it can begin working. For this
+discussion, a "thread" is actually
+two things. First, it's an object of the class
+<tt>thread</tt>, which is a C++ object in the conventional
+sense. When I am referring to this object, I will say
+"thread object." Then there is the
+thread of execution, which is an operating system thread that is
+represented by the <tt>thread</tt> object. When I say
+"thread" (not in fixed-width font),
+I mean the operating system thread.</p>
+<p class="docText">Let's get right to the code in the example. The
+<tt>thread</tt> constructor takes a functor (or function
+pointer) that takes no arguments and returns <tt>void</tt>.
+Look at this line from Example 12-1:</p>
+<pre>boost::thread myThread(threadFun);</pre><br/>
+<p class="docText">This creates the
+<tt>myThread</tt>
+
+object on the stack, which represents a new operating system thread
+that begins executing <tt>threadFun</tt>. At that point,
+the code in <tt>threadFun</tt> and the code in
+<tt>main</tt> are, at least in theory, running in parallel.
+They may not exactly be running in parallel, of course, because your
+machine may have only one processor, in which case this is impossible
+(recent processor architectures have made this not quite true, but
+I'll ignore dual-core processors and the like for
+now). If you have only one processor, then the operating system will
+give each thread you create a slice of time in the run state before
+it is suspended. Because these slices of time can be of varying
+sizes, you can never be guaranteed which thread will reach a
+particular point first. This is the aspect of multithreaded
+programming that makes it difficult: <span class="docEmphasis">multithreaded program
+state is nondeterministic</span>. The same multithreaded program,
+run multiple times, with the same inputs, can produce different
+output. Coordinating resources used by multiple threads is the
+subject of Recipe 12.2.</p>
+<p class="docText">After creating <tt>myThread</tt>, the
+<tt>main</tt> thread continues, at least for a moment,
+until it reaches the next line:</p>
+<pre>boost::thread::yield( );</pre><br/>
+<p class="docText">This puts the current thread (in this case the
+<tt>main</tt> thread) in a sleep state, which means the
+operating system will switch to another thread or another process
+using some operating-system-specific policy. <tt>yield</tt>
+is a way of telling the operating system that the current thread
+wants to give up the rest of its slice of time. Meanwhile, the new
+thread is executing <tt>threadFun</tt>. When
+<tt>threadFun</tt> is done, the child thread goes away.
+Note that the <tt>thread</tt> object
+doesn't go away, because it's still
+a C++ object that's in scope. This is an important
+distinction.</p>
+<p class="docText">The thread object is something that exists on the heap or the stack,
+and works just like any other C++ object. When the calling code exits
+scope, any stack thread objects are destroyed and, alternatively,
+when the caller calls <tt>delete</tt> on a
+<tt>thread*</tt>, the corresponding heap
+<tt>thread</tt> object disappears. But
+<tt>thread</tt> objects are just proxies for the actual
+operating system threads, and when they are destroyed the operating
+system threads aren't guaranteed to go away. They
+merely become detached, meaning that they cannot later be rejoined.
+This is not a bad thing.</p>
+<p class="docText">Threads use resources, and
+
+in
+any (well-designed) multithreaded application, access to such
+resources (objects, sockets, files, raw memory, and so on) is
+controlled with mutexes, which are objects used for serializing
+access to something among multiple threads (see Recipe 12.2). If an operating system thread is killed, it
+will not release its locks or deallocate its resources, similarly to
+how killing a process does not give it a chance to flush its buffers
+or release operating system resources properly. Simply ending a
+thread when you think it ought to be finished is like pulling a
+ladder out from under a painter when his time is up.</p>
+<p class="docText">Thus, we have the
+
+
+<tt>join</tt> member function. As in Example 12-1, you can call <tt>join</tt> to wait
+for a child thread to finish. <tt>join</tt> is a polite way
+of telling the thread that you are going to wait until
+it's done working:</p>
+<pre>myThread.join( );</pre><br/>
+<p class="docText">The thread that calls <tt>join</tt> goes into a wait state
+until the thread represented by <tt>myThread</tt> is
+finished. If it never finishes, <tt>join</tt> never
+returns. <tt>join</tt> is the best way to wait for a child
+thread to finish.</p>
+<p class="docText">You may notice that if you put something meaningful in
+<tt>threadFun</tt>, but comment out the use of
+<tt>join</tt>, the thread doesn't finish
+its work. Try this out by putting a loop or some long operation in
+<tt>threadFun</tt>. This is because when the operating
+system destroys a process, all of its child threads go with it,
+whether they're done or not. Without the call to
+<tt>join</tt>, <tt>main</tt>
+doesn't wait for its child thread: it exits, and the
+operating system thread is destroyed.</p>
+<p class="docText">If you need to create several threads, consider grouping them with a
+<tt>thread_group</tt> object. A
+<tt>thread_group</tt>
+
+object can manage threads in a couple of ways. First, you can call
+<tt>add_thread</tt> with a pointer to a
+<tt>thread</tt> object, and that object will be added to
+the group. Here's a sample:</p>
+<pre>boost::thread_group grp;
+boost::thread* p = new boost::thread(threadFun);
+grp.add_thread(p);
+// do something...
+grp.remove_thread(p);</pre><br/>
+<p class="docText">When <tt>grp</tt>'s destructor is called,
+it will <tt>delete</tt> each of the thread pointers that
+were added with <tt>add_thread</tt>. For this reason, you
+can only add pointers to heap thread objects to a
+<tt>thread_group</tt>. Remove a thread by calling
+<tt>remove_thread</tt> and passing in the thread
+object's address (<tt>remove_thread</tt>
+finds the corresponding thread object in the group by comparing the
+pointer values, not by comparing the objects they point to).
+<tt>remove_thread</tt> will remove the pointer to that
+thread from the group, but you are still responsible for
+<tt>delete</tt>-ing it.</p>
+<p class="docText">You can also add a
+
+
+thread to a group without having to
+create it yourself by calling <tt>create_thread</tt>, which
+(like a thread object) takes a functor as an argument and begins
+executing it in a new operating system thread. For example, to spawn
+two threads in a group, do this:</p>
+<pre>boost::thread_group grp;
+
+grp.create_thread(threadFun);
+grp.create_thread(threadFun); // Now there are two threads in grp
+
+grp.join_all( ); // Wait for all threads to finish</pre><br/>
+<p class="docText">Whether you add threads to the group with
+<tt>create_thread</tt> or <tt>add_thread</tt>,
+you can call <tt>join_all</tt> to wait for all of the
+threads in the group to complete. Calling <tt>join_all</tt>
+is the same as calling <tt>join</tt> on each of the threads
+in the group: when all of the threads in the group have completed
+their work <tt>join_all</tt> returns.</p>
+<p class="docText">Creating a thread object allows a separate thread of execution to
+begin. Doing it with the Boost Threads library is deceptively easy,
+though, so design carefully. Read the rest of the recipes in this
+chapter for more
+
+ cautionary information about threads.</p>
+
+<h4 class="docSection2Title" id="title-ID0EJRAK">See Also</h4>
+<p class="docText">Recipe 12.2</p>
+</div>
+</body>
+</html>

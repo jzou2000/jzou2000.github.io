@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>18.12. Changing the Root Directory of a Process: chroot()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">18.12. Changing the Root Directory of a Process: <span class="docEmphasis">chroot()</span></h3><p class="docText">Every process has a <span class="docEmphasis">root directory</span>,
+ which is the point from which absolute pathnames (i.e., those beginning
+ with /) are interpreted. By default, this is the real root directory of
+ the file system. (A new process inherits its parent’s root directory.) 
+On occasion, it is useful for a process to change its root directory, 
+and a privileged (<tt>CAP_SYS_CHROOT</tt>) process can do this using the <span class="docEmphasis">chroot()</span> system call.</p><pre>#define _BSD_SOURCE
+#include &lt;unistd.h&gt;
+
+int <b>chroot</b>(const char *<span class="docEmphasis">pathname</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">chroot()</span> system call changes the process’s root directory to the directory specified by <span class="docEmphasis">pathname</span>
+ (which is dereferenced if it is a symbolic link). Thereafter, all 
+absolute pathnames are interpreted as starting from that location in the
+ file system. This is sometimes referred to as setting up a <span class="docEmphasis">chroot</span> jail, since the program is then confined to a particular area of the file system.</p><p class="docText">SUSv2 contained a specification for <span class="docEmphasis">chroot()</span> (marked LEGACY), but this was removed in SUSv3. Nevertheless, <span class="docEmphasis">chroot()</span> appears on most UNIX implementations.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">chroot()</span> system call is employed by the <span class="docEmphasis">chroot</span> command, which enables us to execute shell commands in a <span class="docEmphasis">chroot</span> jail.</p><p class="docText">The root directory of any process can be found by reading (<span class="docEmphasis">readlink()</span>) the contents of the Linux-specific <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/root</tt> symbolic link.</p><hr noshade="noshade" size="1"/><p class="docText">The classic example of the use of <span class="docEmphasis">chroot()</span> is in the <span class="docEmphasis">ftp</span> program. As a security measure, when a user logs in anonymously under FTP, the <span class="docEmphasis">ftp</span> program uses <span class="docEmphasis">chroot()</span>
+ to set the root directory for the new process to the directory 
+specifically reserved for anonymous logins. After the chroot() call, the
+ user is limited to the file-system subtree under their new root 
+directory, so they can’t roam around the entire file system. (This 
+relies on the fact that the root directory is its own parent; that is, <tt>/..</tt> is a link to <tt>/</tt>, so that changing directory to <tt>/</tt> and then attempting a <span class="docEmphasis">cd ..</span> leaves the user in the same directory.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Some
+ UNIX implementations (but not Linux) allow multiple hard links to a 
+directory, so that it is possible to create a hard link within a 
+subdirectory to its parent (or a further removed ancestor). On 
+implementations permitting this, the presence of a hard link that 
+reaches outside the jail directory tree compromises the jail. Symbolic 
+links to directories outside the jail don’t pose a problem—because they 
+are interpreted within the framework of the process’s new root 
+directory, they can’t reach outside the <span class="docEmphasis">chroot</span> jail.</p><hr noshade="noshade" size="1"/><p class="docText">Normally, we can’t execute arbitrary programs within a <span class="docEmphasis">chroot</span>
+ jail. This is because most programs are dynamically linked against 
+shared libraries. Therefore, we must either limit ourselves to executing
+ statically linked programs, or replicate a standard set of system 
+directories containing shared libraries (including, for example, <tt>/lib</tt> and <tt>/usr/lib</tt>) within the jail (in this regard, the bind mount feature described in Section 14.9.4 can be useful).</p><p class="docText">The <span class="docEmphasis">chroot()</span>
+ system call was not conceived as a completely secure jail mechanism. To
+ begin with, there are various ways in which a privileged program can 
+subsequently use a further <span class="docEmphasis">chroot()</span> call to break out of the jail. For example, a privileged (<tt>CAP_MKNOD</tt>) program can use <span class="docEmphasis">mknod()</span> to create a memory device file (similar to <tt>/dev/mem</tt>)
+ giving access to the contents of RAM, and, from that point, anything is
+ possible. In general, it is advisable not to include set-user-ID-<span class="docEmphasis">root</span> programs within a <span class="docEmphasis">chroot</span> jail file system.</p><p class="docText">Even with unprivileged programs, we must take care to prevent the following possible routes for breaking out of a <span class="docEmphasis">chroot</span> jail:</p><ul><li><p class="docList">Calling <span class="docEmphasis">chroot()</span> doesn’t change the process’s current working directory. Thus, a call to <span class="docEmphasis">chroot()</span> is typically preceded or followed by a call to <span class="docEmphasis">chdir()</span> (e.g., <span class="docEmphasis">chdir</span>(“/”) after the <span class="docEmphasis">chroot()</span>
+ call). If this is not done, then a process can use relative pathnames 
+to access files and directories outside the jail. (Some BSD derivatives 
+prevent this possibility—if the current working directory lies outside 
+the new root directory tree, then it is changed by the <span class="docEmphasis">chroot()</span> call to be the same as the root directory.)</p></li><li><p class="docList">If a process holds an open file descriptor for a directory outside the jail, then the combination of <span class="docEmphasis">fchdir()</span> plus <span class="docEmphasis">chroot()</span> can be used to break out of the jail, as shown in the following code sample:</p><pre>int fd;
+
+fd = open("/", O_RDONLY);
+chroot("/home/mtk");            /* Jailed */
+fchdir(fd);
+chroot(".");                    /* Out of jail */</pre><br/>
+<p class="docList">To prevent this possibility, 
+we must close all open file descriptors referring to directories outside
+ the jail. (Some other UNIX implementations provide the <span class="docEmphasis">fchroot()</span> system call, which can be used to achieve a similar result to the above code snippet.)</p></li><li><p class="docList">Even
+ preventing the preceding possibilities is insufficient to stop an 
+arbitrary unprivileged program (i.e., one whose operation we don’t have 
+control over) from breaking out of the jail. The jailed process can 
+still use a UNIX domain socket to receive a file descriptor (from 
+another process) referring to a directory outside the jail. (We briefly 
+explain the concept of passing file descriptors between processes via a 
+socket in Section 61.13.3.) By specifying this file descriptor in a call to <span class="docEmphasis">fchdir()</span>,
+ the program can set its current working directory outside the jail and 
+then access arbitrary files and directories using relative pathnames.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Some BSD derivatives provide a <span class="docEmphasis">jail()</span>
+ system call, which addresses the points described above, as well as 
+several others, to create a jail that is secure even for a privileged 
+process.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

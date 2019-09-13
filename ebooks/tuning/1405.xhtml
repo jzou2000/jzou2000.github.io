@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>System Panic and Crash Dump Taken</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">System Panic and Crash Dump Taken</h3>
+<p class="docText">Now let’s view a sample 
+system panic and a crash dump that has been taken. This system has been 
+set up in /etc/sysconfig/dump to reboot after a crash. The first step 
+after the system has been rebooted is to save the crash dump. Once the 
+crash dump has been saved, you can look at what caused the system’s 
+panic using lcrash to view the dump, as shown in Figure 14.5.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 14.5. Viewing a crash dump with lcrash.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="581" id="" src="Images/getfile_002-37.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<p class="docText">The first command we’ll use to check on what caused the crash dump is <span class="docEmphStrong">stat</span>, which displays the latest kernel messages printed. Figure 14.6 shows the output from the <span class="docEmphStrong">stat</span> command.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 14.6. output from stat.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="502" id="" src="Images/getfile_004-16.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<p class="docText">The dump was taken because there was a NULL pointer in the kernel and an Oops was created. Figure 14.6 shows that the null pointer was created by the <span class="docEmphStrong">jfs_mount</span> routine. The offset into this routine is 0x25. You can view the <span class="docEmphStrong">jfs_mount</span> routine by using lcrash’s <span class="docEmphStrong">dis</span> command. Figure 14.7 shows that the <span class="docEmphStrong">jfs_mount</span> offset 0x25 is the line that caused the kernel panic. In Figure 14.7, the line that is causing the panic is as follows:</p>
+<div class="docText"><pre>jfs_mount+37 movl 0x0, ebx</pre></div><br/>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 14.7. output from dis jfs_mount.</h5>
+<p class="docText"></p><div class="st1">[View full size image]</div><img alt="" border="0" height="665" id="" src="Images/getfile_005-14.jpg" width="500"/><p></p>
+</center><p></p><br/>
+<p class="docText">Next you need to determine which line of code is causing the problem in <span class="docEmphStrong">jfs_mount</span>. The Oops tells you that the problem is caused by the instruction at offset 25 of the <span class="docEmphStrong">jfs_mount</span>.
+ The objdump utility is one way to view the jfs_mount.o file and look at
+ offset 25. objdump is used to disassemble a module function and see 
+what assembler instructions are created by the C source code. Figure 14.8 shows what is displayed from objdump. Figure 14.9 shows the <span class="docEmphStrong">jfs_mount</span> routine. Next we can look at the C code for <span class="docEmphStrong">jfs_mount</span> and see that the null pointer was caused by line 98.</p>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 14.8. Assembler listing of jfs_mount.</h5>
+<p class="docText">
+<img alt="" border="0" height="710" id="" src="Images/getfile_003-24.jpg" width="489"/></p>
+</center><p></p><br/>
+<p></p><center>
+<h5 class="docFigureTitle">Figure 14.9. Assembler listing of jfs_mount showing the jfs_mount routine.</h5>
+<p class="docText">
+<img alt="" border="0" height="710" id="" src="Images/getfile-61.jpg" width="500"/></p>
+</center><p></p><br/>
+<p class="docText">The crash dump was created by the mount to the JFS file system. The <span class="docEmphStrong">jfs_mount</span> routine was changed to add the three lines shown in bold in Listing 14.2. Listing 14.2
+ lists the code that was modified in the source of the 
+usr/src/linux/jfs/ fs/jfs_mount.c file to create a segmentation fault at
+ line 98 by creating a null pointer exception.</p>
+<h5 class="docExampleTitle" id="title-ID0ESBCI">Listing 14.2. Modified jfs_mount.c Code</h5><p></p><div class="box">
+<pre class="preFixedHeight">68 /*
+69  * NAME: jfs_mount(sb)
+70  *
+71  * FUNCTION: vfs_mount()
+72  *
+73  * PARAMETER: sb      - super block
+74  *
+75  * RETURN:-EBUSY      - device already mounted or open for
+write
+76  *         -EBUSY      - cvrdvp already mounted
+77  *         -EBUSY      - mount table full
+78  *         -ENOTDIR    - cvrdvp not directory on a device
+mount
+79  *         -ENXIO      - device open failure
+80  */
+81  int jfs_mount(struct super_block *sb)
+82  {
+83    int rc = 0;   /* Return code */
+84    struct jfs_sb_info *sbi = JFS_SBI(sb);
+85    struct inode *ipaimap = NULL;
+86    struct inode *ipaimap2 = NULL;
+87    struct inode *ipimap = NULL;
+88    struct inode *ipbmap = NULL;
+89    <span class="docEmphStrong">int *ptr;   /* line 1 added */</span>
+90    /*
+91    * read/validate superblock
+92    * (initialize mount inode from the superblock)
+93    */
+94    if ((rc = chkSuper(sb))) {
+95          goto errout20;
+96    }
+97    <span class="docEmphStrong">ptr = 0;                     /* line 2 added */</span>
+98    <span class="docEmphStrong">printk(" jfs %d \n", *ptr);  /* line 3 added */</span>
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">So we have changed the 
+JFS file system code to create a NULL pointer reference by adding the 
+three bold lines of code to the mount code of JFS. If we mount the file 
+system using /dev/hda1 as the JFS device and /jfs as the mount point, a 
+segment failure is displayed, and the crash dump is taken.</p>
+</div>
+</body>
+</html>

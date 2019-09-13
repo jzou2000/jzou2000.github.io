@@ -1,0 +1,303 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Trying to Save Callbacks</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <section data-type="chapter" xmlns:epub="http://www.idpf.org/2007/ops" epub:type="chapter" data-pdf-bookmark="Chapter 2. Callbacks">
+  <div class="epub__chapter" id="chapter-2-callbacks">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<section data-type="sect1" data-pdf-bookmark="Trying to Save Callbacks"><div class="epub__sect1" id="trying-to-save-callbacks">
+<h1>Trying to Save Callbacks</h1>
+
+<p>There are several variations of callback design that have attempted to
+address some (not all!) of the trust issues we’ve just looked at. It’s a
+valiant, but doomed, effort to save the callback pattern from imploding
+on itself.</p>
+
+<p>For example, regarding more graceful error handling, some API designs
+provide for <em>split callbacks</em> (one for the success notification, and one for
+the error notification):</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">function</code> <code class="epub__nx">success</code><code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__nx">console</code><code class="epub__p">.</code><code class="epub__nx">log</code><code class="epub__p">(</code> <code class="epub__nx">data</code> <code class="epub__p">);</code>
+<code class="epub__p">}</code>
+
+<code class="epub__kd">function</code> <code class="epub__nx">failure</code><code class="epub__p">(</code><code class="epub__nx">err</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__nx">console</code><code class="epub__p">.</code><code class="epub__nx">error</code><code class="epub__p">(</code> <code class="epub__nx">err</code> <code class="epub__p">);</code>
+<code class="epub__p">}</code>
+
+<code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.1"</code><code class="epub__p">,</code> <code class="epub__nx">success</code><code class="epub__p">,</code> <code class="epub__nx">failure</code> <code class="epub__p">);</code></pre>
+
+<p>In APIs of this design, often the <code>failure()</code> error handler is optional,
+and if not provided it will be assumed you want the errors swallowed.
+Ugh.</p>
+<div data-type="note" epub:type="note"><h6>Note</h6>
+<p>This split-callback design is what the ES6 Promise API uses.
+We’ll cover ES6 Promises in much more detail in Chapter 3.</p>
+</div>
+
+<p>Another common callback pattern is called “error-first style” (sometimes
+called “Node style,” as it’s also the convention used across nearly all
+Node.js APIs), where the first argument of a single callback is reserved
+for an error object (if any). If successful, this argument will be
+empty/falsy (and any subsequent arguments will be the success data), but
+if an error result is being signaled, the first argument is set/truthy
+(and usually nothing else is passed):</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">function</code> <code class="epub__nx">response</code><code class="epub__p">(</code><code class="epub__nx">err</code><code class="epub__p">,</code><code class="epub__nx">data</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__c1">// error?</code>
+    <code class="epub__k">if</code> <code class="epub__p">(</code><code class="epub__nx">err</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+        <code class="epub__nx">console</code><code class="epub__p">.</code><code class="epub__nx">error</code><code class="epub__p">(</code> <code class="epub__nx">err</code> <code class="epub__p">);</code>
+    <code class="epub__p">}</code>
+    <code class="epub__c1">// otherwise, assume success</code>
+    <code class="epub__k">else</code> <code class="epub__p">{</code>
+        <code class="epub__nx">console</code><code class="epub__p">.</code><code class="epub__nx">log</code><code class="epub__p">(</code> <code class="epub__nx">data</code> <code class="epub__p">);</code>
+    <code class="epub__p">}</code>
+<code class="epub__p">}</code>
+
+<code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.1"</code><code class="epub__p">,</code> <code class="epub__nx">response</code> <code class="epub__p">);</code></pre>
+
+<p>In both of these cases, several things should be observed.</p>
+
+<p>First, it has not really resolved the majority of trust issues like it may
+appear. There’s nothing about either callback that prevents or filters
+unwanted repeated invocations. Moreover, things are worse now, because
+you may get both success and error signals, or neither, and you still
+have to code around either of those conditions.</p>
+
+<p>Also, don’t miss the fact that while it’s a standard pattern you can
+employ, it’s definitely more verbose and boilerplate-ish without much
+reuse, so you’re going to get weary of typing all that out for every
+single callback in your application.</p>
+
+<p>What about the trust issue of never being called? If this is a concern
+(and it probably should be!), you likely will need to set up a timeout
+that cancels the event. You could make a utility (proof-of-concept only
+shown) to help you with that:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">function</code> <code class="epub__nx">timeoutify</code><code class="epub__p">(</code><code class="epub__nx">fn</code><code class="epub__p">,</code><code class="epub__nx">delay</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__kd">var</code> <code class="epub__nx">intv</code> <code class="epub__o">=</code> <code class="epub__nx">setTimeout</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__p">(){</code>
+            <code class="epub__nx">intv</code> <code class="epub__o">=</code> <code class="epub__kc">null</code><code class="epub__p">;</code>
+            <code class="epub__nx">fn</code><code class="epub__p">(</code> <code class="epub__k">new</code> <code class="epub__nb">Error</code><code class="epub__p">(</code> <code class="epub__s2">"Timeout!"</code> <code class="epub__p">)</code> <code class="epub__p">);</code>
+        <code class="epub__p">},</code> <code class="epub__nx">delay</code> <code class="epub__p">)</code>
+    <code class="epub__p">;</code>
+
+    <code class="epub__k">return</code> <code class="epub__kd">function</code><code class="epub__p">()</code> <code class="epub__p">{</code>
+        <code class="epub__c1">// timeout hasn't happened yet?</code>
+        <code class="epub__k">if</code> <code class="epub__p">(</code><code class="epub__nx">intv</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+            <code class="epub__nx">clearTimeout</code><code class="epub__p">(</code> <code class="epub__nx">intv</code> <code class="epub__p">);</code>
+            <code class="epub__nx">fn</code><code class="epub__p">.</code><code class="epub__nx">apply</code><code class="epub__p">(</code> <code class="epub__k">this</code><code class="epub__p">,</code> <code class="epub__nx">arguments</code> <code class="epub__p">);</code>
+        <code class="epub__p">}</code>
+    <code class="epub__p">};</code>
+<code class="epub__p">}</code></pre>
+
+<p>Here’s how you use it:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__c1">// using "error-first style" callback design</code>
+<code class="epub__kd">function</code> <code class="epub__nx">foo</code><code class="epub__p">(</code><code class="epub__nx">err</code><code class="epub__p">,</code><code class="epub__nx">data</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__k">if</code> <code class="epub__p">(</code><code class="epub__nx">err</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+        <code class="epub__nx">console</code><code class="epub__p">.</code><code class="epub__nx">error</code><code class="epub__p">(</code> <code class="epub__nx">err</code> <code class="epub__p">);</code>
+    <code class="epub__p">}</code>
+    <code class="epub__k">else</code> <code class="epub__p">{</code>
+        <code class="epub__nx">console</code><code class="epub__p">.</code><code class="epub__nx">log</code><code class="epub__p">(</code> <code class="epub__nx">data</code> <code class="epub__p">);</code>
+    <code class="epub__p">}</code>
+<code class="epub__p">}</code>
+
+<code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__s2">"http://some.url.1"</code><code class="epub__p">,</code> <code class="epub__nx">timeoutify</code><code class="epub__p">(</code> <code class="epub__nx">foo</code><code class="epub__p">,</code> <code class="epub__mi">500</code> <code class="epub__p">)</code> <code class="epub__p">);</code></pre>
+
+<p>Another trust issue is being called too early. In application-specific
+terms, this may actually involve being called before some critical task is
+complete. But more generally, the problem is evident in utilities that
+can either invoke the callback you provide <em>now</em> (synchronously), or
+<em>later</em> (asynchronously).</p>
+
+<p>This nondeterminism around the sync-or-async behavior is almost always
+going to lead to very difficult to track down bugs. In some circles, the
+fictional insanity-inducing monster named Zalgo is used to describe the
+sync/async nightmares. “Don’t release Zalgo!” is a common cry, and it
+leads to very sound advice: always invoke callbacks asynchronously, even
+if that’s right away on the next turn of the event loop, so that all
+callbacks are predictably async.</p>
+<div data-type="note" epub:type="note"><h6>Note</h6>
+<p>For more information on Zalgo, see Oren Golan’s “Don’t Release
+Zalgo!” and
+Isaac Z. Schlueter’s “Designing APIs for Asynchrony”.</p>
+</div>
+
+<p>Consider:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">function</code> <code class="epub__nx">result</code><code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__nx">console</code><code class="epub__p">.</code><code class="epub__nx">log</code><code class="epub__p">(</code> <code class="epub__nx">a</code> <code class="epub__p">);</code>
+<code class="epub__p">}</code>
+
+<code class="epub__kd">var</code> <code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__mi">0</code><code class="epub__p">;</code>
+
+<code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__s2">"..pre-cached-url.."</code><code class="epub__p">,</code> <code class="epub__nx">result</code> <code class="epub__p">);</code>
+<code class="epub__nx">a</code><code class="epub__o">++</code><code class="epub__p">;</code></pre>
+
+<p>Will this code print <code>0</code> (sync callback invocation) or <code>1</code> (async
+callback invocation)? It depends on the conditions.</p>
+
+<p>You can see just how quickly the unpredictability of Zalgo can threaten
+any JS program. So the silly-sounding “never release Zalgo” is actually
+incredibly common and solid advice. Always be asyncing.</p>
+
+<p>What if you don’t know whether the API in question will always execute
+async? You could invent a utility like this <code>asyncify(..)</code>
+proof-of-concept:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">function</code> <code class="epub__nx">asyncify</code><code class="epub__p">(</code><code class="epub__nx">fn</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__kd">var</code> <code class="epub__nx">orig_fn</code> <code class="epub__o">=</code> <code class="epub__nx">fn</code><code class="epub__p">,</code>
+        <code class="epub__nx">intv</code> <code class="epub__o">=</code> <code class="epub__nx">setTimeout</code><code class="epub__p">(</code> <code class="epub__kd">function</code><code class="epub__p">(){</code>
+            <code class="epub__nx">intv</code> <code class="epub__o">=</code> <code class="epub__kc">null</code><code class="epub__p">;</code>
+            <code class="epub__k">if</code> <code class="epub__p">(</code><code class="epub__nx">fn</code><code class="epub__p">)</code> <code class="epub__nx">fn</code><code class="epub__p">();</code>
+        <code class="epub__p">},</code> <code class="epub__mi">0</code> <code class="epub__p">)</code>
+    <code class="epub__p">;</code>
+
+    <code class="epub__nx">fn</code> <code class="epub__o">=</code> <code class="epub__kc">null</code><code class="epub__p">;</code>
+
+    <code class="epub__k">return</code> <code class="epub__kd">function</code><code class="epub__p">()</code> <code class="epub__p">{</code>
+        <code class="epub__c1">// firing too quickly, before `intv` timer has fired to</code>
+        <code class="epub__c1">// indicate async turn has passed?</code>
+        <code class="epub__k">if</code> <code class="epub__p">(</code><code class="epub__nx">intv</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+            <code class="epub__nx">fn</code> <code class="epub__o">=</code> <code class="epub__nx">orig_fn</code><code class="epub__p">.</code><code class="epub__nx">bind</code><code class="epub__p">.</code><code class="epub__nx">apply</code><code class="epub__p">(</code>
+                <code class="epub__nx">orig_fn</code><code class="epub__p">,</code>
+                <code class="epub__c1">// add the wrapper's `this` to the `bind(..)`</code>
+                <code class="epub__c1">// call parameters, as well as currying any</code>
+                <code class="epub__c1">// passed in parameters</code>
+                <code class="epub__p">[</code><code class="epub__k">this</code><code class="epub__p">].</code><code class="epub__nx">concat</code><code class="epub__p">(</code> <code class="epub__p">[].</code><code class="epub__nx">slice</code><code class="epub__p">.</code><code class="epub__nx">call</code><code class="epub__p">(</code> <code class="epub__nx">arguments</code> <code class="epub__p">)</code> <code class="epub__p">)</code>
+            <code class="epub__p">);</code>
+        <code class="epub__p">}</code>
+        <code class="epub__c1">// already async</code>
+        <code class="epub__k">else</code> <code class="epub__p">{</code>
+            <code class="epub__c1">// invoke original function</code>
+            <code class="epub__nx">orig_fn</code><code class="epub__p">.</code><code class="epub__nx">apply</code><code class="epub__p">(</code> <code class="epub__k">this</code><code class="epub__p">,</code> <code class="epub__nx">arguments</code> <code class="epub__p">);</code>
+        <code class="epub__p">}</code>
+    <code class="epub__p">};</code>
+<code class="epub__p">}</code></pre>
+
+<p>You use <code>asyncify(..)</code> like this:</p>
+
+<pre data-type="programlisting" data-code-language="js"><code class="epub__kd">function</code> <code class="epub__nx">result</code><code class="epub__p">(</code><code class="epub__nx">data</code><code class="epub__p">)</code> <code class="epub__p">{</code>
+    <code class="epub__nx">console</code><code class="epub__p">.</code><code class="epub__nx">log</code><code class="epub__p">(</code> <code class="epub__nx">a</code> <code class="epub__p">);</code>
+<code class="epub__p">}</code>
+
+<code class="epub__kd">var</code> <code class="epub__nx">a</code> <code class="epub__o">=</code> <code class="epub__mi">0</code><code class="epub__p">;</code>
+
+<code class="epub__nx">ajax</code><code class="epub__p">(</code> <code class="epub__s2">"..pre-cached-url.."</code><code class="epub__p">,</code> <code class="epub__nx">asyncify</code><code class="epub__p">(</code> <code class="epub__nx">result</code> <code class="epub__p">)</code> <code class="epub__p">);</code>
+<code class="epub__nx">a</code><code class="epub__o">++</code><code class="epub__p">;</code></pre>
+
+<p>Whether the Ajax request is in the cache and resolves to try to call the
+callback right away, or must be fetched over the wire and thus complete
+later asynchronously, this code will always output <code>1</code> instead of <code>0</code>—<code>result(..)</code> cannot help but be invoked asynchronously, which means the
+<code>a++</code> has a chance to run before <code>result(..)</code> does.</p>
+
+<p>Yay, another trust issue “solved”! But it’s inefficient, and yet again
+more bloated boilerplate to weigh your project down.</p>
+
+<p>That’s just the story, over and over again, with callbacks. They can do
+pretty much anything you want, but you have to be willing to work hard
+to get it, and oftentimes this effort is much more than you can or
+should spend on such code reasoning.</p>
+
+<p>You might find yourself wishing for built-in APIs or other language
+mechanics to address these issues. ES6 has finally arrived on the scene
+with some great answers, so keep reading!</p>
+</div></section>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</div>
+</section>
+
+
+</body>
+</html>

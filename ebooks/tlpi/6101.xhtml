@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>61.1. Partial Reads and Writes on Stream Sockets</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">61.1. Partial Reads and Writes on Stream Sockets</h3><p class="docText">When we first introduced the <span class="docEmphasis">read()</span> and <span class="docEmphasis">write()</span> system calls in Chapter 4,
+ we noted that, in some circumstances, they may transfer fewer bytes 
+than requested. Such partial transfers can occur when performing I/O on 
+stream sockets. We now consider why they can occur and show a pair of 
+functions that transparently handle partial transfers.</p><p class="docText">A partial read may occur if there are fewer bytes available in the socket than were requested in the <span class="docEmphasis">read()</span> call. In this case, <span class="docEmphasis">read()</span> simply returns the number of bytes available. (This is the same behavior that we saw with pipes and FIFOs in Section 44.10.)</p><p class="docText">A
+ partial write may occur if there is insufficient buffer space to 
+transfer all of the requested bytes and one of the following is true:</p><ul><li><p class="docList">A signal handler interrupted the <span class="docEmphasis">write()</span> call (Section 21.5) after it transferred some of the requested bytes.</p></li><li><p class="docList">The socket was operating in nonblocking mode (<tt>O_NONBLOCK</tt>), and it was possible to transfer only some of the requested bytes.</p></li><li><p class="docList">An asynchronous error occurred after only some of the requested bytes had been transferred. By an <span class="docEmphasis">asynchronous error</span>,
+ we mean an error that occurs asynchronously with respect to the 
+application’s use of calls in the sockets API. An asynchronous error can
+ arise, for example, because of a problem with a TCP connection, perhaps
+ resulting from a crash by the peer application.</p></li></ul><p class="docText">In all of the above cases, assuming that there was space to transfer at least 1 byte, the <span class="docEmphasis">write()</span> is successful, and returns the number of bytes that were transferred to the output buffer.</p><p class="docText">If a partial I/O occurs—for example, if a <span class="docEmphasis">read()</span> returns fewer bytes than requested or a blocked <span class="docEmphasis">write()</span>
+ is interrupted by a signal handler after transferring only part of the 
+requested data—then it is sometimes useful to restart the system call to
+ complete the transfer. In Example 61-1, we provide two functions that do this: <span class="docEmphasis">readn()</span> and <span class="docEmphasis">writen()</span>. (The ideas for these functions are drawn from functions of the same name presented in [Stevens et al., 2004].)</p><pre>#include "rdwrn.h"
+
+ssize_t <b>readn</b>(int <span class="docEmphasis">fd</span>, void *<span class="docEmphasis">buffer</span>, size_t <span class="docEmphasis">count</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of bytes read, 0 on EOF, or -1 on error</p><hr noshade="noshade" size="1"/><pre>ssize_t <b>writen</b>(int fd, void *<span class="docEmphasis">buffer</span>, size_t <span class="docEmphasis">count</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of bytes written, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">readn()</span> and <span class="docEmphasis">writen()</span> functions take the same arguments as <span class="docEmphasis">read()</span> and <span class="docEmphasis">write()</span>.
+ However, they use a loop to restart these system calls, thus ensuring 
+that the requested number of bytes is always transferred (unless an 
+error occurs or end-of-file is detected on a <span class="docEmphasis">read()</span>).</p><h5 class="docExampleTitle" id="title-ID0E5BHM">Example 61-1. Implementation of <span class="docEmphasis">readn()</span> and <span class="docEmphasis">writen()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/rdwrn.c</b>
+#include &lt;unistd.h&gt;
+#include &lt;errno.h&gt;
+#include "rdwrn.h"                      /* Declares readn() and writen() */
+
+ssize_t
+readn(int fd, void *buffer, size_t n)
+{
+    ssize_t numRead;                    /* # of bytes fetched by last read() */
+    size_t totRead;                     /* Total # of bytes read so far */
+    char *buf;
+
+    buf = buffer;                       /* No pointer arithmetic on "void *" */
+    for (totRead = 0; totRead &lt; n; ) {
+        numRead = read(fd, buf, n - totRead);
+
+        if (numRead == 0)               /* EOF */
+            return totRead;             /* May be 0 if this is first read() */
+        if (numRead == -1) {
+            if (errno == EINTR)
+                continue;               /* Interrupted --&gt; restart read() */
+            else
+                return -1;              /* Some other error */
+        }
+        totRead += numRead;
+        buf += numRead;
+    }
+    return totRead;                     /* Must be 'n' bytes if we get here */
+}
+
+ssize_t
+writen(int fd, const void *buffer, size_t n)
+{
+    ssize_t numWritten;                 /* # of bytes written by last write() */
+    size_t totWritten;                  /* Total # of bytes written so far */
+    const char *buf;
+
+    buf = buffer;                       /* No pointer arithmetic on "void *" */
+    for (totWritten = 0; totWritten &lt; n; ) {
+        numWritten = write(fd, buf, n - totWritten);
+
+        if (numWritten &lt;= 0) {
+            if (numWritten == -1 &amp;&amp; errno == EINTR)
+                continue;               /* Interrupted --&gt; restart write() */
+            else
+                return -1;              /* Some other error */
+        }
+        totWritten += numWritten;
+        buf += numWritten;
+    }
+    return totWritten;                  /* Must be 'n' bytes if we get here */
+}
+      <b>sockets/rdwrn.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>64.6. Implementing script(1)</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">64.6. Implementing <span class="docEmphasis">script(1)</span></h3><p class="docText">We are now ready to implement a simple version of the standard <span class="docEmphasis">script(1)</span>
+ program. This program starts a new shell session, and records all input
+ and output from the session to a file. Most of the shell sessions shown
+ in this book were recorded using <span class="docEmphasis">script</span>.</p><p class="docText">In a normal login session, the shell is connected directly to the user’s terminal. When we run <span class="docEmphasis">script</span>,
+ it places itself between the user’s terminal and the shell, and uses a 
+pseudoterminal pair to create a communication channel between itself and
+ the shell (see Figure 64-4). The shell is connected to the pseudoterminal slave. The <span class="docEmphasis">script</span> process is connected to the pseudoterminal master. The <span class="docEmphasis">script</span>
+ process acts as a proxy for the user, taking input entered at the 
+terminal and writing it to the pseudoterminal master, and reading output
+ from the pseudoterminal master and writing it to the user’s terminal.</p><p class="docText">In addition, <span class="docEmphasis">script</span> produces an output file (named <tt>typescript</tt>
+ by default) that contains a copy of all bytes that are output on the 
+pseudoterminal master. This has the effect of recording not only the 
+output produced by the shell session, but also the input that is 
+supplied to it. The input is recorded because, just as with a 
+conventional terminal device, the kernel echoes input characters by 
+copying them to the terminal output queue (see Figure 62-1, in Section 62.2).
+ However, when terminal echoing is disabled, as is done by programs that
+ read passwords, the pseudoterminal slave input is not copied to the 
+slave output queue, and thus is not copied to the script output file.</p><p></p><center><h5 class="docFigureTitle">Figure 64-4. The <span class="docEmphasis">script</span> program</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_003-72.png"/></p></center><p></p><br/><p class="docText">Our implementation of <span class="docEmphasis">script</span> is shown in Example 64-3. This program performs the following steps:</p><ul><li><p class="docList">Retrieve the attributes and window size of the terminal under which the program is run <img alt="" border="0" id="" src="Images/getfile_005-59.png"/>. These are passed to the subsequent call to <span class="docEmphasis">ptyFork()</span>, which uses them to set the corresponding values for the pseudoterminal slave device.</p></li><li><p class="docList">Call our <span class="docEmphasis">ptyFork()</span> function (Example 64-2) to create a child process that is connected to the parent via a pseudoterminal pair <img alt="" border="0" id="" src="Images/getfile_008-31.png"/>.</p></li><li><p class="docList">After the <span class="docEmphasis">ptyFork()</span> call, the child execs a shell <img alt="" border="0" id="" src="Images/getfile_006-50.png"/>. The choice of shell is determined by the setting of the <tt>SHELL</tt> environment variable <img alt="" border="0" id="" src="Images/getfile_012-8.png"/>. If the <tt>SHELL</tt> variable is not set or its value is an empty string, then the child execs <tt>/bin/sh</tt>.</p></li><li><p class="docList">After the <span class="docEmphasis">ptyFork()</span> call, the parent performs the following steps:</p><ul><li><p class="docList">Open the output script file <img alt="" border="0" id="" src="Images/getfile_007-41.png"/>.
+ If a command-line argument is supplied, this is used as the name of the
+ script file. If no command-line argument is supplied, the default name <tt>typescript</tt> is used.</p></li><li><p class="docList">Place the terminal in raw mode (using the <span class="docEmphasis">ttySetRaw()</span> function shown in Example 62-3, in Section 62.6.3.1), so that all input characters are passed directly to the <span class="docEmphasis">script</span> program without being modified by the terminal driver <img alt="" border="0" id="" src="Images/getfile_002-73.png"/>. Characters output by the <span class="docEmphasis">script</span> program are likewise not modified by the terminal driver.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The
+ fact that the terminal is in raw mode doesn’t mean that raw, 
+uninterpreted control characters will be transmitted to the shell, or 
+whatever other process group is in the foreground for the pseudoterminal
+ slave device, nor that output from that process group is passed raw to 
+the user’s terminal. Instead, interpretation of terminal special 
+characters is taking place within the slave device (unless the slave was
+ also explicitly placed in raw mode by an application). By placing the 
+user’s terminal in raw mode, we prevent a <span class="docEmphasis">second</span> round of interpretation of input and output characters from occurring.</p><hr noshade="noshade" size="1"/></li></ul></li><li><p class="docList">Call <span class="docEmphasis">atexit()</span> to install an exit handler that resets the terminal to its original mode when the program terminates <img alt="" border="0" id="" src="Images/getfile_009-33.png"/>.</p></li><li><p class="docList">Execute a loop that transfers data in both directions between the terminal and the pseudoterminal master <img alt="" border="0" id="" src="Images/getfile_004-39.png"/>. In each loop iteration, the program first uses <span class="docEmphasis">select()</span> (Section 63.2.1) to monitor both the terminal and the pseudoterminal master for input <img alt="" border="0" id="" src="Images/getfile_010-26.png"/>. If the terminal has input available, then the program reads some of that input and writes it to the pseudoterminal master <img alt="" border="0" id="" src="Images/getfile-131.png"/>.
+ Similarly, if the pseudoterminal master has input available, the 
+program reads some of that input and writes it to the terminal and to 
+the script file <img alt="" border="0" id="" src="Images/getfile-132.png"/>. The loop executes until end-of-file or an error is detected on one of the monitored file descriptors.</p></li></ul><h5 class="docExampleTitle" id="title-ID0ESJJM">Example 64-3. A simple implementation of <span class="docEmphasis">script(1)</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>pty/script.c</b>
+    #include &lt;sys/stat.h&gt;
+    #include &lt;fcntl.h&gt;
+    #include &lt;libgen.h&gt;
+    #include &lt;termios.h&gt;
+    #include &lt;sys/select.h&gt;
+    #include "pty_fork.h"           /* Declaration of ptyFork() */
+    #include "tty_functions.h"      /* Declaration of ttySetRaw() */
+    #include "tlpi_hdr.h"
+
+    #define BUF_SIZE 256
+    #define MAX_SNAME 1000
+
+    struct termios ttyOrig;
+
+    static void             /* Reset terminal mode on program exit */
+    ttyReset(void)
+    {
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &amp;ttyOrig) == -1)
+            errExit("tcsetattr");
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        char slaveName[MAX_SNAME];
+        char *shell;
+        int masterFd, scriptFd;
+        struct winsize ws;
+        fd_set inFds;
+        char buf[BUF_SIZE];
+        ssize_t numRead;
+        pid_t childPid;
+
+<img alt="" border="0" id="" src="Images/getfile_005-60.png"/>    if (tcgetattr(STDIN_FILENO, &amp;ttyOrig) == -1)
+            errExit("tcgetattr");
+        if (ioctl(STDIN_FILENO, TIOCGWINSZ, &amp;ws) &lt; 0)
+            errExit("ioctl-TIOCGWINSZ");
+
+<img alt="" border="0" id="" src="Images/getfile_008-32.png"/>    childPid = ptyFork(&amp;masterFd, slaveName, MAX_SNAME, &amp;ttyOrig, &amp;ws);
+        if (childPid == -1)
+            errExit("ptyFork");
+
+        if (childPid == 0) {        /* Child: execute a shell on pty slave */
+<img alt="" border="0" id="" src="Images/getfile_012-9.png"/>        shell = getenv("SHELL");
+            if (shell == NULL || *shell == '\0')
+                shell = "/bin/sh";
+
+<img alt="" border="0" id="" src="Images/getfile_006-51.png"/>        execlp(shell, shell, (char *) NULL);
+            errExit("execlp");      /* If we get here, something went wrong */
+        }
+
+            /* Parent: relay data between terminal and pty master */
+
+<img alt="" border="0" id="" src="Images/getfile_007-42.png"/>    scriptFd = open((argc &gt; 1) ? argv[1] : "typescript",
+                            O_WRONLY | O_CREAT | O_TRUNC,
+                            S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP |
+                                    S_IROTH | S_IWOTH);
+        if (scriptFd == -1)
+            errExit("open typescript");
+
+<img alt="" border="0" id="" src="Images/getfile_002-74.png"/>    ttySetRaw(STDIN_FILENO, &amp;ttyOrig);
+
+<img alt="" border="0" id="" src="Images/getfile_009-34.png"/>    if (atexit(ttyReset) != 0)
+            errExit("atexit");
+
+<img alt="" border="0" id="" src="Images/getfile_004-40.png"/>    for (;;) {
+            FD_ZERO(&amp;inFds);
+            FD_SET(STDIN_FILENO, &amp;inFds);
+            FD_SET(masterFd, &amp;inFds);
+
+<img alt="" border="0" id="" src="Images/getfile_010-27.png"/>        if (select(masterFd + 1, &amp;inFds, NULL, NULL, NULL) == -1)
+                errExit("select");
+
+<img alt="" border="0" id="" src="Images/getfile-133.png"/>        if (FD_ISSET(STDIN_FILENO, &amp;inFds)) {   /* stdin —&gt; pty */
+                numRead = read(STDIN_FILENO, buf, BUF_SIZE);
+                if (numRead &lt;= 0)
+                    exit(EXIT_SUCCESS);
+
+                if (write(masterFd, buf, numRead) != numRead)
+                    fatal("partial/failed write (masterFd)");
+            }
+
+<img alt="" border="0" id="" src="Images/getfile_011-15.png"/>        if (FD_ISSET(masterFd, &amp;inFds)) {       /* pty —&gt; stdout+file */
+                numRead = read(masterFd, buf, BUF_SIZE);
+                if (numRead &lt;= 0)
+                    exit(EXIT_SUCCESS);
+
+                if (write(STDOUT_FILENO, buf, numRead) != numRead)
+                    fatal("partial/failed write (STDOUT_FILENO)");
+                if (write(scriptFd, buf, numRead) != numRead)
+                    fatal("partial/failed write (scriptFd)");
+            }
+        }
+    }
+         <b>pty/script.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">In the following shell session, we demonstrate the use of the program in Example 64-3. We begin by displaying the name of the pseudoterminal used by the <span class="docEmphasis">xterm</span>
+ on which the login shell is running and the process ID of the login 
+shell. This information is useful later in the shell session.</p><pre>$ <b>tty</b>
+/dev/pts/1
+$ <b>echo $$</b>
+7979</pre><br/>
+<p class="docText">We then start an instance of our <span class="docEmphasis">script</span>
+ program, which invokes a subshell. Once more, we display the name of 
+the terminal on which the shell is running and the process ID of the 
+shell:</p><pre class="preFixedWidth">$ <b>./script </b>
+$ <b>tty </b>
+/dev/pts/24                         <i> Pseudoterminal slave opened by</i> <span class="docEmphasis">script</span>
+$ <b>echo $$ </b>
+29825                               <i> PID of subshell process started by</i> <span class="docEmphasis">script</span>
+
+					  </pre><br/>
+<p class="docText">Now we use <span class="docEmphasis">ps(1)</span> to display information about the two shells and the process running <span class="docEmphasis">script</span>, and then terminate the shell started by <span class="docEmphasis">script</span>:</p><pre>$ <b>ps -p 7979 -p 29825 -C script -o "pid ppid sid tty cmd"</b>
+  PID  PPID   SID TT       CMD
+ 7979  7972  7979 pts/1    /bin/bash
+29824  7979  7979 pts/1    ./script
+29825 29824 29825 pts/24   /bin/bash
+$ <b>exit</b></pre><br/>
+<p class="docText">The output of <span class="docEmphasis">ps(1)</span> shows the parent-child relationships between the login shell, the process running <span class="docEmphasis">script</span>, and the subshell started by <span class="docEmphasis">script</span>.</p><p class="docText">At this point, we have returned to the login shell. Displaying the contents of the file <tt>typescript</tt> shows a record of all input and output that was produced while <span class="docEmphasis">script</span> was running:</p><pre>$ <b>cat typescript</b>
+$ tty
+/dev/pts/24
+$ echo $$
+29825
+$ ps -p 7979 -p 29825 -C script -o "pid ppid sid tty cmd"
+  PID  PPID   SID TT       CMD
+ 7979  7972  7979 pts/1    /bin/bash
+29824  7979  7979 pts/1    ./script
+29825 29824 29825 pts/24   /bin/bash
+$ exit</pre><br/>
+</div>
+</body>
+</html>

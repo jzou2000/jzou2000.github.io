@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>21.3. Handling a Signal on an Alternate Stack: sigaltstack()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">21.3. Handling a Signal on an Alternate Stack: <span class="docEmphasis">sigaltstack()</span></h3><p class="docText">Normally,
+ when a signal handler is invoked, the kernel creates a frame for it on 
+the process stack. However, this may not be possible if a process 
+attempts to extend the stack beyond the maximum possible size. For 
+example, this may occur because the stack grows so large that it 
+encounters a region of mapped memory (Section 48.5) or the upwardly growing heap, or it reaches the <tt>RLIMIT_STACK</tt> resource limit (Section 36.3).</p><p class="docText">When a process attempts to grow its stack beyond the maximum possible size, the kernel generates a <tt>SIGSEGV</tt> signal for the process. However, since the stack space is exhausted, the kernel can’t create a frame for any <tt>SIGSEGV</tt>
+ handler that the program may have established. Consequently, the 
+handler is not invoked, and the process is terminated (the default 
+action for <tt>SIGSEGV</tt>).</p><p class="docText">If we instead need to ensure that the <tt>SIGSEGV</tt> signal is handled in these circumstances, we can do the following:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Allocate an area of memory, called an <span class="docEmphasis">alternate signal stack</span>, to be used for the stack frame of a signal handler.</p></div></li><li><div style="font-weight:normal"><p class="docList">Use the <span class="docEmphasis">sigaltstack()</span> system call to inform the kernel of the existence of the alternate signal stack.</p></div></li><li><div style="font-weight:normal"><p class="docList">When establishing the signal handler, specify the <tt>SA_ONSTACK</tt> flag, to tell the kernel that the frame for this handler should be created on the alternate stack.</p></div></li></ol></div><p class="docText">The <span class="docEmphasis">sigaltstack()</span>
+ system call both establishes an alternate signal stack and returns 
+information about any alternate signal stack that is already 
+established.</p><pre>#include &lt;signal.h&gt;
+
+int <b>sigaltstack</b>(const stack_t *<span class="docEmphasis">sigstack</span>, stack_t *<span class="docEmphasis">old_sigstack</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">sigstack</span> argument points to a structure specifying the location and attributes of the new alternate signal stack. The <span class="docEmphasis">old_sigstack</span>
+ argument points to a structure used to return information about the 
+previously established alternate signal stack (if there was one). Either
+ one of these arguments can be specified as <tt>NULL</tt>. For example, we can find out about the existing alternate signal stack, without changing it, by specifying <tt>NULL</tt> for the <span class="docEmphasis">sigstack</span> argument. Otherwise, each of these arguments points to a structure of the following type:</p><pre>typedef struct {
+    void  *ss_sp;         /* Starting address of alternate stack */
+    int    ss_flags;      /* Flags: SS_ONSTACK, SS_DISABLE */
+    size_t ss_size;       /* Size of alternate stack */
+} stack_t;</pre><br/>
+<p class="docText">The <span class="docEmphasis">ss_sp</span> and <span class="docEmphasis">ss_size</span>
+ fields specify the size and location of the alternate signal stack. 
+When actually using the alternate signal stack, the kernel automatically
+ takes care of aligning the value given in <span class="docEmphasis">ss_sp</span> to an address boundary that is suitable for the hardware architecture.</p><p class="docText">Typically,
+ the alternate signal stack is either statically allocated or 
+dynamically allocated on the heap. SUSv3 specifies the constant <tt>SIGSTKSZ</tt> to be used as a typical value when sizing the alternate stack, and <tt>MINSIGSTKSZ</tt>
+ as the minimum size required to invoke a signal handler. On 
+Linux/x86-32, these constants are defined with the values 8192 and 2048,
+ respectively.</p><p class="docText">The kernel 
+doesn’t resize an alternate signal stack. If the stack overflows the 
+space we have allocated for it, then chaos results (e.g., overwriting of
+ variables beyond the limits of the stack). This is not usually a 
+problem—because we normally use an alternate signal stack to handle the 
+special case of the standard stack overflowing, typically only one or a 
+few frames are allocated on the stack. The job of the <tt>SIGSEGV</tt> handler is either to perform some cleanup and terminate the process or to unwind the standard stack using a nonlocal goto.</p><p class="docText">The <span class="docEmphasis">ss_flags</span> field contains one of the following values:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SS_ONSTACK</span></span></span></p></dt><dd><p class="docList">If this flag is set when retrieving information about the currently established alternate signal stack (<span class="docEmphasis">old_sigstack</span>),
+ it indicates that the process is currently executing on the alternate 
+signal stack. Attempts to establish a new alternate signal stack while 
+the process is already running on an alternate signal stack result in an
+ error (<tt>EPERM</tt>) from <span class="docEmphasis">sigaltstack()</span>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">SS_DISABLE</span></span></span></p></dt><dd><p class="docList">Returned in <span class="docEmphasis">old_sigstack</span>, this flag indicates that there is no currently established alternate signal stack. When specified in <span class="docEmphasis">sigstack</span>, this disables a currently established alternate signal stack.</p></dd></dl><p class="docText">Example 21-3
+ demonstrates the establishment and use of an alternate signal stack. 
+After establishing an alternate signal stack and a handler for <tt>SIGSEGV</tt>, this program calls a function that infinitely recurses, so that the stack overflows and the process is sent a <tt>SIGSEGV</tt> signal. When we run the program, this is what we see:</p><pre>$ <b>ulimit -s unlimited </b>
+$ <b>./t_sigaltstack </b>
+Top of standard stack is near 0xbffff6b8
+Alternate stack is at          0x804a948-0x804cfff
+Call    1 - top of stack near 0xbff0b3ac
+Call    2 - top of stack near 0xbfe1714c
+<i> Many intervening lines of output removed</i>
+Call 2144 - top of stack near 0x4034120c
+Call 2145 - top of stack near 0x4024cfac
+Caught signal 11 (Segmentation fault)
+Top of handler stack near      0x804c860</pre><br/>
+<p class="docText">In this shell session, the <span class="docEmphasis">ulimit</span> command is used to remove any <tt>RLIMIT_STACK</tt> resource limit that may have been set in the shell. We explain this resource limit in Section 36.3.</p><h5 class="docExampleTitle" id="title-ID0EMBBK">Example 21-3. Using <span class="docEmphasis">sigaltstack()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>signals/t_sigaltstack.c</b>
+#define _GNU_SOURCE          /* Get strsignal() declaration from &lt;string.h&gt; */
+#include &lt;string.h&gt;
+#include &lt;signal.h&gt;
+#include "tlpi_hdr.h"
+
+static void
+sigsegvHandler(int sig)
+{
+    int x;
+
+    /* UNSAFE: This handler uses non-async-signal-safe functions
+       (printf(), strsignal(), fflush(); see Section 21.1.2) */
+
+    printf("Caught signal %d (%s)\n", sig, strsignal(sig));
+    printf("Top of handler stack near     %10p\n", (void *) &amp;x);
+    fflush(NULL);
+
+    _exit(EXIT_FAILURE);                /* Can't return after SIGSEGV */
+}
+
+static void             /* A recursive function that overflows the stack */
+overflowStack(int callNum)
+{
+    char a[100000];                     /* Make this stack frame large */
+
+    printf("Call %4d - top of stack near %10p\n", callNum, &amp;a[0]);
+    overflowStack(callNum+1);
+}
+
+int
+main(int argc, char *argv[])
+{
+    stack_t sigstack;
+    struct sigaction sa;
+    int j;
+
+    printf("Top of standard stack is near %10p\n", (void *) &amp;j);
+
+    /* Allocate alternate stack and inform kernel of its existence */
+
+    sigstack.ss_sp = malloc(SIGSTKSZ);
+    if (sigstack.ss_sp == NULL)
+        errExit("malloc");
+
+    sigstack.ss_size = SIGSTKSZ;
+    sigstack.ss_flags = 0;
+    if (sigaltstack(&amp;sigstack, NULL) == -1)
+        errExit("sigaltstack");
+    printf("Alternate stack is at         %10p-%p\n",
+            sigstack.ss_sp, (char *) sbrk(0) - 1);
+
+    sa.sa_handler = sigsegvHandler;     /* Establish handler for SIGSEGV */
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = SA_ONSTACK;           /* Handler uses alternate stack */
+    if (sigaction(SIGSEGV, &amp;sa, NULL) == -1)
+        errExit("sigaction");
+
+    overflowStack(1);
+}
+      <b>signals/t_sigaltstack.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

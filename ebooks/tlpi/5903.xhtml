@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>59.3. Data Representation</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">59.3. Data Representation</h3><p class="docText">When
+ writing network programs, we need to be aware of the fact that 
+different computer architectures use different conventions for 
+representing various data types. We have already noted that integer 
+types can be stored in big-endian or little-endian form. There are also 
+other possible differences. For example, the C <span class="docEmphasis">long</span>
+ data type may be 32 bits on some systems and 64 bits on others. When we
+ consider structures, the issue is further complicated by the fact that 
+different implementations employ different rules for aligning the fields
+ of a structure to address boundaries on the host system, leaving 
+different numbers of padding bytes between the fields.</p><p class="docText">Because
+ of these differences in data representation, applications that exchange
+ data between heterogeneous systems over a network must adopt some 
+common convention for encoding that data. The sender must encode data 
+according to this convention, while the receiver decodes following the 
+same convention. The process of putting data into a standard format for 
+transmission across a network is referred to as <span class="docEmphasis">marshalling</span>.
+ Various marshalling standards exist, such as XDR (External Data 
+Representation, described in RFC 1014), ASN.1-BER (Abstract Syntax 
+Notation 1, http://www.asn1.org/),
+ CORBA, and XML. Typically, these standards define a fixed format for 
+each data type (defining, for example, byte order and number of bits 
+used). As well as being encoded in the required format, each data item 
+is tagged with extra field(s) identifying its type (and, possibly, 
+length).</p><p class="docText">However,
+ a simpler approach than marshalling is often employed: encode all 
+transmitted data in text form, with separate data items delimited by a 
+designated character, typically a newline character. One advantage of 
+this approach is that we can use <span class="docEmphasis">telnet</span> to debug an application. To do this, we use the following command:</p><pre>$ <b>telnet</b> <b><tt><i>host port</i></tt></b></pre><br/>
+<p class="docText">We can then type lines of text 
+to be transmitted to the application, and view the responses sent by the
+ application. We demonstrate this technique in Section 59.11.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The
+ problems associated with differences in representation across 
+heterogeneous systems apply not only to data transfer across a network, 
+but also to any mechanism of data exchange between such systems. For 
+example, we face the same problems when transferring files on disk or 
+tape between heterogeneous systems. Network programming is simply the 
+most common programming context in which we are nowadays likely to 
+encounter this issue.</p><hr noshade="noshade" size="1"/><p class="docText">If we encode data transmitted on a stream socket as newline-delimited text, then it is convenient to define a function such as <span class="docEmphasis">readLine()</span>, shown in Example 59-1.</p><pre>#include "read_line.h"
+
+ssize_t <b>readLine</b>(int <span class="docEmphasis">fd</span>, void *<span class="docEmphasis">buffer</span>, size_t <span class="docEmphasis">n</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns number of bytes copied into <span class="docEmphasis">buffer</span> (excluding terminating null byte), or 0 on end-of-file, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">readLine()</span> function reads bytes from the file referred to by the file descriptor argument <span class="docEmphasis">fd</span> until a newline is encountered. The input byte sequence is returned in the location pointed to by <span class="docEmphasis">buffer</span>, which must point to a region of at least <span class="docEmphasis">n</span> bytes of memory. The returned string is always null-terminated; thus, at most <span class="docEmphasis">(n - 1)</span> bytes of actual data will be returned. On success, <span class="docEmphasis">readLine()</span> returns the number of bytes of data placed in <span class="docEmphasis">buffer</span>; the terminating null byte is not included in this count.</p><h5 class="docExampleTitle" id="title-ID0EFFGM">Example 59-1. Reading data a line at a time</h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/read_line.c</b>
+#include &lt;unistd.h&gt;
+#include &lt;errno.h&gt;
+#include "read_line.h"                  /* Declaration of readLine() */
+
+ssize_t
+readLine(int fd, void *buffer, size_t n)
+{
+    ssize_t numRead;                    /* # of bytes fetched by last read() */
+    size_t totRead;                     /* Total bytes read so far */
+    char *buf;
+    char ch;
+
+    if (n &lt;= 0 || buffer == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    buf = buffer;                       /* No pointer arithmetic on "void *" */
+
+    totRead = 0;
+    for (;;) {
+        numRead = read(fd, &amp;ch, 1);
+
+        if (numRead == -1) {
+            if (errno == EINTR)        /* Interrupted --&gt; restart read() */
+                continue;
+            else
+                return -1;              /* Some other error */
+
+        } else if (numRead == 0) {      /* EOF */
+            if (totRead == 0)           /* No bytes read; return 0 */
+                return 0;
+            else                        /* Some bytes read; add '\0' */
+                break;
+
+        } else {                        /* 'numRead' must be 1 if we get here */
+            if (totRead &lt; n - 1) {      /* Discard &gt; (n - 1) bytes */
+                totRead++;
+                *buf++ = ch;
+            }
+
+            if (ch == '\n')
+                break;
+        }
+    }
+
+    *buf = '\0';
+    return totRead;
+}
+     <b>sockets/read_line.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">If the number of bytes read before a newline is encountered is greater than or equal to <span class="docEmphasis">(n - 1)</span>, then the <span class="docEmphasis">readLine()</span> function discards the excess bytes (including the newline). If a newline was read within the first <span class="docEmphasis">(n - 1)</span>
+ bytes, then it is included in the returned string. (Thus, we can 
+determine if bytes were discarded by checking if a newline precedes the 
+terminating null byte in the returned <span class="docEmphasis">buffer</span>.)
+ We take this approach so that application protocols that rely on 
+handling input in units of lines don’t end up processing a long line as 
+though it were multiple lines. This would likely break the protocol, as 
+the applications on either end would become desynchronized. An 
+alternative approach would be to have <span class="docEmphasis">readLine()</span>
+ read only sufficient bytes to fill the supplied buffer, leaving any 
+remaining bytes up to the next newline for the next call to <span class="docEmphasis">readLine()</span>. In this case, the caller of <span class="docEmphasis">readLine()</span> would need to handle the possibility of a partial line being read.</p><p class="docText">We employ the <span class="docEmphasis">readLine()</span> function in the example programs presented in Section 59.11.</p>
+</div>
+</body>
+</html>

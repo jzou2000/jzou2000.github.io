@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>47.8. Semaphore Undo Values</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">47.8. Semaphore Undo Values</h3><p class="docText">Suppose
+ that, having adjusted the value of a semaphore (e.g., decreased the 
+semaphore value so that it is now 0), a process then terminates, either 
+deliberately or accidentally. By default, the semaphore’s value is left 
+unchanged. This may constitute a problem for other processes using the 
+semaphore, since they may be blocked waiting on that semaphore—that is, 
+waiting for the now-terminated process to undo the change it made.</p><p class="docText">To avoid such problems, we can employ the <tt>SEM_UNDO</tt> flag when changing the value of a semaphore via <span class="docEmphasis">semop()</span>.
+ When this flag is specified, the kernel records the effect of the 
+semaphore operation, and then undoes the operation if the process 
+terminates. The undo happens regardless of whether the process 
+terminates normally or abnormally.</p><p class="docText">The kernel doesn’t need to keep a record of all operations performed using <tt>SEM_UNDO</tt>. It suffices to record the <span class="docEmphasis">sum</span> of all of the semaphore adjustments performed using <tt>SEM_UNDO</tt> in a per-semaphore, per-process integer total called the <span class="docEmphasis">semadj</span>
+ (semaphore adjustment) value. When the process terminates, all that is 
+necessary is to subtract this total from the semaphore’s current value.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Since Linux 2.6, processes (threads) created using <span class="docEmphasis">clone()</span> share <span class="docEmphasis">semadj</span> values if the <tt>CLONE_SYSVSEM</tt>
+ flag is employed. Such sharing is required for a conforming 
+implementation of POSIX threads. The NPTL threading implementation 
+employs <tt>CLONE_SYSVSEM</tt> for the implementation of <span class="docEmphasis">pthread_create()</span>.</p><hr noshade="noshade" size="1"/><p class="docText">When a semaphore value is set using the <span class="docEmphasis">semctl()</span> <tt>SETVAL</tt> or <tt>SETALL</tt> operation, the corresponding <span class="docEmphasis">semadj</span>
+ values are cleared (i.e., set to 0) in all processes using the 
+semaphore. This makes sense, since absolutely setting the value of a 
+semaphore destroys the value associated with the historical record 
+maintained in the <span class="docEmphasis">semadj</span> total.</p><p class="docText">A child created via <span class="docEmphasis">fork()</span> doesn’t inherit its parent’s <span class="docEmphasis">semadj</span> values; it doesn’t make sense for a child to undo its parent’s semaphore operations. On the other hand, <span class="docEmphasis">semadj</span> values are preserved across an <span class="docEmphasis">exec()</span>. This permits us to adjust a semaphore value using <tt>SEM_UNDO</tt>, and then <span class="docEmphasis">exec()</span>
+ a program that performs no operation on the semaphore, but does 
+automatically adjust the semaphore on process termination. (This can be 
+used as a technique that allows another process to discover when this 
+process terminates.)</p><h4 class="docSection2Title" id="title-ID0ENJCM">47.8.1. </h4><h5 class="docSection3Title" id="title-ID0ERJCM">47.8.1.1. Example of the effect of <tt>SEM_UNDO</tt></h5><p class="docText">The following shell session log shows the effect of performing operations on two semaphores: one operation with the <tt>SEM_UNDO</tt> flag and one without. We begin by creating a set containing two semaphores:</p><pre>$ <b>./svsem_create -p 2</b>
+131073</pre><br/>
+<p class="docText">Next, we execute a command that adds 1 to both semaphores and then terminates. The operation on semaphore 0 specifies the <tt>SEM_UNDO</tt> flag:</p><pre>$ <b>./svsem_op 131073 0+1u 1+1</b>
+ 2248, 06:41:56: about to semop()
+ 2248, 06:41:56: semop() completed</pre><br/>
+<p class="docText">Now, we use the program in Example 47-3 to check the state of the semaphores:</p><pre>$ <b>./svsem_mon 131073</b>
+Semaphore changed: Sun Jul 25 06:41:34 2010
+Last semop():      Sun Jul 25 06:41:56 2010
+Sem #  Value  SEMPID  SEMNCNT  SEMZCNT
+  0       0    2248      0        0
+  1       1    2248      0        0</pre><br/>
+<p class="docText">Looking at the semaphore 
+values in the last two lines of the above output, we can see that the 
+operation on semaphore 0 was undone, but the operation on semaphore 1 
+was not undone.</p><h5 class="docSection3Title" id="title-ID0EYLCM">47.8.1.2. Limitations of <tt>SEM_UNDO</tt></h5><p class="docText">We conclude by noting that the <tt>SEM_UNDO</tt>
+ flag is less useful than it first appears, for two reasons. One is that
+ because modifying a semaphore typically corresponds to acquiring or 
+releasing some shared resource, the use of <tt>SEM_UNDO</tt>
+ on its own may be insufficient to allow a multiprocess application to 
+recover in the event that a process unexpectedly terminates. Unless 
+process termination also automatically returns the shared resource state
+ to a consistent state (unlikely in many scenarios), undoing a semaphore
+ operation is probably insufficient to allow the application to recover.</p><p class="docText">The second factor limiting the utility of <tt>SEM_UNDO</tt>
+ is that, in some cases, it is not possible to perform semaphore 
+adjustments when a process terminates. Consider the following scenario, 
+applied to a semaphore whose initial value is 0:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Process A increases the value of a semaphore by 2, specifying the <tt>SEM_UNDO</tt> flag for the operation.</p></div></li><li><div style="font-weight:normal"><p class="docList">Process B decreases the value of the semaphore by 1, so that it has the value 1.</p></div></li><li><div style="font-weight:normal"><p class="docList">Process A terminates.</p></div></li></ol></div><p class="docText">At
+ this point, it is impossible to completely undo the effect of process 
+A’s operation in step 1, since the value of the semaphore is too low. 
+There are three possible ways to resolve this situation:</p><ul><li><p class="docList">Force the process to block until the semaphore adjustment is possible.</p></li><li><p class="docList">Decrease the semaphore value as far as possible (i.e., to 0) and exit.</p></li><li><p class="docList">Exit without performing any semaphore adjustment.</p></li></ul><p class="docText">The
+ first solution is infeasible since it might force a terminating process
+ to block forever. Linux adopts the second solution. Some other UNIX 
+implementations adopt the third solution. SUSv3 is silent on what an 
+implementation should do in this situation.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">An undo operation that attempts to raise a semaphore’s value above its permitted maximum value of 32,767 (the <tt>SEMVMX</tt> limit, described Section 47.10)
+ also causes anomalous behavior. In this case, the kernel always 
+performs the adjustment, thus (illegitimately) raising the semaphore’s 
+value above <tt>SEMVMX</tt>.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

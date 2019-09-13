@@ -1,0 +1,617 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Move Semantics and the Rvalue Reference</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Move Semantics and the Rvalue Reference</h3>
+<p class="docText">Now let’s move on to topics we haven’t yet discussed. C++11 enables a technique called <span class="docEmphasis">move semantics</span>.
+ This raises some questions, such as what are move semantics, how does 
+C++11 enable them, and why do we need them? We’ll begin with the last 
+question.</p>
+
+<h4 class="docSection2Title" id="title-ID0E1PAM">The Need for Move Semantics</h4>
+<p class="docText">Let’s look into the copying process as it worked prior to C++11. Suppose we start with something like this:</p>
+<div class="docText"><pre>vector&lt;string&gt; vstr;
+// build up a vector of 20,000 strings, each of 1000 characters
+...
+vector&lt;string&gt; vstr_copy1(vstr);  // make vstr_copy1 a copy of vstr</pre></div><br/>
+<p class="docText">Both the <tt>vector</tt> class and the <tt>string</tt> class use dynamic memory allocation, so they will have copy constructors defined that use some version of <tt>new</tt>. To initialize the <tt>vstr_copy1</tt> object, the <tt>vector&lt;string&gt;</tt> copy constructor will use <tt>new</tt> to allocate memory for 20,000 <tt>string</tt> objects, and each <tt>string</tt> object, in turn, will call the <tt>string</tt> copy constructor, which will use <tt>new</tt> to allocate memory for 1000 characters. Then all 20,000,000 characters will be copied from the memory controlled by <tt>vstr</tt> to the memory controlled by <tt>vstr_copy1</tt>. That’s a lot of work, but if it’s got to be done, then it’s got to be done.</p>
+<p class="docText">But does it “got to be done?” There are times when the answer is no. For instance, suppose we have a function that returns a <tt>vector&lt;string&gt;</tt> object:</p>
+<div class="docText"><pre>vector&lt;string&gt; allcaps(const vector&lt;string&gt; &amp; vs)
+{
+    vector&lt;string&gt; temp;
+// code that stores an all-uppercase version of vs in temp
+    return temp;
+}</pre></div><br/>
+<p class="docText">Next, suppose we use it this way:</p>
+<div class="docText"><pre>vector&lt;string&gt; vstr;
+// build up a vector of 20,000 strings, each of 1000 characters
+vector&lt;string&gt; vstr_copy1(vstr);              // #1
+vector&lt;string&gt; vstr_copy2(allcaps(vstr));     // #2</pre></div><br/>
+<p class="docText">Superficially, statements #1 and #2 are similar; each uses an existing object to initialize a new <tt>vector&lt;string&gt;</tt> object. If we take this code at face value, <tt>allcaps()</tt> creates a <tt>temp</tt> object managing 20,000,000 characters, the <tt>vector</tt> and <tt>string</tt> copy constructors go through the effort of creating a 20,000,000-character duplicate, then the program deletes the temporary object returned by <tt>allcaps()</tt>. (A really uninspired compiler could even copy <tt>temp</tt> to a temporary return object, delete <tt>temp</tt>,
+ and then delete the return object.) The main point is that a lot of 
+effort is wasted here. Because the temporary object is deleted, wouldn’t
+ it be better if the compiler could just transfer ownership of the data 
+to <tt>vstr_copy2</tt>? That is, instead of 
+copying 20,000,000 characters to a new location and then deleting the 
+old location, just leave the characters in place and attach the <tt>vstr_copy2</tt>
+ label to them. This would be similar to what happens when you move a 
+file from one directory to another: The actual file stays where it is on
+ the hard drive, and just the bookkeeping is altered. Such an approach 
+is called <span class="docEmphasis">move semantics</span>. Somewhat paradoxically, move semantics actually avoids moving the primary data; it just adjusts the bookkeeping.</p>
+<p class="docText">To implement move semantics, we 
+need a way to let the compiler know when it needs to do a real copy and 
+when it doesn’t. Here’s where the rvalue reference comes into play. We 
+can define two constructors. One, the regular copy constructor, can use 
+the usual <tt>const</tt> lvalue reference as a parameter. This reference will bind to lvalue arguments, such as <tt>vstr</tt> in statement #1. The other, called a <span class="docEmphasis">move constructor</span>, can use an rvalue reference, and it can bind to rvalue arguments, such as the return value of <tt>allcaps(vstr)</tt>
+ in statement #2. The copy constructor can do the usual deep copy, while
+ the move constructor can just adjust the bookkeeping. A move 
+constructor may alter its argument in the process of transferring 
+ownership to a new object, and this implies that an rvalue reference 
+parameter should not be <tt>const</tt>.</p>
+
+<h4 class="docSection2Title" id="title-ID0EYTAM">A Move Example</h4>
+<p class="docText">Let’s look at an example to see how move semantics and rvalue references work. Listing 18.2 defines and uses the <tt>Useless</tt>
+ class, which incorporates dynamic memory allocation, a regular copy 
+constructor, and a move constructor, which uses move semantics and an 
+rvalue reference. In order to illustrate the processes involved, the 
+constructors and destructor are unusually verbose, and the class uses a 
+state variable to keep track of the number of objects. Also some 
+important methods, such as the assignment operator, are omitted. 
+(Despite these omissions, the <tt>Useless</tt> class should not be confused with the eco-friendly <tt>Use_Less</tt> class.)</p>
+<h5 class="docExampleTitle" id="title-ID0EQUAM">Listing 18.2. <tt>useless.cpp</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// useless.cpp -- an otherwise useless class with move semantics
+#include &lt;iostream&gt;
+using namespace std;
+
+// interface
+class Useless
+{
+private:
+    int n;          // number of elements
+    char * pc;      // pointer to data
+    static int ct;  // number of objects
+    void ShowObject() const;
+public:
+    Useless();
+    explicit Useless(int k);
+    Useless(int k, char ch);
+    Useless(const Useless &amp; f); // regular copy constructor
+    Useless(Useless &amp;&amp; f);      // move constructor
+    ~Useless();
+    Useless operator+(const Useless &amp; f)const;
+// need operator=() in copy and move versions
+    void ShowData() const;
+};
+
+// implementation
+int Useless::ct = 0;
+
+Useless::Useless()
+{
+    ++ct;
+    n = 0;
+    pc = nullptr;
+    cout &lt;&lt; "default constructor called; number of objects: " &lt;&lt; ct &lt;&lt; endl;
+    ShowObject();
+}
+
+Useless::Useless(int k) : n(k)
+{
+    ++ct;
+    cout &lt;&lt; "int constructor called; number of objects: " &lt;&lt; ct &lt;&lt; endl;
+    pc = new char[n];
+    ShowObject();
+}
+
+Useless::Useless(int k, char ch) : n(k)
+{
+    ++ct;
+    cout &lt;&lt; "int, char constructor called; number of objects: " &lt;&lt; ct
+         &lt;&lt; endl;
+    pc = new char[n];
+    for (int i = 0; i &lt; n; i++)
+        pc[i] = ch;
+    ShowObject();
+}
+
+Useless::Useless(const Useless &amp; f): n(f.n)
+{
+    ++ct;
+    cout &lt;&lt; "copy const called; number of objects: " &lt;&lt; ct &lt;&lt; endl;
+    pc = new char[n];
+    for (int i = 0; i &lt; n; i++)
+        pc[i] = f.pc[i];
+    ShowObject();
+}
+
+Useless::Useless(Useless &amp;&amp; f): n(f.n)
+{
+    ++ct;
+    cout &lt;&lt; "move constructor called; number of objects: " &lt;&lt; ct &lt;&lt; endl;
+    pc = f.pc;       // steal address
+    f.pc = nullptr;  // give old object nothing in return
+    f.n = 0;
+    ShowObject();
+}
+
+Useless::~Useless()
+{
+    cout &lt;&lt; "destructor called; objects left: " &lt;&lt; --ct &lt;&lt; endl;
+    cout &lt;&lt; "deleted object:\n";
+    ShowObject();
+    delete [] pc;
+}
+
+Useless Useless::operator+(const Useless &amp; f)const
+{
+    cout &lt;&lt; "Entering operator+()\n";
+    Useless temp = Useless(n + f.n);
+    for (int i = 0; i &lt; n; i++)
+        temp.pc[i] = pc[i];
+    for (int i = n; i &lt; temp.n; i++)
+        temp.pc[i] = f.pc[i - n];
+    cout &lt;&lt; "temp object:\n";
+    cout &lt;&lt; "Leaving operator+()\n";
+    return temp;
+}
+
+void Useless::ShowObject() const
+{
+    cout &lt;&lt; "Number of elements: " &lt;&lt; n;
+    cout &lt;&lt; " Data address: " &lt;&lt; (void *) pc &lt;&lt; endl;
+}
+
+void Useless::ShowData() const
+{
+    if (n == 0)
+        cout &lt;&lt; "(object empty)";
+    else
+        for (int i = 0; i &lt; n; i++)
+            cout &lt;&lt; pc[i];
+    cout &lt;&lt; endl;
+}
+
+// application
+int main()
+{
+    {
+        Useless one(10, 'x');
+        Useless two = one;           // calls copy constructor
+        Useless three(20, 'o');
+        Useless four (one + three);  // calls operator+(), move constructor
+        cout &lt;&lt; "object one: ";
+        one.ShowData();
+        cout &lt;&lt; "object two: ";
+        two.ShowData();
+        cout &lt;&lt; "object three: ";
+        three.ShowData();
+        cout &lt;&lt; "object four: ";
+        four.ShowData();
+    }
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">The 
+crucial definitions are those of the two copy/move constructors. First, 
+shorn of the output statements, here is the copy constructor:</p>
+<div class="docText"><pre>Useless::Useless(const Useless &amp; f): n(f.n)
+{
+    ++ct;
+    pc = new char[n];
+    for (int i = 0; i &lt; n; i++)
+        pc[i] = f.pc[i];
+}</pre></div><br/>
+<p class="docText">It does the usual deep copy, and it is the constructor that’s used by the following statement:</p>
+<div class="docText"><pre>Useless two = one;           // calls copy constructor</pre></div><br/>
+<p class="docText">The reference <tt>f</tt> refers to the lvalue object <tt>one</tt>.</p>
+<p class="docText">Next, again shorn of the output statements, here is the move constructor:</p>
+<div class="docText"><pre>Useless::Useless(Useless &amp;&amp; f): n(f.n)
+{
+    ++ct;
+    pc = f.pc;       // steal address
+    f.pc = nullptr;  // give old object nothing in return
+    f.n = 0;
+}</pre></div><br/>
+<p class="docText">It takes ownership of the existing data by setting <tt>pc</tt> to point to the data. At this time, both <tt>pc</tt> and <tt>f.pc</tt> point to the same data. This would be awkward when the destructors are called, because a program shouldn’t call <tt>delete []</tt>
+ twice for the same address. To avoid this problem, the constructor then
+ sets the original pointer to the null pointer because it is not an 
+error to apply <tt>delete []</tt> to the null pointer. This appropriation of ownership often is termed <span class="docEmphasis">pilfering</span>.
+ The code also sets the element count in the original object to 0. This 
+isn’t necessary, but it makes the output for our example look more 
+self-consistent. Note that the changes to the <tt>f</tt> object require not using <tt>const</tt> in the parameter declaration.</p>
+<p class="docText">It is this constructor that is used in the following statement:</p>
+<div class="docText"><pre>Useless four (one + three);  // calls move constructor</pre></div><br/>
+<p class="docText">The expression <tt>one + three</tt> invokes <tt>Useless::operator+()</tt>, and the rvalue reference <tt>f</tt> binds to the rvalue temporary object returned by the method.</p>
+<p class="docText">Here’s the output when the program was compiled with Microsoft Visual C++ 2010:</p>
+<div class="docText"><pre class="preFixedHeight">int, char constructor called; number of objects: 1
+Number of elements: 10 Data address: 006F4B68
+copy const called; number of objects: 2
+Number of elements: 10 Data address: 006F4BB0
+int, char constructor called; number of objects: 3
+Number of elements: 20 Data address: 006F4BF8
+Entering operator+()
+int constructor called; number of objects: 4
+Number of elements: 30 Data address: 006F4C48
+temp object:
+Leaving operator+()
+move constructor called; number of objects: 5
+Number of elements: 30 Data address: 006F4C48
+destructor called; objects left: 4
+deleted object:
+Number of elements: 0 Data address: 00000000
+object one: xxxxxxxxxx
+object two: xxxxxxxxxx
+object three: oooooooooooooooooooo
+object four: xxxxxxxxxxoooooooooooooooooooo
+destructor called; objects left: 3
+deleted object:
+Number of elements: 30 Data address: 006F4C48
+destructor called; objects left: 2
+deleted object:
+Number of elements: 20 Data address: 006F4BF8
+destructor called; objects left: 1
+deleted object:
+Number of elements: 10 Data address: 006F4BB0
+destructor called; objects left: 0
+deleted object:
+Number of elements: 10 Data address: 006F4B68
+
+					  </pre></div><br/>
+<p class="docText">Note that object <tt>two</tt> is a separate copy of object <tt>one</tt>: Both display the same data output, but the data addresses (<tt>006F4B68</tt> and <tt>006F4BB0</tt>) are different. On the other hand, the data address (<tt>006F4C48</tt>) of the object created in the <tt>Useless::operator+()</tt> method is the same as the data address stored in the <tt>four</tt>
+ object, which was constructed by the move copy constructor. Also note 
+how the destructor was called for the temporary object after the <tt>four</tt>
+ object was constructed. You can tell that is the temporary object that 
+was deleted because the size and the data address both show as 0.</p>
+<p class="docText">Compiling the same program (but replacing <tt>nullptr</tt> with <tt>0</tt>) with g++ 4.5.0 with the <tt>–std=c++11</tt> flag leads to an interestingly different output:</p>
+<div class="docText"><pre class="preFixedHeight">int, char constructor called; number of objects: 1
+Number of elements: 10 Data address: 0xa50338
+copy const called; number of objects: 2
+Number of elements: 10 Data address: 0xa50348
+int, char constructor called; number of objects: 3
+Number of elements: 20 Data address: 0xa50358
+Entering operator+()
+int constructor called; number of objects: 4
+Number of elements: 30 Data address: 0xa50370
+temp object:
+Leaving operator+()
+object one: xxxxxxxxxx
+object two: xxxxxxxxxx
+object three: oooooooooooooooooooo
+object four: xxxxxxxxxxoooooooooooooooooooo
+destructor called; objects left: 3
+deleted object:
+Number of elements: 30 Data address: 0xa50370
+destructor called; objects left: 2
+deleted object:
+Number of elements: 20 Data address: 0xa50358
+destructor called; objects left: 1
+deleted object:
+Number of elements: 10 Data address: 0xa50348
+destructor called; objects left: 0
+deleted object:
+Number of elements: 10 Data address: 0xa50338
+
+					  </pre></div><br/>
+<p class="docText">Note
+ that the move constructor is not called and that only four objects were
+ created. The compiler did not call any of our constructors to construct
+ the <tt>four</tt> object; instead, it deduced that the <tt>four</tt> object should be the beneficiary of the work done by <tt>operator+()</tt> and transferred the name <tt>four</tt> to the object created in <tt>operator+()</tt>.
+ In general, compilers are empowered to make their own optimizations if 
+the result is the same that would have been obtained by going through 
+all the steps. Even if you omit the move constructor from the code and 
+compile with g++, you get the same behavior.</p>
+
+<h4 class="docSection2Title" id="title-ID0EB1AM">Move Constructor Observations</h4>
+<p class="docText">Although using an rvalue
+ reference enables move semantics, it doesn’t magically make it happen. 
+There are two steps to enablement. The first step is that the rvalue 
+reference allows the compiler to identify when move semantics can be 
+used:</p>
+<div class="docText"><pre>Useless two = one;          // matches Useless::Useless(const Useless &amp;)
+Useless four (one + three); // matches Useless::Useless(Useless &amp;&amp;)</pre></div><br/>
+<p class="docText">The object <tt>one</tt> is an lvalue, so it matches the lvalue reference, and the expression <tt>one + three</tt> is an rvalue, so it matches the rvalue reference. Thus, the rvalue reference directs initialization for object <tt>four</tt>
+ to the move constructor. The second step in enabling move semantics is 
+coding the move constructor so that it provides the behavior we want.</p>
+<p class="docText">In short, the presence of one 
+constructor with an lvalue reference and a second constructor with an 
+rvalue reference sorts possible initializations into two groups. Objects
+ initialized with an lvalue object use the copy constructor, and objects
+ initialized with an rvalue object use the move constructor. The code 
+writer then can endow these constructors with different behaviors.</p>
+<p class="docText">This raises the question 
+of what happened before rvalue references were part of the language. If 
+there is no move constructor and the compiler doesn’t optimize away the 
+need for the copy constructor, what should happen? Under C++98, the 
+following statement would invoke the copy constructor:</p>
+<div class="docText"><pre>Useless four (one + three);</pre></div><br/>
+<p class="docText">But an lvalue reference doesn’t bind to an rvalue. So what happens? As you may recall from Chapter 8, a <tt>const</tt> reference parameter will bind to a temporary variable or object if the actual argument is an rvalue:</p>
+<div class="docText"><pre>int twice(const &amp; rx) {return 2 * rx;}
+...
+int main()
+{
+    int m = 6;
+    // below, rx refers to m
+    int n = twice(m);
+    // below, rx refers to a temporary variable initialized to 21
+    int k = twice(21);
+...</pre></div><br/>
+<p class="docText">So in the <tt>Useless</tt> case, the formal parameter <tt>f</tt> will be initialized to a temporary object that’s initialized to the return value of <tt>operator+()</tt>. Here is an excerpt from the result of using an older compiler with Listing 18.2 and omitting the move constructor:</p>
+<div class="docText"><pre>...
+Entering operator+()
+int constructor called; number of objects: 4
+Number of elements: 30 Data address: 01C337C4
+temp object:
+Leaving operator+()
+copy const called; number of objects: 5
+Number of elements: 30 Data address: 01C337E8
+destructor called; objects left: 4
+deleted object:
+Number of elements: 30 Data address: 01C337C4
+copy const called; number of objects: 5
+Number of elements: 30 Data address: 01C337C4
+destructor called; objects left: 4
+deleted object:
+Number of elements: 30 Data address: 01C337E8
+...</pre></div><br/>
+<p class="docText">First, within the <tt>Useless::operator+()</tt> method, a constructor creates <tt>temp</tt>, allocating storage for 30 elements at location <tt>01C337C4</tt>. Then the copy constructor creates a temporary copy to which <tt>f</tt> will refer, copying the information to location <tt>01C337E8</tt>. Next, <tt>temp</tt>, which uses location <tt>01C337C4</tt>, gets deleted. Then a new object, <tt>four</tt>, is constructed, reusing the recently freed memory at <tt>01C337C4</tt>. Then the temporary argument object, which used location <tt>01C337E8</tt>,
+ gets deleted. So three complete objects were constructed, and two of 
+them were destroyed. This is the sort of extra work that move semantics 
+are meant to eliminate.</p>
+<p class="docText">As the g++ example shows, an
+ optimizing compiler might eliminate extra copying on its own, but using
+ an rvalue reference lets the programmer dictate move semantics when 
+appropriate.</p>
+
+<h4 class="docSection2Title" id="title-ID0EQ4AM">Assignment</h4>
+<p class="docText">The same considerations that 
+make move semantics appropriate for constructors make them appropriate 
+for assignment. Here, for example, is how you could code the copy 
+assignment and the move assignment operators for the <tt>Useless</tt> class:</p>
+<div class="docText"><pre class="preFixedHeight">Useless &amp; Useless::operator=(const Useless &amp; f)  // copy assignment
+{
+    if (this == &amp;f)
+        return *this;
+    delete [] pc;
+    n = f.n;
+    pc = new char[n];
+    for (int i = 0; i &lt; n; i++)
+        pc[i] = f.pc[i];
+    return *this;
+}
+
+Useless &amp; Useless::operator=(Useless &amp;&amp; f)       // move assignment
+{
+    if (this == &amp;f)
+        return *this;
+    delete [] pc;
+    n = f.n;
+    pc = f.pc;
+    f.n = 0;
+    f.pc = nullptr;
+    return *this;
+}
+
+					  </pre></div><br/>
+<p class="docText">The copy assignment operator follows the usual pattern given in Chapter 12.
+ The move assignment operator deletes the original data in the target 
+and pilfers the source object. It’s important that only one pointer 
+points to the data, so the method resets the pointer in the source 
+object to the null pointer.</p>
+<p class="docText">As with the move constructor, the move assignment operator parameter is not a <tt>const</tt> reference because the method alters the source object.</p>
+
+<h4 class="docSection2Title" id="title-ID0EO6AM">Forcing a Move</h4>
+<p class="docText">Move constructors and move 
+assignment operators work with rvalues. What if you want to use them 
+with lvalues? For instance, a program could analyze an array of some 
+sort of candidate objects, select one object for further use, and 
+discard the array. It would be convenient if you could use a move 
+constructor or a move assignment operator to preserve the selected 
+object. However, suppose you tried the following:</p>
+<div class="docText"><pre>Useless choices[10];
+Useless best;
+int pick;
+... // select one object,  set pick to index
+best = choices[pick];</pre></div><br/>
+<p class="docText">The <tt>choices[pick]</tt> 
+object is an lvalue, so the assignment statement will use the copy 
+assignment operator, not the move assignment operator. But if you could 
+make <tt>choices[pick]</tt> look like an rvalue, then the move assignment operator would be used. This can be done by using the <tt>static_cast&lt;&gt;</tt> operator to cast the object to type <tt>Useless &amp;&amp;</tt>. C++11 provides a simpler way to do this—use the <tt>std::move()</tt> function, which is declared in the <tt>utility</tt> header file. Listing 18.3 illustrates this technique. It adds verbose versions of the assignment operators to the <tt>Useless</tt> class while silencing the previously verbose constructors and destructor.</p>
+<h5 class="docExampleTitle" id="title-ID0EEBBM">Listing 18.3. <tt>stdmove.cpp</tt></h5><p></p><div class="box">
+<pre class="preFixedHeight">// stdmove.cpp -- using std::move()
+#include &lt;iostream&gt;
+#include &lt;utility&gt;
+
+// interface
+class Useless
+{
+private:
+    int n;          // number of elements
+    char * pc;      // pointer to data
+    static int ct;  // number of objects
+    void ShowObject() const;
+public:
+    Useless();
+    explicit Useless(int k);
+    Useless(int k, char ch);
+    Useless(const Useless &amp; f); // regular copy constructor
+    Useless(Useless &amp;&amp; f);      // move constructor
+    ~Useless();
+    Useless operator+(const Useless &amp; f)const;
+    Useless &amp; operator=(const Useless &amp; f); // copy assignment
+    Useless &amp; operator=(Useless &amp;&amp; f);      // move assignment
+    void ShowData() const;
+};
+
+// implementation
+int Useless::ct = 0;
+
+Useless::Useless()
+{
+    ++ct;
+    n = 0;
+    pc = nullptr;
+ }
+
+Useless::Useless(int k) : n(k)
+{
+    ++ct;
+    pc = new char[n];
+}
+
+Useless::Useless(int k, char ch) : n(k)
+{
+    ++ct;
+    pc = new char[n];
+    for (int i = 0; i &lt; n; i++)
+        pc[i] = ch;
+}
+
+Useless::Useless(const Useless &amp; f): n(f.n)
+{
+    ++ct;
+    pc = new char[n];
+    for (int i = 0; i &lt; n; i++)
+        pc[i] = f.pc[i];
+}
+
+Useless::Useless(Useless &amp;&amp; f): n(f.n)
+{
+    ++ct;
+    pc = f.pc;       // steal address
+    f.pc = nullptr;  // give old object nothing in return
+    f.n = 0;
+}
+
+Useless::~Useless()
+{
+    delete [] pc;
+}
+
+Useless &amp; Useless::operator=(const Useless &amp; f)  // copy assignment
+{
+    std::cout &lt;&lt; "copy assignment operator called:\n";
+    if (this == &amp;f)
+        return *this;
+    delete [] pc;
+    n = f.n;
+    pc = new char[n];
+    for (int i = 0; i &lt; n; i++)
+        pc[i] = f.pc[i];
+    return *this;
+}
+
+Useless &amp; Useless::operator=(Useless &amp;&amp; f)       // move assignment
+{
+    std::cout &lt;&lt; "move assignment operator called:\n";
+    if (this == &amp;f)
+        return *this;
+    delete [] pc;
+    n = f.n;
+    pc = f.pc;
+    f.n = 0;
+    f.pc = nullptr;
+    return *this;
+}
+
+Useless Useless::operator+(const Useless &amp; f)const
+{
+    Useless temp = Useless(n + f.n);
+    for (int i = 0; i &lt; n; i++)
+        temp.pc[i] = pc[i];
+    for (int i = n; i &lt; temp.n; i++)
+        temp.pc[i] = f.pc[i - n];
+    return temp;
+}
+
+void Useless::ShowObject() const
+{
+    std::cout &lt;&lt; "Number of elements: " &lt;&lt; n;
+    std::cout &lt;&lt; " Data address: " &lt;&lt; (void *) pc &lt;&lt; std::endl;
+}
+
+void Useless::ShowData() const
+{
+    if (n == 0)
+        std::cout &lt;&lt; "(object empty)";
+    else
+        for (int i = 0; i &lt; n; i++)
+            std::cout &lt;&lt; pc[i];
+    std::cout &lt;&lt; std::endl;
+}
+
+// application
+int main()
+{
+    using std::cout;
+    {
+        Useless one(10, 'x');
+        Useless two = one +one;   // calls move constructor
+        cout &lt;&lt; "object one: ";
+        one.ShowData();
+        cout &lt;&lt; "object two: ";
+        two.ShowData();
+        Useless three, four;
+        cout &lt;&lt; "three = one\n";
+        three = one;              // automatic copy assignment
+        cout &lt;&lt; "now object three = ";
+        three.ShowData();
+        cout &lt;&lt; "and object one = ";
+        one.ShowData();
+        cout &lt;&lt; "four = one + two\n";
+        four = one + two;         // automatic move assignment
+        cout &lt;&lt; "now object four = ";
+        four.ShowData();
+        cout &lt;&lt; "four = move(one)\n";
+        four = std::move(one);    // forced move assignment
+        cout &lt;&lt; "now object four = ";
+        four.ShowData();
+        cout &lt;&lt; "and object one = ";
+        one.ShowData();
+    }
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Here is a sample run:</p>
+<div class="docText"><pre>object one: xxxxxxxxxx
+object two: xxxxxxxxxxxxxxxxxxxx
+three = one
+copy assignment operator called:
+now object three = xxxxxxxxxx
+and object one = xxxxxxxxxx
+four = one + two
+move assignment operator called:
+now object four = xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+four = move(one)
+move assignment operator called:
+now object four = xxxxxxxxxx
+and object one = (object empty)</pre></div><br/>
+<p class="docText">As you can see, assigning <tt>one</tt> to <tt>three</tt> invokes copy assignment, but assigning <tt>move(one)</tt> to <tt>four</tt> invokes move assignment.</p>
+<p class="docText">You should realize that the <tt>std::move()</tt> function doesn’t necessarily produce a move operation. Suppose, for instance, that <tt>Chunk</tt> is a class with private data and that we have the following code:</p>
+<div class="docText"><pre>Chunk one;
+...
+Chunk two;
+two = std::move(one);  // move semantics?</pre></div><br/>
+<p class="docText">The expression <tt>std::move(one)</tt> is an rvalue, so the assignment statement will invoke the move assignment operator for <tt>Chunk</tt>, providing that one has been defined. But if the <tt>Chunk</tt>
+ class doesn’t define a move assignment operator, the compiler will use 
+the copy assignment operator. And if that also isn’t defined, then 
+assignment isn’t allowed at all.</p>
+<p class="docText">The main benefit rvalue 
+references bring to most programmers is not the opportunity to write 
+code using them. Rather, it is the opportunity to use library code that 
+utilizes rvalue references to implement move semantics. For example, the
+ STL classes now have copy constructors, move constructors, copy 
+assignment operators, and move assignment operators.</p>
+</div>
+</body>
+</html>

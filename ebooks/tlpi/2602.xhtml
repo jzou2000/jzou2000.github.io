@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>26.2. Orphans and Zombies</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">26.2. Orphans and Zombies</h3><p class="docText">The
+ lifetimes of parent and child processes are usually not the same—either
+ the parent outlives the child or vice versa. This raises two questions:</p><ul><li><p class="docList">Who becomes the parent of an <span class="docEmphasis">orphaned</span> child? The orphaned child is adopted by <span class="docEmphasis">init</span>, the ancestor of all processes, whose process ID is 1. In other words, after a child’s parent terminates, a call to <span class="docEmphasis">getppid()</span>
+ will return the value 1. This can be used as a way of determining if a 
+child’s true parent is still alive (this assumes a child that was 
+created by a process other than <span class="docEmphasis">init</span>).</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Using the <tt>PR_SET_PDEATHSIG</tt> operation of the Linux-specific <span class="docEmphasis">prctl()</span> system call, it is possible to arrange that a process receives a specified signal when it becomes an orphan.</p><hr noshade="noshade" size="1"/><ul><li><p class="docList">What happens to a child that terminates before its parent has had a chance to perform a <span class="docEmphasis">wait()</span>? The point here is that, although the child has finished its work, the parent should still be permitted to perform a <span class="docEmphasis">wait()</span> at some later time to determine how the child terminated. The kernel deals with this situation by turning the child into a <span class="docEmphasis">zombie</span>.
+ This means that most of the resources held by the child are released 
+back to the system to be reused by other processes. The only part of the
+ process that remains is an entry in the kernel’s process table 
+recording (among other things) the child’s process ID, termination 
+status, and resource usage statistics (Section 36.1).</p></li></ul><p class="docText">Regarding zombies, UNIX systems imitate the movies—a zombie process can’t be killed by a signal, not even the (silver bullet) <tt>SIGKILL</tt>. This ensures that the parent can always eventually perform a <span class="docEmphasis">wait()</span>.</p><p class="docText">When the parent does perform a <span class="docEmphasis">wait()</span>,
+ the kernel removes the zombie, since the last remaining information 
+about the child is no longer required. On the other hand, if the parent 
+terminates without doing a <span class="docEmphasis">wait()</span>, then the <span class="docEmphasis">init</span> process adopts the child and automatically performs a <span class="docEmphasis">wait()</span>, thus removing the zombie process from the system.</p><p class="docText">If a parent creates a child, but fails to perform a <span class="docEmphasis">wait()</span>,
+ then an entry for the zombie child will be maintained indefinitely in 
+the kernel’s process table. If a large number of such zombie children 
+are created, they will eventually fill the kernel process table, 
+preventing the creation of new processes. Since the zombies can’t be 
+killed by a signal, the only way to remove them from the system is to 
+kill their parent (or wait for it to exit), at which time the zombies 
+are adopted and waited on by <span class="docEmphasis">init</span>, and consequently removed from the system.</p><p class="docText">These
+ semantics have important implications for the design of long-lived 
+parent processes, such as network servers and shells, that create 
+numerous children. To put things another way, in such applications, a 
+parent process should perform <span class="docEmphasis">wait()</span>
+ calls in order to ensure that dead children are always removed from the
+ system, rather than becoming long-lived zombies. The parent may perform
+ such <span class="docEmphasis">wait()</span> calls either synchronously, or asynchronously, in response to delivery of the <tt>SIGCHLD</tt> signal, as described in Section 26.3.1.</p><p class="docText">Example 26-4 demonstrates the creation of a zombie and that a zombie can’t be killed by <tt>SIGKILL</tt>. When we run this program, we see the following output:</p><pre class="preFixedWidth">$ <b>./make_zombie </b>
+Parent PID=1013
+Child (PID=1014) exiting
+ 1013 pts/4    00:00:00 make_zombie                       <i> Output from</i> <b>ps(1) </b>
+ 1014 pts/4    00:00:00 make_zombie &lt;defunct&gt;
+After sending SIGKILL to make_zombie (PID=1014):
+ 1013 pts/4    00:00:00 make_zombie                       <i> Output from</i> <b>ps(1) </b>
+ 1014 pts/4    00:00:00 make_zombie &lt;defunct&gt;
+
+					  </pre><br/>
+<p class="docText">In the above output, we see that <span class="docEmphasis">ps(1)</span> displays the string <tt>&lt;defunct&gt;</tt> to indicate a process in the zombie state.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The program in Example 26-4 uses the <span class="docEmphasis">system()</span> function to execute the shell command given in its character-string argument. We describe <span class="docEmphasis">system()</span> in detail in Section 27.6.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0E13CK">Example 26-4. Creating a zombie child process</h5><p></p><div class="box"><pre class="preFixedHeight"><b>procexec/make_zombie.c</b>
+#include &lt;signal.h&gt;
+#include &lt;libgen.h&gt;             /* For basename() declaration */
+#include "tlpi_hdr.h"
+
+#define CMD_SIZE 200
+
+int
+main(int argc, char *argv[])
+{
+    char cmd[CMD_SIZE];
+    pid_t childPid;
+
+    setbuf(stdout, NULL);       /* Disable buffering of stdout */
+
+    printf("Parent PID=%ld\n", (long) getpid());
+
+    switch (childPid = fork()) {
+    case -1:
+        errExit("fork");
+
+    case 0:     /* Child: immediately exits to become zombie */
+        printf("Child (PID=%ld) exiting\n", (long) getpid());
+        _exit(EXIT_SUCCESS);
+
+        default:    /* Parent */
+        sleep(3);               /* Give child a chance to start and exit */
+        snprintf(cmd, CMD_SIZE, "ps | grep %s", basename(argv[0]));
+        cmd[CMD_SIZE - 1] = '\0';       /* Ensure string is null-terminated */
+        system(cmd);            /* View zombie child */
+
+        /* Now send the "sure kill" signal to the zombie */
+
+        if (kill(childPid, SIGKILL) == -1)
+            errMsg("kill");
+        sleep(3);               /* Give child a chance to react to signal */
+        printf("After sending SIGKILL to zombie (PID=%ld):\n", (long) childPid);
+        system(cmd);            /* View zombie child again */
+
+        exit(EXIT_SUCCESS);
+    }
+}
+      <b>procexec/make_zombie.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

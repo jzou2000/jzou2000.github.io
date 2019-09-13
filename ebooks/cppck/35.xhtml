@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 35. Placement New</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 35. Placement New</h2>
+		
+<p class="docText">It’s
+ impossible to call a constructor directly. However, we can trick the 
+compiler into calling a constructor for us through the use of placement 
+new.</p>
+		
+<div class="docText">
+  <pre>void *operator new( size_t, void *p ) throw()
+    { return p; }
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Placement new is a standard, global, overloaded version of <tt>operator new</tt> that cannot be replaced with a user-defined version (unlike the standard, global, “usual” <tt>operator new</tt> and <tt>operator delete</tt>
+ that can be replaced but probably shouldn’t be). The implementation 
+ignores the size argument and returns its second argument. This has the 
+effect of allowing one to “place” an object at a particular location, 
+giving the effect of being able to call a constructor.</p>
+		
+<div class="docText">
+  <pre>class SPort { ... }; // represents a serial port
+const int comLoc = 0x00400000; // location of a port
+//...
+void *comAddr = reinterpret_cast&lt;void *&gt;(comLoc);
+SPort *com1 = new (comAddr) SPort; // create object at comLoc
+</pre>
+</div>
+<br/>
+		
+<p class="docText">It’s important to distinguish the <tt>new</tt> operator from functions that are named <tt>operator new</tt>. The <tt>new</tt> operator can’t be overloaded and so always behaves in the same way; it calls a function named <tt>operator new</tt>
+ and then initializes the returned storage. Any variation of behavior we
+ achieve with memory allocation has to do with different, overloaded 
+versions of <tt>operator new</tt>, not with the <tt>new</tt> operator. The same applies to the <tt>delete</tt> operator and <tt>operator delete</tt>.</p>
+		
+<p class="docText">Placement new is a version of the function <tt>operator new</tt>
+ that doesn’t actually allocate any storage; it just returns a pointer 
+to some storage that (presumably) is already allocated. Because no 
+storage is allocated by a call to placement new, it’s important not to 
+delete it.</p>
+		
+<div class="docText">
+  <pre>				<span class="docEmphMark">delete com1; // oops!                             </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">However,
+ even though we didn’t allocate any storage, we did create an object, 
+and that object should be destroyed at the end of its lifetime. We avoid
+ the <tt>delete</tt> operator and instead call the object’s destructor directly:</p>
+		
+<div class="docText">
+  <pre>com1-&gt;~SPort(); // call dtor but not operator delete
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Designs that involve direct 
+destructor invocation tend to be prone to error, however, often 
+resulting in multiple destruction of the same object or no destruction 
+of an object. We would typically prefer to employ such designs only when
+ necessary, in well-hidden and well-maintained areas of our code.</p>
+		
+<p class="docText">We also have a placement array new that can be used to create an array of objects at a given location:</p>
+		
+<div class="docText">
+  <pre>const int numComs = 4;
+//...
+SPort *comPorts = new (comAddr) SPort[numComs]; // create array
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Of course, these array elements must eventually be destroyed:</p>
+		
+<div class="docText">
+  <pre>int i = numComs;
+while( i )
+    comPorts[--i].~SPort();
+</pre>
+</div>
+<br/>
+		
+<p class="docText">One potential problem 
+with arrays of class objects is that each element must be initialized by
+ a call to a default constructor when the array is allocated. Consider a
+ simple, fixed-size buffer to which one can append a new value:</p>
+		
+<div class="docText">
+  <pre>				<span class="docEmphMark">string *sbuf = new string[BUFSIZ]; // BUFSIZ default ctor calls!  </span>
+				<span class="docEmphMark">int size = 0;                                                     </span>
+				<span class="docEmphMark">void append( string buf[], int &amp;size, const string &amp;val )         </span>
+				<span class="docEmphMark">    { buf[size++] = val; } // wipe out default initialization!    </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">If only a portion of the 
+array is used, or if the elements are immediately assigned, this is 
+inefficient. Worse, if the element type of the array has no default 
+constructor, we’ll get a compile-time error.</p>
+		
+<p class="docText">Placement new is often used 
+to address this buffer problem. With this approach the storage for the 
+buffer is allocated in such a way as to avoid initialization by the 
+default constructor (if any).</p>
+		
+<div class="docText">
+  <pre>const size_t n = sizeof(string) * BUFSIZE;
+string *sbuf = static_cast&lt;string *&gt;(::operator new( n ));
+int size = 0;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">We can’t assign to an array element on its first access because it hasn’t been initialized (see <span class="docEmphasis">Assignment and Initialization Are Different</span> [12, 41]). Instead, we use placement new to initialize the element with the copy constructor:</p>
+		
+<div class="docText">
+  <pre>void append( string buf[], int &amp;size, const string &amp;val )
+    { new (&amp;buf[size++]) string( val ); } // placement new
+</pre>
+</div>
+<br/>
+		
+<p class="docText">As usual, with placement new we are required to do our own cleanup:</p>
+		
+<div class="docText">
+  <pre>void cleanupBuf( string buf[], int size ) {
+    while( size )
+        buf[--size].~string(); // destroy initialized elements
+    ::operator delete( buf ); // free storage
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This approach is fast, 
+clever, and not intended for viewing by the general public. This basic 
+technique is used extensively (in a more sophisticated form) in most 
+implementations of the standard library containers.</p>
+		
+
+
+</body>
+</html>

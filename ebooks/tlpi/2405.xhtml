@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>24.5. Avoiding Race Conditions by Synchronizing with Signals</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">24.5. Avoiding Race Conditions by Synchronizing with Signals</h3><p class="docText">After a <span class="docEmphasis">fork()</span>,
+ if either process needs to wait for the other to complete an action, 
+then the active process can send a signal after completing the action; 
+the other process waits for the signal.</p><p class="docText">Example 24-6
+ demonstrates this technique. In this program, we assume that it is the 
+parent that must wait on the child to carry out some action. The 
+signal-related calls in the parent and child can be swapped if the child
+ must wait on the parent. It is even possible for both parent and child 
+to signal each other multiple times in order to coordinate their 
+actions, although, in practice, such coordination is more likely to be 
+done using semaphores, file locks, or message passing.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">[Stevens
+ &amp; Rago, 2005] suggests encapsulating such synchronization steps 
+(block signal, send signal, catch signal) into a standard set of 
+functions for process synchronization. The advantage of such 
+encapsulation is that we can then later replace the use of signals by 
+another IPC mechanism, if desired.</p><hr noshade="noshade" size="1"/><p class="docText">Note that we block the synchronization signal <tt>(SIGUSR1)</tt> before the <span class="docEmphasis">fork()</span> call in Example 24-6. If the parent tried blocking the signal after the <span class="docEmphasis">fork()</span>,
+ it would remain vulnerable to the very race condition we are trying to 
+avoid. (In this program, we assume that the state of the signal mask in 
+the child is irrelevant; if necessary, we can unblock <tt>SIGUSR1</tt> in the child after the <span class="docEmphasis">fork()</span>.)</p><p class="docText">The following shell session log shows what happens when we run the program in Example 24-6:</p><pre>$ <b>./fork_sig_sync</b>
+[17:59:02 5173] Child started - doing some work
+[17:59:02 5172] Parent about to wait for signal
+[17:59:04 5173] Child about to signal parent
+[17:59:04 5172] Parent got signal</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0E2KCK">Example 24-6. Using signals to synchronize process actions</h5><p></p><div class="box"><pre class="preFixedHeight"><b>procexec/fork_sig_sync.c</b>
+#include &lt;signal.h&gt;
+#include "curr_time.h"                  /* Declaration of currTime() */
+#include "tlpi_hdr.h"
+
+#define SYNC_SIG SIGUSR1                /* Synchronization signal */
+
+static void             /* Signal handler - does nothing but return */
+handler(int sig)
+{
+}
+
+int
+main(int argc, char *argv[])
+{
+    pid_t childPid;
+    sigset_t blockMask, origMask, emptyMask;
+    struct sigaction sa;
+
+    setbuf(stdout, NULL);               /* Disable buffering of stdout */
+
+    sigemptyset(&amp;blockMask);
+    sigaddset(&amp;blockMask, SYNC_SIG);    /* Block signal */
+    if (sigprocmask(SIG_BLOCK, &amp;blockMask, &amp;origMask) == -1)
+        errExit("sigprocmask");
+
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sa.sa_handler = handler;
+    if (sigaction(SYNC_SIG, &amp;sa, NULL) == -1)
+        errExit("sigaction");
+
+    switch (childPid = fork()) {
+    case -1:
+        errExit("fork");
+
+    case 0: /* Child */
+
+        /* Child does some required action here... */
+
+        printf("[%s %ld] Child started - doing some work\n",
+                currTime("%T"), (long) getpid());
+        sleep(2);               /* Simulate time spent doing some work */
+
+        /* And then signals parent that it's done */
+
+        printf("[%s %ld] Child about to signal parent\n",
+                currTime("%T"), (long) getpid());
+        if (kill(getppid(), SYNC_SIG) == -1)
+            errExit("kill");
+
+        /* Now child can do other things... */
+
+        _exit(EXIT_SUCCESS);
+
+    default: /* Parent */
+
+        /* Parent may do some work here, and then waits for child to
+           complete the required action */
+
+        printf("[%s %ld] Parent about to wait for signal\n",
+                currTime("%T"), (long) getpid());
+        sigemptyset(&amp;emptyMask);
+        if (sigsuspend(&amp;emptyMask) == -1 &amp;&amp; errno != EINTR)
+            errExit("sigsuspend");
+        printf("[%s %ld] Parent got signal\n", currTime("%T"), (long) getpid());
+
+        /* If required, return signal mask to its original state */
+
+        if (sigprocmask(SIG_SETMASK, &amp;origMask, NULL) == -1)
+            errExit("sigprocmask");
+
+        /* Parent carries on to do other things... */
+
+        exit(EXIT_SUCCESS);
+    }
+}
+      <b>procexec/fork_sig_sync.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

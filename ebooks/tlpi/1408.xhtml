@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>14.8. Mounting and Unmounting File Systems</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">14.8. Mounting and Unmounting File Systems</h3><p class="docText">The <span class="docEmphasis">mount()</span> and <span class="docEmphasis">umount()</span> system calls allow a privileged (<tt>CAP_SYS_ADMIN</tt>)
+ process to mount and unmount file systems. Most UNIX implementations 
+provide versions of these system calls. However, they are not 
+standardized by SUSv3, and their operation varies both across UNIX 
+implementations and across file systems.</p><p class="docText">Before
+ looking at these system calls, it is useful to know about three files 
+that contain information about the file systems that are currently 
+mounted or can be mounted:</p><ul><li><p class="docList">A list of the currently mounted file systems can be read from the Linux-specific <tt>/proc/mounts</tt> virtual file. <tt>/proc/mounts</tt> is an interface to kernel data structures, so it always contains accurate information about mounted file systems.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">With the arrival of the per-process mount namespace feature mentioned earlier, each process now has a <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/mounts</tt> file that lists the mount points constituting its mount namespace, and <tt>/proc/mounts</tt> is just a symbolic link to /<tt>proc/self/mounts</tt>.</p><hr noshade="noshade" size="1"/></li><li><p class="docList">The <span class="docEmphasis">mount(8)</span> and <span class="docEmphasis">umount(8)</span> commands automatically maintain the file <tt>/etc/mtab</tt>, which contains information that is similar to that in <tt>/proc/mounts</tt>, but slightly more detailed. In particular, <tt>/etc/mtab</tt> includes file system–specific options given to <span class="docEmphasis">mount(8)</span>, which are not shown in <tt>/proc/mounts</tt>. However, because the <span class="docEmphasis">mount()</span> and <span class="docEmphasis">umount()</span> system calls don’t update <tt>/etc/mtab</tt>, this file may be inaccurate if some application that mounts or unmounts devices fails to update it.</p></li><li><p class="docList">The <tt>/etc/fstab</tt>
+ file, maintained manually by the system administrator, contains 
+descriptions of all of the available file systems on a system, and is 
+used by the <span class="docEmphasis">mount(8)</span>, <span class="docEmphasis">umount(8)</span>, and <span class="docEmphasis">fsck(8)</span> commands.</p></li></ul><p class="docText">The <tt>/proc/mounts</tt>, <tt>/etc/mtab</tt>, and <tt>/etc/fstab</tt> files share a common format, described in the <span class="docEmphasis">fstab(5)</span> manual page. Here is an example of a line from the <tt>/proc/mounts</tt> file:</p><pre>/dev/sda9 /boot ext3 rw 0 0</pre><br/>
+<p class="docText">This line contains six fields:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">The name of the mounted device.</p></div></li><li><div style="font-weight:normal"><p class="docList">The mount point for the device.</p></div></li><li><div style="font-weight:normal"><p class="docList">The file-system type.</p></div></li><li><div style="font-weight:normal"><p class="docList">Mount flags. In the above example, <span class="docEmphasis">rw</span> indicates that the file system was mounted read-write.</p></div></li><li><div style="font-weight:normal"><p class="docList">A number used to control the operation of file-system backups by <span class="docEmphasis">dump(8)</span>. This field and the next are used only in the <tt>/etc/fstab</tt> file; for <tt>/proc/mounts</tt> and /<tt>etc/mtab</tt>, these fields are always 0.</p></div></li><li><div style="font-weight:normal"><p class="docList">A number used to control the order in which <span class="docEmphasis">fsck(8)</span> checks file systems at system boot time.</p></div></li></ol></div><p class="docText">The <span class="docEmphasis">getfsent(3)</span> and <span class="docEmphasis">getmntent(3)</span> manual pages document functions that can be used to read records from these files.</p><h4 class="docSection2Title" id="title-ID0ETBCI">14.8.1. Mounting a File System: <span class="docEmphasis">mount()</span></h4><p class="docText">The <span class="docEmphasis">mount()</span> system call mounts the file system contained on the device specified by <span class="docEmphasis">source</span> under the directory (the <span class="docEmphasis">mount point</span>) specified by <span class="docEmphasis">target</span>.</p><pre>#include &lt;sys/mount.h&gt;
+
+int <b>mount</b>(const char *<span class="docEmphasis">source</span>, const char *<span class="docEmphasis">target</span>, const char *<span class="docEmphasis">fstype</span>,
+          unsigned long <span class="docEmphasis">mountflags</span>, const void *<span class="docEmphasis">data</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The names <span class="docEmphasis">source</span> and <span class="docEmphasis">target</span> are used for the first two arguments because <span class="docEmphasis">mount()</span> can perform other tasks than mounting a disk file system under a directory.</p><p class="docText">The <span class="docEmphasis">fstype</span> argument is a string identifying the type of file system contained on the device, such as <span class="docEmphasis">ext4</span> or <span class="docEmphasis">btrfs</span>.</p><p class="docText">The <span class="docEmphasis">mountflags</span> argument is a bit mask constructed by ORing (<tt>|</tt>) zero or more of the flags shown in Table 14-1, which are described in more detail below.</p><p class="docText">The final <span class="docEmphasis">mount()</span> argument, <span class="docEmphasis">data</span>,
+ is a pointer to a buffer of information whose interpretation depends on
+ the file system. For most file-system types, this argument is a string 
+consisting of comma-separated option settings. A full list of these 
+options can be found in the <span class="docEmphasis">mount(8)</span> manual page (or the documentation for the file system concerned, if it is not described in <span class="docEmphasis">mount(8)</span>).</p><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 14-1. mountflags <tt>values for</tt> mount()</h5></caption><colgroup span="2"><col></col><col></col></colgroup><thead><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Flag</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Purpose</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top"><tt>MS_BIND</tt></td><td align="left" class="docTableCell" valign="top">Create a bind mount (since Linux 2.4)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_DIRSYNC</tt></td><td align="left" class="docTableCell" valign="top">Make directory updates synchronous (since Linux 2.6)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_MANDLOCK</tt></td><td align="left" class="docTableCell" valign="top">Permit mandatory locking of files</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_MOVE</tt></td><td align="left" class="docTableCell" valign="top">Atomically move mount point to new location</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_NOATIME</tt></td><td align="left" class="docTableCell" valign="top">Don’t update last access time for files</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_NODEV</tt></td><td align="left" class="docTableCell" valign="top">Don’t allow access to devices</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_NODIRATIME</tt></td><td align="left" class="docTableCell" valign="top">Don’t update last access time for directories</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_NOEXEC</tt></td><td align="left" class="docTableCell" valign="top">Don’t allow programs to be executed</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_NOSUID</tt></td><td align="left" class="docTableCell" valign="top">Disable set-user-ID and set-group-ID programs</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_RDONLY</tt></td><td align="left" class="docTableCell" valign="top">Read-only mount; files can’t be created or modified</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_REC</tt></td><td align="left" class="docTableCell" valign="top">Recursive mount (since Linux 2.6.20)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_RELATIME</tt></td><td align="left" class="docTableCell" valign="top">Update last access time only if older than last modification time or last status change time (since Linux 2.4.11)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_REMOUNT</tt></td><td align="left" class="docTableCell" valign="top">Remount with new <span class="docEmphasis">mountflags</span> and <span class="docEmphasis">data</span></td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_STRICTATIME</tt></td><td align="left" class="docTableCell" valign="top">Always update last access time (since Linux 2.6.30)</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>MS_SYNCHRONOUS</tt></td><td align="left" class="docTableCell" valign="top">Make all file and directory updates synchronous</td></tr></tbody></table><p></p><br/><p class="docText">The <span class="docEmphasis">mountflags</span> argument is a bit mask of flags that modify the operation of <span class="docEmphasis">mount()</span>. Zero or more of the following flags can be specified in <span class="docEmphasis">mountflags</span>:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_BIND</span></span> (since Linux 2.4)</span></p></dt><dd><p class="docList">Create a bind mount. We describe this feature in Section 14.9.4. If this flag is specified, then the <span class="docEmphasis">fstype</span>, <span class="docEmphasis">mountflags</span>, and <span class="docEmphasis">data</span> arguments are ignored.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_DIRSYNC</span></span> (since Linux 2.6)</span></p></dt><dd><p class="docList">Make directory updates synchronous. This is similar to the effect of the <span class="docEmphasis">open()</span> <tt>O_SYNC</tt> flag (Section 13.3), but applies only to directory updates. The <tt>MS_SYNCHRONOUS</tt> flag described below provides a superset of the functionality of <tt>MS_DIRSYNC</tt>, ensuring that both file and directory updates are performed synchronously. The <tt>MS_DIRSYNC</tt> flag allows an application to ensure that directory updates (e.g., <span class="docEmphasis">open(pathname, O_CREAT)</span>, <span class="docEmphasis">rename()</span>, <span class="docEmphasis">link()</span>, <span class="docEmphasis">unlink()</span>, <span class="docEmphasis">symlink()</span>, and <span class="docEmphasis">mkdir()</span>) are synchronized without incurring the expense of synchronizing all file updates. The <tt>FS_DIRSYNC_FL</tt> flag (Section 15.5) serves a similar purpose to <tt>MS_DIRSYNC</tt>, with the difference that <tt>FS_DIRSYNC_FL</tt> can be applied to individual directories. In addition, on Linux, calling <span class="docEmphasis">fsync()</span>
+ on a file descriptor that refers to a directory provides a means of 
+synchronizing directory updates on a per-directory basis. (This 
+Linux-specific <span class="docEmphasis">fsync()</span> behavior is not specified in SUSv3.)</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_MANDLOCK</span></span></span></p></dt><dd><p class="docList">Permit mandatory record locking on files in this file system. We describe record locking in Chapter 55.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_MOVE</span></span></span></p></dt><dd><p class="docList">Atomically move the existing mount point specified by <span class="docEmphasis">source</span> to the new location specified by <span class="docEmphasis">target</span>. This corresponds to the <span class="docEmphasis">—move</span> option to <span class="docEmphasis">mount(8)</span>.
+ This is equivalent to unmounting the subtree and then remounting at a 
+different location, except that there is no point in time when the 
+subtree is unmounted. The <span class="docEmphasis">source</span> argument should be a string specified as a <span class="docEmphasis">target</span> in a previous <span class="docEmphasis">mount()</span> call. When this flag is specified, the <span class="docEmphasis">fstype</span>, <span class="docEmphasis">mountflags</span>, and <span class="docEmphasis">data</span> arguments are ignored.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_NOATIME</span></span></span></p></dt><dd><p class="docList">Don’t update the last access time for files in this file system. The purpose of this flag, as well as the <tt>MS_NODIRATIME</tt>
+ flag described below, is to eliminate the extra disk access required to
+ update the file i-node each time a file is accessed. In some 
+applications, maintaining this timestamp is not critical, and avoiding 
+doing so can significantly improve performance. The <tt>MS_NOATIME</tt> flag serves a similar purpose to the <tt>FS_NOATIME_FL</tt> flag (Section 15.5), with the difference that <tt>FS_NOATIME_FL</tt> can be applied to single files. Linux also provides similar functionality via the <tt>O_NOATIME</tt> <span class="docEmphasis">open()</span> flag, which selects this behavior for individual open files (Section 4.3.1).</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_NODEV</span></span></span></p></dt><dd><p class="docList">Don’t
+ allow access to block and character devices on this file system. This 
+is a security feature designed to prevent users from doing things such 
+as inserting a removable disk containing device special files that would
+ allow arbitrary access to the system.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_NODIRATIME</span></span></span></p></dt><dd><p class="docList">Don’t update the last access time for directories on this file system. (This flag provides a subset of the functionality of <tt>MS_NOATIME</tt>, which prevents updates to the last access time for all file types.)</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_NOEXEC</span></span></span></p></dt><dd><p class="docList">Don’t
+ allow programs (or scripts) to be executed from this file system. This 
+is useful if the file system contains non-Linux executables.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_NOSUID</span></span></span></p></dt><dd><p class="docList">Disable
+ set-user-ID and set-group-ID programs on this file system. This is a 
+security feature to prevent users from running set-user-ID and 
+set-group-ID programs from removable devices.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_RDONLY</span></span></span></p></dt><dd><p class="docList">Mount the file system read-only, so that no new files can be created and no existing files can be modified.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_REC</span></span> (since Linux 2.4.11)</span></p></dt><dd><p class="docList">This flag is used in conjunction with other flags (e.g., <tt>MS_BIND</tt>) to recursively apply the mount action to all of the mounts in a subtree.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_RELATIME</span></span> (since Linux 2.6.20)</span></p></dt><dd><p class="docList">Update
+ the last access timestamp for files on this file system only if the 
+current setting of this timestamp is less than or equal to either the 
+last modification or the last status change timestamp. This provides 
+some of the performance benefits of <tt>MS_NOATIME</tt>,
+ but is useful for programs that need to know if a file has been read 
+since it was last updated. Since Linux 2.6.30, the behavior provided by <tt>MS_RELATIME</tt> is the default (unless the <tt>MS_NOATIME</tt> flag is specified), and the <tt>MS_STRICTATIME</tt>
+ flag is required to obtain classical behavior. In addition, since Linux
+ 2.6.30, the last access timestamp is always updated if its current 
+value is more than 24 hours in the past, even if the current value is 
+more recent than the last modification and last status change 
+timestamps. (This is useful for certain system programs that monitor 
+directories to see whether files have recently been accessed.)</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_REMOUNT</span></span></span></p></dt><dd><p class="docList">Alter the <span class="docEmphasis">mountflags</span> and <span class="docEmphasis">data</span> for a file system that is already mounted (e.g., to make a read-only file system writable). When using this flag, the <span class="docEmphasis">source</span> and <span class="docEmphasis">target</span> arguments should be the same as for the original <span class="docEmphasis">mount()</span> call, and the <span class="docEmphasis">fstype</span>
+ argument is ignored. This flag avoids the need to unmount and remount 
+the disk, which may not be possible in some cases. For example, we can’t
+ unmount a file system if any process has files open on, or its current 
+working directory located within, the file system (this will always be 
+true of the root file system). Another example of where we need to use <tt>MS_REMOUNT</tt> is with <span class="docEmphasis">tmpfs</span> (memory-based) file systems (Section 14.10), which can’t be unmounted without losing their contents. Not all <span class="docEmphasis">mountflags</span> are modifiable; see the <span class="docEmphasis">mount(2)</span> manual page for details.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_STRICTATIME</span></span> (since Linux 2.6.30)</span></p></dt><dd><p class="docList">Always
+ update the last access timestamp when files on this file system are 
+accessed. This was the default behavior before Linux 2.6.30. If <tt>MS_STRICTATIME</tt> is specified, then <tt>MS_NOATIME</tt> and <tt>MS_RELATIME</tt> are ignored if they are also specified in <span class="docEmphasis">mountflags</span>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MS_SYNCHRONOUS</span></span></span></p></dt><dd><p class="docList">Make
+ all file and directory updates on this file system synchronous. (In the
+ case of files, this is as though files were always opened with the <span class="docEmphasis">open()</span> <tt>O_SYNC</tt> flag.)</p></dd></dl><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Starting with kernel 2.6.15, Linux provides four new mount flags to support the notion of <span class="docEmphasis">shared subtrees</span>. The new flags are <tt>MS_PRIVATE</tt>, <tt>MS_SHARED</tt>, <tt>MS_SLAVE</tt>, and <tt>MS_UNBINDABLE</tt>. (These flags can be used in conjunction with <tt>MS_REC</tt>
+ to propagate their effects to all of the submounts under a mount 
+subtree.) Shared subtrees are designed for use with certain advanced 
+file-system features, such as per-process mount namespaces (see the 
+description of <tt>CLONE_NEWNS</tt> in Section 28.2.1), and the <span class="docEmphasis">Filesystem in Userspace</span>
+ (FUSE) facility. The shared subtree facility permits file-system mounts
+ to be propagated between mount namespaces in a controlled fashion. 
+Details on shared subtrees can be found in the kernel source code file <tt>Documentation/filesystems/sharedsubtree.txt</tt> and [Viro &amp; Pai, 2006].</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EY4CI">14.8.1.1. Example program</h5><p class="docText">The program in Example 14-1 provides a command-level interface to the <span class="docEmphasis">mount(2)</span> system call. In effect, it is a crude version of the <span class="docEmphasis">mount(8)</span>
+ command. The following shell session log demonstrates the use of this 
+program. We begin by creating a directory to be used as a mount point 
+and mounting a file system:</p><pre class="preFixedWidth">$ <b>su </b>                                    <i> Need privilege to mount a file system</i>
+Password:
+# <b>mkdir /testfs </b>
+# <b>./t_mount -t ext2 -o bsdgroups /dev/sda12 /testfs </b>
+# <b>cat /proc/mounts | grep sda12 </b>         <i> Verify the setup</i>
+/dev/sda12 /testfs ext3 rw 0 0          <i> Doesn't show bsdgroups</i>
+# <b>grep sda12 /etc/mtab </b>
+
+					  </pre><br/>
+<p class="docText">We find that the preceding <span class="docEmphasis">grep</span> command produces no output because our program doesn’t update <tt>/etc/mtab</tt>. We continue, remounting the file system read-only:</p><pre># <b>./t_mount -f Rr /dev/sda12 /testfs </b>
+# <b>cat /proc/mounts | grep sda12 </b>         <i> Verify change</i>
+/dev/sda12 /testfs ext3 ro 0 0</pre><br/>
+<p class="docText">The string <span class="docEmphasis">ro</span> in the line displayed from <tt>/proc/mounts</tt> indicates that this is a read-only mount.</p><p class="docText">Finally, we move the mount point to a new location within the directory hierarchy:</p><pre># <b>mkdir /demo </b>
+# <b>./t_mount -f m /testfs /demo </b>
+# <b>cat /proc/mounts | grep sda12 </b>         <i> Verify change</i>
+/dev/sda12 /demo ext3 ro 0</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EEDDI">Example 14-1. Using <span class="docEmphasis">mount()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>filesys/t_mount.c</b>
+#include &lt;sys/mount.h&gt;
+#include "tlpi_hdr.h"
+
+static void
+usageError(const char *progName, const char *msg)
+{
+    if (msg != NULL)
+        fprintf(stderr, "%s", msg);
+
+    fprintf(stderr, "Usage: %s [options] source target\n\n", progName);
+    fprintf(stderr, "Available options:\n");
+#define fpe(str) fprintf(stderr, "    " str)    /* Shorter! */
+    fpe("-t fstype        [e.g., 'ext2' or 'reiserfs']\n");
+    fpe("-o data          [file system-dependent options,\n");
+    fpe("                 e.g., 'bsdgroups' for ext2]\n");
+    fpe("-f mountflags    can include any of:\n");
+#define fpe2(str) fprintf(stderr, "            " str)
+    fpe2("b - MS_BIND         create a bind mount\n");
+    fpe2("d - MS_DIRSYNC      synchronous directory updates\n");
+    fpe2("l - MS_MANDLOCK     permit mandatory locking\n");
+    fpe2("m - MS_MOVE         atomically move subtree\n");
+    fpe2("A - MS_NOATIME      don't update atime (last access time)\n");
+    fpe2("V - MS_NODEV        don't permit device access\n");
+    fpe2("D - MS_NODIRATIME   don't update atime on directories\n");
+    fpe2("E - MS_NOEXEC       don't allow executables\n");
+    fpe2("S - MS_NOSUID       disable set-user/group-ID programs\n");
+    fpe2("r - MS_RDONLY       read-only mount\n");
+    fpe2("c - MS_REC          recursive mount\n");
+    fpe2("R - MS_REMOUNT      remount\n");
+    fpe2("s - MS_SYNCHRONOUS  make writes synchronous\n");
+    exit(EXIT_FAILURE);
+}
+
+int
+main(int argc, char *argv[])
+{
+    unsigned long flags;
+    char *data, *fstype;
+    int j, opt;
+
+    flags = 0;
+    data = NULL;
+    fstype = NULL;
+
+    while ((opt = getopt(argc, argv, "o:t:f:")) != -1) {
+        switch (opt) {
+        case 'o':
+            data = optarg;
+            break;
+
+        case 't':
+            fstype = optarg;
+            break;
+
+        case 'f':
+            for (j = 0; j &lt; strlen(optarg); j++) {
+                switch (optarg[j]) {
+                case 'b': flags |= MS_BIND;             break;
+                case 'd': flags |= MS_DIRSYNC;          break;
+                case 'l': flags |= MS_MANDLOCK;         break;
+                case 'm': flags |= MS_MOVE;             break;
+                case 'A': flags |= MS_NOATIME;          break;
+                case 'V': flags |= MS_NODEV;            break;
+                case 'D': flags |= MS_NODIRATIME;       break;
+                case 'E': flags |= MS_NOEXEC;           break;
+                case 'S': flags |= MS_NOSUID;           break;
+                case 'r': flags |= MS_RDONLY;           break;
+                case 'c': flags |= MS_REC;              break;
+                case 'R': flags |= MS_REMOUNT;          break;
+                case 's': flags |= MS_SYNCHRONOUS;      break;
+                default:  usageError(argv[0], NULL);
+                }
+            }
+            break;
+
+        default:
+            usageError(argv[0], NULL);
+        }
+    }
+
+    if (argc != optind + 2)
+        usageError(argv[0], "Wrong number of arguments\n");
+
+    if (mount(argv[optind], argv[optind + 1], fstype, flags, data) == -1)
+        errExit("mount");
+
+    exit(EXIT_SUCCESS);
+}
+      <b>filesys/t_mount.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0ERDDI">14.8.2. Unmounting a File System: <span class="docEmphasis">umount()</span> and <span class="docEmphasis">umount2()</span></h4><p class="docText">The <span class="docEmphasis">umount()</span> system call unmounts a mounted file system.</p><pre>#include &lt;sys/mount.h&gt;
+
+int <b>umount</b>(const char *<span class="docEmphasis">target</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">target</span> argument specifies the mount point of the file system to be unmounted.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On
+ Linux 2.2 and earlier, the file system can be identified in two ways: 
+by the mount point or by the name of the device containing the file 
+system. Since kernel 2.4, Linux doesn’t allow the latter possibility, 
+because a single file system can now be mounted at multiple locations, 
+so that specifying a file system for <span class="docEmphasis">target</span> would be ambiguous. We explain this point in further detail in Section 14.9.1.</p><hr noshade="noshade" size="1"/><p class="docText">It is not possible to unmount a file system that is <span class="docEmphasis">busy</span>;
+ that is, if there are open files on the file system, or a process’s 
+current working directory is somewhere in the file system. Calling <span class="docEmphasis">umount()</span> on a busy file system yields the error <tt>EBUSY</tt>.</p><p class="docText">The <span class="docEmphasis">umount2()</span> system call is an extended version of <span class="docEmphasis">umount()</span>. It allows finer control over the unmount operation via the <span class="docEmphasis">flags</span> argument.</p><pre>#include &lt;sys/mount.h&gt;
+
+int <b>umount2</b>(const char *<span class="docEmphasis">target</span>, int <span class="docEmphasis">flags</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">This <span class="docEmphasis">flags</span> bit-mask argument consists of zero or more of the following values ORed together:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MNT_DETACH</span></span> (since Linux 2.4.11)</span></p></dt><dd><p class="docList">Perform a <span class="docEmphasis">lazy</span>
+ unmount. The mount point is marked so that no process can make new 
+accesses to it, but processes that are already using it can continue to 
+do so. The file system is actually unmounted when all processes cease 
+using the mount.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MNT_EXPIRE</span></span> (since Linux 2.6.8)</span></p></dt><dd><p class="docList">Mark the mount point as <span class="docEmphasis">expired</span>. If an initial <span class="docEmphasis">umount2()</span> call is made specifying this flag, and the mount point is not busy, then the call fails with the error <tt>EAGAIN</tt>, but the mount point is marked to expire. (If the mount point is busy, then the call fails with the error <tt>EBUSY</tt>,
+ and the mount point is not marked to expire.) A mount point remains 
+expired as long as no process subsequently makes use of it. A second <span class="docEmphasis">umount2()</span> call specifying <tt>MNT_EXPIRE</tt>
+ will unmount an expired mount point. This provides a mechanism to 
+unmount a file system that hasn’t been used for some period of time. 
+This flag can’t be specified with <tt>MNT_DETACH</tt> or <tt>MNT_FORCE</tt>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MNT_FORCE</span></span></span></p></dt><dd><p class="docList">Force an unmount even if the device is busy (NFS mounts only). Employing this option can cause data loss.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">UMOUNT_NOFOLLOW</span></span> (since Linux 2.6.34)</span></p></dt><dd><p class="docList">Don’t dereference <span class="docEmphasis">target</span> if it is a symbolic link. This flag is designed for use in certain set-user-ID-<span class="docEmphasis">root</span> programs that allow unprivileged users to perform unmounts, in order to avoid the security problems that could occur if <span class="docEmphasis">target</span> is a symbolic link that is changed to point to a different location.</p></dd></dl>
+</div>
+</body>
+</html>

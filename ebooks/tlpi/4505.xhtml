@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>45.5. Algorithm Employed by System V IPC get Calls</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">45.5. Algorithm Employed by System V IPC <span class="docEmphasis">get</span> Calls</h3><p class="docText">Figure 45-1
+ shows some of the structures used internally by the kernel to represent
+ information about System V IPC objects (in this case semaphores, but 
+the details are similar for other IPC mechanisms), including the fields 
+used to calculate IPC keys. For each IPC mechanism (shared memory, 
+message queue, or semaphore), the kernel maintains an associated <span class="docEmphasis">ipc_ids</span>
+ structure that records various global information about all instances 
+of that IPC mechanism. This information includes a dynamically sized 
+array of pointers, <span class="docEmphasis">entries</span>, to the associated data structure for each object instance (<span class="docEmphasis">semid_ds</span> structures in the case of semaphores). The current size of the <span class="docEmphasis">entries</span> array is recorded in the <span class="docEmphasis">size</span> field, with the <span class="docEmphasis">max_id</span> field holding the index of the highest currently in-use element.</p><p></p><center><h5 class="docFigureTitle">Figure 45-1. Kernel data structures used to represent System V IPC (semaphore) objects</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-86.png"/></p></center><p></p><br/><p class="docText">When an IPC <span class="docEmphasis">get</span> call is made, the algorithm used on Linux (other systems use similar algorithms) is approximately as follows:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">The list of associated data structures (pointed to by elements of the <span class="docEmphasis">entries</span> array) is searched for one whose <span class="docEmphasis">key</span> field matches that specified in the <span class="docEmphasis">get</span> call.</p><div style="font-weight:bold"><ol class="docList" type="a"><li><div style="font-weight:normal"><p class="docList">If no match is found, and <tt>IPC_CREAT</tt> was not specified, then the error <tt>ENOENT</tt> is returned.</p></div></li><li><div style="font-weight:normal"><p class="docList">If a match is found, but both <tt>IPC_CREAT</tt> and <tt>IPC_EXCL</tt> were specified, then the error <tt>EEXIST</tt> is returned.</p></div></li><li><div style="font-weight:normal"><p class="docList">Otherwise, if a match is found, then the following step is skipped.</p></div></li></ol></div></div></li><li><div style="font-weight:normal"><p class="docList">If no match was found, and <tt>IPC_CREAT</tt> was specified, then a new mechanism-specific associated data structure (<span class="docEmphasis">semid_ds</span> in Figure 45-1) is allocated and initialized. This also involves updating various fields of the <span class="docEmphasis">ipc_ids</span> structure, and may involve resizing the <span class="docEmphasis">entries</span> array. A pointer to the new structure is placed in the first free element of <span class="docEmphasis">entries</span>. Two substeps are included as part of this initialization:</p><div style="font-weight:bold"><ol class="docList" type="a"><li><div style="font-weight:normal"><p class="docList">The <span class="docEmphasis">key</span> value supplied in the <span class="docEmphasis">get</span> call is copied into the <span class="docEmphasis">xxx_perm.__key</span> field of the newly allocated structure.</p></div></li><li><div style="font-weight:normal"><p class="docList">The current value of the <span class="docEmphasis">seq</span> field of the <span class="docEmphasis">ipc_ids</span> structure is copied into the <span class="docEmphasis">xxx_perm.__seq</span> field of the associated data structure, and the <span class="docEmphasis">seq</span> field is incremented by one.</p></div></li></ol></div></div></li><li><div style="font-weight:normal"><p class="docList">The identifier for the IPC object is calculated using the following formula:</p><pre>identifier = index + xxx_perm.__seq * SEQ_MULTIPLIER</pre><br/>
+</div></li></ol></div><p class="docText">In the formula used to calculate the IPC identifier, <span class="docEmphasis">index</span> is the index of this object instance within the <span class="docEmphasis">entries</span> array, and <tt>SEQ_MULTIPLIER</tt> is a constant defined with the value 32,768 (<tt>IPCMNI</tt> in the kernel source file <tt>include/linux/ipc.h</tt>). For example, in Figure 45-1, the identifier generated for the semaphore with the <span class="docEmphasis">key</span> value <tt>0x4b079002</tt> would be (2 + 5 * 32,768) = 163,842.</p><p class="docText">Note the following points about the algorithm employed by the <span class="docEmphasis">get</span> calls:</p><ul><li><p class="docList">Even
+ if a new IPC object is created with the same key, it will almost 
+certainly have a different identifier, since the identifier is 
+calculated based on the <span class="docEmphasis">seq</span>
+ value saved in the associated data structure, and this value is 
+incremented by one during the creation of each object of this type.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The algorithm employed within the kernel wraps the <span class="docEmphasis">seq</span> value back to 0 when it reaches the value <tt>(INT_MAX / IPCMNI)</tt>—that
+ is, 2,147,483,647 / 32,768 = 65,535. Thus, a new IPC object could have 
+the same identifier as a previous object if 65,535 objects are created 
+in the interim and the new object reuses the same element in the <span class="docEmphasis">entries</span>
+ array as the previous object (i.e., this element must also have been 
+freed in the interim). However, the chances of this occurring are small.</p><hr noshade="noshade" size="1"/><ul><li><p class="docList">The algorithm generates a distinct set of identifier values for each index of the <span class="docEmphasis">entries</span> array.</p></li><li><p class="docList">Since the constant <tt>IPCMNI</tt>
+ defines an upper limit on the number of System V objects of each type, 
+the algorithm guarantees that each existing IPC object has a unique 
+identifier.</p></li><li><p class="docList">Given an identifier value, the corresponding index into the <span class="docEmphasis">entries</span> array can be quickly calculated using this equation:</p></li></ul><pre>index = identifier % SEQ_MULTIPLIER</pre><br/>
+<p class="docText">Being able to rapidly perform 
+this calculation is necessary for the efficient operation of those IPC 
+system calls that are supplied with the identifier of an IPC object 
+(i.e., those calls in Table 45-1 other than the <span class="docEmphasis">get</span> calls).</p><p class="docText">In passing, it is worth noting that two different errors can result if a process makes an IPC system call (e.g., <span class="docEmphasis">msgctl()</span>, <span class="docEmphasis">semop()</span>, or <span class="docEmphasis">shmat()</span>) that specifies an identifier that doesn’t correspond to an existing object. If the corresponding index of <span class="docEmphasis">entries</span> is empty, the error <tt>EINVAL</tt>
+ results. If the index points to an associated data structure, but the 
+sequence number stored in that structure doesn’t yield the same 
+identifier value, then it is assumed that an old object pointed to by 
+this array index has been deleted and the index reused. This scenario is
+ diagnosed with the error <tt>EIDRM</tt>.</p>
+</div>
+</body>
+</html>

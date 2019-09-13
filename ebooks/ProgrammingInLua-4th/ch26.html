@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 26. Interlude: Multithreading with Coroutines</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 26. Interlude: Multithreading with Coroutines"><div class="titlepage"><div><h1><span class="partLabel">26</span> Interlude: Multithreading with Coroutines</h1></div></div><p id="N1592E" style="text-indent: 0">
+In this interlude,
+we will see an implementation of a multithreading system
+on top of coroutines.
+</p><p id="N15930" style="text-indent: 0">
+As we saw earlier, coroutines allow a kind of
+<a class="indexterm" id="N15932"/>collaborative multithreading.
+Each <a class="indexterm" id="N15936"/>coroutine is equivalent to a thread.
+A pair yield–resume switches control from one thread to another.
+However, unlike regular multithreading,
+coroutines are non preemptive.
+While a coroutine is running,
+we cannot stop it from the outside.
+It suspends execution only when it explicitly requests so,
+through a call to <a class="indexterm" id="N1593A"/><code class="function">yield</code>.
+For several applications, this is not a problem,
+quite the opposite.
+Programming is much easier in the absence of preemption.
+We do not need to be paranoid about synchronization bugs,
+because all synchronization among <a class="indexterm" id="N15942"/>threads
+is explicit in the program.
+We just need to ensure that
+a coroutine yields only when it is outside a <a class="indexterm" id="N15946"/>critical region.
+</p><p id="N1594A" style="text-indent: 0">
+However, with non-preemptive <a class="indexterm" id="N1594C"/>multithreading,
+whenever any thread calls a blocking operation,
+the whole program blocks until the operation completes.
+For many applications, this behavior is unacceptable,
+which leads many programmers to disregard coroutines as a real
+alternative to conventional <a class="indexterm" id="N15950"/>multithreading.
+As we will see here, this problem has an interesting
+(and obvious, with hindsight) solution.
+</p><p id="N15954" style="text-indent: 0">
+Let us assume a typical multithreading situation:
+we want to download several remote files through <a class="indexterm" id="N15956"></a>HTTP.
+To download several remote files,
+first we must learn how to download one remote file.
+In this example, we will use the <a class="indexterm" id="N1595A"></a>LuaSocket library.
+<a class="indexterm" id="N1595E"></a>
+To download a file, we must open a connection to its site,
+send a request to the file,
+receive the file (in blocks), and close the connection.
+
+In Lua, we can write this task as follows.
+First, we load the LuaSocket library:
+</p><pre class="programlisting" id="N15962">      local socket = require "socket"
+</pre><p style="text-indent: 0">
+Then, we define the host and the file we want to download.
+In this example,
+we will download the Lua 5.3 manual
+from the Lua site:
+</p><pre class="programlisting" id="N15965">      host = "www.lua.org"
+      file = "/manual/5.3/manual.html"
+</pre><p style="text-indent: 0">
+</p><p id="N15968" style="text-indent: 0">
+Then, we open a <a class="indexterm" id="N1596A"></a>TCP connection to port 80
+(the standard port for <a class="indexterm" id="N1596E"></a>HTTP connections) of that site:
+</p><pre class="programlisting" id="N15972">      c = assert(socket.connect(host, 80))
+</pre><p style="text-indent: 0">
+This operation returns a connection object,
+which we use to send the file request:
+</p><pre class="programlisting" id="N15975">      local request = string.format(
+          "GET %s HTTP/1.0\r\nhost: %s\r\n\r\n", file, host)
+      c:send(request)
+</pre><p style="text-indent: 0">
+</p><p id="N15978" style="text-indent: 0">
+Next, we read the file in blocks of 1 kB,
+writing each block to the standard output:
+</p><pre class="programlisting" id="N1597A">      repeat
+        local s, status, partial = c:receive(2^10)
+        io.write(s or partial)
+      until status == "closed"
+</pre><p style="text-indent: 0">
+The method <code class="literal">receive</code> returns either a string with
+what it read or nil in case of error;
+in the latter case, it also returns an error code (<code class="literal">status</code>)
+and what it read until the error (<code class="literal">partial</code>).
+When the host closes the connection,
+we print that remaining input and break the receive loop.
+</p><p id="N15986" style="text-indent: 0">
+After downloading the file,
+we close the connection:
+</p><pre class="programlisting" id="N15988">      c:close()
+</pre><p style="text-indent: 0">
+</p><p id="N1598B" style="text-indent: 0">
+Now that we know how to download one file,
+let us return to the problem of downloading several files.
+The trivial approach is to download one at a time.
+However, this sequential approach,
+where we start reading a file only after finishing the previous one,
+is too slow.
+When reading a remote file,
+a program spends most of its time waiting for data to arrive.
+More specifically, it spends most of its time blocked
+in the call to <code class="literal">receive</code>.
+So, the program could run much faster if
+it downloaded all files concurrently.
+Then, while a connection has no data available,
+the program can read from another connection.
+Clearly, coroutines offer a convenient way to structure these
+simultaneous downloads.
+We create a new thread for each download task.
+When a thread has no data available,
+it yields control to a simple <a class="indexterm" id="N15990"/>dispatcher,
+which invokes another <a class="indexterm" id="N15994"/>thread.
+</p><p id="N15998" style="text-indent: 0">
+To rewrite the program with coroutines,
+we first rewrite the previous download code
+as a function.
+The result is in <a class="xref" href="ch26.html#download" title="Figure 26.1. Function to download a Web page">Figure 26.1, “Function to download a Web page”</a>.
+</p><div class="figure-float"><div class="figure"><a id="download"/><p class="title" style="text-indent: 0"><strong>Figure 26.1. Function to download a Web page</strong></p><div class="figure-contents"><pre class="programlisting" id="N159A2">      function download (host, file)
+        local c = assert(socket.connect(host, 80))
+        local count = 0    -- counts number of bytes read
+        local request = string.format(
+               "GET %s HTTP/1.0\r\nhost: %s\r\n\r\n", file, host)
+        c:send(request)
+        while true do
+          local s, status = receive(c)
+          count = count + #s
+          if status == "closed" then break end
+        end
+        c:close()
+        print(file, count)
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+Because we are not interested in the remote file contents,
+this function counts and prints the file size,
+instead of writing the file to the standard output.
+(With several threads reading several files,
+the output would shuffle all files.)
+
+</p><p id="N159A5" style="text-indent: 0">
+In this new code, we use an auxiliary function (<code class="literal">receive</code>)
+to receive data from the connection.
+In the sequential approach, its code would be like this:
+</p><pre class="programlisting" id="N159AA">      function receive (connection)
+        local s, status, partial = connection:receive(2^10)
+        return s or partial, status
+      end
+</pre><p style="text-indent: 0">
+For the concurrent implementation,
+this function must receive data without blocking.
+Instead, if there is not enough data available, it yields.
+The new code is like this:
+</p><pre class="programlisting" id="N159AD">      function receive (connection)
+        connection:settimeout(0)      -- do not block
+        local s, status, partial = connection:receive(2^10)
+        if status == "timeout" then
+          coroutine.yield(connection)
+        end
+        return s or partial, status
+      end
+</pre><p style="text-indent: 0">
+The call to <code class="literal">settimeout(0)</code> makes any operation over the
+connection a non-blocking operation.
+When the resulting status is <code class="literal">"timeout"</code>,
+it means that the operation returned without completion.
+In this case, the thread yields.
+The non-false argument passed to <a class="indexterm" id="N159B6"></a><code class="function">yield</code>
+signals to the dispatcher that
+the thread is still performing its task.
+Note that, even in case of a timeout,
+the connection returns what it read until the timeout,
+which is in the variable <code class="literal">partial</code>.
+</p><p id="N159C1" style="text-indent: 0">
+<a class="xref" href="ch26.html#dispatcher" title="Figure 26.2. The dispatcher">Figure 26.2, “The dispatcher”</a> shows the dispatcher plus some auxiliary code.
+</p><div class="figure-float"><div class="figure"><a id="dispatcher"/><p class="title" style="text-indent: 0"><strong>Figure 26.2. The dispatcher</strong></p><div class="figure-contents"><pre class="programlisting" id="N159CB">      tasks = {}    -- list of all live tasks
+      
+      function get (host, file)
+        -- create coroutine for a task
+        local co = coroutine.wrap(function ()
+          download(host, file)
+        end)
+        -- insert it in the list
+        table.insert(tasks, co)
+      end
+      
+      function dispatch ()
+        local i = 1
+        while true do
+          if tasks[i] == nil then   -- no other tasks?
+            if tasks[1] == nil then   -- list is empty?
+              break   -- break the loop
+            end
+            i = 1                     -- else restart the loop
+          end
+          local res = tasks[i]()   -- run a task
+          if not res then    -- task finished?
+            table.remove(tasks, i)
+          else
+            i = i + 1   -- go to next task
+          end
+        end
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+The table <code class="literal">tasks</code> keeps a list of all live tasks
+for the dispatcher.
+The function <code class="literal">get</code> ensures that each download task
+runs in an individual thread.
+The <a class="indexterm" id="N159D4"></a>dispatcher itself
+is mainly a loop that goes through all tasks,
+resuming them one by one.
+It must also remove from the list
+the tasks that have finished.
+It stops the loop when there are no more tasks to run.
+</p><p id="N159D8" style="text-indent: 0">
+Finally, the main program creates the tasks it needs
+and calls the dispatcher.
+To download some distributions from the Lua site,
+the main program could be like this:
+</p><pre class="programlisting" id="N159DA">      get("www.lua.org", "/ftp/lua-5.3.2.tar.gz")
+      get("www.lua.org", "/ftp/lua-5.3.1.tar.gz")
+      get("www.lua.org", "/ftp/lua-5.3.0.tar.gz")
+      get("www.lua.org", "/ftp/lua-5.2.4.tar.gz")
+      get("www.lua.org", "/ftp/lua-5.2.3.tar.gz")
+      
+      dispatch()   -- main loop
+</pre><p style="text-indent: 0">
+The sequential implementation takes
+fifteen seconds to download these files,
+in my machine.
+This implementation with coroutines runs more than
+three times faster.
+</p><p id="N159DD" style="text-indent: 0">
+Despite the speedup, this last implementation is far from optimal.
+Everything goes fine while at least
+one thread has something to read.
+However, when no thread has data to read,
+the dispatcher does a <a class="indexterm" id="N159DF"/>busy wait,
+going from thread to thread
+only to check that they still have no data.
+As a result, this coroutine implementation uses
+three orders of magnitude
+more CPU than the sequential solution.
+</p><p id="N159E3" style="text-indent: 0">
+To avoid this behavior,
+we can use the function <code class="literal">select</code> from LuaSocket:
+it allows a program to block while waiting
+for a status change in a group of sockets.
+The changes in our implementation are small:
+we have to change only the dispatcher,
+as shown in <a class="xref" href="ch26.html#newdispatcher" title="Figure 26.3. Dispatcher using select">Figure 26.3, “Dispatcher using <code class="literal">select</code>”</a>.
+</p><div class="figure-float"><div class="figure"><a id="newdispatcher"/><p class="title" style="text-indent: 0"><strong>Figure 26.3. Dispatcher using <code class="literal">select</code></strong></p><div class="figure-contents"><pre class="programlisting" id="N159F2">      function dispatch ()
+        local i = 1
+        local timedout = {}
+        while true do
+          if tasks[i] == nil then   -- no other tasks?
+            if tasks[1] == nil then   -- list is empty?
+              break     -- break the loop
+            end
+            i = 1                     -- else restart the loop
+            timedout = {}
+          end
+          local res = tasks[i]()   -- run a task
+          if not res then    -- task finished?
+            table.remove(tasks, i)
+          else               -- time out
+            i = i + 1
+            timedout[#timedout + 1] = res
+            if #timedout == #tasks then    -- all tasks blocked?
+              socket.select(timedout)   -- wait
+            end
+          end
+        end
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+Along the loop,
+this new dispatcher collects the timed-out connections
+in the table <code class="literal">timedout</code>.
+(Remember that <code class="literal">receive</code> passes such connections to <a class="indexterm" id="N159FB"></a><code class="function">yield</code>,
+thus <a class="indexterm" id="N15A03"></a><code class="function">resume</code> returns them.)
+If all connections time out,
+the dispatcher calls <code class="literal">select</code>
+to wait for any of these connections to change status.
+This final implementation runs as fast as the previous implementation,
+with coroutines.
+Moreover, as it does not do busy waits,
+it uses just as much CPU as the sequential implementation.
+</p><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L253"/>Exercises</h2></div></div></div><p id="N15A12" style="text-indent: 0">
+Exercise 26.1:<a id="L254"/> 
+Implement and run the code presented in this chapter.
+
+
+</p></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

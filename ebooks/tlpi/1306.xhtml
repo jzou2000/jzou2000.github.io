@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>13.6. Bypassing the Buffer Cache: Direct I/O</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">13.6. Bypassing the Buffer Cache: Direct I/O</h3><p class="docText">Starting
+ with kernel 2.4, Linux allows an application to bypass the buffer cache
+ when performing disk I/O, thus transferring data directly from user 
+space to a file or disk device. This is sometimes termed <span class="docEmphasis">direct I/O</span> or <span class="docEmphasis">raw I/O</span>.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The
+ details described here are Linux-specific and are not standardized by 
+SUSv3. Nevertheless, most UNIX implementations provide some form of 
+direct I/O access to devices and files.</p><hr noshade="noshade" size="1"/><p class="docText">Direct
+ I/O is sometimes misunderstood as being a means of obtaining fast I/O 
+performance. However, for most applications, using direct I/O can 
+considerably degrade performance. This is because the kernel applies a 
+number of optimizations to improve the performance of I/O done via the 
+buffer cache, including performing sequential read-ahead, performing I/O
+ in clusters of disk blocks, and allowing processes accessing the same 
+file to share buffers in the cache. All of these optimizations are lost 
+when we use direct I/O. Direct I/O is intended only for applications 
+with specialized I/O requirements. For example, database systems that 
+perform their own caching and I/O optimizations don’t need the kernel to
+ consume CPU time and memory performing the same tasks.</p><p class="docText">We can perform direct I/O either on an individual file or on a block device (e.g., a disk). To do this, we specify the <tt>O_DIRECT</tt> flag when opening the file or device with <span class="docEmphasis">open()</span>.</p><p class="docText">The <tt>O_DIRECT</tt>
+ flag is effective since kernel 2.4.10. Not all Linux file systems and 
+kernel versions support the use of this flag. Most native file systems 
+support <tt>O_DIRECT</tt>, but many non-UNIX 
+file systems (e.g., VFAT) do not. It may be necessary to test the file 
+system concerned (if a file system doesn’t support <tt>O_DIRECT</tt>, then <span class="docEmphasis">open()</span> fails with the error <tt>EINVAL</tt>) or read the kernel source code to check for this support.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">If a file is opened with <tt>O_DIRECT</tt>
+ by one process, and opened normally (i.e., so that the buffer cache is 
+used) by another process, then there is no coherency between the 
+contents of the buffer cache and the data read or written via direct 
+I/O. Such scenarios should be avoided.</p><p class="docText">The <span class="docEmphasis">raw(8)</span> manual page describes an older (now deprecated) technique for obtaining raw access to a disk device.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0ETTBI">13.6.1. </h4><h5 class="docSection3Title" id="title-ID0EXTBI">13.6.1.1. Alignment restrictions for direct I/O</h5><p class="docText">Because
+ direct I/O (on both disk devices and files) involves direct access to 
+the disk, we must observe a number of restrictions when performing I/O:</p><ul><li><p class="docList">The data buffer being transferred must be aligned on a memory boundary that is a multiple of the block size.</p></li><li><p class="docList">The file or device offset at which data transfer commences must be a multiple of the block size.</p></li><li><p class="docList">The length of the data to be transferred must be a multiple of the block size.</p></li></ul><p class="docText">Failure to observe any of these restrictions results in the error <tt>EINVAL</tt>. In the above list, <span class="docEmphasis">block size</span> means the physical block size of the device (typically 512 bytes).</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">When
+ performing direct I/O, Linux 2.4 is more restrictive than Linux 2.6: 
+the alignment, length, and offset must be multiples of the <span class="docEmphasis">logical</span> block size of the underlying file system. (Typical file system logical block sizes are 1024, 2048, or 4096 bytes.)</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0ERUBI">13.6.1.2. Example program</h5><p class="docText">Example 13-1 provides a simple example of the use of <tt>O_DIRECT</tt>
+ while opening a file for reading. This program takes up to four 
+command-line arguments specifying, in order, the file to be read, the 
+number of bytes to be read from the file, the offset to which the 
+program should seek before reading from the file, and the alignment of 
+the data buffer passed to <span class="docEmphasis">read()</span>.
+ The last two arguments are optional, and default to offset 0 and 4096 
+bytes, respectively. Here are some examples of what we see when we run 
+this program:</p><pre class="preFixedWidth">$ <b>./direct_read /test/x 512 </b>                <i> Read 512 bytes at offset 0</i>
+Read 512 bytes                              <i> Succeeds</i>
+$ <b>./direct_read /test/x 256 </b>
+ERROR [EINVAL Invalid argument] read        <i> Length is not a multiple of 512</i>
+$ <b>./direct_read /test/x 512 1 </b>
+ERROR [EINVAL Invalid argument] read        <i> Offset is not a multiple of 512</i>
+$ <b>./direct_read /test/x 4096 8192 512 </b>
+Read 4096 bytes                             <i> Succeeds</i>
+$ <b>./direct_read /test/x 4096 512 256 </b>
+ERROR [EINVAL Invalid argument] read        <i> Alignment is not a multiple of 512</i>
+
+					  </pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The program in Example 13-1 uses the <span class="docEmphasis">memalign()</span> function to allocate a block of memory aligned on a multiple of its first argument. We describe <span class="docEmphasis">memalign()</span> in Section 7.1.4.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0E3WBI">Example 13-1. Using <tt>O_DIRECT</tt> to bypass the buffer cache</h5><p></p><div class="box"><pre class="preFixedHeight"><b>filebuff/direct_read.c</b>
+#define _GNU_SOURCE     /* Obtain O_DIRECT definition from &lt;fcntl.h&gt; */
+#include &lt;fcntl.h&gt;
+#include &lt;malloc.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int fd;
+    ssize_t numRead;
+    size_t length, alignment;
+    off_t offset;
+    char *buf;
+
+    if (argc &lt; 3 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s file length [offset [alignment]]\n", argv[0]);
+
+    length = getLong(argv[2], GN_ANY_BASE, "length");
+    offset = (argc &gt; 3) ? getLong(argv[3], GN_ANY_BASE, "offset") : 0;
+    alignment = (argc &gt; 4) ? getLong(argv[4], GN_ANY_BASE, "alignment") : 4096;
+
+    fd = open(argv[1], O_RDONLY | O_DIRECT);
+    if (fd == -1)
+        errExit("open");
+
+    /* memalign() allocates a block of memory aligned on an address that
+      is a multiple of its first argument. By specifying this argument as
+      2 * 'alignment' and then adding 'alignment' to the returned pointer,
+      we ensure that 'buf' is aligned on a non-power-of-two multiple of
+      'alignment'. We do this to ensure that if, for example, we ask
+      for a 256-byte aligned buffer, we don't accidentally get a
+      buffer that is also aligned on a 512-byte boundary. */
+
+    buf = memalign(alignment * 2, length + alignment);
+    if (buf == NULL)
+        errExit("memalign");
+
+    buf += alignment;
+
+    if (lseek(fd, offset, SEEK_SET) == -1)
+        errExit("lseek");
+
+    numRead = read(fd, buf, length);
+    if (numRead == -1)
+        errExit("read");
+    printf("Read %ld bytes\n", (long) numRead);
+
+    exit(EXIT_SUCCESS);
+}
+     <b>filebuff/direct_read.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

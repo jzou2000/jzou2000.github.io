@@ -1,0 +1,351 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>21.1. Designing Signal Handlers</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">21.1. Designing Signal Handlers</h3><p class="docText">In
+ general, it is preferable to write simple signal handlers. One 
+important reason for this is to reduce the risk of creating race 
+conditions. Two common designs for signal handlers are the following:</p><ul><li><p class="docList">The
+ signal handler sets a global flag and exits. The main program 
+periodically checks this flag and, if it is set, takes appropriate 
+action. (If the main program cannot perform such periodic checks because
+ it needs to monitor one or more file descriptors to see if I/O is 
+possible, then the signal handler can also write a single byte to a 
+dedicated pipe whose read end is included among the file descriptors 
+monitored by the main program. We show an example of this technique in Section 63.5.2.)</p></li><li><p class="docList">The signal handler performs some type of cleanup and then either terminates the process or uses a nonlocal goto (Section 21.2.1) to unwind the stack and return control to a predetermined location in the main program.</p></li></ul><p class="docText">In
+ the following sections, we explore these ideas, as well as other 
+concepts that are important in the design of signal handlers.</p><h4 class="docSection2Title" id="title-ID0EGUAK">21.1.1. Signals Are Not Queued (Revisited)</h4><p class="docText">In Section 20.10, we noted that delivery of a signal is blocked during the execution of its handler (unless we specify the <tt>SA_NODEFER</tt> flag to <span class="docEmphasis">sigaction()</span>).
+ If the signal is (again) generated while the handler is executing, then
+ it is marked as pending and later delivered when the handler returns. 
+We also already noted that signals are not queued. If the signal is 
+generated more than once while the handler is executing, then it is 
+still marked as pending, and it will later be delivered only once.</p><p class="docText">That
+ signals can “disappear” in this way has implications for how we design 
+signal handlers. To begin with, we can’t reliably count the number of 
+times a signal is generated. Furthermore, we may need to code our signal
+ handlers to deal with the possibility that multiple events of the type 
+corresponding to the signal have occurred. We’ll see an example of this 
+when we consider the use of the <tt>SIGCHLD</tt> signal in Section 26.3.1.</p><h4 class="docSection2Title" id="title-ID0EFVAK">21.1.2. Reentrant and Async-Signal-Safe Functions</h4><p class="docText">Not
+ all system calls and library functions can be safely called from a 
+signal handler. To understand why requires an explanation of two 
+concepts: reentrant functions and async-signal-safe functions.</p><h5 class="docSection3Title" id="title-ID0EKVAK">21.1.2.1. Reentrant and nonreentrant functions</h5><p class="docText">To
+ explain what a reentrant function is, we need to first distinguish 
+between single-threaded and multithreaded programs. Classical UNIX 
+programs have a single <span class="docEmphasis">thread of execution</span>:
+ the CPU processes instructions for a single logical flow of execution 
+through the program. In a multithreaded program, there are multiple, 
+independent, concurrent logical flows of execution within the same 
+process.</p><p class="docText">In Chapter 29,
+ we’ll see how to explicitly create programs that contain multiple 
+threads of execution. However, the concept of multiple threads of 
+execution is also relevant for programs that employ signal handlers. 
+Because a signal handler may asynchronously interrupt the execution of a
+ program at any point in time, the main program and the signal handler 
+in effect form two independent (although not concurrent) threads of 
+execution within the same process.</p><p class="docText">A function is said to be <span class="docEmphasis">reentrant</span>
+ if it can safely be simultaneously executed by multiple threads of 
+execution in the same process. In this context, “safe” means that the 
+function achieves its expected result, regardless of the state of 
+execution of any other thread of execution.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The
+ SUSv3 definition of a reentrant function is one “whose effect, when 
+called by two or more threads, is guaranteed to be as if the threads 
+each executed the function one after the other in an undefined order, 
+even if the actual execution is interleaved.”</p><hr noshade="noshade" size="1"/><p class="docText">A function may be <span class="docEmphasis">nonreentrant</span>
+ if it updates global or static data structures. (A function that 
+employs only local variables is guaranteed to be reentrant.) If two 
+invocations of (i.e., two threads executing) the function simultaneously
+ attempt to update the same global variable or data structure, then 
+these updates are likely to interfere with each other and produce 
+incorrect results. For example, suppose that one thread of execution is 
+in the middle of updating a linked list data structure to add a new list
+ item when another thread also attempts to update the same linked list. 
+Since adding a new item to the list requires updating multiple pointers,
+ if another thread interrupts these steps and updates the same pointers,
+ chaos will result.</p><p class="docText">Such possibilities are in fact rife within the standard C library. For example, we already noted in Section 7.1.3 that <span class="docEmphasis">malloc()</span> and <span class="docEmphasis">free()</span> maintain a linked list of freed memory blocks available for reallocation from the heap. If a call to <span class="docEmphasis">malloc()</span> in the main program is interrupted by a signal handler that also calls <span class="docEmphasis">malloc()</span>, then this linked list can be corrupted. For this reason, the <span class="docEmphasis">malloc()</span> family of functions, and other library functions that use them, are nonreentrant.</p><p class="docText">Other
+ library functions are nonreentrant because they return information 
+using statically allocated memory. Examples of such functions (described
+ elsewhere in this book) include <span class="docEmphasis">crypt()</span>, <span class="docEmphasis">getpwnam()</span>, <span class="docEmphasis">gethostbyname()</span>, and <span class="docEmphasis">getservbyname()</span>.
+ If a signal handler also uses one of these functions, then it will 
+overwrite information returned by any earlier call to the same function 
+from within the main program (or vice versa).</p><p class="docText">Functions
+ can also be nonreentrant if they use static data structures for their 
+internal bookkeeping. The most obvious examples of such functions are 
+the members of the <span class="docEmphasis">stdio</span> library (<span class="docEmphasis">printf()</span>, <span class="docEmphasis">scanf()</span>, and so on), which update internal data structures for buffered I/O. Thus, when using <span class="docEmphasis">printf()</span>
+ from within a signal handler, we may sometimes see strange output—or 
+even a program crash or data corruption—if the handler interrupts the 
+main program in the middle of executing a call to <span class="docEmphasis">printf()</span> or another <span class="docEmphasis">stdio</span> function.</p><p class="docText">Even
+ if we are not using nonreentrant library functions, reentrancy issues 
+can still be relevant. If a signal handler updates programmer-defined 
+global data structures that are also updated within the main program, 
+then we can say that the signal handler is nonreentrant with respect to 
+the main program.</p><p class="docText">If a 
+function is nonreentrant, then its manual page will normally provide an 
+explicit or implicit indication of this fact. In particular, watch out 
+for statements that the function uses or returns information in 
+statically allocated variables.</p><h5 class="docSection3Title" id="title-ID0ECYAK">21.1.2.2. Example program</h5><p class="docText">Example 21-1 demonstrates the nonreentrant nature of the <span class="docEmphasis">crypt()</span> function (Section 8.5). As command-line arguments, this program accepts two strings. The program performs the following steps:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Call <span class="docEmphasis">crypt()</span> to encrypt the string in the first command-line argument, and copy this string to a separate buffer using <span class="docEmphasis">strdup()</span>.</p></div></li><li><div style="font-weight:normal"><p class="docList">Establish a handler for <tt>SIGINT</tt> (generated by typing <span class="docEmphasis">Control-C</span>). The handler calls <span class="docEmphasis">crypt()</span> to encrypt the string supplied in the second command-line argument.</p></div></li><li><div style="font-weight:normal"><p class="docList">Enter an infinite <tt>for</tt> loop that uses <span class="docEmphasis">crypt()</span>
+ to encrypt the string in the first command-line argument and check that
+ the returned string is the same as that saved in step 1.</p></div></li></ol></div><p class="docText">In the absence of a signal, the strings will always match in step 3. However, if a <tt>SIGINT</tt> signal arrives and the execution of the signal handler interrupts the main program just after the execution of the <span class="docEmphasis">crypt()</span> call in the <tt>for</tt>
+ loop, but before the check to see if the strings match, then the main 
+program will report a mismatch. When we run the program, this is what we
+ see:</p><pre>$ <b>./non_reentrant abc def </b>
+<i> Repeatedly type Control-C to generate</i> SIGINT
+Mismatch on call 109871 (mismatch=1 handled=1)
+Mismatch on call 128061 (mismatch=2 handled=2)
+<i> Many lines of output removed</i>
+Mismatch on call 727935 (mismatch=149 handled=156)
+Mismatch on call 729547 (mismatch=150 handled=157)
+<i> Type Control-\ to generate</i> SIGQUIT
+Quit (core dumped)</pre><br/>
+<p class="docText">Comparing the <span class="docEmphasis">mismatch</span> and <span class="docEmphasis">handled</span>
+ values in the above output, we see that in the majority of cases where 
+the signal handler is invoked, it overwrites the statically allocated 
+buffer between the call to <span class="docEmphasis">crypt()</span> and the string comparison in <span class="docEmphasis">main()</span>.</p><h5 class="docExampleTitle" id="title-ID0EW1AK">Example 21-1. Calling a nonreentrant function from both <span class="docEmphasis">main()</span> and a signal handler</h5><p></p><div class="box"><pre class="preFixedHeight"><b>signals/nonreentrant.c</b>
+#define _XOPEN_SOURCE 600
+#include &lt;unistd.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;string.h&gt;
+#include "tlpi_hdr.h"
+
+static char *str2;              /* Set from argv[2] */
+static int handled = 0;         /* Counts number of calls to handler */
+
+static void
+handler(int sig)
+{
+
+    crypt(str2, "xx");
+    handled++;
+}
+int
+main(int argc, char *argv[])
+{
+    char *cr1;
+    int callNum, mismatch;
+    struct sigaction sa;
+
+    if (argc != 3)
+        usageErr("%s str1 str2\n", argv[0]);
+
+    str2 = argv[2];                      /* Make argv[2] available to handler */
+    cr1 = strdup(crypt(argv[1], "xx"));  /* Copy statically allocated string
+                                            to another buffer */
+    if (cr1 == NULL)
+        errExit("strdup");
+
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_flags = 0;
+    sa.sa_handler = handler;
+    if (sigaction(SIGINT, &amp;sa, NULL) == -1)
+        errExit("sigaction");
+
+    /* Repeatedly call crypt() using argv[1]. If interrupted by a
+       signal handler, then the static storage returned by crypt()
+       will be overwritten by the results of encrypting argv[2], and
+       strcmp() will detect a mismatch with the value in 'cr1'. */
+
+    for (callNum = 1, mismatch = 0; ; callNum++) {
+        if (strcmp(crypt(argv[1], "xx"), cr1) != 0) {
+            mismatch++;
+            printf("Mismatch on call %d (mismatch=%d handled=%d)\n",
+                    callNum, mismatch, handled);
+        }
+    }
+}
+     <b>signals/nonreentrant.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docSection3Title" id="title-ID0EE2AK">21.1.2.3. Standard async-signal-safe functions</h5><p class="docText">An <span class="docEmphasis">async-signal-safe</span>
+ function is one that the implementation guarantees to be safe when 
+called from a signal handler. A function is async-signal-safe either 
+because it is reentrant or because it is not interruptible by a signal 
+handler.</p><p class="docText">Table 21-1
+ lists the functions that various standards require to be 
+async-signal-safe. In this table, the functions whose names are not 
+followed by a <span class="docEmphasis">v2</span> or <span class="docEmphasis">v3</span> were specified as async-signal-safe in POSIX.1-1990. SUSv2 added the functions marked <span class="docEmphasis">v2</span> to the list, and those marked <span class="docEmphasis">v3</span>
+ were added by SUSv3. Individual UNIX implementations may make other 
+functions async-signal-safe, but all standards-conformant UNIX 
+implementations must ensure that at least these functions are 
+async-signal-safe (if they are provided by the implementation; not all 
+of these functions are provided on Linux).</p><p class="docText">SUSv4 makes the following changes to Table 21-1:</p><ul><li><p class="docList">The following functions are removed: <span class="docEmphasis">fpathconf()</span>, <span class="docEmphasis">pathconf()</span>, and <span class="docEmphasis">sysconf()</span>.</p></li><li><p class="docList">The following functions are added: <span class="docEmphasis">execl()</span>, <span class="docEmphasis">execv()</span>, <span class="docEmphasis">faccessat()</span>, <span class="docEmphasis">fchmodat()</span>, <span class="docEmphasis">fchownat()</span>, <span class="docEmphasis">fexecve()</span>, <span class="docEmphasis">fstatat()</span>, <span class="docEmphasis">futimens()</span>, <span class="docEmphasis">linkat()</span>, <span class="docEmphasis">mkdirat()</span>, <span class="docEmphasis">mkfifoat()</span>, <span class="docEmphasis">mknod()</span>, <span class="docEmphasis">mknodat()</span>, <span class="docEmphasis">openat()</span>, <span class="docEmphasis">readlinkat()</span>, <span class="docEmphasis">renameat()</span>, <span class="docEmphasis">symlinkat()</span>, <span class="docEmphasis">unlinkat()</span>, <span class="docEmphasis">utimensat()</span>, and <span class="docEmphasis">utimes()</span>.</p></li></ul><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 21-1. Functions required to be async-signal-safe by POSIX.1-1990, SUSv2, and SUSv3</h5></caption><colgroup span="3"><col></col><col></col><col></col></colgroup><thead></thead><tbody><tr><td align="left" class="docTableCell" valign="top"><span class="docEmphasis">_Exit()(v3)</span>
+<p class="docText"><span class="docEmphasis">_exit()</span></p>
+<p class="docText"><span class="docEmphasis">abort() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">accept() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">access()</span></p>
+<p class="docText"><span class="docEmphasis">aio_error() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">aio_return()(v2)</span></p>
+<p class="docText"><span class="docEmphasis">aio_suspend() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">alarm()</span></p>
+<p class="docText"><span class="docEmphasis">bind()(v3)</span></p>
+<p class="docText"><span class="docEmphasis">cfgetispeed()</span></p>
+<p class="docText"><span class="docEmphasis">cfgetospeed()</span></p>
+<p class="docText"><span class="docEmphasis">cfsetispeed()</span></p>
+<p class="docText"><span class="docEmphasis">cfsetospeed()</span></p>
+<p class="docText"><span class="docEmphasis">chdir()</span></p>
+<p class="docText"><span class="docEmphasis">chmod()</span></p>
+<p class="docText"><span class="docEmphasis">chown()</span></p>
+<p class="docText"><span class="docEmphasis">clock_gettime() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">close()</span></p>
+<p class="docText"><span class="docEmphasis">connect() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">creat()</span></p>
+<p class="docText"><span class="docEmphasis">dup()</span></p>
+<p class="docText"><span class="docEmphasis">dup2()</span></p>
+<p class="docText"><span class="docEmphasis">execle()</span></p>
+<p class="docText"><span class="docEmphasis">execve()</span></p>
+<p class="docText"><span class="docEmphasis">fchmod() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">fchown() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">fcntl()</span></p>
+<p class="docText"><span class="docEmphasis">fdatasync() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">fork()</span></p>
+<p class="docText"><span class="docEmphasis">fpathconf() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">fstat()</span></p>
+<p class="docText"><span class="docEmphasis">fsync() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">ftruncate() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">getegid()</span></p>
+<p class="docText"><span class="docEmphasis">geteuid()</span></p>
+<p class="docText"><span class="docEmphasis">getgid()</span></p>
+<p class="docText"><span class="docEmphasis">getgroups()</span></p>
+<p class="docText"><span class="docEmphasis">getpeername() (v3)</span></p>
+<span class="docEmphasis">getpgrp()</span></td><td align="left" class="docTableCell" valign="top"><span class="docEmphasis">getpid()</span>
+<p class="docText"><span class="docEmphasis">getppid()</span></p>
+<p class="docText"><span class="docEmphasis">getsockname() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">getsockopt() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">getuid()</span></p>
+<p class="docText"><span class="docEmphasis">kill()</span></p>
+<p class="docText"><span class="docEmphasis">link()</span></p>
+<p class="docText"><span class="docEmphasis">listen() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">lseek()</span></p>
+<p class="docText"><span class="docEmphasis">lstat() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">mkdir()</span></p>
+<p class="docText"><span class="docEmphasis">mkfifo()</span></p>
+<p class="docText"><span class="docEmphasis">open()</span></p>
+<p class="docText"><span class="docEmphasis">pathconf()</span></p>
+<p class="docText"><span class="docEmphasis">pause()</span></p>
+<p class="docText"><span class="docEmphasis">pipe()</span></p>
+<p class="docText"><span class="docEmphasis">poll() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">posix_trace_event() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">pselect() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">raise() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">read()</span></p>
+<p class="docText"><span class="docEmphasis">readlink() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">recv() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">recvfrom() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">recvmsg() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">rename()</span></p>
+<p class="docText"><span class="docEmphasis">rmdir()</span></p>
+<p class="docText"><span class="docEmphasis">select() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">sem_post() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">send() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">sendmsg() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">sendto() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">setgid()</span></p>
+<p class="docText"><span class="docEmphasis">setpgid()</span></p>
+<p class="docText"><span class="docEmphasis">setsid()</span></p>
+<p class="docText"><span class="docEmphasis">setsockopt() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">setuid()</span></p>
+<p class="docText"><span class="docEmphasis">shutdown() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">sigaction()</span></p>
+<span class="docEmphasis">sigaddset()</span></td><td align="left" class="docTableCell" valign="top"><span class="docEmphasis">sigdelset()</span>
+<p class="docText"><span class="docEmphasis">sigemptyset()</span></p>
+<p class="docText"><span class="docEmphasis">sigfillset()</span></p>
+<p class="docText"><span class="docEmphasis">sigismember()</span></p>
+<p class="docText"><span class="docEmphasis">signal() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">sigpause() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">sigpending()</span></p>
+<p class="docText"><span class="docEmphasis">sigprocmask()</span></p>
+<p class="docText"><span class="docEmphasis">sigqueue() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">sigset() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">sigsuspend()</span></p>
+<p class="docText"><span class="docEmphasis">sleep()</span></p>
+<p class="docText"><span class="docEmphasis">socket() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">sockatmark() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">socketpair() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">stat()</span></p>
+<p class="docText"><span class="docEmphasis">symlink() (v3)</span></p>
+<p class="docText"><span class="docEmphasis">sysconf()</span></p>
+<p class="docText"><span class="docEmphasis">tcdrain()</span></p>
+<p class="docText"><span class="docEmphasis">tcflow()</span></p>
+<p class="docText"><span class="docEmphasis">tcflush()</span></p>
+<p class="docText"><span class="docEmphasis">tcgetattr()</span></p>
+<p class="docText"><span class="docEmphasis">tcgetpgrp()</span></p>
+<p class="docText"><span class="docEmphasis">tcsendbreak()</span></p>
+<p class="docText"><span class="docEmphasis">tcsetattr()</span></p>
+<p class="docText"><span class="docEmphasis">tcsetpgrp()</span></p>
+<p class="docText"><span class="docEmphasis">time()</span></p>
+<p class="docText"><span class="docEmphasis">timer_getoverrun() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">timer_gettime() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">timer_settime() (v2)</span></p>
+<p class="docText"><span class="docEmphasis">times()</span></p>
+<p class="docText"><span class="docEmphasis">umask()</span></p>
+<p class="docText"><span class="docEmphasis">uname()</span></p>
+<p class="docText"><span class="docEmphasis">unlink()</span></p>
+<p class="docText"><span class="docEmphasis">utime()</span></p>
+<p class="docText"><span class="docEmphasis">wait()</span></p>
+<p class="docText"><span class="docEmphasis">waitpid()</span></p>
+<span class="docEmphasis">write()</span></td></tr></tbody></table><p></p><br/><p class="docText">SUSv3 notes that all functions not listed in Table 21-1
+ are considered to be unsafe with respect to signals, but points out 
+that a function is unsafe only when invocation of a signal handler 
+interrupts the execution of an unsafe function, and the handler itself 
+also calls an unsafe function. In other words, when writing signal 
+handlers, we have two choices:</p><ul><li><p class="docList">Ensure that the code of the signal handler itself is reentrant and that it calls only async-signal-safe functions.</p></li><li><p class="docList">Block
+ delivery of signals while executing code in the main program that calls
+ unsafe functions or works with global data structures also updated by 
+the signal handler.</p></li></ul><p class="docText">The
+ problem with the second approach is that, in a complex program, it can 
+be difficult to ensure that a signal handler will never interrupt the 
+main program while it is calling an unsafe function. For this reason, 
+the above rules are often simplified to the statement that we must not 
+call unsafe functions from within a signal handler.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">If we set up the same handler function to deal with several different signals or use the <tt>SA_NODEFER</tt> flag to <span class="docEmphasis">sigaction()</span>,
+ then a handler may interrupt itself. As a consequence, the handler may 
+be nonreentrant if it updates global (or static) variables, even if they
+ are not used by the main program.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EABCK">21.1.2.4. Use of <span class="docEmphasis">errno</span> inside signal handlers</h5><p class="docText">Because they may update <span class="docEmphasis">errno</span>, use of the functions listed in Table 21-1 can nevertheless render a signal handler nonreentrant, since they may overwrite the <span class="docEmphasis">errno</span> value that was set by a function called from the main program. The workaround is to save the value of <span class="docEmphasis">errno</span> on entry to a signal handler that uses any of the functions in Table 21-1 and restore the <span class="docEmphasis">errno</span> value on exit from the handler, as in the following example:</p><pre>void
+handler(int sig)
+{
+    int savedErrno;
+
+    savedErrno = errno;
+
+    /* Now we can execute a function that might modify errno */
+
+    errno = savedErrno;
+}</pre><br/>
+<h5 class="docSection3Title" id="title-ID0EADCK">21.1.2.5. Use of unsafe functions in example programs in this book</h5><p class="docText">Although <span class="docEmphasis">printf()</span> is not async-signal-safe, we use it in signal handlers in various example programs in this book. We do so because <span class="docEmphasis">printf()</span>
+ provides an easy and concise way to demonstrate that a signal handler 
+has been called, and to display the contents of relevant variables 
+within the handler. For similar reasons, we occasionally use a few other
+ unsafe functions in signal handlers, including other <span class="docEmphasis">stdio</span> functions and <span class="docEmphasis">strsignal()</span>.</p><p class="docText">Real-world
+ applications should avoid calling non-async-signal-safe functions from 
+signal handlers. To make this clear, each signal handler in the example 
+programs that uses one of these functions is marked with a comment 
+indicating that the usage is unsafe:</p><pre>printf("Some message\n");           /* UNSAFE */</pre><br/>
+<h4 class="docSection2Title" id="title-ID0ESDCK">21.1.3. Global Variables and the <span class="docEmphasis">sig_atomic_t</span> Data Type</h4><p class="docText">Notwithstanding
+ reentrancy issues, it can be useful to share global variables between 
+the main program and a signal handler. This can be safe as long as the 
+main program correctly handles the possibility that the signal handler 
+may change the global variable at any time. For example, one common 
+design is to make a signal handler’s sole action the setting of a global
+ flag. This flag is periodically checked by the main program, which then
+ takes appropriate action in response to the delivery of the signal (and
+ clears the flag). When global variables are accessed in this way from a
+ signal handler, we should always declare them using the <tt>volatile</tt> attribute (see Section 6.8) in order to prevent the compiler from performing optimizations that result in the variable being stored in a register.</p><p class="docText">Reading
+ and writing global variables may involve more than one machine-language
+ instruction, and a signal handler may interrupt the main program in the
+ middle of such an instruction sequence. (We say that access to the 
+variable is <span class="docEmphasis">nonatomic</span>.) For this reason, the C language standards and SUSv3 specify an integer data type, <span class="docEmphasis">sig_atomic_t</span>,
+ for which reads and writes are guaranteed to be atomic. Thus, a global 
+flag variable that is shared between the main program and a signal 
+handler should be declared as follows:</p><pre>volatile sig_atomic_t flag;</pre><br/>
+<p class="docText">We show an example of the use of the <span class="docEmphasis">sig_atomic_t</span> data type in Example 22-5, in Section 22.9.1.1.</p><p class="docText">Note that the C increment (<tt>++</tt>) and decrement (<tt>--</tt>) operators don’t fall within the guarantee provided for <span class="docEmphasis">sig_atomic_t</span>. On some hardware architectures, these operations may not be atomic (refer to Section 30.1 for more details). All that we are guaranteed to be safely allowed to do with a <span class="docEmphasis">sig_atomic_t</span> variable is set it within the signal handler, and check it in the main program (or vice versa).</p><p class="docText">C99 and SUSv3 specify that an implementation should define two constants (in <tt>&lt;stdint.h&gt;</tt>), <tt>SIG_ATOMIC_MIN</tt> and <tt>SIG_ATOMIC_MAX</tt>, that define the range of values that may be assigned to variables of type <span class="docEmphasis">sig_atomic_t</span>. The standards require that this range be at least -127 to 127 if <span class="docEmphasis">sig_atomic_t</span>
+ is represented as a signed value, or 0 to 255 if it is represented as 
+an unsigned value. On Linux, these two constants equate to the negative 
+and positive limits for signed 32-bit integers.</p>
+</div>
+</body>
+</html>

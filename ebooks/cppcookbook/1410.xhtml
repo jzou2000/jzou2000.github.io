@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 14.9. Using XML to Save and Restore a Collection of Objects</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 14.9. Using XML to Save and Restore a Collection of Objects</h3>
+
+<h4 class="docSection2Title" id="title-ID0EWQBK">Problem</h4>
+<p class="docText">You want to be able to
+
+
+
+ save a collection of C++ objects to an
+XML document and read it back into memory later.</p>
+
+<h4 class="docSection2Title" id="title-ID0E3RBK">Solution</h4>
+<p class="docText">Use the 
+Boost Serialization library.
+This library allows you to save and restore objects using classes
+called
+<i>archives</i>
+
+.
+To make use of this library, you must first make each of your classes
+<i>serializable</i>, which just means that instances of
+the class can be written to an archive, or
+<i>serialized</i>, and read back into memory, or
+<i>deserialized</i>. Then, at runtime, you can save
+your objects to an XML archive using the <tt>&lt;&lt;</tt>
+operator and restore them using the <tt>&gt;&gt;</tt>
+operator.</p>
+<p class="docText">To make a class serializable, add a member function template
+<tt>serialize</tt> with the following signature:</p>
+<pre>template&lt;typename Archive&gt;
+void serialize(Archive&amp; ar, const unsigned int version);</pre><br/>
+<p class="docText">The implementation of <tt>serialize</tt> should write each
+data member of the class to the specified archive as a name-value
+pair, using the <tt>&amp;</tt> operator. For example, if
+you want to serialize and deserialize instances of the class
+<tt>Contact</tt> from Example 14-2, add a
+member function <tt>serialize</tt>, as shown in Example 14-25.</p>
+<h5 class="docExampleTitle" id="title-ID0EDUBK">Example 14-25. Adding support for serialization to the class Contact from Example 14-2</h5><p></p><div class="box">
+<pre>#include &lt;boost/serialization/nvp.hpp&gt; // "name-value pair"
+
+class Contact {
+...
+private:
+    friend class boost::serialization::access;
+    template&lt;typename Archive&gt;
+    void serialize(Archive&amp; ar, const unsigned int version)
+    {   
+        // Write (or read) each data-member as a name-value pair
+        using boost::serialization::make_nvp;
+        ar &amp; make_nvp("name", name_);    
+        ar &amp; make_nvp("phone", phone_); 
+    }
+    ...
+};</pre><br/>
+</div><p></p>
+<p class="docText">Similarly, you can make the class <tt>Animal</tt> from
+Example 14-2 serializable, as shown in Example 14-26.</p>
+<h5 class="docExampleTitle" id="title-ID0E6UBK">Example 14-26. Adding support for serialization to the class Animal from Example 14-2</h5><p></p><div class="box">
+<pre>...
+// Include serialization support for boost::gregorian::date
+#include &lt;boost/date_time/gregorian/greg_serialize.hpp&gt;
+...
+class Contact {
+... 
+private:
+    friend class boost::serialization::access;
+    template&lt;typename Archive&gt;
+    void serialize(Archive&amp; ar, const unsigned int version)
+    {
+        // Write (or read) each data-member as a name-value pair 
+        using boost::serialization::make_nvp;
+        ar &amp; make_nvp("name", name_);      
+        ar &amp; make_nvp("species", species_);  
+        ar &amp; make_nvp("dateOfBirth", dob_);  
+        ar &amp; make_nvp("veterinarian", vet_);
+        ar &amp; make_nvp("trainer", trainer_);
+    }
+...
+};</pre><br/>
+</div><p></p>
+<p class="docText">You can now serialize an <tt>Animal</tt> by creating an XML
+archive of type <tt>boost::archive::xml_oarchive</tt> and
+writing the animal to the archive using the
+<tt>&lt;&lt;</tt> operator. The
+<tt>xml_oarchive</tt> constructor takes a
+<tt>std::ostream</tt> as an argument; often this will be an
+output stream for writing to a file, but in general it can be a
+stream for writing to any type of resource. After an
+<tt>Animal</tt> is serialized, it can be read back into
+memory by constructing an XML archive of type
+<tt>boost::archive::xml_iarchive</tt>, connecting it to the
+same resource as the original archive, and invoking the
+<tt>&gt;&gt;</tt> operator.</p>
+<p class="docText">Example 14-27 shows how to use Boost.Serialization to
+save a <tt>std::vector</tt> of <tt>Animal</tt>s
+to the file <i>animals.xml</i> and then load it back
+into memory. The contents of the file
+<i>animals.xml</i> after running the program in Example 14-27 are shown in Example 14-28.</p>
+<h5 class="docExampleTitle" id="title-ID0EWWBK">Example 14-27. Serializing a std::vector of Animals</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;fstream&gt;
+#include &lt;boost/archive/xml_oarchive.hpp&gt; // Archive for writing XML
+#include &lt;boost/archive/xml_iarchive.hpp&gt; // Archive for reading XML
+#include &lt;boost/serialization/vector.hpp&gt; // machinery for serializing
+#include "animal.hpp"                     // std::vector
+
+int main( )
+{
+    using namespace std;
+    using namespace boost::archive;       // namespace for archives
+    using namespace boost::serialization; // namespace for make_nvp
+
+    try {
+        // Populate list of animals
+        vector&lt;Animal&gt; animalList;
+        animalList.push_back( 
+            Animal( "Herby", "elephant", "1992-04-23", 
+                    Contact("Dr. Hal Brown", "(801)595-9627"),
+                    Contact("Bob Fisk", "(801)881-2260") ));
+        animalList.push_back( 
+            Animal( "Sheldon", "parrot", "1998-09-30", 
+                    Contact("Dr. Kevin Wilson", "(801)466-6498"),
+                    Contact("Eli Wendel", "(801)929-2506") ));
+        animalList.push_back( 
+            Animal( "Dippy", "penguin", "2001-06-08", 
+                    Contact("Dr. Barbara Swayne", "(801)459-7746"),
+                    Contact("Ben Waxman", "(801)882-3549") ));
+
+        // Construct XML output archive and serialize list
+        ofstream       fout("animals.xml");
+        xml_oarchive   oa(fout);
+        oa &lt;&lt; make_nvp("animalList", animalList);
+        fout.close( );
+
+        // Construct XML intput archive and deserialize list
+        ifstream        fin("animals.xml");
+        xml_iarchive    ia(fin);
+        vector&lt;Animal&gt;  animalListCopy;
+        ia &gt;&gt; make_nvp("animalList", animalListCopy);
+        fin.close( );
+
+        if (animalListCopy != animalList) {
+            cout &lt;&lt; "XML serialization failed\n";
+            return EXIT_FAILURE;
+        }
+
+    } catch (const exception&amp; e) {
+        cout &lt;&lt; e.what( ) &lt;&lt; "\n";
+        return EXIT_FAILURE;
+    }
+}
+
+					  </pre><br/>
+</div><p></p>
+<h5 class="docExampleTitle" id="title-ID0E6WBK">Example 14-28. The file animals.xml after running the program from Example 14-27</h5><p></p><div class="box">
+<pre class="preFixedHeight">&lt;?xml version="1.0" encoding="UTF-8" standalone="yes" ?&gt;
+&lt;!DOCTYPE boost_serialization&gt;
+&lt;boost_serialization signature="serialization::archive" version="3"&gt;
+&lt;animalList class_id="0" tracking_level="0" version="0"&gt;
+    &lt;count&gt;3&lt;/count&gt;
+    &lt;item class_id="1" tracking_level="0" version="0"&gt;
+        &lt;name&gt;Herby&lt;/name&gt;
+        &lt;species&gt;elephant&lt;/species&gt;
+        &lt;dateOfBirth class_id="2" tracking_level="0" version="0"&gt;
+            &lt;date&gt;19920423&lt;/date&gt;
+        &lt;/dateOfBirth&gt;
+        &lt;veterinarian class_id="3" tracking_level="0" version="0"&gt;
+            &lt;name&gt;Dr. Hal Brown&lt;/name&gt;
+            &lt;phone&gt;(801)595-9627&lt;/phone&gt;
+        &lt;/veterinarian&gt;
+        &lt;trainer&gt;
+            &lt;name&gt;Bob Fisk&lt;/name&gt;
+            &lt;phone&gt;(801)881-2260&lt;/phone&gt;
+        &lt;/trainer&gt;
+    &lt;/item&gt;
+    &lt;item&gt;
+        &lt;name&gt;Sheldon&lt;/name&gt;
+        &lt;species&gt;parrot&lt;/species&gt;
+        &lt;dateOfBirth&gt;
+            &lt;date&gt;19980930&lt;/date&gt;
+        &lt;/dateOfBirth&gt;
+        &lt;veterinarian&gt;
+            &lt;name&gt;Dr. Kevin Wilson&lt;/name&gt;
+            &lt;phone&gt;(801)466-6498&lt;/phone&gt;
+        &lt;/veterinarian&gt;
+        &lt;trainer&gt;
+            &lt;name&gt;Eli Wendel&lt;/name&gt;
+            &lt;phone&gt;(801)929-2506&lt;/phone&gt;
+        &lt;/trainer&gt;
+    &lt;/item&gt;
+    &lt;item&gt;
+        &lt;name&gt;Dippy&lt;/name&gt;
+        &lt;species&gt;penguin&lt;/species&gt;
+        &lt;dateOfBirth&gt;
+            &lt;date&gt;20010608&lt;/date&gt;
+        &lt;/dateOfBirth&gt;
+        &lt;veterinarian&gt;
+            &lt;name&gt;Dr. Barbara Swayne&lt;/name&gt;
+            &lt;phone&gt;(801)459-7746&lt;/phone&gt;
+        &lt;/veterinarian&gt;
+        &lt;trainer&gt;
+            &lt;name&gt;Ben Waxman&lt;/name&gt;
+            &lt;phone&gt;(801)882-3549&lt;/phone&gt;
+        &lt;/trainer&gt;
+    &lt;/item&gt;
+&lt;/animalList&gt;
+
+					  </pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0EMXBK">Discussion</h4>
+<p class="docText">The Boost Serialization library provides the most comprehensive and
+flexible way to save and restore C++ objects. It's
+an extremely sophisticated framework; for example,
+it's able to serialize complex data structures
+containing cyclic references and pointers to polymorphic objects.
+Furthermore, the library is useful for much more than XML
+serialization: in addition to XML archives, it provides several types
+of text and binary archives. The XML and text archives are portable,
+meaning that data can be serialized on one system and deserialized on
+another; the binaries archives are nonportable but compact.</p>
+<p class="docText">The XML documents produced by Boost.Serialization do not conform to
+any pre-existing specification, and the format may change in future
+versions of Boost. As a result, you cannot use these documents in
+conjunction with other C++ serialization frameworks. Nonetheless, XML
+serialization is useful because the serialized output is easy for
+humans to read and can be processed by XML processing tools.</p>
+<p class="docText">Examples Example 14-25 and Example 14-26 demonstrate <i>intrusive
+serialization</i>
+:
+the classes <tt>Animal</tt> and <tt>Contact</tt>
+were modified to make them serializable. Boost.Serialization also
+supports <i>nonintrusive
+serialization</i>
+,
+allowing classes to be made serializable without modifying their
+definitions, provided that all of an object's state
+is accessible through its public interface. You've
+already seen an example of nonintrusive serialization in Example 14-27: the template <tt>std::vector</tt>
+is serializable, despite the fact that its definition is unmodifiable
+by end-users. In fact, all standard library containers are
+serializable; to make serialization available for a container defined
+in the standard header <tt><i>xxx</i></tt>, simply include
+the header
+<i>boost/serialization/</i><tt><i>xxx</i></tt><i>.hpp</i>.
+To learn more about nonintrusive serialization, consult the
+Boost.Serialization documentation.</p>
+<p class="docText">Examples Example 14-25 and Example 14-26 also illustrate the dual role of the
+<tt>&amp;</tt> operator: it acts like the
+<tt>&lt;&lt;</tt> operator when an object is being
+serialized and like the <tt>&gt;&gt;</tt> operator when an
+object is being deserialized. This is convenient, because it allows
+serialization and deserialization to be implemented as a single
+function. In some cases, however, it's not
+appropriate to use a single function for serialization and
+deserialization; for those cases, Boost.Serialization provides a
+mechanism for splitting the <tt>serialize( )</tt> method
+into separate <tt>load( )</tt> and <tt>save(
+)</tt> methods. If you need to take advantage of this feature,
+consult the Boost.Serialization documentation.</p>
+<p class="docText">In Examples Example 14-25, Example 14-26, and Example 14-27, I use the
+function <tt>boost::serialization::make_nvp</tt> to
+construct name-value pairs. Boost.Serialization also provides a macro
+<tt>BOOST_SERIALIZATION_NVP</tt> that allows you to
+serialize a variable by specifying only its name. The first component
+of the pair will be constructed automatically by the preprocessor
+using the "stringizing" operator
+<tt>#</tt> to convert the macro parameters to string
+constants:</p>
+<pre>// Same as ar &amp; make_nvp("name_", name_);      
+ar &amp; BOOST_SERIALIZATION_NVP(name_);</pre><br/>
+<p class="docText">In the examples, I use <tt>make_nvp</tt> instead of
+<tt>BOOST_SERIALIZATION_NVP</tt> to give me more control
+over the tag names, making the contents of XML archives easier to
+read.</p>
+<p class="docText">The
+Boost.Serialization
+documentation recommends that the <tt>serialize( )</tt>
+method be declared <tt>private</tt> to reduce user errors
+when adding serialization support to classes derived from other
+serializable classes. To allow Boost.Serialization to call your
+class's <tt>serialize( )</tt> method, you
+must declare the class
+<tt>boost::serialization::access</tt> to be a friend.</p>
+<p class="docText">Finally, the second parameter of the <tt>serialize(
+)</tt>
+
+method in Examples Example 14-25 and Example 14-26 is part of
+Boost.Serialization's support for
+
+<i>class versioning</i>.
+The first time an object of a certain class is saved to an archive,
+the class's version is also saved; when an instance
+of the class is deserialized, Boost.Serialization passes the stored
+version as the second argument to <tt>serialize</tt>. This
+information can be used to customize deserialization; for example,
+<tt>serialize</tt> might load the value of a member
+variable only if the class version recorded in the archive is as
+least as high as the first version of the class to declare that
+variable. By default, a class's version is
+<tt>0</tt>. To specify a class's version,
+invoke the macro <tt>BOOST_CLASS_VERSION--</tt>defined in
+the header
+<i>boost/serialization/version.hpp—</i>passing
+the name of the class and class's version as
+
+
+
+
+arguments.</p>
+</div>
+</body>
+</html>

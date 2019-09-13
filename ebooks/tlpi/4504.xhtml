@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>45.4. IPC Identifiers and Client-Server Applications</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">45.4. IPC Identifiers and Client-Server Applications</h3><p class="docText">In
+ client-server applications, the server typically creates the System V 
+IPC objects, while the client simply accesses them. In other words, the 
+server performs an IPC <span class="docEmphasis">get</span> call specifying the flag <tt>IPC_CREAT</tt>, while the client omits this flag in its <span class="docEmphasis">get</span> call.</p><p class="docText">Suppose
+ a client engages in an extended dialogue with a server, with multiple 
+IPC operations being performed by each process (e.g., multiple messages 
+exchanged, a sequence of semaphore operations, or multiple updates to 
+shared memory). What happens if the server process crashes or is 
+deliberately halted and then restarted? At this point, it would make no 
+sense to blindly reuse the existing IPC object created by the previous 
+server process, since the new server process has no knowledge of the 
+historical information associated with the current state of the IPC 
+object. (For example, there may be a secondary request within a message 
+queue that was sent by a client in response to an earlier message from 
+the old server process.)</p><p class="docText">In
+ such a scenario, the only option for the server may be to abandon all 
+existing clients, delete the IPC objects created by the previous server 
+process, and create new instances of the IPC objects. A newly started 
+server handles the possibility that a previous instance of the server 
+terminated prematurely by first trying to create an IPC object by 
+specifying both the <tt>IPC_CREAT</tt> and the <tt>IPC_EXCL</tt> flags within the <span class="docEmphasis">get</span> call. If the <span class="docEmphasis">get</span>
+ call fails because an object with the specified key already exists, 
+then the server assumes the object was created by an old server process;
+ it therefore uses the <tt>IPC_RMID</tt> <span class="docEmphasis">ctl</span>
+ operation to delete the object, and once more performs a get call to 
+create the object. (This may be combined with other steps to ensure that
+ another server process is not currently running, such as those 
+described in Section 55.6.) For a message queue, these steps might 
+appear as shown in Example 45-1.</p><h5 class="docExampleTitle" id="title-ID0ENJBM">Example 45-1. Cleanup of IPC objects within a server</h5><p></p><div class="box"><pre class="preFixedHeight"><b>svipc/svmsg_demo_server.c</b>
+#include &lt;sys/types.h&gt;
+#include &lt;sys/ipc.h&gt;
+#include &lt;sys/msg.h&gt;
+#include &lt;sys/stat.h&gt;
+#include "tlpi_hdr.h"
+
+#define KEY_FILE "/some-path/some-file"
+                                /* Should be an existing file or one
+                                   that this program creates */
+
+int
+main(int argc, char *argv[])
+{
+    int msqid;
+    key_t key;
+    const int MQ_PERMS = S_IRUSR | S_IWUSR | S_IWGRP;   /* rw--w---- */
+
+    /* Optional code here to check if another server process is
+       already running */
+
+    /* Generate the key for the message queue */
+
+    key = ftok(KEY_FILE, 1);
+    if (key == -1)
+        errExit("ftok");
+
+    /* While msgget() fails, try creating the queue exclusively */
+
+    while ((msqid = msgget(key, IPC_CREAT | IPC_EXCL | MQ_PERMS)) == -1) {
+        if (errno == EEXIST) {          /* MQ with the same key already
+                                           exists - remove it and try again */
+            msqid = msgget(key, 0);
+            if (msqid == -1)
+                errExit("msgget() failed to retrieve old queue ID");
+            if (msgctl(msqid, IPC_RMID, NULL) == -1)
+                errExit("msgget() failed to delete old queue");
+            printf("Removed old message queue (id=%d)\n", msqid);
+
+        } else {                        /* Some other error --&gt; give up */
+            errExit("msgget() failed");
+        }
+    }
+
+    /* Upon loop exit, we've successfully created the message queue,
+       and we can then carry on to do other work... */
+
+    exit(EXIT_SUCCESS);
+}
+     <b>svipc/svmsg_demo_server.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Even
+ if a restarted server re-created the IPC objects, there still would be a
+ potential problem if supplying the same key to the <span class="docEmphasis">get</span>
+ call always generated the same identifier whenever a new IPC object was
+ created. Consider the solution just outlined from the point of view of 
+the client. If the IPC objects re-created by the server use the same 
+identifiers, then the client would have no way of becoming aware that 
+the server has been restarted and that the IPC objects don’t contain the
+ expected historical information.</p><p class="docText">To
+ solve this problem, the kernel employs an algorithm (described in the 
+next section) that normally ensures that when a new IPC object is 
+created, the object’s identifier will be different, even when the same 
+key is supplied. Consequently, any clients of the old server process 
+that attempt to use the old identifier will receive an error from the 
+relevant IPC system call.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Solutions such as that shown in Example 45-1
+ don’t completely solve the problem of identifying a server restart when
+ using System V shared memory, since a shared memory object is deleted 
+only when all processes have detached it from their virtual address 
+space. However, shared memory objects are typically used in conjunction 
+with System V semaphores, which <span class="docEmphasis">are</span> immediately deleted in response to an <tt>IPC_RMID</tt>
+ operation. This means that a client process will become aware of a 
+server restart when it tries to access the deleted semaphore object.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

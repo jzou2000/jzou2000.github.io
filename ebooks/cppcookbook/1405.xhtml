@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 14.4. Manipulating an XML Document</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 14.4. Manipulating an XML Document</h3>
+
+<h4 class="docSection2Title" id="title-ID0EJFBK">Problem</h4>
+<p class="docText">You want to represent an
+
+
+XML document as a C++ object so that you can manipulate its elements,
+attributes, text, DTD, processing instructions, and comments.</p>
+
+<h4 class="docSection2Title" id="title-ID0EFGBK">Solution</h4>
+<p class="docText">Use Xerces's implementation of the W3C DOM. First,
+use the class <tt>xercesc::DOMImplementationRegistry</tt>
+to obtain an instance of
+<tt>xercesc::DOMImplementation</tt>, then use the
+<tt>DOMImplementation</tt> to create an instance of the
+parser <tt>xercesc::DOMBuilder</tt>. Next, register an
+instance of <tt>xercesc::DOMErrorHandler</tt> to receive
+notifications of parsing errors, and invoke the
+parser's <tt>parseURI( )</tt> method with
+your XML document's URI or file pathname as its
+argument. If the parse is successful, <tt>parseURI</tt>
+will return a pointer to a <tt>DOMDocument</tt>
+representing the XML document. You can then use the functions defined
+by the W3C DOM specification to inspect and manipulate the document.</p>
+<p class="docText">When you are done manipulating the document, you can save it to a
+file by obtaining a <tt>DOMWriter</tt> from the
+<tt>DOMImplementation</tt> and calling its
+<tt>writeNode( )</tt> method with a pointer to the
+<tt>DOMDocument</tt> as its argument.</p>
+<p class="docText">Example 14-10 shows how to use DOM to parse the document
+<i>animals.xml</i> from Example 14-1,
+locate and remove the node corresponding to Herby the elephant, and
+save the modified document.</p>
+<h5 class="docExampleTitle" id="title-ID0E2HBK">Example 14-10. Using DOM to load, modify, and then save an XML document</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;exception&gt;
+#include &lt;iostream&gt;     // cout
+#include &lt;xercesc/dom/DOM.hpp&gt;
+#include &lt;xercesc/framework/LocalFileFormatTarget.hpp&gt;
+#include &lt;xercesc/sax/SAXException.hpp&gt;
+#include &lt;xercesc/util/PlatformUtils.hpp&gt;
+#include "animal.hpp"
+#include "xerces_strings.hpp"
+
+using namespace std;
+using namespace xercesc;
+
+/*
+ * Define XercesInitializer as in Example 14-8
+ */
+
+// RAII utility that releases a resource when it goes out of scope.
+template&lt;typename T&gt;
+class DOMPtr {
+public:
+    DOMPtr(T* t) : t_(t) { }
+    ~DOMPtr( ) { t_-&gt;release( ); }
+    T* operator-&gt;( ) const { return t_; }
+private:
+    // prohibit copying and assigning
+    DOMPtr(const DOMPtr&amp;);
+    DOMPtr&amp; operator=(const DOMPtr&amp;);
+    T* t_;
+};
+
+// Reports errors encountered while parsing using a DOMBuilder.
+class CircusErrorHandler : public DOMErrorHandler {
+public:
+    bool handleError(const DOMError&amp; e)
+    {
+        std::cout &lt;&lt; toNative(e.getMessage( )) &lt;&lt; "\n";
+        return false;
+    }
+};
+
+// Returns the value of the "name" child of an "animal" element.
+const XMLCh* getAnimalName(const DOMElement* animal)
+{
+    static XercesString name = fromNative("name");
+
+    // Iterate though animal's children
+    DOMNodeList* children = animal-&gt;getChildNodes( );
+    for ( size_t i = 0,
+                 len = children-&gt;getLength( ); 
+          i &lt; len; 
+          ++i ) 
+    {
+        DOMNode* child = children-&gt;item(i);
+        if ( child-&gt;getNodeType( ) == DOMNode::ELEMENT_NODE &amp;&amp;
+             static_cast&lt;DOMElement*&gt;(child)-&gt;getTagName( ) == name )
+        {
+            // We've found the "name" element.
+            return child-&gt;getTextContent( );
+        }
+    }
+    return 0;
+}
+
+int main( )
+{
+    try {
+        // Initialize Xerces and retrieve a DOMImplementation;
+        // specify that you want to  use the Load and Save (LS)
+        // feature
+        XercesInitializer   init;
+        DOMImplementation*  impl = 
+            DOMImplementationRegistry::getDOMImplementation(
+                fromNative("LS").c_str( )
+            );
+        if (impl == 0) {
+            cout &lt;&lt; "couldn't create DOM implementation\n";
+            return EXIT_FAILURE;
+        }
+
+        // Construct a DOMBuilder to parse animals.xml.
+        DOMPtr&lt;DOMBuilder&gt;  parser = 
+            static_cast&lt;DOMImplementationLS*&gt;(impl)-&gt;
+                createDOMBuilder(DOMImplementationLS::MODE_SYNCHRONOUS, 0);
+
+        // Enable namespaces (not needed in this example)
+        parser-&gt;setFeature(XMLUni::fgDOMNamespaces, true);
+
+        // Register an error handler
+        CircusErrorHandler  err;
+        parser-&gt;setErrorHandler(&amp;err);
+
+        // Parse animals.xml; you can use a URL here 
+        // instead of a file name
+        DOMDocument* doc = 
+            parser-&gt;parseURI("animals.xml");
+
+        // Search for Herby the elephant: first, obtain a pointer 
+        // to the "animalList" element.
+        DOMElement*  animalList = doc-&gt;getDocumentElement( );
+        if (animalList-&gt;getTagName( ) != fromNative("animalList")) {
+            cout &lt;&lt; "bad document root: " 
+                 &lt;&lt; toNative(animalList-&gt;getTagName( ))
+                 &lt;&lt; "\n";
+            return EXIT_FAILURE;
+        }
+
+        // Next, iterate through the "animal" elements, searching
+        // for Herby the elephant.
+        DOMNodeList* animals = 
+            animalList-&gt;getElementsByTagName(fromNative("animal").c_str( ));
+        for ( size_t i = 0, 
+                     len = animals-&gt;getLength( );
+              i &lt; len;
+              ++i )
+        {
+            DOMElement* animal = 
+              static_cast&lt;DOMElement*&gt;(animals-&gt;item(i));
+            const XMLCh* name = getAnimalName(animal);
+            if (name != 0 &amp;&amp; name == fromNative("Herby")) {
+                // Found Herby -- remove him from document.
+                animalList-&gt;removeChild(animal);
+                animal-&gt;release( ); // optional.
+                break;
+            }
+        }
+
+        // Construct a DOMWriter to save animals.xml.
+        DOMPtr&lt;DOMWriter&gt; writer = 
+            static_cast&lt;DOMImplementationLS*&gt;(impl)-&gt;createDOMWriter( );
+        writer-&gt;setErrorHandler(&amp;err);
+
+        // Save animals.xml.
+        LocalFileFormatTarget file("animals.xml");
+        writer-&gt;writeNode(&amp;file, *animalList);
+    } catch (const SAXException&amp; e) {
+        cout &lt;&lt; "xml error: " &lt;&lt; toNative(e.getMessage( )) &lt;&lt; "\n";
+        return EXIT_FAILURE;
+    } catch (const DOMException&amp; e) {
+        cout &lt;&lt; "xml error: " &lt;&lt; toNative(e.getMessage( )) &lt;&lt; "\n";
+        return EXIT_FAILURE;
+    } catch (const exception&amp; e) {
+        cout &lt;&lt; e.what( ) &lt;&lt; "\n";
+        return EXIT_FAILURE;
+    }
+}
+
+					  </pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0EKIBK">Discussion</h4>
+<p class="docText">Like the TinyXml parser, the
+
+Xerces DOM parser produces a
+representation of an XML document as a tree-structured C++ object
+with nodes representing the document's components.
+Xerces is a much more sophisticated parser, however: for instance,
+unlike TinyXml, it understands XML Namespaces and can parse complex
+DTDs. It also constructs a much more detailed representation of an
+XML document, including its processing instructions and the namespace
+URIs associated with elements and attributes. Most importantly, it
+provides access to this information through the interface described
+in the W3C DOM specification.</p>
+<p class="docText">The W3C specification, which is still a work in progress, is divided
+into several "levels"; currently,
+there are three levels. The classes
+<tt>DOMImplementation</tt>, <tt>DOMDocument</tt>,
+<tt>DOMElement</tt>, and <tt>DOMNodeList</tt>,
+used in Example 14-10, are specified in DOM Level 1.
+The classes <tt>DOMBuilder</tt> and
+<tt>DOMWrite</tt> are specified in DOM Level 3, as part of
+the <tt>Load</tt> and <tt>Save</tt>
+recommendation.</p>
+<p></p><table align="center" bgcolor="black" border="0" cellpadding="1" cellspacing="0" width="90%"><tbody><tr><td><table bgcolor="white" border="0" cellpadding="6" cellspacing="0" width="100%"><tbody><tr><td valign="top" width="60"><img alt="" height="54" src="Images/tip_yellow.gif" width="50"/></td><td valign="top">
+<p class="docText">The names of Xerces classes aren't always the same
+as the names of the W3C DOM interfaces they implement; this is
+because Xerces implements several specifications in a single
+namespace, and attaches prefixes to some class names to avoid name
+clashes.</p>
+</td></tr></tbody></table></td></tr></tbody></table><p></p><br/>
+<p class="docText">Example 14-10 should now be pretty easy to understand.
+I start by initializing Xerces as shown in Example 14-8. Then I obtain a
+<tt>DOMImplementation</tt> from the
+<tt>DOMImplementationRegistry</tt>, requesting the
+<tt>Load</tt> and <tt>Save</tt> feature by
+passing the string "<tt>LS</tt>" to the static method
+<tt>DOMImplementationRegistry::getDOMImplementation()</tt>. I next obtain a <tt>DOMBuilder</tt> from the
+<tt>DOMIMplementation</tt>. I have to cast the
+<tt>DOMIMplementation</tt> to type
+<tt>DOMIMplementationLS</tt>, because
+<tt>Load</tt> and <tt>Save</tt> features are not
+accessible from the <tt>DOMIMplementation</tt> interface
+specified by W3C DOM level 1. The first argument to
+<tt>createDOMBuilder()</tt>
+ indicates that the returned parser will
+operate in <i>synchronous
+mode</i>. The other possible
+mode,
+<i>asynchronous mode</i>, is not currently supported by
+Xerces.</p>
+<p class="docText">After obtaining a <tt>DOMBuilder</tt>, I enable XML
+Namespace support, register an <tt>ErrorHandler</tt>, and
+parse the document. The parser returns a representation of the
+document as a <tt>DOMDocument</tt>; using the
+<tt>DOMDocument</tt>'s
+<tt>getElementsByTagName()</tt>
+ method, I obtain a
+<tt>DOMElement</tt> object corresponding to the
+document's <tt>animalList</tt> element and
+iterate over its children using an object of type
+<tt>DOMNodeList</tt>. When I find an element that has a
+child element of type <tt>name</tt> containing the text
+"<tt>Herby</tt>", I remove it from the document by calling
+the root element's <tt>removeChild(
+)</tt>
+ method.</p>
+<p></p><table align="center" bgcolor="black" border="0" cellpadding="1" cellspacing="0" width="90%"><tbody><tr><td><table bgcolor="white" border="0" cellpadding="6" cellspacing="0" width="100%"><tbody><tr><td valign="top" width="60"><img alt="" height="54" src="Images/tip_yellow.gif" width="50"/></td><td valign="top">
+<p class="docText">Just as <tt>SAX2XMLReader</tt> has a <tt>parse(
+)</tt> method taking an instance of
+<tt>InputSource</tt>, <tt>DOMBuilder</tt> has a
+<tt>parse( )</tt> method taking an instance of
+<tt>xercesc::DOMInputSource</tt>, an abstract class
+encapsulating a source of character data.
+<tt>DOMInputSource</tt> has a concrete subclass
+<tt>Wrapper4DOMIn-putSource</tt> that can be used to
+transform an arbitrary <tt>InputSource</tt> into a
+<tt>xercesc::DOMInputSource</tt>. See Recipe 14.3.</p>
+</td></tr></tbody></table></td></tr></tbody></table><p></p><br/>
+<p class="docText">Finally, I obtain a <tt>DOMWriter</tt> object from the
+<tt>DOMImplementation</tt>, in much the same way that I
+obtained a <tt>DOMBuilder</tt>, and save the modified XML
+document to disk by calling its <tt>writeNode(
+)</tt>
+ method with the document's
+root 
+
+element as argument.</p>
+<p></p><table align="center" bgcolor="black" border="0" cellpadding="1" cellspacing="0" width="90%"><tbody><tr><td><table bgcolor="white" border="0" cellpadding="6" cellspacing="0" width="100%"><tbody><tr><td valign="top" width="60"><img alt="" height="54" src="Images/tip_yellow.gif" width="50"/></td><td valign="top">
+<p class="docText">You must free pointers returned by methods of the form
+<tt>DOMImplementation::createXXX( )</tt> by calling the
+method <tt>release( )</tt>. Use the
+<tt>DOMPtr</tt> utility from Example 14-10
+to make sure such pointers are released even if an exception is
+thrown. Pointers returned by methods of the form
+<tt>DOMDocument::createXXX( )</tt> need not be explicitly
+released, although they can be if they are no longer needed. See the
+Xerces documentation for details.</p>
+</td></tr></tbody></table></td></tr></tbody></table><p></p><br/>
+</div>
+</body>
+</html>

@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>59.7. Client-Server Example (Datagram Sockets)</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">59.7. Client-Server Example (Datagram Sockets)</h3><p class="docText">In this section, we take the case-conversion server and client programs shown in Section 57.3 and modify them to use datagram sockets in the <tt>AF_INET6</tt>
+ domain. We present these programs with a minimum of commentary, since 
+their structure is similar to the earlier programs. The main differences
+ in the new programs lie in the declaration and initialization of the 
+IPv6 socket address structure, which we described in Section 59.4.</p><p class="docText">The client and server both employ the header file shown in Example 59-2. This header file defines the server’s port number and the maximum size of messages that the client and server can exchange.</p><h5 class="docExampleTitle" id="title-ID0ETGGM">Example 59-2. Header file used by <tt>i6d_ucase_sv.c</tt> and <tt>i6d_ucase_cl.c</tt></h5><p></p><div class="box"><pre class="preFixedWidth"><b>sockets/i6d_ucase.h</b>
+#include &lt;netinet/in.h&gt;
+#include &lt;arpa/inet.h&gt;
+#include &lt;sys/socket.h&gt;
+#include &lt;ctype.h&gt;
+#include "tlpi_hdr.h"
+
+#define BUF_SIZE 10                     /* Maximum size of messages exchanged
+                                           between client and server */
+
+#define PORT_NUM 50002                  /* Server port number */
+     <b>sockets/i6d_ucase.h</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Example 59-3 shows the server program. The server uses the <span class="docEmphasis">inet_ntop()</span> function to convert the host address of the client (obtained via the <span class="docEmphasis">recvfrom()</span> call) to printable form.</p><p class="docText">The client program shown in Example 59-4 contains two notable modifications from the earlier UNIX domain version (Example 57-7, in Section 57.3.1.2).
+ The first difference is that the client interprets its initial 
+command-line argument as the IPv6 address of the server. (The remaining 
+command-line arguments are passed as separate datagrams to the server.) 
+The client converts the server address to binary form using <span class="docEmphasis">inet_pton()</span>. The other difference is that the client doesn’t bind its socket to an address. As noted in Section 58.6.1,
+ if an Internet domain socket is not bound to an address, the kernel 
+binds the socket to an ephemeral port on the host system. We can observe
+ this in the following shell session log, where we run the server and 
+the client on the same host:</p><pre class="preFixedWidth">$ <b>./i6d_ucase_sv &amp; </b>
+[1] 31047
+$ <b>./i6d_ucase_cl ::1 ciao </b>                     <i> Send to server on local host</i>
+Server received 4 bytes from (::1, 32770)
+Response 1: CIAO
+
+					  </pre><br/>
+<p class="docText">From the above output, we see that the server’s <span class="docEmphasis">recvfrom()</span>
+ call was able to obtain the address of the client’s socket, including 
+the ephemeral port number, despite the fact that the client did not do a
+ <span class="docEmphasis">bind()</span>.</p><h5 class="docExampleTitle" id="title-ID0EWIGM">Example 59-3. IPv6 case-conversion server using datagram sockets</h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/i6d_ucase_sv.c</b>
+#include "i6d_ucase.h"
+
+int
+main(int argc, char *argv[])
+{
+    struct sockaddr_in6 svaddr, claddr;
+    int sfd, j;
+    ssize_t numBytes;
+    socklen_t len;
+    char buf[BUF_SIZE];
+    char claddrStr[INET6_ADDRSTRLEN];
+
+    sfd = socket(AF_INET6, SOCK_DGRAM, 0);
+    if (sfd == -1)
+        errExit("socket");
+
+    memset(&amp;svaddr, 0, sizeof(struct sockaddr_in6));
+    svaddr.sin6_family = AF_INET6;
+    svaddr.sin6_addr = in6addr_any;                    /* Wildcard address */
+    svaddr.sin6_port = htons(PORT_NUM);
+
+    if (bind(sfd, (struct sockaddr *) &amp;svaddr,
+                sizeof(struct sockaddr_in6)) == -1)
+        errExit("bind");
+
+    /* Receive messages, convert to uppercase, and return to client */
+
+    for (;;) {
+        len = sizeof(struct sockaddr_in6);
+        numBytes = recvfrom(sfd, buf, BUF_SIZE, 0,
+                            (struct sockaddr *) &amp;claddr, &amp;len);
+        if (numBytes == -1)
+            errExit("recvfrom");
+
+        if (inet_ntop(AF_INET6, &amp;claddr.sin6_addr, claddrStr,
+                    INET6_ADDRSTRLEN) == NULL)
+            printf("Couldn't convert client address to string\n");
+        else
+            printf("Server received %ld bytes from (%s, %u)\n",
+                    (long) numBytes, claddrStr, ntohs(claddr.sin6_port));
+
+        for (j = 0; j &lt; numBytes; j++)
+            buf[j] = toupper((unsigned char) buf[j]);
+
+        if (sendto(sfd, buf, numBytes, 0, (struct sockaddr *) &amp;claddr, len) !=
+                numBytes)
+            fatal("sendto");
+    }
+}
+      <b>sockets/i6d_ucase_sv.c</b>
+
+					  </pre><br/>
+</div><p></p><h5 class="docExampleTitle" id="title-ID0EBJGM">Example 59-4. IPv6 case-conversion client using datagram sockets</h5><p></p><div class="box"><pre class="preFixedHeight"><b>sockets/i6d_ucase_cl.c</b>
+#include "i6d_ucase.h"
+
+int
+main(int argc, char *argv[])
+{
+    struct sockaddr_in6 svaddr;
+    int sfd, j;
+    size_t msgLen;
+    ssize_t numBytes;
+    char resp[BUF_SIZE];
+
+    if (argc &lt; 3 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s host-address msg...\n", argv[0]);
+
+    sfd = socket(AF_INET6, SOCK_DGRAM, 0);      /* Create client socket */
+    if (sfd == -1)
+        errExit("socket");
+
+    memset(&amp;svaddr, 0, sizeof(struct sockaddr_in6));
+    svaddr.sin6_family = AF_INET6;
+    svaddr.sin6_port = htons(PORT_NUM);
+    if (inet_pton(AF_INET6, argv[1], &amp;svaddr.sin6_addr) &lt;= 0)
+        fatal("inet_pton failed for address '%s'", argv[1]);
+
+    /* Send messages to server; echo responses on stdout */
+
+    for (j = 2; j &lt; argc; j++) {
+        msgLen = strlen(argv[j]);
+        if (sendto(sfd, argv[j], msgLen, 0, (struct sockaddr *) &amp;svaddr,
+                    sizeof(struct sockaddr_in6)) != msgLen)
+            fatal("sendto");
+
+        numBytes = recvfrom(sfd, resp, BUF_SIZE, 0, NULL, NULL);
+        if (numBytes == -1)
+            errExit("recvfrom");
+
+        printf("Response %d: %.*s\n", j - 1, (int) numBytes, resp);
+    }
+
+    exit(EXIT_SUCCESS);
+}
+      <b>sockets/i6d_ucase_cl.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

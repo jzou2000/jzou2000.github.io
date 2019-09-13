@@ -1,0 +1,353 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>26.1. Waiting on a Child Process</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">26.1. Waiting on a Child Process</h3><p class="docText">In
+ many applications where a parent creates child processes, it is useful 
+for the parent to be able to monitor the children to find out when and 
+how they terminate. This facility is provided by <span class="docEmphasis">wait()</span> and a number of related system calls.</p><h4 class="docSection2Title" id="title-ID0EUSCK">26.1.1. The <span class="docEmphasis">wait()</span> System Call</h4><p class="docText">The <span class="docEmphasis">wait()</span>
+ system call waits for one of the children of the calling process to 
+terminate and returns the termination status of that child in the buffer
+ pointed to by <span class="docEmphasis">status</span>.</p><pre>#include &lt;sys/wait.h&gt;
+
+pid_t <b>wait</b>(int *<span class="docEmphasis">status</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns process ID of terminated child, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">wait()</span> system call does the following:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">If
+ no (previously unwaited-for) child of the calling process has yet 
+terminated, the call blocks until one of the children terminates. If a 
+child has already terminated by the time of the call, <span class="docEmphasis">wait()</span> returns immediately.</p></div></li><li><div style="font-weight:normal"><p class="docList">If <span class="docEmphasis">status</span> is not <tt>NULL</tt>, information about how the child terminated is returned in the integer to which <span class="docEmphasis">status</span> points. We describe the information returned in <span class="docEmphasis">status</span> in Section 26.1.3.</p></div></li><li><div style="font-weight:normal"><p class="docList">The kernel adds the process CPU times (Section 10.7) and resource usage statistics (Section 36.1) to running totals for all children of this parent process.</p></div></li><li><div style="font-weight:normal"><p class="docList">As its function result, <span class="docEmphasis">wait()</span> returns the process ID of the child that has terminated.</p></div></li></ol></div><p class="docText">On error, <span class="docEmphasis">wait()</span>
+ returns -1. One possible error is that the calling process has no 
+(previously unwaited-for) children, which is indicated by the <span class="docEmphasis">errno</span> value <tt>ECHILD</tt>. This means that we can use the following loop to wait for all children of the calling process to terminate:</p><pre>while ((childPid = wait(NULL)) != -1)
+    continue;
+if (errno != ECHILD)                /* An unexpected error... */
+    errExit("wait");</pre><br/>
+<p class="docText">Example 26-1 demonstrates the use of <span class="docEmphasis">wait()</span>.
+ This program creates multiple child processes, one per (integer) 
+command-line argument. Each child sleeps for the number of seconds 
+specified in the corresponding command-line argument and then exits. In 
+the meantime, after all children have been created, the parent process 
+repeatedly calls <span class="docEmphasis">wait()</span> to monitor the termination of its children. This loop continues until <span class="docEmphasis">wait()</span> returns -1. (This is not the only approach: we could alternatively exit the loop when the number of terminated children, <span class="docEmphasis">numDead</span>,
+ matches the number of children created.) The following shell session 
+log shows what happens when we use the program to create three children:</p><pre>$ <b>./multi_wait 7 1 4</b>
+[13:41:00] child 1 started with PID 21835, sleeping 7 seconds
+[13:41:00] child 2 started with PID 21836, sleeping 1 seconds
+[13:41:00] child 3 started with PID 21837, sleeping 4 seconds
+[13:41:01] wait() returned child PID 21836 (numDead=1)
+[13:41:04] wait() returned child PID 21837 (numDead=2)
+[13:41:07] wait() returned child PID 21835 (numDead=3)
+No more children - bye!</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">If
+ there are multiple terminated children at a particular moment, SUSv3 
+leaves unspecified the order in which these children will be reaped by a
+ sequence of <span class="docEmphasis">wait()</span> calls; that is, the order depends on the implementation. Even across versions of the Linux kernel, the behavior varies.</p><hr noshade="noshade" size="1"/><h5 class="docExampleTitle" id="title-ID0EYWCK">Example 26-1. Creating and waiting for multiple children</h5><p></p><div class="box"><pre class="preFixedHeight"><b>procexec/multi_wait.c</b>
+#include &lt;sys/wait.h&gt;
+#include &lt;time.h&gt;
+#include "curr_time.h"              /* Declaration of currTime() */
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int numDead;       /* Number of children so far waited for */
+    pid_t childPid;    /* PID of waited for child */
+    int j;
+
+    if (argc &lt; 2 || strcmp(argv[1], "--help") == 0)
+        usageErr("%s sleep-time...\n", argv[0]);
+
+    setbuf(stdout, NULL);           /* Disable buffering of stdout */
+
+    for (j = 1; j &lt; argc; j++) {    /* Create one child for each argument */
+        switch (fork()) {
+        case -1:
+            errExit("fork");
+
+        case 0:                     /* Child sleeps for a while then exits */
+            printf("[%s] child %d started with PID %ld, sleeping %s "
+                    "seconds\n", currTime("%T"), j, (long) getpid(), argv[j]);
+            sleep(getInt(argv[j], GN_NONNEG, "sleep-time"));
+            _exit(EXIT_SUCCESS);
+
+        default:                    /* Parent just continues around loop */
+            break;
+        }
+    }
+
+    numDead = 0;
+    for (;;) {                      /* Parent waits for each child to exit */
+        childPid = wait(NULL);
+        if (childPid == -1) {
+            if (errno == ECHILD) {
+                printf("No more children - bye!\n");
+                exit(EXIT_SUCCESS);
+            } else {                /* Some other (unexpected) error */
+                errExit("wait");
+            }
+        }
+
+        numDead++;
+        printf("[%s] wait() returned child PID %ld (numDead=%d)\n",
+                currTime("%T"), (long) childPid, numDead);
+    }
+}
+     <b>procexec/multi_wait.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0EDXCK">26.1.2. The <span class="docEmphasis">waitpid()</span> System Call</h4><p class="docText">The <span class="docEmphasis">wait()</span> system call has a number of limitations, which <span class="docEmphasis">waitpid()</span> was designed to address:</p><ul><li><p class="docList">If a parent process has created multiple children, it is not possible to <span class="docEmphasis">wait()</span> for the completion of a specific child; we can only wait for the next child that terminates.</p></li><li><p class="docList">If no child has yet terminated, <span class="docEmphasis">wait()</span>
+ always blocks. Sometimes, it would be preferable to perform a 
+nonblocking wait so that if no child has yet terminated, we obtain an 
+immediate indication of this fact.</p></li><li><p class="docList">Using <span class="docEmphasis">wait()</span>,
+ we can find out only about children that have terminated. It is not 
+possible to be notified when a child is stopped by a signal (such as <tt>SIGSTOP</tt> or <tt>SIGTTIN</tt>) or when a stopped child is resumed by delivery of a <tt>SIGCONT</tt> signal.</p></li></ul><pre>#include &lt;sys/wait.h&gt;
+
+pid_t <b>waitpid</b>(pid_t <span class="docEmphasis">pid</span>, int <span class="docEmphasis">*status</span>, int <span class="docEmphasis">options</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns process ID of child, 0 (see text), or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The return value and <span class="docEmphasis">status</span> arguments of <span class="docEmphasis">waitpid()</span> are the same as for <span class="docEmphasis">wait()</span>. (See Section 26.1.3 for an explanation of the value returned in <span class="docEmphasis">status</span>.) The <span class="docEmphasis">pid</span> argument enables the selection of the child to be waited for, as follows:</p><ul><li><p class="docList">If <span class="docEmphasis">pid</span> is greater than 0, wait for the child whose <span class="docEmphasis">process ID</span> equals <span class="docEmphasis">pid</span>.</p></li><li><p class="docList">If <span class="docEmphasis">pid</span> equals 0, wait for any child in the <span class="docEmphasis">same process group as the caller</span> (parent). We describe process groups in Section 34.2.</p></li><li><p class="docList">If <span class="docEmphasis">pid</span> is less than -1, wait for any child whose <span class="docEmphasis">process group</span> identifier equals the absolute value of <span class="docEmphasis">pid</span>.</p></li><li><p class="docList">If <span class="docEmphasis">pid</span> equals -1, wait for <span class="docEmphasis">any</span> child. The call <span class="docEmphasis">wait(&amp;status)</span> is equivalent to the call <span class="docEmphasis">waitpid(-1, &amp;status, 0)</span>.</p></li></ul><p class="docText">The <span class="docEmphasis">options</span> argument is a bit mask that can include (OR) zero or more of the following flags (all of which are specified in SUSv3):</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">WUNTRACED</span></span></span></p></dt><dd><p class="docList">In addition to returning information about terminated children, also return information when a child is <span class="docEmphasis">stopped</span> by a signal.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">WCONTINUED</span></span> (since Linux 2.6.10)</span></p></dt><dd><p class="docList">Also return status information about stopped children that have been resumed by delivery of a <tt>SIGCONT</tt> signal.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">WNOHANG</span></span></span></p></dt><dd><p class="docList">If no child specified by <span class="docEmphasis">pid</span>
+ has yet changed state, then return immediately, instead of blocking 
+(i.e., perform a “poll”). In this case, the return value of <span class="docEmphasis">waitpid()</span> is 0. If the calling process has no children that match the specification in <span class="docEmphasis">pid</span>, <span class="docEmphasis">waitpid()</span> fails with the error <tt>ECHILD</tt>.</p></dd></dl><p class="docText">We demonstrate the use of <span class="docEmphasis">waitpid()</span> in Example 26-3.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In its rationale for <span class="docEmphasis">waitpid()</span>, SUSv3 notes that the name <tt>WUNTRACED</tt>
+ is a historical artifact of this flag’s origin in BSD, where a process 
+could be stopped in one of two ways: as a consequence of being traced by
+ the <span class="docEmphasis">ptrace()</span> system call, or by being stopped by a signal (i.e., not being traced). When a child is being traced by <span class="docEmphasis">ptrace()</span>, then delivery of <span class="docEmphasis">any</span> signal (other than <tt>SIGKILL</tt>) causes the child to be stopped, and a <tt>SIGCHLD</tt>
+ signal is consequently sent to the parent. This behavior occurs even if
+ the child is ignoring the signal. However, if the child is blocking the
+ signal, then it is not stopped (unless the signal is <tt>SIGSTOP</tt>, which can’t be blocked).</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0E15CK">26.1.3. The Wait Status Value</h4><p class="docText">The <span class="docEmphasis">status</span> value returned by <span class="docEmphasis">wait()</span> and <span class="docEmphasis">waitpid()</span> allows us to distinguish the following events for the child:</p><ul><li><p class="docList">The child terminated by calling _<span class="docEmphasis">exit()</span> (or <span class="docEmphasis">exit()</span>), specifying an integer <span class="docEmphasis">exit status</span>.</p></li><li><p class="docList">The child was terminated by the delivery of an unhandled signal.</p></li><li><p class="docList">The child was stopped by a signal, and <span class="docEmphasis">waitpid()</span> was called with the <tt>WUNTRACED</tt> flag.</p></li><li><p class="docList">The child was resumed by a <tt>SIGCONT</tt> signal, and <span class="docEmphasis">waitpid()</span> was called with the <tt>WCONTINUED</tt> flag.</p></li></ul><p class="docText">We use the term <span class="docEmphasis">wait status</span> to encompass all of the above cases. The designation <span class="docEmphasis">termination status</span>
+ is used to refer to the first two cases. (In the shell, we can obtain 
+the termination status of the last command executed by examining the 
+contents of the variable <span class="docEmphasis">$?</span>.)</p><p class="docText">Although defined as an <span class="docEmphasis">int</span>, only the bottom 2 bytes of the value pointed to by <span class="docEmphasis">status</span>
+ are actually used. The way in which these 2 bytes are filled depends on
+ which of the above events occurred for the child, as depicted in Figure 26-1.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Figure 26-1
+ shows the layout of the wait status value for Linux/x86-32. The details
+ vary across implementations. SUSv3 doesn’t specify any particular 
+layout for this information, or even require that it is contained in the
+ bottom 2 bytes of the value pointed to by <span class="docEmphasis">status</span>.
+ Portable applications should always use the macros described in this 
+section to inspect this value, rather than directly inspecting its 
+bit-mask components.</p><hr noshade="noshade" size="1"/><p></p><center><h5 class="docFigureTitle">Figure 26-1. Value returned in the <span class="docEmphasis">status</span> argument of <span class="docEmphasis">wait()</span> and <span class="docEmphasis">waitpid()</span></h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-44.png"/></p></center><p></p><br/><p class="docText">The <tt>&lt;sys/wait.h&gt;</tt> header file defines a standard set of macros that can be used to dissect a wait status value. When applied to a <span class="docEmphasis">status</span> value returned by <span class="docEmphasis">wait()</span> or <span class="docEmphasis">waitpid()</span>, only one of the macros in the list below will return true. Additional macros are provided to further dissect the <span class="docEmphasis">status</span> value, as noted in the list.</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">WIFEXITED(status)</span></span></span></p></dt><dd><p class="docList">This macro returns true if the child process exited normally. In this case, the macro <tt>WEXITSTATUS(status)</tt> returns the exit status of the child process. (As noted in Section 25.1, only the least significant byte of the child’s exit status is available to the parent.)</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">WIFSIGNALED(status)</span></span></span></p></dt><dd><p class="docList">This macro returns true if the child process was killed by a signal. In this case, the macro <tt>WTERMSIG(status)</tt> returns the number of the signal that caused the process to terminate, and the macro <tt>WCOREDUMP(status)</tt> returns true if the child process produced a core dump file. The <tt>WCOREDUMP()</tt> macro is not specified by SUSv3, but is available on most UNIX implementations.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">WIFSTOPPED(status)</span></span></span></p></dt><dd><p class="docList">This macro returns true if the child process was stopped by a signal. In this case, the macro <tt>WSTOPSIG(status)</tt> returns the number of the signal that stopped the process.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">WIFCONTINUED(status)</span></span></span></p></dt><dd><p class="docList">This macro returns true if the child was resumed by delivery of <tt>SIGCONT</tt>. This macro is available since Linux 2.6.10.</p></dd></dl><p class="docText">Note that although the name <span class="docEmphasis">status</span>
+ is also used for the argument of the above macros, they expect a plain 
+integer, rather than a pointer to an integer as required by <span class="docEmphasis">wait()</span> and <span class="docEmphasis">waitpid()</span>.</p><h5 class="docSection3Title" id="title-ID0EPFDK">26.1.3.1. Example program</h5><p class="docText">The <span class="docEmphasis">printWaitStatus()</span> function of Example 26-2 uses all of the macros described above. This function dissects and prints the contents of a wait status value.</p><h5 class="docExampleTitle" id="title-ID0EEKDK">Example 26-2. Displaying the status value returned by <span class="docEmphasis">wait()</span> and related calls</h5><p></p><div class="box"><pre class="preFixedHeight"><b>procexec/print_wait_status.c</b>
+#define _GNU_SOURCE     /* Get strsignal() declaration from &lt;string.h&gt; */
+#include &lt;string.h&gt;
+#include &lt;sys/wait.h&gt;
+#include "print_wait_status.h"  /* Declaration of printWaitStatus() */
+#include "tlpi_hdr.h"
+
+/* NOTE: The following function employs printf(), which is not
+   async-signal-safe (see Section 21.1.2). As such, this function is
+   also not async-signal-safe (i.e., beware of calling it from a
+   SIGCHLD handler). */
+
+void                    /* Examine a wait() status using the W* macros */
+printWaitStatus(const char *msg, int status)
+{
+if (msg != NULL)
+        printf("%s", msg);
+
+    if (WIFEXITED(status)) {
+        printf("child exited, status=%d\n", WEXITSTATUS(status));
+
+    } else if (WIFSIGNALED(status)) {
+        printf("child killed by signal %d (%s)",
+                WTERMSIG(status), strsignal(WTERMSIG(status)));
+#ifdef WCOREDUMP        /* Not in SUSv3, may be absent on some systems */
+        if (WCOREDUMP(status))
+            printf(" (core dumped)");
+#endif
+        printf("\n");
+
+    } else if (WIFSTOPPED(status)) {
+        printf("child stopped by signal %d (%s)\n",
+                WSTOPSIG(status), strsignal(WSTOPSIG(status)));
+
+#ifdef WIFCONTINUED     /* SUSv3 has this, but older Linux versions and
+                           some other UNIX implementations don't */
+    } else if (WIFCONTINUED(status)) {
+        printf("child continued\n");
+#endif
+
+    } else {            /* Should never happen */
+        printf("what happened to this child? (status=%x)\n",
+                (unsigned int) status);
+    }
+}
+
+     <b>procexec/print_wait_status.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">The <span class="docEmphasis">printWaitStatus()</span> function is used in Example 26-3. This program creates a child process that either loops continuously calling <span class="docEmphasis">pause()</span>
+ (during which time signals can be sent to the child) or, if an integer 
+command-line argument was supplied, exits immediately using this integer
+ as the exit status. In the meantime, the parent monitors the child via <span class="docEmphasis">waitpid()</span>, printing the returned status value and passing this value to <span class="docEmphasis">printWaitStatus()</span>. The parent exits when it detects that the child has either exited normally or been terminated by a signal.</p><p class="docText">The following shell session shows a few example runs of the program in Example 26-3. We begin by creating a child that immediately exits with a status of 23:</p><pre>$ <b>./child_status 23</b>
+Child started with PID = 15807
+waitpid() returned: PID=15807; status=0x1700 (23,0)
+child exited, status=23</pre><br/>
+<p class="docText">In the next run, we start the program in the background, and then send <tt>SIGSTOP</tt> and <tt>SIGCONT</tt> signals to the child:</p><pre>$ <b>./child_status &amp;</b>
+[1] 15870
+$ Child started with PID = 15871
+<b>kill -STOP 15871</b>
+$ waitpid() returned: PID=15871; status=0x137f (19,127)
+child stopped by signal 19 (Stopped (signal))
+<b>kill -CONT 15871</b>
+$ waitpid() returned: PID=15871; status=0xffff (255,255)
+child continued</pre><br/>
+<p class="docText">The last two lines of output will appear only on Linux 2.6.10 and later, since earlier kernels don’t support the <span class="docEmphasis">waitpid()</span> <tt>WCONTINUED</tt>
+ option. (This shell session is made slightly hard to read by the fact 
+that output from the program executing in the background is in some 
+cases intermingled with the prompt produced by the shell.)</p><p class="docText">We continue the shell session by sending a <tt>SIGABRT</tt> signal to terminate the child:</p><pre class="preFixedWidth"><b>kill -ABRT 15871 </b>
+$ waitpid() returned: PID=15871; status=0x0006 (0,6)
+child killed by signal 6 (Aborted)
+<i> Press Enter, in order to see shell notification that background job has terminated</i>
+[1]+  Done              ./child_status
+$ <b>ls -l core </b>
+ls: core: No such file or directory
+$ <b>ulimit -c </b>                                    <i> Display</i> RLIMIT_CORE <i> limit</i>
+0
+
+					  </pre><br/>
+<p class="docText">Although the default action of <tt>SIGABRT</tt>
+ is to produce a core dump file and terminate the process, no core file 
+was produced. This is because core dumps were disabled—the <tt>RLIMIT_CORE</tt> soft resource limit (Section 36.3), which specifies the maximum size of a core file, was set to 0, as shown by the <span class="docEmphasis">ulimit</span> command above.</p><p class="docText">We repeat the same experiment, but this time enabling core dumps before sending <tt>SIGABRT</tt> to the child:</p><pre class="preFixedWidth">$ <b>ulimit -c unlimited </b>                           <i> Allow core dumps</i>
+$ <b>./child_status &amp; </b>
+[1] 15902
+$ Child started with PID = 15903
+<b>kill -ABRT 15903 </b>                                <i> Send</i> SIGABRT <i> to child</i>
+$ waitpid() returned: PID=15903; status=0x0086 (0,134)
+child killed by signal 6 (Aborted) (core dumped)
+<i> Press Enter, in order to see shell notification that background job has terminated</i>
+[1]+  Done              ./child_status
+$ <b>ls -l core </b>                                   <i> This time we get a core dump</i>
+-rw-------   1 mtk      users       65536 May  6 21:01 core
+
+					  </pre><br/>
+<h5 class="docExampleTitle" id="title-ID0EOODK">Example 26-3. Using <span class="docEmphasis">waitpid()</span> to retrieve the status of a child process</h5><p></p><div class="box"><pre class="preFixedHeight"><b>procexec/child_status.c</b>
+#include &lt;sys/wait.h&gt;
+#include "print_wait_status.h"          /* Declares printWaitStatus() */
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int status;
+    pid_t childPid;
+if (argc &gt; 1 &amp;&amp; strcmp(argv[1], "—help") == 0)
+        usageErr("%s [exit-status]\n", argv[0]);
+
+    switch (fork()) {
+    case -1: errExit("fork");
+
+    case 0:             /* Child: either exits immediately with given
+                           status or loops waiting for signals */
+        printf("Child started with PID = %ld\n", (long) getpid());
+        if (argc &gt; 1)                   /* Status supplied on command line? */
+            exit(getInt(argv[1], 0, "exit-status"));
+        else                            /* Otherwise, wait for signals */
+            for (;;)
+                pause();
+        exit(EXIT_FAILURE);             /* Not reached, but good practice */
+
+    default:            /* Parent: repeatedly wait on child until it
+                           either exits or is terminated by a signal */
+        for (;;) {
+            childPid = waitpid(-1, &amp;status, WUNTRACED
+#ifdef WCONTINUED       /* Not present on older versions of Linux */
+                                                | WCONTINUED
+#endif
+                    );
+            if (childPid == -1)
+                errExit("waitpid");
+
+            /* Print status in hex, and as separate decimal bytes */
+
+            printf("waitpid() returned: PID=%ld; status=0x%04x (%d,%d)\n",
+                    (long) childPid,
+                    (unsigned int) status, status &gt;&gt; 8, status &amp; 0xff);
+            printWaitStatus(NULL, status);
+
+            if (WIFEXITED(status) || WIFSIGNALED(status))
+                exit(EXIT_SUCCESS);
+        }
+    }
+}
+      <b>procexec/child_status.c</b>
+
+					  </pre><br/>
+</div><p></p><h4 class="docSection2Title" id="title-ID0E3ODK">26.1.4. Process Termination from a Signal Handler</h4><p class="docText">As shown in Table 20-1 (in Section 20.3),
+ some signals terminate a process by default. In some circumstances, we 
+may wish to have certain cleanup steps performed before a process 
+terminates. For this purpose, we can arrange to have a handler catch 
+such signals, perform the cleanup steps, and then terminate the process.
+ If we do this, we should bear in mind that the termination status of a 
+process is available to its parent via <span class="docEmphasis">wait()</span> or <span class="docEmphasis">waitpid()</span>. For example, calling <span class="docEmphasis">_exit(EXIT_SUCCESS)</span> from the signal handler will make it appear to the parent process that the child terminated successfully.</p><p class="docText">If
+ the child needs to inform the parent that it terminated because of a 
+signal, then the child’s signal handler should first disestablish 
+itself, and then raise the same signal once more, which this time will 
+terminate the process. The signal handler would contain code such as the
+ following:</p><pre>void
+handler(int sig)
+{
+    /* Perform cleanup steps */
+
+    signal(sig, SIG_DFL);            /* Disestablish handler */
+    raise(sig);                      /* Raise signal again */
+}</pre><br/>
+<h4 class="docSection2Title" id="title-ID0ERQDK">26.1.5. The <span class="docEmphasis">waitid()</span> System Call</h4><p class="docText">Like <span class="docEmphasis">waitpid()</span>, <span class="docEmphasis">waitid()</span> returns the status of child processes. However, <span class="docEmphasis">waitid()</span> provides extra functionality that is unavailable with <span class="docEmphasis">waitpid()</span>. This system call derives from System V, but is now specified in SUSv3. It was added to Linux in kernel 2.6.9.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Before Linux 2.6.9, a version of <span class="docEmphasis">waitid()</span> was provided via an implementation in <span class="docEmphasis">glibc</span>. However, because a full implementation of this interface requires kernel support, the <span class="docEmphasis">glibc</span> implementation provided no more functionality than was available using <span class="docEmphasis">waitpid()</span>.</p><hr noshade="noshade" size="1"/><pre>#include &lt;sys/wait.h&gt;
+
+int <b>waitid</b>(idtype_t <span class="docEmphasis">idtype</span>, id_t <span class="docEmphasis">id</span>, siginfo_t *<span class="docEmphasis">infop</span>, int <span class="docEmphasis">options</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success or if <tt>WNOHANG</tt> was specified and there were no children to wait for, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">idtype</span> and <span class="docEmphasis">id</span> arguments specify which child(ren) to wait for, as follows:</p><ul><li><p class="docList">If <span class="docEmphasis">idtype</span> is <tt>P_ALL</tt>, wait for any child; <span class="docEmphasis">id</span> is ignored.</p></li><li><p class="docList">If <span class="docEmphasis">idtype</span> is <tt>P_PID</tt>, wait for the child whose process ID equals <span class="docEmphasis">id</span>.</p></li><li><p class="docList">If <span class="docEmphasis">idtype</span> is <tt>P_PGID</tt>, wait for any child whose process group ID equals <span class="docEmphasis">id</span>.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Note that unlike <span class="docEmphasis">waitpid()</span>,
+ it is not possible to specify 0 in id to mean any process in the same 
+process group as the caller. Instead, we must explicitly specify the 
+caller’s process group ID using the value returned by <span class="docEmphasis">getpgrp()</span>.</p><hr noshade="noshade" size="1"/><p class="docText">The most significant difference between <span class="docEmphasis">waitpid()</span> and <span class="docEmphasis">waitid()</span> is that <span class="docEmphasis">waitid()</span>
+ provides more precise control of the child events that should be waited
+ for. We control this by ORing one or more of the following flags in <span class="docEmphasis">options</span>:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">WEXITED</span></span></span></p></dt><dd><p class="docList">Wait for children that have terminated, either normally or abnormally.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">WSTOPPED</span></span></span></p></dt><dd><p class="docList">Wait for children that have been stopped by a signal.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">WCONTINUED</span></span></span></p></dt><dd><p class="docList">Wait for children that have been resumed by a <tt>SIGCONT</tt> signal.</p></dd></dl><p class="docText">The following additional flags may be ORed in <span class="docEmphasis">options</span>:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">WNOHANG</span></span></span></p></dt><dd><p class="docList">This flag has the same meaning as for <span class="docEmphasis">waitpid()</span>.
+ If none of the children matching the specification in id has status 
+information to return, then return immediately (a poll). In this case, 
+the return value of <span class="docEmphasis">waitid()</span> is 0. If the calling process has no children that match the specification in <span class="docEmphasis">id</span>, <span class="docEmphasis">waitid()</span> instead fails with the error <tt>ECHILD</tt>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">WNOWAIT</span></span></span></p></dt><dd><p class="docList">Normally, once a child has been waited for using <span class="docEmphasis">waitid()</span>, then that “status event” is consumed. However, if <tt>WNOWAIT</tt>
+ is specified, then the child status is returned, but the child remains 
+in a waitable state, and we can later wait for it again to retrieve the 
+same information.</p></dd></dl><p class="docText">On success, <span class="docEmphasis">waitid()</span> returns 0, and the <span class="docEmphasis">siginfo_t</span> structure (Section 21.4) pointed to by <span class="docEmphasis">infop</span> is updated to contain information about the child. The following fields are filled in the <span class="docEmphasis">siginfo_t</span> structure:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docEmphasis">si_code</span></span></p></dt><dd><p class="docList">This field contains one of the following values: <tt>CLD_EXITED</tt>, indicating that the child terminated by calling <span class="docEmphasis">_exit()</span>; <tt>CLD_KILLED</tt>, indicating that the child was killed by a signal; <tt>CLD_STOPPED</tt>, indicating that the child was stopped by a signal; or <tt>CLD_CONTINUED</tt>, indicating that the (previously stopped) child resumed execution as a consequence of receiving a (<tt>SIGCONT</tt>) signal.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docEmphasis">si_pid</span></span></p></dt><dd><p class="docList">This field contains the process ID of the child whose state has changed.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docEmphasis">si_signo</span></span></p></dt><dd><p class="docList">This field is always set to <tt>SIGCHLD</tt>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docEmphasis">si_status</span></span></p></dt><dd><p class="docList">This field contains either the exit status of the child, as passed to <span class="docEmphasis">_exit()</span>,
+ or the signal that caused the child to stop, continue, or terminate. We
+ can determine which type of information is in this field by examining 
+the <span class="docEmphasis">si_code</span> field.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docEmphasis">si_uid</span></span></p></dt><dd><p class="docList">This field contains the real user ID of the child. Most other UNIX implementations don’t set this field.</p></dd></dl><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On Solaris, two additional fields are filled in: <span class="docEmphasis">si_stime</span> and <span class="docEmphasis">si_utime</span>. These contain the system and user CPU time used by the child, respectively. SUSv3 doesn’t require these fields to be set by <span class="docEmphasis">waitid()</span>.</p><hr noshade="noshade" size="1"/><p class="docText">One detail of the operation of <span class="docEmphasis">waitid()</span> needs further clarification. If <tt>WNOHANG</tt> is specified in <span class="docEmphasis">options</span>, then a 0 return value from <span class="docEmphasis">waitid()</span>
+ can mean one of two things: a child had already changed state at the 
+time of the call (and information about the child is returned in the <span class="docEmphasis">siginfo_t</span> structure pointed to by <span class="docEmphasis">infop</span>),
+ or there was no child whose state has changed. For the case where no 
+child has changed state, some UNIX implementations (including Linux), 
+zero out the returned <span class="docEmphasis">siginfo_t</span> structure. This provides a method of distinguishing the two possibilities: we can check whether the value in <span class="docEmphasis">si_pid</span> is 0 or nonzero. Unfortunately, this behavior is not required by SUSv3, and some UNIX implementations leave the <span class="docEmphasis">siginfo_t</span> structure unchanged in this case. (A future corrigendum to SUSv4 is likely to add a requirement that <span class="docEmphasis">si_pid</span> and <span class="docEmphasis">si_signo</span> are zeroed in this case.) The only portable way to distinguish these two cases is to zero out the <span class="docEmphasis">siginfo_t</span> structure before calling <span class="docEmphasis">waitid()</span>, as in the following code:</p><pre>siginfo_t info;
+...
+memset(&amp;info, 0, sizeof(siginfo_t));
+if (waitid(idtype, id, &amp;info, options | WNOHANG) == -1)
+    errExit("waitid");
+if (info.si_pid == 0) {
+    /* No children changed state */
+} else {
+    /* A child changed state; details are provided in 'info' */
+}</pre><br/>
+<h4 class="docSection2Title" id="title-ID0EM4DK">26.1.6. The <span class="docEmphasis">wait3()</span> and <span class="docEmphasis">wait4()</span> System Calls</h4><p class="docText">The <span class="docEmphasis">wait3()</span> and <span class="docEmphasis">wait4()</span> system calls perform a similar task to <span class="docEmphasis">waitpid()</span>. The principal semantic difference is that <span class="docEmphasis">wait3()</span> and <span class="docEmphasis">wait4()</span> return <span class="docEmphasis">resource usage</span> information about the terminated child in the structure pointed to by the <span class="docEmphasis">rusage</span>
+ argument. This information includes the amount of CPU time used by the 
+process and memory-management statistics. We defer detailed discussion 
+of the <span class="docEmphasis">rusage</span> structure until Section 36.1, where we describe the <span class="docEmphasis">getrusage()</span> system call.</p><pre>#define _BSD_SOURCE       /* Or #define _XOPEN_SOURCE 500 for wait3() */
+#include &lt;sys/resource.h&gt;
+#include &lt;sys/wait.h&gt;
+
+pid_t <b>wait3</b>(int *<span class="docEmphasis">status</span>, int <span class="docEmphasis">options</span>, struct rusage *<span class="docEmphasis">rusage</span>);
+pid_t <b>wait4</b>(pid_t <span class="docEmphasis">pid</span>, int *<span class="docEmphasis">status</span>, int <span class="docEmphasis">options</span>, struct rusage *<span class="docEmphasis">rusage</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Both return process ID of child, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">Excluding the use of the <span class="docEmphasis">rusage</span> argument, a call to <span class="docEmphasis">wait3()</span> is equivalent to the following <span class="docEmphasis">waitpid()</span> call:</p><pre>waitpid(-1, &amp;status, options);</pre><br/>
+<p class="docText">Similarly, <span class="docEmphasis">wait4()</span> is equivalent to the following:</p><pre>waitpid(pid, &amp;status, options);</pre><br/>
+<p class="docText">In other words, <span class="docEmphasis">wait3()</span> waits for any child, while <span class="docEmphasis">wait4()</span> can be used to select a specific child or children upon which to wait.</p><p class="docText">On some UNIX implementations, <span class="docEmphasis">wait3()</span> and <span class="docEmphasis">wait4()</span>
+ return resource usage information only for terminated children. On 
+Linux, resource usage information can also be retrieved for stopped 
+children if the <tt>WUNTRACED</tt> flag is specified in <span class="docEmphasis">options</span>.</p><p class="docText">The
+ names for these two system calls refer to the number of arguments they 
+each take. Both system calls originated in BSD, but are now available on
+ most UNIX implementations. Neither is standardized in SUSv3. (SUSv2 did
+ specify <span class="docEmphasis">wait3()</span>, but marked it LEGACY.)</p><p class="docText">We usually avoid the use of <span class="docEmphasis">wait3()</span> and <span class="docEmphasis">wait4()</span>
+ in this book. Typically, we don’t need the extra information returned 
+by these calls. Also, lack of standardization limits their portability.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>46.6. Displaying All Message Queues on the System</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">46.6. Displaying All Message Queues on the System</h3><p class="docText">In Section 45.7, we looked at one way to obtain a list of all of the IPC objects on the system: via a set of files in the <tt>/proc</tt> file system. We now look at a second method of obtaining the same information: via a set of Linux-specific IPC <span class="docEmphasis">ctl</span> (<span class="docEmphasis">msgctl()</span>, <span class="docEmphasis">semctl()</span>, and <span class="docEmphasis">shmctl()</span>) operations. (The <span class="docEmphasis">ipcs</span> program employs these operations.) These operations are as follows:</p><ul><li><p class="docList"><tt>MSG_INFO</tt>, <tt>SEM_INFO</tt>, and <tt>SHM_INFO</tt>: The <tt>MSG_INFO</tt>
+ operation serves two purposes. First, it returns a structure detailing 
+resources consumed by all message queues on the system. Second, as the 
+function result of the <span class="docEmphasis">ctl</span> call, it returns the index of the maximum item in the <span class="docEmphasis">entries</span> array pointing to data structures for the message queue objects (see Figure 45-1, in Section 45.5). The <tt>SEM_INFO</tt> and <tt>SHM_INFO</tt> operations perform an analogous task for semaphore sets and shared memory segments, respectively. We must define the <tt>_GNU_SOURCE</tt> feature test macro to obtain the definitions of these three constants from the corresponding System V IPC header files.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">An example showing the use of <tt>MSG_INFO</tt> to retrieve a <span class="docEmphasis">msginfo</span> structure containing information about resources used by all message queue objects is provided in the file <tt>svmsg/svmsg_info.c</tt> in the source code distribution for this book.</p><hr noshade="noshade" size="1"/></li><li><p class="docList"><tt>MSG_STAT</tt>, <tt>SEM_STAT</tt>, and <tt>SHM_STAT</tt>: Like the <tt>IPC_STAT</tt>
+ operation, these operations retrieve the associated data structure for 
+an IPC object. However, they differ in two respects. First, instead of 
+expecting an IPC identifier as the first argument of the <span class="docEmphasis">ctl</span> call, these operations expect an index into the <span class="docEmphasis">entries</span> array. Second, if the operation is successful, then, as its function result, the <span class="docEmphasis">ctl</span> call returns the identifier of the IPC object corresponding to that index. We must define the <tt>_GNU_SOURCE</tt> feature test macro to obtain the definitions of these three constants from the corresponding System V IPC header files.</p></li></ul><p class="docText">To list all message queues on the system, we can do the following:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Use a <tt>MSG_INFO</tt> operation to find out the maximum index (<span class="docEmphasis">maxind</span>) of the <span class="docEmphasis">entries</span> array for message queues.</p></div></li><li><div style="font-weight:normal"><p class="docList">Perform a loop for all values from 0 up to and including <span class="docEmphasis">maxind</span>, employing a <tt>MSG_STAT</tt> operation for each value. During this loop, we ignore the errors that may occur if an item of the <span class="docEmphasis">entries</span> array is empty (<tt>EINVAL</tt>) or if we don’t have permissions on the object to which it refers (<tt>EACCES</tt>).</p></div></li></ol></div><p class="docText">Example 46-6
+ provides an implementation of the above steps for message queues. The 
+following shell session log demonstrates the use of this program:</p><pre class="preFixedWidth">$ <b>./svmsg_ls </b>
+maxind: 4
+
+index     ID       key      messages
+   2    98306  0x00000000       0
+   4   163844  0x000004d2       2
+$ <b>ipcs -q </b>                               <i> Check above against output of ipcs</i>
+
+------ Message Queues --------
+key        msqid      owner    perms    used-bytes   messages
+0x00000000 98306      mtk      600      0            0
+0x000004d2 163844     mtk      600      12           2
+
+					  </pre><br/>
+<h5 class="docExampleTitle" id="title-ID0ED3BM">Example 46-6. Displaying all System V message queues on the system</h5><p></p><div class="box"><pre class="preFixedHeight"><b>svmsg/svmsg_ls.c</b>
+#define _GNU_SOURCE
+#include &lt;sys/types.h&gt;
+#include &lt;sys/msg.h&gt;
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int maxind, ind, msqid;
+    struct msqid_ds ds;
+    struct msginfo msginfo;
+
+    /* Obtain size of kernel 'entries' array */
+
+    maxind = msgctl(0, MSG_INFO, (struct msqid_ds *) &amp;msginfo);
+    if (maxind == -1)
+        errExit("msgctl-MSG_INFO");
+
+    printf("maxind: %d\n\n", maxind);
+    printf("index     id       key      messages\n");
+
+    /* Retrieve and display information from each element of 'entries' array */
+
+    for (ind = 0; ind &lt;= maxind; ind++) {
+        msqid = msgctl(ind, MSG_STAT, &amp;ds);
+        if (msqid == -1) {
+            if (errno != EINVAL &amp;&amp; errno != EACCES)
+                errMsg("msgctl-MSG_STAT");              /* Unexpected error */
+            continue;                                   /* Ignore this item */
+        }
+
+        printf("%4d %8d  0x%08lx %7ld\n", ind, msqid,
+                (unsigned long) ds.msg_perm.__key, (long) ds.msg_qnum);
+    }
+
+    exit(EXIT_SUCCESS);
+}
+      <b>svmsg/svmsg_ls.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

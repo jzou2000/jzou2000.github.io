@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>44.2. Creating and Using Pipes</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">44.2. Creating and Using Pipes</h3><p class="docText">The <span class="docEmphasis">pipe()</span> system call creates a new pipe.</p><pre>#include &lt;unistd.h&gt;
+
+int <b>pipe</b>(int <span class="docEmphasis">filedes</span>[2]);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">A successful call to <span class="docEmphasis">pipe()</span> returns two open file descriptors in the array <span class="docEmphasis">filedes</span>: one for the read end of the pipe (<span class="docEmphasis">filedes[0]</span>) and one for the write end (<span class="docEmphasis">filedes[1]</span>).</p><p class="docText">As with any file descriptor, we can use the <span class="docEmphasis">read()</span> and <span class="docEmphasis">write()</span>
+ system calls to perform I/O on the pipe. Once written to the write end 
+of a pipe, data is immediately available to be read from the read end. A
+ <span class="docEmphasis">read()</span> from a
+ pipe obtains the lesser of the number of bytes requested and the number
+ of bytes currently available in the pipe (but blocks if the pipe is 
+empty).</p><p class="docText">We can also use the <span class="docEmphasis">stdio</span> functions (<span class="docEmphasis">printf()</span>, <span class="docEmphasis">scanf()</span>, and so on) with pipes by first using <span class="docEmphasis">fdopen()</span> to obtain a file stream corresponding to one of the descriptors in <span class="docEmphasis">filedes</span> (Section 13.7). However, when doing this, we must be aware of the <span class="docEmphasis">stdio</span> buffering issues described in Section 44.6.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The call <span class="docEmphasis">ioctl(fd, FIONREAD, &amp;cnt)</span> returns the number of unread bytes in the pipe or FIFO referred to by the file descriptor <span class="docEmphasis">fd</span>. This feature is also available on some other implementations, but is not specified in SUSv3.</p><hr noshade="noshade" size="1"/><p class="docText">Figure 44-2 shows the situation after a pipe has been created by <span class="docEmphasis">pipe()</span>, with the calling process having file descriptors referring to each end.</p><p></p><center><h5 class="docFigureTitle">Figure 44-2. Process file descriptors after creating a pipe</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile_011-6.png"/></p></center><p></p><br/><p class="docText">A pipe has few uses within a single process (we consider one in Section 63.5.2). Normally, we use a pipe to allow communication between two processes. To connect two processes using a pipe, we follow the <span class="docEmphasis">pipe()</span> call with a call to <span class="docEmphasis">fork()</span>. During a <span class="docEmphasis">fork()</span>, the child process inherits copies of its parent’s file descriptors (Section 24.2.1), bringing about the situation shown on the left side of Figure 44-3.</p><p></p><center><h5 class="docFigureTitle">Figure 44-3. Setting up a pipe to transfer data from a parent to a child</h5><p class="docText"><img alt="" border="0" id="" src="Images/getfile-75.png"/></p></center><p></p><br/><p class="docText">While
+ it is possible for the parent and child to both read from and write to 
+the pipe, this is not usual. Therefore, immediately after the <span class="docEmphasis">fork()</span>,
+ one process closes its descriptor for the write end of the pipe, and 
+the other closes its descriptor for the read end. For example, if the 
+parent is to send data to the child, then it would close its read 
+descriptor for the pipe, <span class="docEmphasis">filedes[0]</span>, while the child would close its write descriptor for the pipe, <span class="docEmphasis">filedes[1]</span>, bringing about the situation shown on the right side of Figure 44-3. The code to create this setup is shown in Example 44-1.</p><h5 class="docExampleTitle" id="title-ID0ECZAM">Example 44-1. Steps in creating a pipe to transfer data from a parent to a child</h5><p></p><div class="box"><pre class="preFixedWidth">int filedes[2];
+
+    if (pipe(filedes) == -1)                    /* Create the pipe */
+        errExit("pipe");
+
+    switch (fork()) {                           /* Create a child process */
+    case -1:
+        errExit("fork");
+
+    case 0:  /* Child */
+        if (close(filedes[1]) == -1)            /* Close unused write end */
+            errExit("close");
+
+        /* Child now reads from pipe */
+        break;
+
+    default: /* Parent */
+        if (close(filedes[0]) == -1)            /* Close unused read end */
+            errExit("close");
+
+        /* Parent now writes to pipe */
+        break;
+    }
+
+					  </pre><br/>
+</div><p></p><p class="docText">One
+ reason that it is not usual to have both the parent and child reading 
+from a single pipe is that if two processes try to simultaneously read 
+from a pipe, we can’t be sure which process will be the first to 
+succeed—the two processes race for data. Preventing such races would 
+require the use of some synchronization mechanism. However, if we 
+require bidirectional communication, there is a simpler way: just create
+ two pipes, one for sending data in each direction between the two 
+processes. (If employing this technique, then we need to be wary of 
+deadlocks that may occur if both processes block while trying to read 
+from empty pipes or while trying to write to pipes that are already 
+full.)</p><p class="docText">While it is 
+possible to have multiple processes writing to a pipe, it is typical to 
+have only a single writer. (We show one example of where it is useful to
+ have multiple writers to a pipe in Section 44.3.) By contrast, there 
+are situations where it can be useful to have multiple writers on a 
+FIFO, and we see an example of this in Section 44.8.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Starting with kernel 2.6.27, Linux supports a new, nonstandard system call, <span class="docEmphasis">pipe2()</span>. This system call performs the same task as <span class="docEmphasis">pipe()</span>, but supports an additional argument, <span class="docEmphasis">flags</span>, that can be used to modify the behavior of the system call. Two flags are supported. The <tt>O_CLOEXEC</tt> flag causes the kernel to enable the close-on-exec flag (<tt>FD_CLOEXEC</tt>) for the two new file descriptors. This flag is useful for the same reasons as the <span class="docEmphasis">open()</span> <tt>O_CLOEXEC</tt> flag described in Section 4.3.1. The <tt>O_NONBLOCK</tt>
+ flag causes the kernel to mark both underlying open file descriptions 
+as nonblocking, so that future I/O operations will be nonblocking. This 
+saves additional calls to <span class="docEmphasis">fcntl()</span> to achieve the same result.</p><hr noshade="noshade" size="1"/><h4 class="docSection2Title" id="title-ID0ET1AM">44.2.1. </h4><h5 class="docSection3Title" id="title-ID0EX1AM">44.2.1.1. Pipes allow communication between related processes</h5><p class="docText">In
+ the discussion so far, we have talked about using pipes for 
+communication between a parent and a child process. However, pipes can 
+be used for communication between any two (or more) related processes, 
+as long as the pipe was created by a common ancestor before the series 
+of <span class="docEmphasis">fork()</span> calls that led to the existence of the processes. (This is what we meant when we referred to <span class="docEmphasis">related processes</span>
+ at the beginning of this chapter.) For example, a pipe could be used 
+for communication between a process and its grandchild. The first 
+process creates the pipe, and then forks a child that in turn forks to 
+yield the grandchild. A common scenario is that a pipe is used for 
+communication between two siblings—their parent creates the pipe, and 
+then creates the two children. This is what the shell does when building
+ a pipeline.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">There
+ is an exception to the statement that pipes can be used to communicate 
+only between related processes. Passing a file descriptor over a UNIX 
+domain socket (a technique that we briefly describe in Section 61.13.3) makes it possible to pass a file descriptor for a pipe to an unrelated process.</p><hr noshade="noshade" size="1"/><h5 class="docSection3Title" id="title-ID0EF3AM">44.2.1.2. Closing unused pipe file descriptors</h5><p class="docText">Closing
+ unused pipe file descriptors is more than a matter of ensuring that a 
+process doesn’t exhaust its limited set of file descriptors—it is 
+essential to the correct use of pipes. We now consider why the unused 
+file descriptors for both the read and write ends of the pipe must be 
+closed.</p><p class="docText">The process 
+reading from the pipe closes its write descriptor for the pipe, so that,
+ when the other process completes its output and closes its write 
+descriptor, the reader sees end-of-file (once it has read any 
+outstanding data in the pipe).</p><p class="docText">If
+ the reading process doesn’t close the write end of the pipe, then, 
+after the other process closes its write descriptor, the reader won’t 
+see end-of-file, even after it has read all data from the pipe. Instead,
+ a <span class="docEmphasis">read()</span> would 
+block waiting for data, because the kernel knows that there is still at 
+least one write descriptor open for the pipe. That this descriptor is 
+held open by the reading process itself is irrelevant; in theory, that 
+process could still write to the pipe, even if it is blocked trying to 
+read. For example, the <span class="docEmphasis">read()</span> might be interrupted by a signal handler that writes data to the pipe. (This is a realistic scenario, as we’ll see in Section 63.5.2.)</p><p class="docText">The
+ writing process closes its read descriptor for the pipe for a different
+ reason. When a process tries to write to a pipe for which no process 
+has an open read descriptor, the kernel sends the <tt>SIGPIPE</tt>
+ signal to the writing process. By default, this signal kills a process.
+ A process can instead arrange to catch or ignore this signal, in which 
+case the <span class="docEmphasis">write()</span> on the pipe fails with the error <tt>EPIPE</tt> (broken pipe). Receiving the <tt>SIGPIPE</tt> signal or getting the <tt>EPIPE</tt>
+ error is a useful indication about the status of the pipe, and this is 
+why unused read descriptors for the pipe should be closed.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Note that the treatment of a <span class="docEmphasis">write()</span> that is interrupted by a <tt>SIGPIPE</tt> handler is special. Normally, when a <span class="docEmphasis">write()</span>
+ (or other “slow” system call) is interrupted by a signal handler, the 
+call is either automatically restarted or fails with the error <tt>EINTR</tt>, depending on whether the handler was installed with the <span class="docEmphasis">sigaction()</span> <tt>SA_RESTART</tt> flag (Section 21.5). The behavior in the case of <tt>SIGPIPE</tt> is different because it makes no sense either to automatically restart the <span class="docEmphasis">write()</span> or to simply indicate that the <span class="docEmphasis">write()</span> was interrupted by a handler (thus implying that the <span class="docEmphasis">write()</span> could usefully be manually restarted). In neither case can a subsequent <span class="docEmphasis">write()</span> attempt succeed, because the pipe will still be broken.</p><hr noshade="noshade" size="1"/><p class="docText">If
+ the writing process doesn’t close the read end of the pipe, then, even 
+after the other process closes the read end of the pipe, the writing 
+process will still be able to write to the pipe. Eventually, the writing
+ process will fill the pipe, and a further attempt to write will block 
+indefinitely.</p><p class="docText">One final 
+reason for closing unused file descriptors is that it is only after all 
+file descriptors in all processes that refer to a pipe are closed that 
+the pipe is destroyed and its resources released for reuse by other 
+processes. At this point, any unread data in the pipe is lost.</p><h5 class="docSection3Title" id="title-ID0E15AM">44.2.1.3. Example program</h5><p class="docText">The program in Example 44-2
+ demonstrates the use of a pipe for communication between parent and 
+child processes. This example demonstrates the byte-stream nature of 
+pipes referred to earlier—the parent writes its data in a single 
+operation, while the child reads data from the pipe in small blocks.</p><p class="docText">The main program calls <span class="docEmphasis">pipe()</span> to create a pipe <img alt="" border="0" id="" src="Images/getfile_006-20.png"/>, and then calls <span class="docEmphasis">fork()</span> to create a child <img alt="" border="0" id="" src="Images/getfile_005-28.png"/>. After the <span class="docEmphasis">fork()</span>, the parent process closes its file descriptor for the read end of the pipe <img alt="" border="0" id="" src="Images/getfile_007-17.png"/>, and writes the string given as the program’s command-line argument to the write end of the pipe <img alt="" border="0" id="" src="Images/getfile_009-9.png"/>. The parent then closes the read end of the pipe <img alt="" border="0" id="" src="Images/getfile_002-36.png"/>, and calls <span class="docEmphasis">wait()</span> to wait for the child to terminate <img alt="" border="0" id="" src="Images/getfile_004-14.png"/>. After closing its file descriptor for the write end of the pipe <img alt="" border="0" id="" src="Images/getfile_012-2.png"/>, the child process enters a loop where it reads <img alt="" border="0" id="" src="Images/getfile_013-2.png"/> blocks of data (of up to <tt>BUF_SIZE</tt> bytes) from the pipe and writes <img alt="" border="0" id="" src="Images/getfile_003-34.png"/> them to standard output. When the child encounters end-of-file on the pipe <img alt="" border="0" id="" src="Images/getfile_010.png"/>, it exits the loop <img alt="" border="0" id="" src="Images/getfile_008-13.png"/>, writes a trailing newline character, closes its descriptor for the read end of the pipe, and terminates.</p><p class="docText">Here’s an example of what we might see when running the program in Example 44-2:</p><pre>$ <b>./simple_pipe 'It was a bright cold day in April, '\</b>
+<b>'and the clocks were striking thirteen.'</b>
+It was a bright cold day in April, and the clocks were striking thirteen.</pre><br/>
+<h5 class="docExampleTitle" id="title-ID0E2CBM">Example 44-2. Using a pipe to communicate between a parent and child process</h5><p></p><div class="box"><pre class="preFixedHeight"><b>pipes/simple_pipe.c</b>
+    #include &lt;sys/wait.h&gt;
+    #include "tlpi_hdr.h"
+
+    #define BUF_SIZE 10
+
+    int
+    main(int argc, char *argv[])
+    {
+        int pfd[2];                             /* Pipe file descriptors */
+        char buf[BUF_SIZE];
+        ssize_t numRead;
+
+        if (argc != 2 || strcmp(argv[1], "--help") == 0)
+            usageErr("%s string\n", argv[0]);
+
+<img alt="" border="0" id="" src="Images/getfile_006-21.png"/>    if (pipe(pfd) == -1)                    /* Create the pipe */
+            errExit("pipe");
+
+<img alt="" border="0" id="" src="Images/getfile_005-29.png"/>    switch (fork()) {xs
+        case -1:
+            errExit("fork");
+
+        case 0:             /* Child  - reads from pipe */
+<img alt="" border="0" id="" src="Images/getfile_012-3.png"/>        if (close(pfd[1]) == -1)            /* Write end is unused */
+                errExit("close - child");
+
+            for (;;) {              /* Read data from pipe, echo on stdout */
+<img alt="" border="0" id="" src="Images/getfile_013-3.png"/>            numRead = read(pfd[0], buf, BUF_SIZE);
+                if (numRead == -1)
+                    errExit("read");
+<img alt="" border="0" id="" src="Images/getfile_010.png"/>            if (numRead == 0)
+                    break;                      /* End-of-file */
+<img alt="" border="0" id="" src="Images/getfile_003-35.png"/>            if (write(STDOUT_FILENO, buf, numRead) != numRead)
+                    fatal("child - partial/failed write");
+            }
+
+<img alt="" border="0" id="" src="Images/getfile_008-14.png"/>        write(STDOUT_FILENO, "\n", 1);
+            if (close(pfd[0]) == -1)
+                errExit("close");
+            _exit(EXIT_SUCCESS);
+
+        default:            /* Parent - writes to pipe */
+<img alt="" border="0" id="" src="Images/getfile_007-18.png"/>        if (close(pfd[0]) == -1)            /* Read end is unused */
+                errExit("close - parent");
+
+<img alt="" border="0" id="" src="Images/getfile_009-10.png"/>if (write(pfd[1], argv[1], strlen(argv[1])) != strlen(argv[1]))
+                fatal("parent - partial/failed write");
+
+<img alt="" border="0" id="" src="Images/getfile_002-37.png"/>        if (close(pfd[1]) == -1)            /* Child will see EOF */
+                errExit("close");
+<img alt="" border="0" id="" src="Images/getfile_004-15.png"/>        wait(NULL);                         /* Wait for child to finish */
+            exit(EXIT_SUCCESS);
+        }
+    }
+         <b>pipes/simple_pipe.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>64.8. BSD Pseudoterminals</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">64.8. BSD Pseudoterminals</h3><p class="docText">For
+ most of this chapter, we have focused on UNIX 98 pseudoterminals, since
+ this is the style of pseudoterminal that is standardized in SUSv3 and 
+thus should be used in all new programs. However, we may sometimes 
+encounter BSD pseudoterminals in older applications or when porting 
+programs to Linux from other UNIX implementations. Therefore, we now 
+consider the details of BSD pseudoterminals.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The
+ use of BSD pseudoterminals is deprecated on Linux. From Linux 2.6.4 
+onward, BSD pseudoterminal support is an optional kernel component that 
+can be configured via the <tt>CONFIG_LEGACY_PTYS</tt> option.</p><hr noshade="noshade" size="1"/><p class="docText">BSD
+ pseudoterminals differ from their UNIX 98 counterparts only in the 
+details of how pseudoterminal master and slave devices are found and 
+opened. Once the master and slave have been opened, BSD pseudoterminals 
+operate in the same way as UNIX 98 pseudoterminals.</p><p class="docText">With UNIX 98 pseudoterminals, we obtain an unused pseudoterminal master by calling <span class="docEmphasis">posix_openpt()</span>, which opens <tt>/dev/ptmx</tt>, the pseudoterminal master clone device. We then obtain the name of the corresponding pseudoterminal slave using <span class="docEmphasis">ptsname()</span>. By contrast, with BSD pseudoterminals, the master and slave device pairs are precreated entries in the <tt>/dev</tt> directory. Each master device has a name of the form <tt>/dev/pty</tt><span class="docEmphasis">xy</span>, where <span class="docEmphasis">x</span> is replaced by a letter in the 16-letter range <tt>[p-za-e]</tt> and <span class="docEmphasis">y</span> is replaced by a letter in the 16-letter range <tt>[0-9a-f]</tt>. The slave corresponding to a particular pseudoterminal master has a name of the form <tt>/dev/tty</tt><span class="docEmphasis">xy</span>. Thus, for example, the devices <tt>/dev/ptyp0</tt> and <tt>/dev/ttyp0</tt> constitute a BSD pseudoterminal pair.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">UNIX
+ implementations vary in the number and names of BSD pseudoterminal 
+pairs that they supply, with some supplying as few as 32 pairs by 
+default. Most implementations provide at least the 32 master devices 
+with names in the range <tt>/dev/pty[pq][0-9a-f]</tt>, along with the corresponding slave devices.</p><hr noshade="noshade" size="1"/><p class="docText">To
+ find an unused pseudoterminal pair, we execute a loop that attempts to 
+open each master device in turn, until one of them is opened 
+successfully. While executing this loop, there are two errors that we 
+may encounter when calling <span class="docEmphasis">open()</span>:</p><ul><li><p class="docList">If a given master device name doesn’t exist, <span class="docEmphasis">open()</span> fails with the error <tt>ENOENT</tt>.
+ Typically, this means we’ve run through the complete set of 
+pseudoterminal master names on the system without finding a free device 
+(i.e., there was not the full range of devices listed above).</p></li><li><p class="docList">If the master device is in use, <span class="docEmphasis">open()</span> fails with the error <tt>EIO</tt>. We can just ignore this error and try the next device.</p></li></ul><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">On HP-UX 11, <span class="docEmphasis">open()</span> fails with the error <tt>EBUSY</tt> on an attempt to open a BSD pseudoterminal master that is in use.</p><hr noshade="noshade" size="1"/><p class="docText">Once we have found an available master device, we can obtain the name of the corresponding slave by substituting <tt>tty</tt> for <tt>pty</tt> in the name of the master. We can then open the slave using <span class="docEmphasis">open()</span>.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">With BSD pseudoterminals, there is no equivalent of <span class="docEmphasis">grantpt()</span>
+ to change the ownership and permissions of the pseudoterminal slave. If
+ we need to do this, then we must make explicit calls to <span class="docEmphasis">chown()</span> (only possible in a privileged program) and <span class="docEmphasis">chmod()</span>, or write a set-user-ID program (like <span class="docEmphasis">pt_chown</span>) that performs this task for an unprivileged program.</p><hr noshade="noshade" size="1"/><p class="docText">Example 64-4 shows a reimplementation of the <span class="docEmphasis">ptyMasterOpen()</span> function of Section 64.3 using BSD pseudoterminals. Substituting this implementation is all that is required to make our <span class="docEmphasis">script</span> program (Section 64.6) work with BSD pseudoterminals.</p><h5 class="docExampleTitle" id="title-ID0E1IJM">Example 64-4. Implementation of <span class="docEmphasis">ptyMasterOpen()</span> using BSD pseudoterminals</h5><p></p><div class="box"><pre class="preFixedHeight"><b>pty/pty_master_open_bsd.c</b>
+#include &lt;fcntl.h&gt;
+#include "pty_master_open.h"            /* Declares ptyMasterOpen() */
+#include "tlpi_hdr.h"
+
+#define PTYM_PREFIX     "/dev/pty"
+#define PTYS_PREFIX     "/dev/tty"
+#define PTY_PREFIX_LEN  (sizeof(PTYM_PREFIX) - 1)
+#define PTY_NAME_LEN    (PTY_PREFIX_LEN + sizeof("XY"))
+#define X_RANGE         "pqrstuvwxyzabcde"
+#define Y_RANGE         "0123456789abcdef"
+
+int
+ptyMasterOpen(char *slaveName, size_t snLen)
+{
+    int masterFd, n;
+    char *x, *y;
+    char masterName[PTY_NAME_LEN];
+
+    if (PTY_NAME_LEN &gt; snLen) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+
+    memset(masterName, 0, PTY_NAME_LEN);
+    strncpy(masterName, PTYM_PREFIX, PTY_PREFIX_LEN);
+
+    for (x = X_RANGE; *x != '\0'; x++) {
+        masterName[PTY_PREFIX_LEN] = *x;
+
+        for (y = Y_RANGE; *y != '\0'; y++) {
+            masterName[PTY_PREFIX_LEN + 1] = *y;
+
+            masterFd = open(masterName, O_RDWR);
+
+            if (masterFd == -1) {
+                if (errno == ENOENT)    /* No such file */
+                    return -1;          /* Probably no more pty devices */
+                else                    /* Other error (e.g., pty busy) */
+                    continue;
+
+            } else {            /* Return slave name corresponding to master */
+                n = snprintf(slaveName, snLen, "%s%c%c", PTYS_PREFIX, *x, *y);
+                if (n &gt;= snLen) {
+                    errno = EOVERFLOW;
+                    return -1;
+                } else if (n == -1) {
+                    return -1;
+                }
+
+                return masterFd;
+            }
+        }
+    }
+
+    return -1;                  /* Tried all ptys without success */
+}
+     <b>pty/pty_master_open_bsd.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

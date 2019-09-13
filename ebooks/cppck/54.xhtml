@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 54. Traits</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 54. Traits</h2>
+		
+<p class="docText">Sometimes
+ it’s not enough to know just an object’s type. Often, there is 
+information related to the object’s type that is essential to working 
+with the object. In <span class="docEmphasis">Embedded Type Information</span> [53, 189], we saw how complex types like the standard containers often embed information about themselves within themselves:</p>
+		
+<div class="docText">
+  <pre>Strings strings;
+aString = process( strings, strings.size() ); // OK
+std::vector&lt;std::string&gt; strings2;
+<span class="docEmphMark">aString = process( strings2, strings2.size() ); // error!     </span>
+extern double readings[RSIZ];
+<span class="docEmphMark">double r = process( readings, RSIZ ); // error!               </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">The <tt>process</tt> algorithm works well with our <tt>Seq</tt> container but fails with a standard <tt>vector</tt> container, because <tt>vector</tt> does not define the nested type names that <tt>process</tt> assumes are present.</p>
+		
+<p class="docText">We can <tt>process</tt> a <tt>ReadonlySeq</tt> container because it validates our assumptions, but we may also want to <tt>process</tt> containers that do not follow our rather parochial convention, and we may want to <tt>process</tt> container-like things that are not even classes. Traits classes are often used to solve these problems.</p>
+		
+<p class="docText">A traits class is a 
+collection of information about a type. Unlike our nested container 
+information, however, the traits class is independent of the type it 
+describes.</p>
+		
+<div class="docText">
+  <pre>template &lt;typename Cont&gt;
+struct ContainerTraits;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">One common use of a traits 
+class is to put a conventional layer between our generic algorithms and 
+types that don’t follow the algorithms’ expected convention. We write 
+the algorithm in terms of the type’s traits. The general case will often
+ assume some sort of convention. In this case, our <tt>ContainerTraits</tt> will assume the convention used by our <tt>Seq</tt> and <tt>ReadonlySeq</tt> containers.</p>
+		
+<div class="docText">
+  <pre>template &lt;typename Cont&gt;
+struct ContainerTraits {
+    typedef typename Cont::Elem Elem;
+    typedef typename Cont::Temp Temp;
+    typedef typename Cont::Ptr Ptr;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">With the addition of this traits class template, we have the choice of referring to the nested <tt>Elem</tt>
+ type of one of our container types either through the container type or
+ through the traits type instantiated with the container type.</p>
+		
+<div class="docText">
+  <pre>typedef Seq&lt;int&gt; Cont;
+Cont::Elem e1;
+ContainerTraits&lt;Cont&gt;::Elem e2; // same type as e1
+</pre>
+</div>
+<br/>
+		
+<p class="docText">We can rewrite our generic algorithm to employ traits in place of direct access to the container’s nested type names:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename Container&gt;
+typename ContainerTraits&lt;Container&gt;::Elem
+process( Container &amp;c, int size ) {
+    typename ContainerTraits&lt;Container&gt;::Temp temp
+        = typename ContainerTraits&lt;Container&gt;::Elem();
+    for( int i = 0; i &lt; size; ++i )
+        temp += c[i];
+    return temp;
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">It may seem that all we’ve managed to do is to make the syntax of the generic <tt>process</tt> algorithm even more impenetrable! Previously, to get the type of the container’s element, we wrote <tt>typename Container::Elem</tt>. Put in plain language, we said, “Get <tt>Container</tt>’s nested name <tt>Elem</tt>. By the way, it’s a type name.” With traits, we have to write <tt>typename ContainerTraits&lt;Container&gt;::Elem</tt>. Essentially, we say, “Instantiate the <tt>ContainerTraits</tt> class that corresponds to this container, and get its nested name <tt>Elem</tt>.
+ By the way, it’s a type name.” We’ve taken a step back from getting the
+ information directly from the container type itself and are going 
+through the intermediary of the traits class. If accessing nested type 
+information is like reading information about a person from an embedded 
+microchip, using a traits class is like looking up someone’s information
+ in a database, using the person’s name as a key. You’ll get the same information, but the database lookup approach is certainly less invasive and more flexible.</p>
+		
+<p class="docText">For example, you can’t get 
+information from someone’s microchip if he doesn’t have one. (Perhaps 
+the person comes from a region where embedded microchips are not <span class="docEmphasis">de rigeur</span>.)
+ However, you can always create a new entry in a database for such a 
+person without the necessity of even informing the individual concerned.
+ Similarly, we can specialize the traits template to provide information
+ about a particular nonconforming container without affecting the 
+container itself:</p>
+		
+<div class="docText">
+  <pre>class ForeignContainer {
+    // no nested type information...
+};
+//...
+template &lt;&gt;
+struct ContainerTraits&lt;ForeignContainer&gt; {
+    typedef int Elem;
+    typedef Elem Temp;
+    typedef Elem *Ptr;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">With this specialization of <tt>ContainerTraits</tt> available, we can <tt>process</tt> a <tt>ForeignContainer</tt> as effectively as one that is written to our convention. The original implementation of <tt>process</tt> would have failed on a <tt>ForeignContainer</tt> because it would have attempted to access nested information that did not exist:</p>
+		
+<div class="docText">
+  <pre>				<span class="docEmphMark">ForeignContainer::Elem x; // error, no such nested name!     </span>
+ContainerTraits&lt;ForeignContainer&gt;::Elem y; // OK, using traits
+</pre>
+</div>
+<br/>
+		
+<p class="docText">It’s helpful to think of
+ a traits template as a collection of information that is indexed by a 
+type, much as an associative container is indexed by a key. But the 
+“indexing” of traits happens at compile time, through template 
+specialization.</p>
+		
+<p class="docText">Another advantage of 
+accessing information about a type through a traits class is that the 
+technique can be used to provide information about types that are not 
+classes and therefore can have no nested information. Even though traits
+ classes are classes, the types whose traits they encapsulate don’t have
+ to be. For example, an array is a kind of (mathematically and morally) 
+degenerate container that we might like to manipulate as a first class 
+container.</p>
+		
+<div class="docText">
+  <pre>template &lt;&gt;
+struct ContainerTraits&lt;const char *&gt; {
+    typedef const char Elem;
+    typedef char Temp;
+    typedef const char *Ptr;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">With this specialization in place for the “container” type <tt>const char *</tt>, we can <tt>process</tt> an array of characters.</p>
+		
+<div class="docText">
+  <pre>const char *name = "Arsene Lupin";
+const char *r = process( name, strlen(name) );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">We can continue in this fashion for other types of arrays, producing specializations for <tt>int *, const double *</tt>,
+ and so on. However, it would be more convenient to specify a single 
+case for any type of pointer, since they all will have similar 
+properties. For this purpose, we employ partial specialization of the 
+traits template for pointers:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+struct ContainerTraits&lt;T *&gt; {
+    typedef T Elem;
+    typedef T Temp;
+    typedef T *Ptr;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Specializing <tt>ContainerTraits</tt> with any pointer type, whether it be <tt>int *</tt> or <tt>const float *(*const*)(int)</tt>, will result in instantiation of this partial specialization, unless there is an even more specialized version of <tt>ContainerTraits</tt> available.</p>
+		
+<div class="docText">
+  <pre>extern double readings[RSIZ];
+double r = process( readings, RSIZ ); // works!
+</pre>
+</div>
+<br/>
+		
+<p class="docText">We’re not quite there yet, 
+however. Notice that using the partial specialization for a pointer to 
+constant will not result in the correct type for use as a “temporary.” 
+That is, constant temporary values are not of much use because we can’t 
+assign to them. What we’d like is to have the non-constant analog of the
+ element type as our temporary type. In the case of <tt>const char *</tt>, for instance, <tt>ContainerTraits&lt;const char *&gt;::Temp</tt> should be <tt>char</tt>, not <tt>const char</tt>. We can handle this case with an additional partial specialization:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+struct ContainerTraits&lt;const T *&gt; {
+    typedef const T Elem;
+    typedef T Temp; // note: non-const analog of Elem
+    typedef const T *Ptr;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This more specific 
+partial specialization will be selected in preference to the previous 
+one in those cases where the template argument is a pointer to constant,
+ rather than a pointer to non-constant.</p>
+		
+<p class="docText">Partial specialization can 
+also help us to extend our traits mechanism to convert a “foreign” 
+convention to be in line with a local convention. For example, the STL 
+is very heavy on convention (see <span class="docEmphasis">The Standard Template Library</span> [4, 11]), and the standard containers have concepts similar to those encapsulated in our <tt>ContainerTraits</tt> but are expressed differently. For example, we earlier attempted to instantiate the <tt>process</tt> algorithm with a standard <tt>vector</tt> but failed. Let’s fix that.</p>
+		
+<div class="docText">
+  <pre>template &lt;class T&gt;
+struct ContainerTraits&lt; std::vector&lt;T&gt; &gt; {
+    typedef typename std::vector&lt;T&gt;::value_type Elem;
+    typedef typename
+        std::iterator_traits&lt;typename
+        std::vector&lt;T&gt;::iterator&gt;
+        ::value_type Temp;
+    typedef typename
+        std::iterator_traits&lt;typename
+        std::vector&lt;T&gt;::iterator&gt;
+        ::pointer Ptr;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">It’s not the most readable 
+implementation one can imagine, but it’s hidden, and our users can now 
+invoke our generic algorithm with a container generated from a standard <tt>vector</tt>.</p>
+		
+<div class="docText">
+  <pre>std::vector&lt;std::string&gt; strings2;
+aString = process( strings2, strings2.size() ); // works!
+</pre>
+</div>
+<br/>
+		
+
+
+</body>
+</html>

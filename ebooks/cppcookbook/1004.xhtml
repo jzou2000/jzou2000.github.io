@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 10.3. Writing Your Own Stream Manipulators</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 10.3. Writing Your Own Stream Manipulators</h3>
+
+<h4 class="docSection2Title" id="title-ID0ETWCI">Problem</h4>
+<p class="docText">You need a stream manipulator 
+
+that does something the standard
+ones can't. Or, you want to have a single
+manipulator set several flags on the stream instead of calling a set
+of manipulators each time you want a particular format.</p>
+
+<h4 class="docSection2Title" id="title-ID0EPXCI">Solution</h4>
+<p class="docText">To write a manipulator that doesn't take an argument
+(à la <tt>left</tt>), write a function that
+takes an <tt>ios_base</tt> parameter and sets stream flags
+on it. If you need a manipulator that takes an argument, see the
+discussion a little later. Example 10-4 shows how to
+write a manipulator that doesn't take an argument.</p>
+<h5 class="docExampleTitle" id="title-ID0EAYCI">Example 10-4. A simple stream manipulator</h5><p></p><div class="box">
+<pre>#include &lt;iostream&gt;
+#include &lt;iomanip&gt;
+#include &lt;string&gt;
+
+using namespace std;
+
+// make floating-point output look normal
+inline ios_base&amp; floatnormal(ios_base&amp; io) {
+   io.setf(0, ios_base::floatfield);
+   return(io);
+}
+int main( ) {
+
+   ios_base::fmtflags flags =  // Save old flags
+      cout.flags( );
+
+   double pi = 3.14159265;
+
+   cout &lt;&lt; "pi = " &lt;&lt; scientific   // Scientific mode
+        &lt;&lt; pi * 1000 &lt;&lt; '\n';
+
+   cout &lt;&lt; "pi = " &lt;&lt; floatnormal
+        &lt;&lt; pi &lt;&lt; '\n';
+
+   cout.flags(flags);
+}</pre><br/>
+</div><p></p>
+
+<h4 class="docSection2Title" id="title-ID0EJYCI">Discussion</h4>
+<p class="docText">There are two kinds of manipulators: those that accept arguments and
+those that don't. Manipulators that take no
+arguments are easy to write. All you have to do is write a function
+that accepts a stream parameter, does something to it (sets a flag or
+changes a setting), and returns it. Writing a manipulator that takes
+one or more arguments is more complicated because you need to create
+additional classes and functions that operate behind the scenes.
+Since argument-less manipulators are simple, let's
+start with those.</p>
+<p class="docText">After reading Recipe 10.1, you may have
+realized that there are three floating-point formats and only two
+manipulators for choosing the format. The default format
+doesn't have a manipulator; you have to set a flag
+on the stream to get back to the default format, like this:</p>
+<pre>myiostr.setf(0, ios_base::floatfield);</pre><br/>
+<p class="docText">But for consistency and convenience, you may want to add your own
+manipulator that does the same thing. That's what
+Example 10-4 does. The <tt>floatnormal</tt>
+manipulator sets the appropriate stream flag to output floating-point
+data in the default format.</p>
+<p class="docText">The compiler knows what to do with your new function because the
+standard library already defines an operator for
+<tt>basic_ostream</tt> (<tt>basic_ostream</tt> is
+the name of the class template that <tt>ostream</tt> and
+<tt>wostream</tt> are instantiations of) like this:</p>
+<pre>basic_ostream&lt;charT,traits&gt;&amp; operator&lt;&lt;
+(basic_ostream&lt;charT,traits&gt;&amp; (* pf)(basic_ostream&lt;charT,traits&gt;&amp;))</pre><br/>
+<p class="docText">In this example, <tt>pf</tt> is a pointer to a function
+that takes a <tt>basic_ostream</tt> reference argument and
+returns a <tt>basic_ostream</tt> reference. This operator
+just calls your function with the current stream as an argument.</p>
+<p class="docText">Writing manipulators that take arguments is more complicated. To
+understand why, consider how a manipulator without arguments works.
+When you use a manipulator like this:</p>
+<pre>myostream &lt;&lt; myManip &lt;&lt; "foo";</pre><br/>
+<p class="docText">You use it without parenthesis, so that it actually resolves to the
+address of your manipulator function.
+<tt>operator&lt;&lt;</tt> is what actually calls the
+manipulator function, and it passes in the stream so the manipulator
+can do its work.</p>
+<p class="docText">For the sake of comparison, say you have a manipulator that takes a
+numeric argument, so that, ideally, you would use it like this:</p>
+<pre>myostream &lt;&lt; myFancyManip(17) &lt;&lt; "apple";</pre><br/>
+<p class="docText">How is this going to work? If you assume
+<tt>myFancyManip</tt> is a function that takes an integer
+argument, then there is a problem: How do you pass the stream to the
+function without including in the parameters and using it explicitly?
+Here's what you might do:</p>
+<pre>myostream &lt;&lt; myFancyManip(17, myostream) &lt;&lt; "apple";</pre><br/>
+<p class="docText">But this is ugly and redundant. One of the conveniences of a
+manipulator is the ability to just add it in line with a bunch of
+<tt>operator&lt;&lt;</tt>s and to read and use it easily.</p>
+<p class="docText">The solution is to send the compiler on a detour. Instead of
+<tt>operator&lt;&lt;</tt> just invoking your manipulator
+function on the stream, you need to introduce an ephemeral object
+that returns something <tt>operator&lt;&lt;</tt> can use.
+Here's how.</p>
+<p class="docText">First, you need to define a temporary class to do the work. For the
+sake of simplicity, say you want to write a manipulator called
+<tt>setWidth</tt> that does the same thing as
+<tt>setw</tt>. The temporary structure you need to build
+should look something like this:</p>
+<pre>class WidthSetter {
+
+public:
+   WidthSetter (int n) : width_(n) {}
+   void operator( )(ostream&amp; os) const {os.width(width_);}
+private:
+   int width_;
+};</pre><br/>
+<p class="docText">The function of this class is simple. Construct it with an integer
+argument, and when <tt>operator( )</tt> is invoked with a
+stream argument, set the width on the stream to the value that the
+object was initialized with. The point of this behavior is that
+<tt>WidthSetter</tt> will be constructed by one function
+and used by another. Your manipulator function is what will construct
+it, and it should look like this:</p>
+<pre>WidthSetter setWidth(int n) {
+   return(WidthSetter(n));   // Return the initialized object
+}</pre><br/>
+<p class="docText">All this does is return a <tt>WidthSetter</tt> object that
+was initialized with the integer value. This is the manipulator that
+you will use in line with <tt>operator&lt;&lt;</tt>s, like
+this:</p>
+<pre>myostream &lt;&lt; setWidth(20) &lt;&lt; "banana";</pre><br/>
+<p class="docText">But this alone is not enough, because if <tt>setWidth</tt>
+just returns a <tt>WidthSetter</tt> object,
+<tt>operator&lt;&lt;</tt> won't know what
+to do with it. You have to overload
+<tt>operator&lt;&lt;</tt> so it knows how to handle a
+<tt>WidthSetter</tt>:</p>
+<pre>ostream&amp; operator&lt;&lt;(ostream&amp; os, const WidthSetter&amp; ws) {
+   ws(os);     // Pass the stream to the ws object
+   return(os); // to do the real work
+}</pre><br/>
+<p class="docText">That solves the problem, but in a nongeneric way. You
+don't want to have to write a
+<tt>WidthSetter</tt>-style class for every
+argument-accepting manipulator you write (maybe you do, but never
+mind that), so a better approach is to use templates and function
+pointers to make a nice, generic infrastructure on which you can base
+any number of manipulators. Example 10-5 provides the
+<tt>ManipInfra</tt>
+
+class and a version of <tt>operator&lt;&lt;</tt> that uses
+template arguments to deal
+
+with the different kinds of
+characters a stream may handle and the different kinds of arguments a
+stream manipulator might use.</p>
+<h5 class="docExampleTitle" id="title-ID0EC4CI">Example 10-5. Manipulator infrastructure</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;iostream&gt;
+#include &lt;string&gt;
+
+using namespace std;
+
+// ManipInfra is a small, intermediary class that serves as a utility
+// for custom manipulators with arguments. Call its constructor with a
+// function pointer and a value from your main manipulator function.
+// The function pointer should be a helper function that does the
+// actual work. See examples below.
+template&lt;typename T, typename C&gt;
+class ManipInfra {
+
+public:
+   ManipInfra (basic_ostream&lt;C&gt;&amp; (*pFun)
+               (basic_ostream&lt;C&gt;&amp;, T), T val)
+     : manipFun_(pFun), val_(val) {}
+   void operator( )(basic_ostream&lt;C&gt;&amp; os) const
+      {manipFun_(os, val_);}  // Invoke the function pointer with the
+private:                      // stream and value
+   T val_;
+   basic_ostream&lt;C&gt;&amp; (*manipFun_)
+      (basic_ostream&lt;C&gt;&amp;, T);
+};
+
+template&lt;typename T, typename C&gt;
+basic_ostream&lt;C&gt;&amp; operator&lt;&lt;(basic_ostream&lt;C&gt;&amp; os,
+                             const ManipInfra&lt;T, C&gt;&amp; manip) {
+   manip(os);
+   return(os);
+}
+
+// Helper function that is ultimately called by the ManipInfra class
+ostream&amp; setTheWidth(ostream&amp; os, int n) {
+   os.width(n);
+   return(os);
+}
+
+// Manipulator function itself.  This is what is used by client
+// code
+ManipInfra&lt;int, char&gt; setWidth(int n) {
+   return(ManipInfra&lt;int, char&gt;(setTheWidth, n));
+}
+
+// Another helper that takes a char argument
+ostream&amp; setTheFillChar(ostream&amp; os, char c) {
+   os.fill(c);
+   return(os);
+}
+
+ManipInfra&lt;char, char&gt; setFill(char c) {
+   return(ManipInfra&lt;char, char&gt;(setTheFillChar, c));
+}
+
+int main( ) {
+
+  cout &lt;&lt; setFill('-')
+       &lt;&lt; setWidth(10) &lt;&lt; right &lt;&lt; "Proust\n";
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">If the sequence of events is still hazy, I suggest running Example 10-5 in the debugger. Once you see it in action, it
+will
+
+ make
+perfect sense.</p>
+</div>
+</body>
+</html>

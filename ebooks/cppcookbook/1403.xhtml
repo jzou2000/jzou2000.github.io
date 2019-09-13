@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 14.2. Working with Xerces Strings</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 14.2. Working with Xerces Strings</h3>
+
+<h4 class="docSection2Title" id="title-ID0EH6AK">Problem</h4>
+<p class="docText">You want to be able to handle 
+
+
+
+
+
+the wide-character strings used by the
+Xerces library safely and easily. In particular, you want to be able
+to store strings returned by Xerces functions as well as to convert
+between Xerces strings and C++ standard library strings.</p>
+
+<h4 class="docSection2Title" id="title-ID0E1ABK">Solution</h4>
+<p class="docText">You can store wide-character strings returned by Xerces library
+functions using the template <tt>std::basic_string</tt>
+specialized for the Xerces wide-character type
+<tt>XMLCh</tt>:</p>
+<pre>typedef std::basic_string&lt;XMLCh&gt; XercesString;</pre><br/>
+<p class="docText">To translate between Xerces strings and narrow-character strings, use
+the overloaded static method <tt>transcode( )</tt> from the
+class <tt>xercesc::XMLString</tt>, defined in the header
+<i>xercesc/util/XMLString.hpp</i>. Example 14-4 defines two overloaded utility functions,
+<tt>toNative</tt> and <tt>fromNative</tt>, that
+use <tt>transcode</tt> to translate from narrow-character
+strings to Xerces strings and <span class="docEmphasis">vice versa</span>. Each
+function has two variants, one that takes a C-style string and one
+that takes a C++ standard library string. These utility functions are
+all you'll need to convert between Xerces string and
+narrow-character strings; once you
+define them, you'll never need to call
+<tt>transcode</tt> directly.</p>
+<h5 class="docExampleTitle" id="title-ID0EECBK">Example 14-4. The header xerces_strings.hpp, for converting between Xerces strings and narrow-character strings</h5><p></p><div class="box">
+<pre class="preFixedHeight">#ifndef XERCES_STRINGS_HPP_INCLUDED
+#define XERCES_STRINGS_HPP_INCLUDED
+
+#include &lt;string&gt;
+#include &lt;boost/scoped_array.hpp&gt;
+#include &lt;xercesc/util/XMLString.hpp&gt;
+
+typedef std::basic_string&lt;XMLCh&gt; XercesString;
+
+// Converts from a narrow-character string to a wide-character string.
+inline XercesString fromNative(const char* str)
+{
+    boost::scoped_array&lt;XMLCh&gt; ptr(xercesc::XMLString::transcode(str));
+    return XercesString(ptr.get( ));
+}
+
+// Converts from a narrow-character string to a wide-charactr string.
+inline XercesString fromNative(const std::string&amp; str)
+{
+    return fromNative(str.c_str( ));
+}
+
+// Converts from a wide-character string to a narrow-character string.
+inline std::string toNative(const XMLCh* str)
+{
+    boost::scoped_array&lt;char&gt; ptr(xercesc::XMLString::transcode(str));
+    return std::string(ptr.get( ));
+}
+
+// Converts from a wide-character string to a narrow-character string.
+inline std::string toNative(const XercesString&amp; str)
+{
+    return toNative(str.c_str( ));
+}
+
+#endif // #ifndef XERCES_STRINGS_HPP_INCLUDED
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">To convert between Xerces strings and
+<tt>std::wstrings</tt>, simply use the
+<tt>std::basic_string</tt> constructor taking a pair of
+iterators. For example, you can define the following two functions:</p>
+<pre>// Converts from a Xerces String to a std::wstring
+std::wstring xercesToWstring(const XercesString&amp; str)
+{
+    return std::wstring(str.begin( ), str.end( ));
+}
+
+// Converts from a std::wstring to a XercesString
+XercesString wstringToXerces(const std::wstring&amp; str)
+{
+    return XercesString(str.begin( ), str.end( ));
+}</pre><br/>
+<p class="docText">These functions rely on the fact that <tt>wchar_t</tt> and
+<tt>XMLCh</tt> are integral types each of which can be
+implicitly converted to the other; it should work regardless of the
+size of <tt>wchar_t</tt>, as long as no values outside the
+range of <tt>XMLCh</tt> are used. You can define similar
+functions taking C-style strings as arguments, using the
+<tt>std::basic_string</tt> constructor that takes a
+character array and a length as arguments.</p>
+
+<h4 class="docSection2Title" id="title-ID0EDDBK">Discussion</h4>
+<p class="docText">Xerces uses the null-terminated sequences of characters of type
+<tt>XMLCh</tt> to represent Unicode strings.
+<tt>XMLCh</tt> is a typedef for an implementation-defined
+integral type having a size of at least 16 bits—wide enough to
+represent almost all known characters in any language using a single
+character. Xerces uses the UTF-16 character encoding, which means
+that theoretically some Unicode characters must be represented by a
+sequence of more than one <tt>XMLCh</tt>; in practice,
+however, you can think of an <tt>XMLCh</tt> as directly
+representing a Unicode code point, i.e., the numerical value of a
+Unicode character.</p>
+<p class="docText">At one time, <tt>XMLCh</tt> was defined as a
+<tt>typedef</tt> for <tt>wchar_t</tt>, which
+meant you could easily store a copy of a Xerces string as a
+<tt>std::wstring</tt>. Currently, however, Xerces defines
+<tt>XMLCh</tt> as a typedef for <tt>unsigned
+short</tt> on all platforms. Among other things, this means that
+on some platforms <tt>XMLCh</tt> and
+<tt>wchar_t</tt> don't even have the same
+width. Since Xerces may change the definition of
+<tt>XMLCh</tt> in the future, you can't
+count on <tt>XMLCh</tt> to be identical to any particular
+type. So if you want to store a copy of a Xerces string, you should
+use a <tt>std::basic_string&lt;XMLCh&gt;</tt>.</p>
+<p class="docText">When using Xerces you will frequently need to convert between
+narrow-character strings and Xerces strings; Xerces provides the
+overloaded function <tt>transcode(
+)</tt>
+ for this purpose. <tt>transcode()</tt> can convert a Unicode string to a narrow-character string
+in the "native" character encoding
+or a narrow-character string in the
+"native" encoding to a Unicode
+string. What constitutes the native encoding is not precisely
+defined, however, so if you are programming in an environment where
+there are several commonly used character encodings, you may need to
+take matters into your own hands and perform your own conversion,
+either by using a <tt>std::codecvt</tt> facet, or by using
+Xerces's <i>pluggable transcoding
+services</i>
+
+, described in the Xerces
+documentation. In many cases, however, <tt>transcode()</tt> is all you need.</p>
+<p class="docText">The null-terminate string returned by <tt>transcode( )</tt>
+is dynamically allocated using the array form of
+<tt>operator</tt>
+<tt>new</tt>;
+it's up to you to delete it using
+<tt>delete</tt>
+<tt>[]</tt>. This presents a
+slight memory-management problem, since typically you will want to
+make a copy of the string or write it to a stream before you delete
+it, and these operations can throw exceptions. I've
+addressed this problem in Example 14-4 by using the
+template <tt>boost::scoped_array</tt>, which takes
+ownership of a dynamically allocated array and deletes it
+automatically when it goes out of scope, even if an exception is
+thrown. For example, look at the implementation of
+<tt>fromNative</tt>:</p>
+<pre>inline XercesString fromNative(const char* str)
+{
+    boost::scoped_array&lt;XMLCh&gt; ptr(xercesc::XMLString::transcode(str));
+    return XercesString(ptr.get( ));
+}</pre><br/>
+<p class="docText">Here, <tt>ptr</tt> takes ownership of the null-terminated
+string returned by <tt>transcode( )</tt> and frees it even
+if the <tt>XercesString</tt> constructor throws a
+<tt>std::bad_alloc</tt>
+
+
+
+
+
+ exception.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>47.9. Implementing a Binary Semaphores Protocol</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">47.9. Implementing a Binary Semaphores Protocol</h3><p class="docText">The
+ API for System V semaphores is complex, both because semaphore values 
+can be adjusted by arbitrary amounts, and because semaphores are 
+allocated and operated upon in sets. Both of these features provide more
+ functionality than is typically needed within applications, and so it 
+is useful to implement some simpler protocols (APIs) on top of System V 
+semaphores.</p><p class="docText">One commonly used protocol is binary semaphores. A binary semaphore has two values: <span class="docEmphasis">available</span> (free) and <span class="docEmphasis">reserved</span> (in use). Two operations are defined for binary semaphores:</p><ul><li><p class="docList"><span class="docEmphasis">Reserve</span>:
+ Attempt to reserve this semaphore for exclusive use. If the semaphore 
+is already reserved by another process, then block until the semaphore 
+is released.</p></li><li><p class="docList"><span class="docEmphasis">Release</span>: Free a currently reserved semaphore, so that it can be reserved by another process.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">In academic computer science, these two operations often go by the names <span class="docEmphasis">P</span> and <span class="docEmphasis">V</span>,
+ the first letters of the Dutch terms for these operations. This 
+nomenclature was coined by the late Dutch computer scientist Edsger 
+Dijkstra, who produced much of the early theoretical work on semaphores.
+ The terms <span class="docEmphasis">down</span> (decrement the semaphore) and <span class="docEmphasis">up</span> (increment the semaphore) are also used. POSIX terms the two operations <span class="docEmphasis">wait</span> and <span class="docEmphasis">post</span>.</p><hr noshade="noshade" size="1"/></li></ul><p class="docText">A third operation is also sometimes defined:</p><ul><li><p class="docList"><span class="docEmphasis">Reserve conditionally</span>:
+ Make a nonblocking attempt to reserve this semaphore for exclusive use.
+ If the semaphore is already reserved, then immediately return a status 
+indicating that the semaphore is unavailable.</p></li></ul><p class="docText">In implementing binary semaphores, we must choose how to represent the <span class="docEmphasis">available</span> and <span class="docEmphasis">reserved</span>
+ states, and how to implement the above operations. A moment’s 
+reflection leads us to realize that the best way to represent the states
+ is to use the value 1 for <span class="docEmphasis">free</span> and the value 0 for <span class="docEmphasis">reserved</span>, with the <span class="docEmphasis">reserve</span> and <span class="docEmphasis">release</span> operations decrementing and incrementing the semaphore value by one.</p><p class="docText">Example 47-9 and Example 47-10
+ provide an implementation of binary semaphores using System V 
+semaphores. As well as providing the prototypes of the functions in the 
+implementation, the header file in Example 47-9 declares two global Boolean variables exposed by the implementation. The <span class="docEmphasis">bsUseSemUndo</span> variable controls whether the implementation uses the <tt>SEM_UNDO</tt> flag in <span class="docEmphasis">semop()</span> calls. The <span class="docEmphasis">bsRetryOnEintr</span> variable controls whether the implementation restarts <span class="docEmphasis">semop()</span> calls that are interrupted by signals.</p><h5 class="docExampleTitle" id="title-ID0ETMCM">Example 47-9. Header file for <tt>binary_sems.c</tt></h5><p></p><div class="box"><pre><b>svsem/binary_sems.h</b>
+#ifndef BINARY_SEMS_H           /* Prevent accidental double inclusion */
+#define BINARY_SEMS_H
+
+#include "tlpi_hdr.h"
+
+/* Variables controlling operation of functions below */
+
+extern Boolean bsUseSemUndo;            /* Use SEM_UNDO during semop()? */
+extern Boolean bsRetryOnEintr;          /* Retry if semop() interrupted by
+                                           signal handler? */
+
+int initSemAvailable(int semId, int semNum);
+
+int initSemInUse(int semId, int semNum);
+
+int reserveSem(int semId, int semNum);
+
+int releaseSem(int semId, int semNum);
+
+#endif
+     <b>svsem/binary_sems.h</b></pre><br/>
+</div><p></p><p class="docText">Example 47-10
+ shows the implementation of the binary semaphore functions. Each 
+function in this implementation takes two arguments, which identify a 
+semaphore set and the number of a semaphore within that set. (These 
+functions don’t deal with the creation and deletion of semaphore sets; 
+nor do they handle the race condition described in Section 47.5.) We 
+employ these functions in the example programs shown in Section 48.4.</p><h5 class="docExampleTitle" id="title-ID0EGNCM">Example 47-10. Implementing binary semaphores using System V semaphores</h5><p></p><div class="box"><pre class="preFixedHeight"><b>svsem/binary_sems.c</b>
+#include &lt;sys/types.h&gt;
+#include &lt;sys/sem.h&gt;
+#include "semun.h"                      /* Definition of semun union */
+#include "binary_sems.h"
+
+Boolean bsUseSemUndo = FALSE;
+Boolean bsRetryOnEintr = TRUE;
+
+int                     /* Initialize semaphore to 1 (i.e., "available") */
+initSemAvailable(int semId, int semNum)
+{
+    union semun arg;
+
+    arg.val = 1;
+    return semctl(semId, semNum, SETVAL, arg);
+}
+
+int                     /* Initialize semaphore to 0 (i.e., "in use") */
+initSemInUse(int semId, int semNum)
+{
+    union semun arg;
+
+    arg.val = 0;
+    return semctl(semId, semNum, SETVAL, arg);
+}
+
+/* Reserve semaphore (blocking), return 0 on success, or -1 with 'errno'
+   set to EINTR if operation was interrupted by a signal handler */
+
+int                     /* Reserve semaphore - decrement it by 1 */
+reserveSem(int semId, int semNum)
+{
+    struct sembuf sops;
+
+    sops.sem_num = semNum;
+    sops.sem_op = -1;
+    sops.sem_flg = bsUseSemUndo ? SEM_UNDO : 0;
+
+    while (semop(semId, &amp;sops, 1) == -1)
+        if (errno != EINTR || !bsRetryOnEintr)
+            return -1;
+
+    return 0;
+}
+
+int                     /* Release semaphore - increment it by 1 */
+releaseSem(int semId, int semNum)
+{
+    struct sembuf sops;
+
+    sops.sem_num = semNum;
+    sops.sem_op = 1;
+    sops.sem_flg = bsUseSemUndo ? SEM_UNDO : 0;
+
+    return semop(semId, &amp;sops, 1);
+}
+     <b>svsem/binary_sems.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

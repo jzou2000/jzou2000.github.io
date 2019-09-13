@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>23.3. Setting Timeouts on Blocking Operations</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">23.3. Setting Timeouts on Blocking Operations</h3><p class="docText">One
+ use of real-time timers is to place an upper limit on the time for 
+which a blocking system call can remain blocked. For example, we may 
+wish to cancel a <span class="docEmphasis">read()</span> from a terminal if the user has not entered a line of input within a certain time. We can do this as follows:</p><div style="font-weight:bold"><ol class="docList" type="1"><li><div style="font-weight:normal"><p class="docList">Call <span class="docEmphasis">sigaction()</span> to establish a handler for <tt>SIGALRM</tt>, omitting the <tt>SA_RESTART</tt> flag, so that system calls are not restarted (refer to Section 21.5).</p></div></li><li><div style="font-weight:normal"><p class="docList">Call <span class="docEmphasis">alarm()</span> or <span class="docEmphasis">setitimer()</span> to establish a timer specifying the upper limit of time for which we wish the system call to block.</p></div></li><li><div style="font-weight:normal"><p class="docList">Make the blocking system call.</p></div></li><li><div style="font-weight:normal"><p class="docList">After the system call returns, call <span class="docEmphasis">alarm()</span> or <span class="docEmphasis">setitimer()</span> once more to disable the timer (in case the system call completed before the timer expired).</p></div></li><li><div style="font-weight:normal"><p class="docList">Check to see whether the blocking system call failed with <span class="docEmphasis">errno</span> set to <tt>EINTR</tt> (interrupted system call).</p></div></li></ol></div><p class="docText">Example 23-2 demonstrates this technique for <span class="docEmphasis">read()</span>, using <span class="docEmphasis">alarm()</span> to establish the timer.</p><h5 class="docExampleTitle" id="title-ID0EUYBK">Example 23-2. Performing a <span class="docEmphasis">read()</span> with timeout</h5><p></p><div class="box"><pre class="preFixedHeight"><b>timers/timed_read.c</b>
+#include &lt;signal.h&gt;
+#include "tlpi_hdr.h"
+
+#define BUF_SIZE 200
+
+static void     /* SIGALRM handler: interrupts blocked system call */
+handler(int sig)
+{
+    printf("Caught signal\n");          /* UNSAFE (see Section 21.1.2) */
+}
+
+int
+main(int argc, char *argv[])
+{
+    struct sigaction sa;
+    char buf[BUF_SIZE];
+    ssize_t numRead;
+    int savedErrno;
+
+    if (argc &gt; 1 &amp;&amp; strcmp(argv[1], "--help") == 0)
+        usageErr("%s [num-secs [restart-flag]]\n", argv[0]);
+
+    /* Set up handler for SIGALRM. Allow system calls to be interrupted,
+       unless second command-line argument was supplied. */
+
+    sa.sa_flags = (argc &gt; 2) ? SA_RESTART : 0;
+    sigemptyset(&amp;sa.sa_mask);
+    sa.sa_handler = handler;
+    if (sigaction(SIGALRM, &amp;sa, NULL) == -1)
+        errExit("sigaction");
+
+    alarm((argc &gt; 1) ? getInt(argv[1], GN_NONNEG, "num-secs") : 10);
+
+    numRead = read(STDIN_FILENO, buf, BUF_SIZE - 1);
+
+    savedErrno = errno;                 /* In case alarm() changes it */
+    alarm(0);                           /* Ensure timer is turned off */
+    errno = savedErrno;
+
+    /* Determine result of read() */
+
+    if (numRead == -1) {
+        if (errno == EINTR)
+            printf("Read timed out\n");
+        else
+            errMsg("read");
+    } else {
+        printf("Successful read (%ld bytes): %.*s",
+                (long) numRead, (int) numRead, buf);
+    }
+
+    exit(EXIT_SUCCESS);
+}
+     <b>timers/timed_read.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Note that there is a theoretical race condition in the program in Example 23-2. If the timer expires after the call to <span class="docEmphasis">alarm()</span>, but before the <span class="docEmphasis">read()</span> call is started, then the <span class="docEmphasis">read()</span>
+ call won’t be interrupted by the signal handler. Since the timeout 
+value used in scenarios like this is normally relatively large (at least
+ several seconds) this is highly unlikely to occur, so that, in 
+practice, this is a viable technique. [Stevens &amp; Rago, 2005] 
+proposes an alternative technique using <span class="docEmphasis">longjmp()</span>. A further alternative when dealing with I/O system calls is to use the timeout feature of the <span class="docEmphasis">select()</span> or <span class="docEmphasis">poll()</span> system calls (Chapter 63), which also have the advantage of allowing us to simultaneously wait for I/O on multiple descriptors.</p>
+</div>
+</body>
+</html>

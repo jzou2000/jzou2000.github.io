@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>37.4. Using SIGHUP to Reinitialize a Daemon</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">37.4. Using <tt>SIGHUP</tt> to Reinitialize a Daemon</h3><p class="docText">The fact that many daemons should run continuously presents a couple of programming hurdles:</p><ul><li><p class="docList">Typically,
+ a daemon reads operational parameters from an associated configuration 
+file on startup. Sometimes, it is desirable to be able to change these 
+parameters “on the fly,” without needing to stop and restart the daemon.</p></li><li><p class="docList">Some
+ daemons produce log files. If the daemon never closes the log file, 
+then it may grow endlessly, eventually clogging the file system. (In Section 18.3,
+ we noted that even if we remove the last name of a file, the file 
+continues to exist as long as any process has it open.) What we need is a
+ way of telling the daemon to close its log file and open a new file, so
+ that we can rotate log files as required.</p></li></ul><p class="docText">The solution to both of these problems is to have the daemon establish a handler for <tt>SIGHUP</tt>, and perform the required steps upon receipt of this signal. In Section 34.4, we noted that <tt>SIGHUP</tt>
+ is generated for the controlling process on disconnection of a 
+controlling terminal. Since a daemon has no controlling terminal, the 
+kernel never generates this signal for a daemon. Therefore, daemons can 
+use <tt>SIGHUP</tt> for the purpose described here.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The <span class="docEmphasis">logrotate</span> program can be used to automate rotation of daemon log files. See the <span class="docEmphasis">logrotate(8)</span> manual page for details.</p><hr noshade="noshade" size="1"/><p class="docText">Example 37-3 provides an example of how a daemon can employ <tt>SIGHUP</tt>. This program establishes a handler for <tt>SIGHUP</tt> <img alt="" border="0" id="" src="Images/getfile_002-33.png"/>, becomes a daemon <img alt="" border="0" id="" src="Images/getfile-65.png"/>, opens the log file <img alt="" border="0" id="" src="Images/getfile_005-26.png"/>, and reads its configuration file <img alt="" border="0" id="" src="Images/getfile_007-15.png"/>. The <tt>SIGHUP</tt> handler <img alt="" border="0" id="" src="Images/getfile_003-32.png"/> just sets a global flag variable, <span class="docEmphasis">hupReceived</span>, which is checked by the main program. The main program sits in a loop, printing a message to the log file every 15 seconds <img alt="" border="0" id="" src="Images/getfile_004-12.png"/>. The calls to <span class="docEmphasis">sleep()</span> <img alt="" border="0" id="" src="Images/getfile_008.png"/> in this loop are intended to simulate some sort of processing performed by a real application. After each return from <span class="docEmphasis">sleep()</span> in this loop, the program checks to see whether <span class="docEmphasis">hupReceived</span> has been set <img alt="" border="0" id="" src="Images/getfile_006-18.png"/>; if so, it reopens the log file, rereads the configuration file, and clears the <span class="docEmphasis">hupReceived</span> flag.</p><p class="docText">For brevity, the functions <span class="docEmphasis">logOpen()</span>, <span class="docEmphasis">logClose()</span>, <span class="docEmphasis">logMessage()</span>, and <span class="docEmphasis">readConfigFile()</span> are omitted from Example 37-3,
+ but are provided with the source code distribution of this book. The 
+first three functions do what we would expect from their names. The <span class="docEmphasis">readConfigFile()</span> function simply reads a line from the configuration file and echoes it to the log file.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Some daemons use an alternative method to reinitialize themselves on receipt of <tt>SIGHUP</tt>: they close all files and then restart themselves with an <span class="docEmphasis">exec()</span>.</p><hr noshade="noshade" size="1"/><p class="docText">The following is an example of what we might see when running the program in Example 37-3. We begin by creating a dummy configuration file and then launching the daemon:</p><pre>$ <b>echo START &gt; /tmp/ds.conf </b>
+$ <b>./daemon_SIGHUP </b>
+$ <b>cat /tmp/ds.log </b>                                     <i> View log file</i>
+2011-01-17 11:18:34: Opened log file
+2011-01-17 11:18:34: Read config file: START</pre><br/>
+<p class="docText">Now we modify the configuration file and rename the log file before sending <tt>SIGHUP</tt> to the daemon:</p><pre class="preFixedWidth">$ <b>echo CHANGED &gt; /tmp/ds.conf </b>
+$ <b>date +'%F %X'; mv /tmp/ds.log /tmp/old_ds.log </b>
+2011-01-17 11:19:03 AM
+$ <b>date +'%F %X'; killall -HUP daemon_SIGHUP </b>
+2011-01-17 11:19:23 AM
+$ <b>ls /tmp/*ds.log </b>                                     <i> Log file was reopened</i>
+/tmp/ds.log  /tmp/old_ds.log
+$ <b>cat /tmp/old_ds.log </b>                                 <i> View old log file</i>
+2011-01-17 11:18:34: Opened log file
+2011-01-17 11:18:34: Read config file: START
+2011-01-17 11:18:49: Main: 1
+2011-01-17 11:19:04: Main: 2
+2011-01-17 11:19:19: Main: 3
+2011-01-17 11:19:23: Closing log file
+
+					  </pre><br/>
+<p class="docText">The output of <span class="docEmphasis">ls</span> shows that we have both an old and a new log file. When we use <span class="docEmphasis">cat</span> to view the contents of the old log file, we see that even after the <span class="docEmphasis">mv</span>
+ command was used to rename the file, the daemon continued to log 
+messages there. At this point, we could delete the old log file if we no
+ longer need it. When we look at the new log file, we see that the 
+configuration file has been reread:</p><pre>$ <b>cat /tmp/ds.log </b>
+2011-01-17 11:19:23: Opened log file
+2011-01-17 11:19:23: Read config file: CHANGED
+2011-01-17 11:19:34: Main: 4
+$ <b>killall daemon_SIGHUP </b>                               <i> Kill our daemon</i></pre><br/>
+<p class="docText">Note that a daemon’s log and configuration files are typically placed in standard directories, not in the <tt>/tmp</tt> directory, as is done in the program in Example 37-3. By convention, configuration files are placed in <tt>/etc</tt> or one of its subdirectories, while log files are often placed in <tt>/var/log</tt>. Daemon programs commonly provide command-line options to specify alternative locations instead of the defaults.</p><h5 class="docExampleTitle" id="title-ID0EIUGK">Example 37-3. Using <tt>SIGHUP</tt> to reinitialize a daemon</h5><p></p><div class="box"><pre class="preFixedHeight"><b>daemons/daemon_SIGHUP.c</b>
+    #include &lt;sys/stat.h&gt;
+    #include &lt;signal.h&gt;
+    #include "become_daemon.h"
+    #include "tlpi_hdr.h"
+
+    static const char *LOG_FILE = "/tmp/ds.log";
+    static const char *CONFIG_FILE = "/tmp/ds.conf";
+
+    /* Definitions of logMessage(), logOpen(), logClose(), and
+       readConfigFile() are omitted from this listing */
+
+    static volatile sig_atomic_t hupReceived = 0;
+                                        /* Set nonzero on receipt of SIGHUP */
+     from
+    static void
+    sighupHandler(int sig)
+    {
+<img alt="" border="0" id="" src="Images/getfile_003-33.png"/>    hupReceived = 1;
+    }
+
+    int
+    main(int argc, char *argv[])
+    {
+        const int SLEEP_TIME = 15;      /* Time to sleep between messages */
+        int count = 0;                  /* Number of completed SLEEP_TIME intervals */
+        int unslept;                    /* Time remaining in sleep interval */
+        struct sigaction sa;
+
+        sigemptyset(&amp;sa.sa_mask);
+        sa.sa_flags = SA_RESTART;
+        sa.sa_handler = sighupHandler;
+<img alt="" border="0" id="" src="Images/getfile_002-34.png"/>    if (sigaction(SIGHUP, &amp;sa, NULL) == -1)
+                   errExit("sigaction");
+<img alt="" border="0" id="" src="Images/getfile-66.png"/>    if (becomeDaemon(0) == -1)
+            errExit("becomeDaemon");
+
+<img alt="" border="0" id="" src="Images/getfile_005-27.png"/>    logOpen(LOG_FILE);
+<img alt="" border="0" id="" src="Images/getfile_007-16.png"/>    readConfigFile(CONFIG_FILE);
+
+
+        unslept = SLEEP_TIME;
+
+        for (;;) {
+<img alt="" border="0" id="" src="Images/getfile_008.png"/>        unslept = sleep(unslept);       /* Returns &gt; 0 if interrupted */
+<img alt="" border="0" id="" src="Images/getfile_006-19.png"/>        if (hupReceived) {              /* If we got SIGHUP... */
+                logClose();
+                    logOpen(LOG_FILE);
+                readConfigFile(CONFIG_FILE);
+                hupReceived = 0;            /* Get ready for next SIGHUP */
+            }
+
+            if (unslept == 0) {             /* On completed interval */
+                count++;
+<img alt="" border="0" id="" src="Images/getfile_004-13.png"/>            logMessage("Main: %d", count);
+                unslept = SLEEP_TIME;       /* Reset interval */
+            }
+        }
+    }
+          <b>daemons/daemon_SIGHUP.c</b>
+
+					  </pre><br/>
+</div><p></p>
+</div>
+</body>
+</html>

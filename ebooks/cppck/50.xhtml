@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 50. Member Templates</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 50. Member Templates</h2>
+		
+<p class="docText">Class
+ templates have members that are not themselves templates, and many of 
+these members can be defined outside the class. Let’s look at a singly 
+linked list container:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+class SList {
+  public:
+    SList() : head_(0) {}
+    //...
+    void push_front( const T &amp;val );
+    void pop_front();
+    T front() const;
+    void reverse();
+    bool empty() const;
+  private:
+    struct Node {
+        Node *next_;
+        T el_;
+    };
+    Node *head_; // -&gt; list
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The member functions of a 
+template, when defined outside the class template, have a template 
+header with the same structure as that used in the class template 
+definition:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+bool SList&lt;T&gt;::empty() const
+    { return head_ == 0; }
+</pre>
+</div>
+<br/>
+		
+<p class="docText">We’ve decided to 
+implement our singly linked list as a pointer to a sequence of nodes, 
+where each node contains a list element and a pointer to the next node 
+on the list. (A more sophisticated implementation might embed a truncated <tt>Node</tt> in the <tt>SList</tt>, rather than a pointer to a <tt>Node</tt>,
+ but this is sufficient for our needs here.) Generally, such a nested 
+class type is defined within the template itself, but it needn’t be:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+class SList {
+  public:
+    //...
+  private:
+    struct Node; // incomplete class declaration
+    Node *head_; // -&gt; list
+    //...
+};
+
+template &lt;typename T&gt; // definition outside template
+struct SList&lt;T&gt;::Node {
+    Node *next_;
+    T el_;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The members <tt>empty</tt> and <tt>Node</tt>
+ are examples of template members. But a class template (or even a 
+nontemplate class) can also have member templates. (Yes, we are 
+witnessing yet another example of C++’s penchant for defining easily 
+confused technical terms. This little gem joins with the <tt>new</tt> operator/<tt>operator</tt> new, covariance/contravariance, and <tt>const_iterator</tt>/const
+ iterator pairs to ensure that every design review will be an 
+adventure.) In the finest tautological tradition, a member template is a
+ member that is a template:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+class SList {
+  public:
+    //...
+    template &lt;typename In&gt; SList( In begin, In end );
+    //...
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This <tt>SList</tt> constructor, unlike the default constructor, is a member template, explicitly parameterized with the typename <tt>In</tt>. It’s also implicitly parameterized by the type name used to instantiate the <tt>SList</tt> template of which
+ it is a member. This explains the highly repetitious nature of its 
+definition when it’s defined outside its class template:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt; // this one's for SList
+template &lt;typename In&gt; // this one's for the member
+SList&lt;T&gt;::SList( In begin, In end ) : head_( 0 ) {
+    while( begin != end )
+        push_front( *begin++ );
+    reverse();
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">As with other function 
+templates, the compiler will perform argument deduction and instantiate 
+the constructor template as needed (see <span class="docEmphasis">Template Argument Deduction</span> [57, 209]):</p>
+		
+<div class="docText">
+  <pre>float rds[] = { ... };
+const int size = sizeof(rds)/sizeof(rds[0]);
+std::vector&lt;double&gt; rds2( rds, rds+size );
+//...
+SList&lt;float&gt; data( rds, rds+size ); // In is float *
+SList&lt;double&gt; data2( rds2.begin(), rds2.end() ); // In is
+                                  // vector&lt;double&gt;::iterator
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This is a common use of 
+constructor templates in the STL to allow a container to be initialized 
+by a sequence of values drawn from an arbitrary source. Another common 
+use of member templates is to generate copy operation–like constructors 
+and assignment operators:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+class SList {
+  public:
+    //...
+    template &lt;typename S&gt;
+        SList( const SList&lt;S&gt; &amp;that );
+    template &lt;typename S&gt;
+        SList &amp;operator =( const SList&lt;S&gt; &amp;rhs );
+    //...
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">These template members can be used for copy constructor–like and copy assignment–like operations.</p>
+		
+<div class="docText">
+  <pre>SList&lt;double&gt; data3( data ); // T is double, S is float
+data = data3; // T is float, S is double
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Notice
+ the waffle words “copy constructor–like” and “copy assignment–like” in 
+the above description. This is because a template member is never used 
+to instantiate a copy operation; that is, if <tt>T</tt> and <tt>S</tt>
+ are the same type above, then the compiler will not instantiate the 
+member template but will instead write the copy operation itself. In 
+such cases, it’s usually best to define the copy operations explicitly 
+in order to forestall officious and often incorrect help from the 
+compiler:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+class SList {
+  public:
+    //...
+    SList( const SList &amp;that ); // copy ctor
+    SList &amp;operator =( const SList &amp;rhs ); // copy assignment
+    template &lt;typename S&gt; SList( const SList&lt;S&gt; &amp;that );
+    template &lt;typename S&gt;
+        SList &amp;operator =( const SList&lt;S&gt; &amp;rhs );
+    //...
+};
+//...
+SList&lt;float&gt; data4( data ); // copy ctor
+data3 = data2; // copy assignment
+data3 = data4; // non-copy assignment from member template
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Any nonvirtual member 
+function may be a template (member templates can’t be virtual because 
+the combination of these features results in insurmountable technical 
+problems in their implementation). For example, we could implement a 
+sort operation for our list:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+class SList {
+  public:
+    //...
+    template &lt;typename Comp&gt; void sort( Comp comp );
+    //...
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This <tt>sort</tt> 
+member template allows its user to pass a function pointer or function 
+object that will be used to compare elements in the list (see <span class="docEmphasis">STL Function Objects</span> [20, 71]).</p>
+		
+<div class="docText">
+  <pre>data.sort( std::less&lt;float&gt;() ); // sort ascending
+data.sort( std::greater&lt;float&gt;() ); // sort descending
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Here, we’ve instantiated two different versions of the <tt>sort</tt> member using the standard function object types <tt>less</tt> and <tt>greater</tt>.</p>
+		
+
+
+</body>
+</html>

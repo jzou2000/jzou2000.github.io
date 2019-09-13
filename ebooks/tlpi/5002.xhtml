@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>50.2. Memory Locking: mlock() and mlockall()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">50.2. Memory Locking: <span class="docEmphasis">mlock()</span> and <span class="docEmphasis">mlockall()</span></h3><p class="docText">In
+ some applications, it is useful to lock part or all of a process’s 
+virtual memory so that it is guaranteed to always be in physical memory.
+ One reason for doing this is to improve performance. Accesses to locked
+ pages are guaranteed never to be delayed by a page fault. This is 
+useful for applications that must ensure rapid response times.</p><p class="docText">Another
+ reason for locking memory is security. If a virtual memory page 
+containing sensitive data is never swapped out, then no copy of the page
+ is ever written to the disk. If the page was written to the disk, it 
+could, in theory, be read directly from the disk device at some later 
+time. (An attacker could deliberately engineer this situation by running
+ a program that consumes a large amount of memory, thus forcing the 
+memory of other processes to be swapped out to disk.) Reading 
+information from the swap space could even be done after the process has
+ terminated, since the kernel makes no guarantees about zeroing out the 
+data held in swap space. (Normally, only privileged processes would be 
+able to read from the swap device.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">The
+ suspend mode on laptop computers, as well some desktop systems, saves a
+ copy of a system’s RAM to disk, regardless of memory locks.</p><hr noshade="noshade" size="1"/><p class="docText">In
+ this section, we look at the system calls used for locking and 
+unlocking part or all of a process’s virtual memory. However, before 
+doing this, we first look at a resource limit that governs memory 
+locking.</p><h4 class="docSection2Title" id="title-ID0EMKDM">50.2.1. </h4><h5 class="docSection3Title" id="title-ID0EQKDM">50.2.1.1. The <tt>RLIMIT_MEMLOCK</tt> resource limit</h5><p class="docText">In Section 36.3, we briefly described the <tt>RLIMIT_MEMLOCK</tt>
+ limit, which defines a limit on the number of bytes that a process can 
+lock into memory. We now consider this limit in more detail.</p><p class="docText">In Linux kernels before 2.6.9, only privileged processes (<tt>CAP_IPC_LOCK</tt>) can lock memory, and the <tt>RLIMIT_MEMLOCK</tt> soft resource limit places an upper limit on the number of bytes that a privileged process can lock.</p><p class="docText">Starting
+ with Linux 2.6.9, changes to the memory locking model allow 
+unprivileged processes to lock small amounts of memory. This is useful 
+for an application that needs to place a small piece of sensitive 
+information in locked memory in order to ensure that it is never written
+ to the swap space on disk; for example, <span class="docEmphasis">gpg</span> does this with pass phrases. As a result of these changes:</p><ul><li><p class="docList">no limits are placed on the amount of memory that a privileged process can lock (i.e., <tt>RLIMIT_MEMLOCK</tt> is ignored); and</p></li><li><p class="docList">an unprivileged process is now able to lock memory up to the soft limit defined by <tt>RLIMIT_MEMLOCK</tt>.</p></li></ul><p class="docText">The default value for both the soft and hard <tt>RLIMIT_MEMLOCK</tt> limits is 8 pages (i.e., 32,768 bytes on x86-32).</p><p class="docText">The <tt>RLIMIT_MEMLOCK</tt> limit affects:</p><ul><li><p class="docList"><span class="docEmphasis">mlock()</span> and <span class="docEmphasis">mlockall()</span>;</p></li><li><p class="docList">the <span class="docEmphasis">mmap()</span> <tt>MAP_LOCKED</tt> flag, which is used to lock a memory mapping when it is created, as described in Section 49.6; and</p></li><li><p class="docList">the <span class="docEmphasis">shmctl()</span> <tt>SHM_LOCK</tt> operation, which is used to lock System V shared memory segments, as described in Section 48.7.</p></li></ul><p class="docText">Since virtual memory is managed in units of pages, memory locks apply to complete pages. When performing limit checks, the <tt>RLIMIT_MEMLOCK</tt> limit is rounded <span class="docEmphasis">down</span> to the nearest multiple of the system page size.</p><p class="docText">Although this resource limit has a single (soft) value, in effect, it defines two separate limits:</p><ul><li><p class="docList">For <span class="docEmphasis">mlock()</span>, <span class="docEmphasis">mlockall()</span>, and the <span class="docEmphasis">mmap()</span> <tt>MAP_LOCKED</tt> operation, <tt>RLIMIT_MEMLOCK</tt> defines a per-process limit on the number of bytes of its virtual address space that a process may lock.</p></li><li><p class="docList">For the <span class="docEmphasis">shmctl()</span> <tt>SHM_LOCK</tt> operation, <tt>RLIMIT_MEMLOCK</tt>
+ defines a per-user limit on the number of bytes in shared memory 
+segments that may be locked by the real user ID of this process. When a 
+process performs a <span class="docEmphasis">shmctl()</span> <tt>SHM_LOCK</tt>
+ operation, the kernel checks the total number of bytes of System V 
+shared memory that are already recorded as being locked by the real user
+ ID of the calling process. If the size of the to-be-locked segment 
+would not push that total over the process’s <tt>RLIMIT_MEMLOCK</tt> limit, the operation succeeds.</p></li></ul><p class="docText">The reason <tt>RLIMIT_MEMLOCK</tt>
+ has different semantics for System V shared memory is that a shared 
+memory segment can continue to exist even when it is not attached by any
+ process. (It is removed only after an explicit <span class="docEmphasis">shmctl()</span> <tt>IPC_RMID</tt> operation, and then only after all processes have detached it from their address space.)</p><h5 class="docSection3Title" id="title-ID0E3PDM">50.2.1.2. Locking and unlocking memory regions</h5><p class="docText">A process can use <span class="docEmphasis">mlock()</span> and <span class="docEmphasis">munlock()</span> to lock and unlock regions of memory.</p><pre>#include &lt;sys/mman.h&gt;
+
+int <b>mlock</b>(void *<span class="docEmphasis">addr</span>, size_t <span class="docEmphasis">length</span>);
+int <b>munlock</b>(void *<span class="docEmphasis">addr</span>, size_t <span class="docEmphasis">length</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Both return 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">mlock()</span> system call locks all of the pages of the calling process’s virtual address range starting at <span class="docEmphasis">addr</span> and continuing for <span class="docEmphasis">length</span> bytes. Unlike the corresponding argument passed to several other memory-related system calls, <span class="docEmphasis">addr</span> does not need to be page-aligned: the kernel locks pages starting at the next page boundary below <span class="docEmphasis">addr</span>. However, SUSv3 optionally allows an implementation to require that <span class="docEmphasis">addr</span> be a multiple of the system page size, and portable applications should ensure that this is so when calling <span class="docEmphasis">mlock()</span> and <span class="docEmphasis">munlock()</span>.</p><p class="docText">Because locking is done in units of whole pages, the end of the locked region is the next page boundary greater than <span class="docEmphasis">length</span> plus <span class="docEmphasis">addr</span>. For example, on a system where the page size is 4096 bytes, the call <span class="docEmphasis">mlock(2000, 4000)</span> will lock bytes 0 through to 8191.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">We can find out how much memory a process currently has locked by inspecting the <tt>VmLck</tt> entry of the Linux-specific <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/status</tt> file.</p><hr noshade="noshade" size="1"/><p class="docText">After a successful <span class="docEmphasis">mlock()</span> call, all of the pages in the specified range are guaranteed to be locked and resident in physical memory. The <span class="docEmphasis">mlock()</span> system call fails if there is insufficient physical memory to lock all of the requested pages or if the request violates the <tt>RLIMIT_MEMLOCK</tt> soft resource limit.</p><p class="docText">We show an example of the use of <span class="docEmphasis">mlock()</span> in Example 50-2.</p><p class="docText">The <span class="docEmphasis">munlock()</span> system call performs the converse of <span class="docEmphasis">mlock()</span>, removing a memory lock previously established by the calling process. The <span class="docEmphasis">addr</span> and <span class="docEmphasis">length</span> arguments are interpreted in the same way as for <span class="docEmphasis">munlock()</span>.
+ Unlocking a set of pages doesn’t guarantee that they cease to be 
+memory-resident: pages are removed from RAM only in response to memory 
+demands by other processes.</p><p class="docText">Aside from the explicit use of <span class="docEmphasis">munlock()</span>, memory locks are automatically removed in the following circumstances:</p><ul><li><p class="docList">on process termination;</p></li><li><p class="docList">if the locked pages are unmapped via <span class="docEmphasis">munmap()</span>; or</p></li><li><p class="docList">if the locked pages are overlaid using the <span class="docEmphasis">mmap()</span> <tt>MAP_FIXED</tt> flag.</p></li></ul><h5 class="docSection3Title" id="title-ID0EFVDM">50.2.1.3. Details of the semantics of memory locking</h5><p class="docText">In the following paragraphs, we note some details of the semantics of memory locks.</p><p class="docText">Memory locks are not inherited by a child created via <span class="docEmphasis">fork()</span>, and are not preserved across an <span class="docEmphasis">exec()</span>.</p><p class="docText">Where multiple processes share a set of pages (e.g., a <tt>MAP_SHARED</tt> mapping), these pages remain locked in memory as long as at least one of the processes holds a memory lock on the pages.</p><p class="docText">Memory locks don’t nest for a single process. If a process repeatedly calls <span class="docEmphasis">mlock()</span> on a certain virtual address range, only one lock is established, and this lock will be removed by a single call to <span class="docEmphasis">munlock()</span>. On the other hand, if we use <span class="docEmphasis">mmap()</span>
+ to map the same set of pages (i.e., the same file) at several different
+ locations within a single process, and then lock each of these 
+mappings, the pages remain locked in RAM until all of the mappings have 
+been unlocked.</p><p class="docText">The fact
+ that memory locks are performed in units of pages and can’t be nested 
+means that it isn’t logically correct to independently apply <span class="docEmphasis">mlock()</span> and <span class="docEmphasis">munlock()</span>
+ calls to different data structures on the same virtual page. For 
+example, suppose we have two data structures within the same virtual 
+memory page pointed to by pointers <span class="docEmphasis">p1</span> and <span class="docEmphasis">p2</span>, and we make the following calls:</p><pre>mlock(*p1, len1);
+mlock(*p2, len2);               /* Actually has no effect */
+munlock(*p1, len1);</pre><br/>
+<p class="docText">All of the above calls will 
+succeed, but at the end of this sequence, the entire page is unlocked; 
+that is, the data structure pointed to by <span class="docEmphasis">p2</span> is not locked into memory.</p><p class="docText">Note that the semantics of the <span class="docEmphasis">shmctl()</span> <tt>SHM_LOCK</tt> operation (Section 48.7) differ from those of <span class="docEmphasis">mlock()</span> and <span class="docEmphasis">mlockall()</span>, as follows:</p><ul><li><p class="docList">After a <tt>SHM_LOCK</tt> operation, pages are locked into memory only as they are faulted in by subsequent references. By contrast, <span class="docEmphasis">mlock()</span> and <span class="docEmphasis">mlockall()</span> fault all of the locked pages into memory before the call returns.</p></li><li><p class="docList">The <tt>SHM_LOCK</tt> operation sets a property of the shared memory segment, rather than the process. (For this reason, the value in the <tt>/proc/</tt><span class="docEmphasis">PID</span><tt>/status VmLck</tt> field doesn’t include the size of any attached System V shared memory segments that have been locked using <tt>SHM_LOCK</tt>.)
+ This means that, once faulted into memory, the pages remain resident 
+even if all processes detach the shared memory segment. By contrast, a 
+region locked into memory using <span class="docEmphasis">mlock()</span> (or <span class="docEmphasis">mlockall()</span>) remains locked only as long as at least one process holds a lock on the region.</p></li></ul><h5 class="docSection3Title" id="title-ID0EBYDM">50.2.1.4. Locking and unlocking all of a process’s memory</h5><p class="docText">A process can use <span class="docEmphasis">mlockall()</span> and <span class="docEmphasis">munlockall()</span> to lock and unlock all of its memory.</p><pre>#include &lt;sys/mman.h&gt;
+
+int <b>mlockall</b>(int <span class="docEmphasis">flags</span>);
+int <b>munlockall</b>(void);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Both return 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">mlockall()</span>
+ system call locks all of the currently mapped pages in a process’s 
+virtual address space, all of the pages mapped in the future, or both, 
+according to the <span class="docEmphasis">flags</span> bit mask, which is specified by ORing together one or both of the following constants:</p><dl class="docList"><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MCL_CURRENT</span></span></span></p></dt><dd><p class="docList">Lock
+ all pages that are currently mapped into the calling process’s virtual 
+address space. This includes all pages currently allocated for the 
+program text, data segments, memory mappings, and the stack. After a 
+successful call specifying the <tt>MCL_CURRENT</tt>
+ flag, all of the pages of the calling process are guaranteed to be 
+memory-resident. This flag doesn’t affect pages that are subsequently 
+allocated in the process’s virtual address space; for this, we must use <tt>MCL_FUTURE</tt>.</p></dd><dt><br/><p><span class="docPubcolor"><span class="docPubcolor"><span class="docMonofont">MCL_FUTURE</span></span></span></p></dt><dd><p class="docList">Lock
+ all pages subsequently mapped into the calling process’s virtual 
+address space. Such pages may, for example, be part of a shared memory 
+region mapped via <span class="docEmphasis">mmap()</span> or <span class="docEmphasis">shmat()</span>, or part of the upwardly growing heap or downwardly growing stack. As a consequence of specifying the <tt>MCL_FUTURE</tt> flag, a later memory allocation operation (e.g., <span class="docEmphasis">mmap()</span>, <span class="docEmphasis">sbrk()</span>, or <span class="docEmphasis">malloc()</span>) may fail, or stack growth may yield a <tt>SIGSEGV</tt> signal, if the system runs out of RAM to allocate to the process or the <tt>RLIMIT_MEMLOCK</tt> soft resource limit is encountered.</p></dd></dl><p class="docText">The same rules regarding the constraints, lifetime, and inheritance of memory locks created with <span class="docEmphasis">mlock()</span> also apply for memory locks created via <span class="docEmphasis">mlockall()</span>.</p><p class="docText">The <span class="docEmphasis">munlockall()</span> system call unlocks all of the pages of the calling process and undoes the effect of any previous <span class="docEmphasis">mlockall(MCL_FUTURE)</span> call. As with <span class="docEmphasis">munlock()</span>, unlocked pages are not guaranteed to be removed from RAM by this call.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Before Linux 2.6.9, privilege (<tt>CAP_IPC_LOCK</tt>) was required to call <span class="docEmphasis">munlockall()</span> (inconsistently, privilege was not required for <span class="docEmphasis">munlock()</span>). Since Linux 2.6.9, privilege is no longer required.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

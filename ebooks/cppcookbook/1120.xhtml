@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Recipe 11.19. Performing Arithmetic on Bitsets</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h3 class="docSection1Title" id="-100000">Recipe 11.19. Performing Arithmetic on Bitsets</h3>
+
+<h4 class="docSection2Title" id="title-ID0EIBAK">Problem</h4>
+<p class="docText">You want to perform basic
+
+ arithmetic and comparison operations
+on a set of bits as if it were a binary representation of an unsigned
+integer number.</p>
+
+<h4 class="docSection2Title" id="title-ID0EBCAK">Solution</h4>
+<p class="docText">The functions in Example 11-36 provide functions that
+allow arithmetic and comparison of <tt>bitset</tt> class
+template from the <tt>&lt;bitset&gt;</tt> header as if it
+represents an unsigned integer.</p>
+<h5 class="docExampleTitle" id="title-ID0ESCAK">Example 11-36. bitset_arithmetic.hpp</h5><p></p><div class="box">
+<pre class="preFixedHeight">#include &lt;stdexcept&gt;
+#include &lt;bitset&gt;
+
+bool fullAdder(bool b1, bool b2, bool&amp; carry) {
+  bool sum = (b1 ^ b2) ^ carry;
+  carry = (b1 &amp;&amp; b2) || (b1 &amp;&amp; carry) || (b2 &amp;&amp; carry);
+  return sum;
+}
+
+bool fullSubtractor(bool b1, bool b2, bool&amp; borrow) {
+  bool diff;
+  if (borrow) {
+    diff = !(b1 ^ b2);
+    borrow = !b1 || (b1 &amp;&amp; b2);
+  }
+  else {
+    diff = b1 ^ b2;
+    borrow = !b1 &amp;&amp; b2;
+  }
+  return diff;
+}
+
+template&lt;unsigned int N&gt;
+bool bitsetLtEq(const std::bitset&lt;N&gt;&amp; x, const std::bitset&lt;N&gt;&amp; y)
+{
+  for (int i=N-1; i &gt;= 0; i--) {
+    if (x[i] &amp;&amp; !y[i]) return false;
+    if (!x[i] &amp;&amp; y[i]) return true;
+  }
+  return true;
+}
+
+template&lt;unsigned int N&gt;
+bool bitsetLt(const std::bitset&lt;N&gt;&amp; x, const std::bitset&lt;N&gt;&amp; y)
+{
+  for (int i=N-1; i &gt;= 0; i--) {
+    if (x[i] &amp;&amp; !y[i]) return false;
+    if (!x[i] &amp;&amp; y[i]) return true;
+  }
+  return false;
+}
+
+template&lt;unsigned int N&gt;
+bool bitsetGtEq(const std::bitset&lt;N&gt;&amp; x, const std::bitset&lt;N&gt;&amp; y)
+{
+  for (int i=N-1; i &gt;= 0; i--) {
+    if (x[i] &amp;&amp; !y[i]) return true;
+    if (!x[i] &amp;&amp; y[i]) return false;
+  }
+  return true;
+}
+
+template&lt;unsigned int N&gt;
+bool bitsetGt(const std::bitset&lt;N&gt;&amp; x, const std::bitset&lt;N&gt;&amp; y)
+{
+  for (int i=N-1; i &gt;= 0; i--) {
+    if (x[i] &amp;&amp; !y[i]) return true;
+    if (!x[i] &amp;&amp; y[i]) return false;
+  }
+  return false;
+}
+
+template&lt;unsigned int N&gt;
+void bitsetAdd(std::bitset&lt;N&gt;&amp; x, const std::bitset&lt;N&gt;&amp; y)
+{
+  bool carry = false;
+  for (int i = 0; i &lt; N; i++) {
+    x[i] = fullAdder(x[i], y[i], carry);
+  }
+}
+
+template&lt;unsigned int N&gt;
+void bitsetSubtract(std::bitset&lt;N&gt;&amp; x, const std::bitset&lt;N&gt;&amp; y) {
+  bool borrow = false;
+  for (int i = 0; i &lt; N; i++) {
+    if (borrow) {
+      if (x[i]) {
+        x[i] = y[i];
+        borrow = y[i];
+      }
+      else {
+        x[i] = !y[i];
+        borrow = true;
+      }
+    }
+    else {
+      if (x[i]) {
+        x[i] = !y[i];
+        borrow = false;
+      }
+      else {
+        x[i] = y[i];
+        borrow = y[i];
+      }
+    }
+  }
+}
+
+template&lt;unsigned int N&gt;
+void bitsetMultiply(std::bitset&lt;N&gt;&amp; x, const std::bitset&lt;N&gt;&amp; y)
+{
+  std::bitset&lt;N&gt; tmp = x;
+  x.reset( );
+
+  // we want to minimize the number of times we shift and add
+  if (tmp.count( ) &lt; y.count( )) {
+    for (int i=0; i &lt; N; i++)
+      if (tmp[i]) bitsetAdd(x, y &lt;&lt; i);
+  }
+  else {
+    for (int i=0; i &lt; N; i++)
+      if (y[i]) bitsetAdd(x, tmp &lt;&lt; i);
+  }
+}
+
+template&lt;unsigned int N&gt;
+void bitsetDivide(std::bitset&lt;N&gt; x, std::bitset&lt;N&gt; y,
+  std::bitset&lt;N&gt;&amp; q, std::bitset&lt;N&gt;&amp; r)
+{
+  if (y.none( )) {
+    throw std::domain_error("division by zero undefined");
+  }
+  q.reset( );
+  r.reset( );
+  if (x.none( )) {
+    return;
+  }
+  if (x == y) {
+    q[0] = 1;
+    return;
+  }
+  r = x;
+  if (bitsetLt(x, y)) {
+    return;
+  }
+
+  // count significant digits in divisor and dividend
+  unsigned int sig_x;
+  for (int i=N-1; i&gt;=0; i--) {
+    sig_x = i;
+    if (x[i]) break;
+  }
+  unsigned int sig_y;
+  for (int i=N-1; i&gt;=0; i--) {
+    sig_y = i;
+    if (y[i]) break;
+  }
+
+  // align the divisor with the dividend
+  unsigned int n = (sig_x - sig_y);
+  y &lt;&lt;= n;
+
+  // make sure the loop executes the right number of times
+  n += 1;
+
+  // long division algorithm, shift, and subtract
+  while (n--)
+  {
+    // shift the quotient to the left
+    if (bitsetLtEq(y, r))
+    {
+      // add a new digit to quotient
+      q[n] = true;
+      bitsetSubtract(r, y);
+    }
+    // shift the divisor to the right
+    y &gt;&gt;= 1;
+  }
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">Example 11-37 shows how you might use the
+<i>bitset_arithmetic.hpp</i> header file.</p>
+<h5 class="docExampleTitle" id="title-ID0EDDAK">Example 11-37. Using the bitset_arithmetic.hpp functions</h5><p></p><div class="box">
+<pre class="preFixedWidth">#include "bitset_arithmetic.hpp"
+
+#include &lt;bitset&gt;
+#include &lt;iostream&gt;
+#include &lt;string&gt;
+
+using namespace std;
+
+int main( ) {
+  bitset&lt;10&gt; bits1(string("100010001"));
+  bitset&lt;10&gt; bits2(string("000000011"));
+  bitsetAdd(bits1, bits2);
+  cout &lt;&lt; bits1.to_string&lt;char, char_traits&lt;char&gt;, allocator&lt;char&gt; &gt;( ) &lt;&lt; endl;
+}
+
+					  </pre><br/>
+</div><p></p>
+<p class="docText">The program in Example 11-37 produces the following
+output:</p>
+<pre>0100010100</pre><br/>
+
+<h4 class="docSection2Title" id="title-ID0EVDAK">Discussion</h4>
+<p class="docText">The <tt>bitset</tt> class template comes with basic
+operations for manipulating sets of bits but doesn't
+provide any arithmetic or comparion operations. This is because the
+library can't safely assume what kind of numerical
+type a programmer might expect an arbitrary set of bits to represent.</p>
+<p class="docText">The functions in Example 11-36 treat a
+<tt>bitset</tt> as a representation of an unsigned integer
+type, and provide you with functions for adding, subtracting,
+multiplying, dividing, and comparing them. These functions can
+provide a basis for writing custom-sized integer types, and are used
+for such a purpose in Recipe 11.20.</p>
+<p class="docText">I did not use the most efficient algorithms I could for Example 11-36. Instead I chose the simplest possible
+algorithms because they are more easily understood. A much more
+efficient implementation would
+
+ use similar algorithms, but would
+operate on words rather than single bits.</p>
+
+<h4 class="docSection2Title" id="title-ID0EEFAK">See Also</h4>
+<p class="docText">Recipe 11.20</p>
+</div>
+</body>
+</html>

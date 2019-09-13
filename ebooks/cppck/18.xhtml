@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 18. Function Objects</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 18. Function Objects</h2>
+		
+<p class="docText">Often
+ you’ll need something that behaves like a function pointer, but 
+function pointers tend to be unwieldy, dangerous, and (let’s admit it) 
+passé. Often the best approach is to use a function object instead of a 
+function pointer.</p>
+		
+<p class="docText">A function object, like a smart pointer (see <span class="docEmphasis">Smart Pointers</span> [42, 145]) is an ordinary class object. Whereas a smart pointer type overloads the <tt>-&gt;</tt> and <tt>*</tt> (and possibly <tt>-&gt;*</tt>) operators to mimic a “pointer on steroids,” a function object type overloads the function call operator, <tt>()</tt>,
+ to create a “function pointer on steroids.” Consider the following 
+function object that computes the next element in the well-known 
+Fibonacci series (1, 1, 2, 3, 5, 8, 13, ...) with each call:</p>
+		
+<div class="docText">
+  <pre>class Fib {
+  public:
+    Fib() : a0_(1), a1_(1) {}
+    int operator ();
+  private:
+    int a0_, a1_;
+};
+int Fib::operator () {
+    int temp = a0_;
+    a0_ = a1_;
+    a1_ = temp + a0_;
+    return temp;
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">A function object is just a regular class object, but you can call its <tt>operator ()</tt> member (or members, if there is more than one) with standard function call syntax.</p>
+		
+<div class="docText">
+  <pre>Fib fib;
+//...
+cout &lt;&lt; "next two in series: " &lt;&lt; fib()
+     &lt;&lt; ' ' &lt;&lt; fib() &lt;&lt; endl;
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The syntax <tt>fib()</tt> is recognized by the compiler as a member function call to the <tt>operator ()</tt> member of <tt>fib</tt>, identical in meaning to <tt>fib.operator()</tt>
+ but presumably easier on the eye. The advantage in this case of using a
+ function object in preference to a function or a pointer to a function 
+is that the state required to compute the next number in the Fibonacci 
+series is stored within the <tt>Fib</tt> object 
+itself. A function implementation would have to resort to global or 
+local static variables or some other base trickery to retain state 
+between invocations of the function, or the information would have to be
+ passed to the function explicitly. Also note that unlike a function 
+that uses static data, we can have multiple, simultaneous <tt>Fib</tt> objects whose calculations do not interfere with each other.</p>
+		
+<div class="docText">
+  <pre>int fibonacci () {
+<span class="docEmphMark">    static int a0 = 0, a1 = 1; // problematic...                      </span>
+    int temp = a0;
+    a0 = a1;
+    a1 = temp + a0;
+    return temp;
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">It’s also possible and 
+common to create the effect of a virtual function pointer by creating a 
+function object hierarchy with a virtual <tt>operator ()</tt>. Consider a numeric integration facility that calculates an approximation of the area under a curve, as shown in Figure 5.</p>
+		
+<p/>
+<center>
+			<h5>Figure 5. Numeric integration by summing areas of rectangles (simplified)</h5>
+			<p class="docText"/><div class="st1">[View full size image]</div><img id="" src="Images/getfile-3.gif" alt="" height="182" width="500" border="0"/><p/>
+		</center>
+<p/>
+<br/>
+		
+<p class="docText">Our integration function will iteratively call a function for values between <tt>low</tt> and <tt>high</tt> in order to approximate the area under the curve as a sum of the areas of rectangles (or some similar mechanism).</p>
+		
+<div class="docText">
+  <pre>typedef double (*F)( double );
+double integrate( F f, double low, double high ) {
+    const int numsteps = 8;
+    double step = (high-low)/numSteps;
+    double area = 0.0;
+    while( low &lt; high ) {
+        area += f( low ) * step;
+        low += step;
+    }
+    return area;
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">In this version, we pass a pointer to the function over which we want to integrate.</p>
+		
+<div class="docText">
+  <pre>double aFunc( double x ) { ... }
+//...
+double area = integrate( aFunc, 0.0, 2.71828 );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This works, but it’s 
+inflexible because it uses a function pointer to indicate the function 
+to be integrated; it can’t handle functions that require state or 
+pointers to member functions. An alternative is to create a function 
+object hierarchy. The base of the hierarchy is a simple interface class 
+that declares a pure virtual <tt>operator ()</tt>.</p>
+		
+<div class="docText">
+  <pre>class Func {
+  public:
+    virtual ~Func();
+    virtual double operator ()( double ) = 0;
+};
+double integrate( Func &amp;f, double low, double high );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Now <tt>integrate</tt> is capable of integrating any type of function object that is-a <tt>Func</tt> (see <span class="docEmphasis">Polymorphism</span> [2, 3]). It’s also interesting to note that the body of <tt>integrate</tt>
+ does not have to change at all (though it does require recompilation), 
+because we use the same syntax to call a function object as we do for a pointer to function. For example, we can derive a type of <tt>Func</tt> that can handle non-member functions:</p>
+		
+<div class="docText">
+  <pre>class NMFunc : public Func {
+  public:
+    NMFunc( double (*f)( double ) ) : f_(f) {}
+    double operator ()( double d ) { return f_( d ); }
+  private:
+    double (*f_)( double );
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">This allows us to integrate all the functions of our original version:</p>
+		
+<div class="docText">
+  <pre>double aFunc( double x ) { ... }
+//...
+NMFunc g( aFunc );
+double area = integrate( g, 0.0, 2.71828 );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">We can also integrate 
+member functions by wrapping an appropriate interface around a pointer 
+to member function and a class object (see <span class="docEmphasis">Pointers to Member Functions Are Not Pointers</span> [16, 57]):</p>
+		
+<div class="docText">
+  <pre>template &lt;class C&gt;
+class MFunc : public Func {
+  public:
+    MFunc( C &amp;obj, double (C::*f)(double) )
+        : obj_(obj), f_(f) {}
+    double operator ()( double d )
+        { return (obj_.*f_)( d ); }
+private:
+    C &amp;obj_;
+    double (C::*f_)( double );
+};
+//...
+AClass anObj;
+MFunc&lt;AClass&gt; f( anObj, &amp;AClass::aFunc );
+double area = integrate( f, 0.0, 2.71828 );
+</pre>
+</div>
+<br/>
+		
+
+
+</body>
+</html>

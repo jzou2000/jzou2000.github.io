@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 60. Generic Algorithms</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 60. Generic Algorithms</h2>
+		
+<p class="docText">A
+ generic algorithm is a function template that is designed in such a way
+ that it can be easily and effectively customized at compile time 
+according to the context of its use. Let’s look at a function template 
+that doesn’t meet these exacting standards and is therefore not a proper
+ generic algorithm:</p>
+		
+<div class="docText">
+  <pre>				<span class="docEmphMark">template &lt;typename T&gt;                                            </span>
+				<span class="docEmphMark">void slowSort( T a[], int len ) {                                </span>
+				<span class="docEmphMark">    for( int i = 0; i &lt; len; ++i ) // For each pair              </span>
+				<span class="docEmphMark">        for( int j = i; j &lt; len; ++j )                           </span>
+				<span class="docEmphMark">            if( a[j] &lt; a[i] ) { // ...if out of order...         </span>
+				<span class="docEmphMark">                T tmp( a[j] ); // ...swap them.                  </span>
+				<span class="docEmphMark">                a[j] = a[i];                                     </span>
+				<span class="docEmphMark">                a[i] = tmp;                                      </span>
+				<span class="docEmphMark">            }                                                    </span>
+				<span class="docEmphMark">}                                                                </span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">This template can be used to sort an array of objects, provided that the objects can be compared with a <tt>&lt;</tt> operator and copied. For example, we can sort an array of our <tt>String</tt> objects from <span class="docEmphasis">Assignment and Initialization Are Different</span> [12, 41]:</p>
+		
+<div class="docText">
+  <pre>String names[] = { "my", "dog", "has", "fleece" };
+const int namesLen = sizeof(names)/sizeof(names[0]);
+slowSort( names, namesLen ); // sorts...eventually!
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The first complaint one might make concerning <tt>slowSort</tt> is that it can be slow. That observation is correct, but let’s forgive <tt>slowSort</tt> its O(n<sup>2</sup>) runtime and concentrate instead on aspects of its generic design.</p>
+		
+<p class="docText">The first observation we can make is that our implementation of swap in <tt>slowSort</tt> is not ideal for the <tt>String</tt> type (or many other types, for that matter). The <tt>String</tt> class has its own member <tt>swap</tt> that is both faster and more exception safe than a swap that is accomplished by copying through a temporary <tt>String</tt>. A better implementation approach is simply to say what we mean:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T&gt;
+void slowSort( T a[], int len ) {
+    for( int i = 0; i &lt; len; ++i ) // For each pair
+        for( int j = i; j &lt; len; ++j )
+            if( a[j] &lt; a[i] ) // ...if out of order...
+                swap( a[j], a[i] ); // ...swap them.
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">We’re still not calling <tt>String</tt>’s <tt>swap</tt> member function, but if the author of the <tt>String</tt> class has it together, there will be a nonmember <tt>swap</tt> available that will:</p>
+		
+<div class="docText">
+  <pre>inline void swap( String &amp;a, String &amp;b )
+    { a.swap( b ); }
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Suppose there is no such nonmember <tt>swap</tt> available? In that case, we’ll be no worse off because one way or another we’ll end up calling the standard library <tt>swap</tt>, which does precisely the same thing we hand-coded in the original version of <tt>slowSort</tt>. Actually, we’re still much better off than we were originally, because the new implementation of <tt>slowSort</tt> is shorter, simpler, and easier to understand. More important, if someone should eventually implement an efficient nonmember <tt>swap</tt> for <tt>String</tt>, we’ll pick up the improvement automatically. That’s the kind of code maintenance we can live with.</p>
+		
+<p class="docText">Now consider the use of <tt>&lt;</tt>
+ for comparing elements of the array. This is probably the most common 
+way one would like to sort an array (from smallest to largest), but we 
+may also want to sort in descending order or in some idiosyncratic 
+order. Further, there may be arrays of objects we’d like to sort that 
+either don’t support a <tt>&lt;</tt> operator or have several distinct candidates for a less-than-like operator. We’ve already seen such a type in <span class="docEmphasis">STL Function Objects</span> [20, 71]: the <tt>State</tt> class:</p>
+		
+<div class="docText">
+  <pre>class State {
+  public:
+   //...
+   int population() const;
+   float aveTempF() const;
+   //...
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Our approach in <span class="docEmphasis">STL Function Objects</span> [20, 71] was to implement functions and function objects that could be used in place of a <tt>&lt;</tt> operator, but this approach will work only if the generic algorithm has been designed to accept such an argument:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename T, typename Comp&gt;
+void slowSort( T a[], int len, Comp less ) {
+    for( int i = 0; i &lt; len; ++i ) // For each pair
+        for( int j = i; j &lt; len; ++j )
+           if( less( a[j], a[i] ) ) // ...if out of order...
+                swap( a[j], a[i] ); // ...swap them.
+}
+//...
+State states[50];
+//...
+slowSort( states, 50, PopComp() );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">If <tt>slowSort</tt>ing with <tt>&lt;</tt> is a very common operation, it might be a good idea to overload <tt>slowSort</tt> so that it can be called either with or without a special purpose comparison operation.</p>
+		
+<p class="docText">Finally, it’s always a good 
+idea to follow convention, and it’s a particularly good idea in the case
+ of generic algorithms. We can also justifiably criticize <tt>slowSort</tt>
+ for restricting the argument it sorts to be an array, since there are 
+many other kinds of containers or data structures that we might like to 
+sort. When in doubt, copy the standard:</p>
+		
+<div class="docText">
+  <pre>template &lt;typename For, typename Comp&gt;
+void slowSort( For b, For e, Comp less ) {
+    for( For i( b ); i != e; ++i ) // For each pair
+        for( For j( i ); j != e; ++j )
+            if( less( a[j], a[i] ) ) // ...if out of order...
+               swap( a[j], a[i] ); // ...swap them.
+}
+template &lt;typename For&gt;
+void slowSort( For b, For e ) {
+    for( For i( b ); i != e; ++i ) // For each pair
+        for( For j( i ); j != e; ++j )
+            if( a[j] &lt; a[i] ) // ...if out of order...
+                swap( a[j], a[i] ); // ...swap them.
+}
+//...
+std::list&lt;State&gt; states;
+//...
+slowSort( states.begin(), states.end(), PopComp() );
+slowSort( names, names+namesLen );
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Here
+ we’ve replaced our clunky array interface with a more standard and more
+ flexible STL compliant iterator interface. Now we can feel comfortable 
+calling <tt>slowSort</tt> a generic algorithm, rather than simply a function template.</p>
+		
+<p class="docText">One important lesson
+ of this example is that complex software design is nearly always a 
+group effort. As such, your code should be designed in such a way as to 
+leverage the expertise of your colleagues while remaining as immune as 
+possible to maintenance they perform on code that is not in your 
+control. Our improved <tt>slowSort</tt> 
+algorithm is a good example of such proper design. It performs a single,
+ well-understood operation at as high a conceptual level as possible. To
+ be precise, <tt>slowSort</tt> handles the 
+sorting algorithm and subcontracts swapping and comparison to others who
+ will do a better job. This approach allows you, the (supposed) sorting 
+expert, to augment your sorting expertise with the swapping expertise of
+ whoever designed the element type that is being sorted. The two of you 
+may never meet, but through proper design you can work together as 
+closely as if you shared the same workstation. Moreover, if improved 
+swap functionality should appear in the future, <tt>slowSort</tt>
+ will pick up the improvement automatically and probably without your 
+knowledge. As ever, ignorance is strength. (This is similar in flavor to
+ proper polymorphic design; see <span class="docEmphasis">Commands and Hollywood</span> [19, 67].)</p>
+		
+
+
+</body>
+</html>

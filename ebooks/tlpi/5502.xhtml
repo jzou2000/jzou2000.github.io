@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>55.2. File Locking with flock()</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent"><h3 class="docSection1Title" id="-100000">55.2. File Locking with <span class="docEmphasis">flock()</span></h3><p class="docText">Although <span class="docEmphasis">fcntl()</span> provides a superset of the functionality provided by <span class="docEmphasis">flock()</span>, we nevertheless describe <span class="docEmphasis">flock()</span> because it is still used in some applications, and because it differs from <span class="docEmphasis">fcntl()</span> in some of the semantics of inheritance and release of locks.</p><pre>#include &lt;sys/file.h&gt;
+
+int <b>flock</b>(int <span class="docEmphasis">fd</span>, int <span class="docEmphasis">operation</span>);</pre><br/>
+<hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Returns 0 on success, or -1 on error</p><hr noshade="noshade" size="1"/><p class="docText">The <span class="docEmphasis">flock()</span> system call places a single lock on an entire file. The file to be locked is specified via an open file descriptor passed in <span class="docEmphasis">fd</span>. The <span class="docEmphasis">operation</span> argument specifies one of the values <tt>LOCK_SH</tt>, <tt>LOCK_EX</tt>, or <tt>LOCK_UN</tt>, which are described in Table 55-1.</p><p class="docText">By default, <span class="docEmphasis">flock()</span> blocks if another process already holds an incompatible lock on a file. If we want to prevent this, we can OR (<tt>|</tt>) the value <tt>LOCK_NB</tt> into <span class="docEmphasis">operation</span>. In this case, if another process already holds an incompatible lock on the file, <span class="docEmphasis">flock()</span> doesn’t block, but instead returns -1, with <span class="docEmphasis">errno</span> set to <tt>EWOULDBLOCK</tt>.</p><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 55-1. Values for the <span class="docEmphasis">operation</span> argument of <span class="docEmphasis">flock()</span></h5></caption><colgroup span="2"><col></col><col></col></colgroup><thead><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Value</th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="bottom">Description</th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top"><tt>LOCK_SH</tt></td><td align="left" class="docTableCell" valign="top">Place a <span class="docEmphasis">shared</span> lock on the file referred to by <span class="docEmphasis">fd</span></td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>LOCK_EX</tt></td><td align="left" class="docTableCell" valign="top">Place an <span class="docEmphasis">exclusive</span> lock on the file referred to by <span class="docEmphasis">fd</span></td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>LOCK_UN</tt></td><td align="left" class="docTableCell" valign="top">Unlock the file referred to by <span class="docEmphasis">fd</span></td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>LOCK_NB</tt></td><td align="left" class="docTableCell" valign="top">Make a nonblocking lock request</td></tr></tbody></table><p></p><br/><p class="docText">Any
+ number of processes may simultaneously hold a shared lock on a file. 
+However, only one process at a time can hold an exclusive lock on a 
+file. (In other words, exclusive locks deny both exclusive and shared 
+locks by other processes.) Table 55-2 summarizes the compatibility rules for <span class="docEmphasis">flock()</span>
+ locks. Here, we assume that process A is the first to place the lock, 
+and the table indicates whether process B can then place a lock.</p><p></p><table border="1" cellspacing="0" width="100%"><caption><h5 class="docTableTitle">Table 55-2. Compatibility of <span class="docEmphasis">flock()</span> locking types</h5></caption><colgroup span="3"><col></col><col></col><col></col></colgroup><thead><tr><th align="center" class="docTableCell thead" rowspan="2" scope="col" style="text-align:center" valign="bottom">Process A</th><th align="center" class="docTableCell thead" colspan="2" scope="col" style="text-align:center" valign="top">Process B</th></tr><tr><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="top"><tt>LOCK_SH</tt></th><th align="left" class="docTableCell thead" scope="col" style="text-align:left" valign="top"><tt>LOCK_EX</tt></th></tr></thead><tbody><tr><td align="left" class="docTableCell" valign="top"><tt>LOCK_SH</tt></td><td align="left" class="docTableCell" valign="top">Yes</td><td align="left" class="docTableCell" valign="top">No</td></tr><tr><td align="left" class="docTableCell" valign="top"><tt>LOCK_EX</tt></td><td align="left" class="docTableCell" valign="top">No</td><td align="left" class="docTableCell" valign="top">No</td></tr></tbody></table><p></p><br/><p class="docText">A process can place a shared or exclusive lock regardless of the access mode (read, write, or read-write) of the file.</p><p class="docText">An existing shared lock can be converted to an exclusive lock (and vice versa) by making another call to <span class="docEmphasis">flock()</span> specifying the appropriate value for <span class="docEmphasis">operation</span>. Converting a shared lock to an exclusive lock will block if another process holds a shared lock on the file, unless <tt>LOCK_NB</tt> was also specified.</p><p class="docText">A lock conversion is <span class="docEmphasis">not</span>
+ guaranteed to be atomic. During conversion, the existing lock is first 
+removed, and then a new lock is established. Between these two steps, 
+another process’s pending request for an incompatible lock may be 
+granted. If this occurs, then the conversion will block, or, if <tt>LOCK_NB</tt>
+ was specified, the conversion will fail and the process will lose its 
+original lock. (This behavior occurred in the original BSD <span class="docEmphasis">flock()</span> implementation and also occurs on many other UNIX implementations.)</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Although it is not part of SUSv3, <span class="docEmphasis">flock()</span> appears on most UNIX implementations. Some implementations require the inclusion of either <tt>&lt;fcntl.h&gt;</tt> or <tt>&lt;sys/fcntl.h&gt;</tt> instead of <tt>&lt;sys/file.h&gt;</tt>. Because <span class="docEmphasis">flock()</span> originates on BSD, the locks that it places are sometimes known as <span class="docEmphasis">BSD file locks</span>.</p><hr noshade="noshade" size="1"/><p class="docText">Example 55-1 demonstrates the use of <span class="docEmphasis">flock()</span>.
+ This program locks a file, sleeps for a specified number of seconds, 
+and then unlocks the file. The program takes up to three command-line 
+arguments. The first of these is the file to lock. The second specifies 
+the lock type (shared or exclusive) and whether or not to include the <tt>LOCK_NB</tt>
+ (nonblocking) flag. The third argument specifies the number of seconds 
+to sleep between acquiring and releasing the lock; this argument is 
+optional and defaults to 10 seconds.</p><h5 class="docExampleTitle" id="title-ID0E35EM">Example 55-1. Using <span class="docEmphasis">flock()</span></h5><p></p><div class="box"><pre class="preFixedHeight"><b>filelock/t_flock.c</b>
+#include &lt;sys/file.h&gt;
+#include &lt;fcntl.h&gt;
+#include "curr_time.h"                  /* Declaration of currTime() */
+#include "tlpi_hdr.h"
+
+int
+main(int argc, char *argv[])
+{
+    int fd, lock;
+    const char *lname;
+
+    if (argc &lt; 3 || strcmp(argv[1], "--help") == 0 ||
+            strchr("sx", argv[2][0]) == NULL)
+        usageErr("%s file lock [sleep-time]\n"
+                 "    'lock' is 's' (shared) or 'x' (exclusive)\n"
+                 "        optionally followed by 'n' (nonblocking)\n"
+                 "    'secs' specifies time to hold lock\n", argv[0]);
+
+    lock = (argv[2][0] == 's') ? LOCK_SH : LOCK_EX;
+    if (argv[2][1] == 'n')
+        lock |= LOCK_NB;
+
+    fd = open(argv[1], O_RDONLY);               /* Open file to be locked */
+    if (fd == -1)
+        errExit("open");
+
+    lname = (lock &amp; LOCK_SH) ? "LOCK_SH" : "LOCK_EX";
+
+    printf("PID %ld: requesting %s at %s\n", (long) getpid(), lname,
+            currTime("%T"));
+
+    if (flock(fd, lock) == -1) {
+        if (errno == EWOULDBLOCK)
+            fatal("PID %ld: already locked - bye!", (long) getpid());
+        else
+            errExit("flock (PID=%ld)", (long) getpid());
+    }
+
+    printf("PID %ld: granted    %s at %s\n", (long) getpid(), lname,
+            currTime("%T"));
+
+    sleep((argc &gt; 3) ? getInt(argv[3], GN_NONNEG, "sleep-time") : 10);
+
+    printf("PID %ld: releasing  %s at %s\n", (long) getpid(), lname,
+            currTime("%T"));
+    if (flock(fd, LOCK_UN) == -1)
+        errExit("flock");
+
+    exit(EXIT_SUCCESS);
+}
+    <b>filelock/t_flock.c</b>
+
+					  </pre><br/>
+</div><p></p><p class="docText">Using the program in Example 55-1, we can conduct a number of experiments to explore the behavior of <span class="docEmphasis">flock()</span>.
+ Some examples are shown in the following shell session. We begin by 
+creating a file, and then start an instance of our program that sits in 
+the background and holds a shared lock for 60 seconds:</p><pre>$ <b>touch tfile</b>
+$ <b>./t_flock tfile s 60 &amp;</b>
+[1] 9777
+PID 9777: requesting LOCK_SH at 21:19:37
+PID 9777: granted    LOCK_SH at 21:19:37</pre><br/>
+<p class="docText">Next, we start another instance of the program that successfully requests a shared lock and then releases it:</p><pre>$ <b>./t_flock tfile s 2</b>
+PID 9778: requesting LOCK_SH at 21:19:49
+PID 9778: granted    LOCK_SH at 21:19:49
+PID 9778: releasing  LOCK_SH at 21:19:51</pre><br/>
+<p class="docText">However, when we start 
+another instance of the program that makes a nonblocking requests for an
+ exclusive lock, the request immediately fails:</p><pre>$ <b>./t_flock tfile xn</b>
+PID 9779: requesting LOCK_EX at 21:20:03
+PID 9779: already locked - bye!</pre><br/>
+<p class="docText">When we start another 
+instance of the program that makes a blocking request for an exclusive 
+lock, the program blocks. When the background process that was holding a
+ shared lock for 60 seconds releases its lock, the blocked request is 
+granted:</p><pre>$ <b>./t_flock tfile x</b>
+PID 9780: requesting LOCK_EX at 21:20:21
+PID 9777: releasing  LOCK_SH at 21:20:37
+PID 9780: granted    LOCK_EX at 21:20:37
+PID 9780: releasing  LOCK_EX at 21:20:47</pre><br/>
+<h4 class="docSection2Title" id="title-ID0ETAFM">55.2.1. Semantics of Lock Inheritance and Release</h4><p class="docText">As shown in Table 55-1, we can release a file lock via an <span class="docEmphasis">flock()</span> call that specifies <span class="docEmphasis">operation</span> as <tt>LOCK_UN</tt>.
+ In addition, locks are automatically released when the corresponding 
+file descriptor is closed. However, the story is more complicated than 
+this. A file lock obtained via <span class="docEmphasis">flock()</span> is associated with the open file description (Section 5.4), rather than the file descriptor or the file (i-node) itself. This means that when a file descriptor is duplicated (via <span class="docEmphasis">dup()</span>, <span class="docEmphasis">dup2()</span>, or an <span class="docEmphasis">fcntl()</span> <tt>F_DUPFD</tt>
+ operation), the new file descriptor refers to the same file lock. For 
+example, if we have obtained a lock on the file referred to by <span class="docEmphasis">fd</span>, then the following code (which omits error checking) releases that lock:</p><pre>flock(fd, LOCK_EX);               /* Gain lock via 'fd' */
+newfd = dup(fd);                  /* 'newfd' refers to same lock as 'fd' */
+flock(newfd, LOCK_UN);            /* Frees lock acquired via 'fd' */</pre><br/>
+<p class="docText">If we have acquired a 
+lock via a particular file descriptor, and we create one or more 
+duplicates of that descriptor, then—if we don’t explicitly perform an 
+unlock operation--the lock is released only when all of the duplicate 
+descriptors have been closed.</p><p class="docText">However, if we use <span class="docEmphasis">open()</span>
+ to obtain a second file descriptor (and associated open file 
+description) referring to the same file, this second descriptor is 
+treated independently by <span class="docEmphasis">flock()</span>. For example, a process executing the following code will block on the second <span class="docEmphasis">flock()</span> call:</p><pre>fd1 = open("a.txt", O_RDWR);
+fd2 = open("a.txt", O_RDWR);
+flock(fd1, LOCK_EX);
+flock(fd2, LOCK_EX);              /* Locked out by lock on 'fd1' */</pre><br/>
+<p class="docText">Thus, a process can lock itself out of a file using <span class="docEmphasis">flock()</span>. As we’ll see later, this can’t happen with record locks obtained by <span class="docEmphasis">fcntl()</span>.</p><p class="docText">When we create a child process using <span class="docEmphasis">fork()</span>, that child obtains duplicates of its parent’s file descriptors, and, as with descriptors duplicated via <span class="docEmphasis">dup()</span>
+ and so on, these descriptors refer to the same open file descriptions 
+and thus to the same locks. For example, the following code causes a 
+child to remove a parent’s lock:</p><pre>flock(fd, LOCK_EX);               /* Parent obtains lock */
+if (fork() == 0)                  /* If child... */
+    flock(fd, LOCK_UN);           /* Release lock shared with parent */</pre><br/>
+<p class="docText">These semantics can 
+sometimes be usefully exploited to (atomically) transfer a file lock 
+from a parent process to a child process: after the <span class="docEmphasis">fork()</span>,
+ the parent closes its file descriptor, and the lock is under sole 
+control of the child process. As we’ll see later, this isn’t possible 
+using record locks obtained by <span class="docEmphasis">fcntl()</span>.</p><p class="docText">Locks created by <span class="docEmphasis">flock()</span> are preserved across an <span class="docEmphasis">exec()</span>
+ (unless the close-on-exec flag was set for the file descriptor and that
+ file descriptor was the last one referencing the underlying open file 
+description).</p><p class="docText">The Linux semantics described above conform to the classical BSD implementation of <span class="docEmphasis">flock()</span>. On some UNIX implementations, <span class="docEmphasis">flock()</span> is implemented using <span class="docEmphasis">fcntl()</span>, and we’ll see later that the inheritance and release semantics of <span class="docEmphasis">fcntl()</span> locks differ from those of <span class="docEmphasis">flock()</span> locks. Because the interactions between locks created by <span class="docEmphasis">flock()</span> and <span class="docEmphasis">fcntl()</span> are undefined, an application should use only one of these locking methods on a file.</p><h4 class="docSection2Title" id="title-ID0EYDFM">55.2.2. Limitations of <span class="docEmphasis">flock()</span></h4><p class="docText">Placing locks with <span class="docEmphasis">flock()</span> suffers from a number of limitations:</p><ul><li><p class="docList">Only
+ whole files can be locked. Such coarse locking limits the potential for
+ concurrency among cooperating processes. If, for example, we have 
+multiple processes, each of which would like to simultaneously access 
+different parts of the same file, then locking via <span class="docEmphasis">flock()</span> would needlessly prevent these processes from operating concurrently.</p></li><li><p class="docList">We can place only advisory locks with <span class="docEmphasis">flock()</span>.</p></li><li><p class="docList">Many NFS implementations don’t recognize locks granted by <span class="docEmphasis">flock()</span>.</p></li></ul><p class="docText">All of these limitations are addressed by the locking scheme implemented by <span class="docEmphasis">fcntl()</span>, which we describe in the next section.</p><hr noshade="noshade" size="1"/><p><span class="v2"><i><b>Note:</b></i></span></p><p class="docText">Historically, the Linux NFS server did not support <span class="docEmphasis">flock()</span> locks. Since kernel 2.6.12, the Linux NFS server supports <span class="docEmphasis">flock()</span> locks by implementing them as an <span class="docEmphasis">fcntl()</span>
+ lock on the entire file. This can cause some strange effects when 
+mixing BSD locks on the server and BSD locks on the client: the clients 
+usually won’t see the server’s locks, and vice versa.</p><hr noshade="noshade" size="1"/>
+</div>
+</body>
+</html>

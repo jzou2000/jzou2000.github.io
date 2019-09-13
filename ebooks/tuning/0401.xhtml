@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Chapter 4. Memory Management Debugging</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ <div class="htmlcontent">
+<h2 class="docChapterTitle" id="title-ID0EJ5AE">Chapter 4. Memory Management Debugging</h2>
+<p class="docText">In this chapter</p>
+<p></p><table cellpadding="5" cellspacing="0" frame="void" rules="none"><colgroup align="left" span="3"><col width="10"></col><col width="300"></col><col width="200"></col></colgroup><thead></thead><tbody><tr><td align="left" class="docTableCell" valign="top">▪</td><td align="left" class="docTableCell" valign="top">Dynamic Memory Functions</td><td align="left" class="docTableCell" valign="top">page 82</td></tr><tr><td align="left" class="docTableCell" valign="top">▪</td><td align="left" class="docTableCell" valign="top">MEMWATCH</td><td align="left" class="docTableCell" valign="top">page 84</td></tr><tr><td align="left" class="docTableCell" valign="top">▪</td><td align="left" class="docTableCell" valign="top">YAMD</td><td align="left" class="docTableCell" valign="top">page 86</td></tr><tr><td align="left" class="docTableCell" valign="top">▪</td><td align="left" class="docTableCell" valign="top">Electric Fence</td><td align="left" class="docTableCell" valign="top">page 93</td></tr><tr><td align="left" class="docTableCell" valign="top">▪</td><td align="left" class="docTableCell" valign="top">Valgrind</td><td align="left" class="docTableCell" valign="top">page 97</td></tr><tr><td align="left" class="docTableCell" valign="top">▪</td><td align="left" class="docTableCell" valign="top">Summary</td><td align="left" class="docTableCell" valign="top">page 109</td></tr><tr><td align="left" class="docTableCell" valign="top">▪</td><td align="left" class="docTableCell" valign="top">Web Resources for Memory Checkers</td><td align="left" class="docTableCell" valign="top">page 109</td></tr></tbody></table><p></p><br/>
+<p class="docText">Dynamic memory allocation seems straightforward enough: Memory is allocated on demand—using <span class="docEmphStrong">malloc()</span>
+ or one of its variants—and memory is freed when it’s no longer needed. 
+Memory management would be that easy if programmers never made mistakes.
+ Alas, we do make mistakes (from time to time), so memory management 
+problems do occur.</p>
+<p class="docText">For example, a <span class="docEmphasis">memory leak</span> occurs when memory is allocated but never freed. Leaks can obviously be caused by a <span class="docEmphStrong">malloc()</span> without a corresponding <span class="docEmphStrong">free()</span>, but leaks can also be inadvertently caused if a pointer to dynamically allocated memory is deleted, lost, or overwritten. <span class="docEmphasis">Memory corruption</span>
+ can occur when allocated (and in use) memory is overwritten 
+accidentally or when using statically allocated memory and stack 
+variables (especially if a pointer to stack-allocated memory is returned
+ to a calling method). Buffer overruns—caused by writing past the end of
+ a block of allocated memory—frequently corrupt memory.</p>
+<p class="docText">Regardless of the 
+root cause, memory management errors can have unexpected, even 
+devastating effects on application and system behavior. With dwindling 
+available memory, processes and entire systems can grind to a halt, 
+while corrupted memory often leads to spurious crashes. System security 
+is also susceptible to buffer overruns. Worse, it might take days before
+ evidence of a real problem appears. Today, it’s common for Linux 
+systems to have a gigabyte of main memory. If a program leaks a small 
+amount of memory, it takes some time before the application and system 
+show symptoms of a problem. Memory management errors can be quite 
+insidious and very difficult to find and fix.</p>
+<p class="docText">This chapter covers four 
+memory-management checkers: MEMWATCH, YAMD, Electric Fence, and 
+Valgrind. All these tools can help detect common memory management 
+errors. We’ll review the basics, write some “buggy” code, and then use 
+each of these tools to find the mistakes.</p>
+
+<h3 class="docSection1Title" id="-100000">Dynamic Memory Functions</h3>
+<p class="docText">Of all the library calls (libc) in Linux, only four manage memory: <span class="docEmphStrong">malloc()</span>, <span class="docEmphStrong">calloc()</span>, <span class="docEmphStrong">realloc()</span>, and <span class="docEmphStrong">free()</span>. All these functions have prototypes in the stdlib.h include file.</p>
+<p class="docText"><span class="docEmphStrong">malloc()</span> allocates a memory block that is uninitialized. Its prototype is</p>
+<div class="docText"><pre>void* malloc(size_t size)</pre></div><br/>
+<p class="docText">The single argument is the number of bytes of memory to allocate.</p>
+<p class="docText">If the allocation is successful, <span class="docEmphStrong">malloc()</span> returns a pointer to the memory. If memory allocation fails for some reason (for example, if the system is out of memory), <span class="docEmphStrong">malloc()</span> returns a NULL pointer.</p>
+<p class="docText"><span class="docEmphStrong">calloc()</span> allocates an array in memory and initializes all the memory to 0 (with <span class="docEmphStrong">malloc()</span>, the allocated memory is uninitialized). Here’s the prototype:</p>
+<div class="docText"><pre>void* calloc(size_t nmemb, size_t size)</pre></div><br/>
+<p class="docText">The first argument is the number of elements in the array, and the second argument is the size (in bytes) of each element. Like <span class="docEmphStrong">malloc()</span>, <span class="docEmphStrong">calloc()</span> returns a pointer if the memory allocation was successful, and NULL otherwise.</p>
+<p class="docText"><span class="docEmphStrong">realloc()</span> is defined as</p>
+<div class="docText"><pre>void* realloc (void *ptr, size_t size)</pre></div><br/>
+<p class="docText"><span class="docEmphStrong">realloc()</span> changes the size of the object referenced by the pointer to a new size specified by the second argument. <span class="docEmphStrong">realloc()</span> returns a pointer to the moved block of memory.</p>
+<p class="docText"><span class="docEmphStrong">free()</span> deallocates a memory block. It takes a pointer as an argument, as shown in its prototype, and releases that memory:</p>
+<div class="docText"><pre>void free (void *ptr),</pre></div><br/>
+<p class="docText">While the API for memory 
+management is unusually small, the number and kind of memory errors that
+ can occur are substantial. They include:</p>
+<ul><li><p class="docList">Reading and using uninitialized memory</p></li><li><p class="docList">Reading and writing memory after it has been freed</p></li><li><p class="docList">Reading and writing from memory after or in front of (underrun) the allocated size</p></li><li><p class="docList">Reading and writing inappropriate areas on the stack</p></li><li><p class="docList">Memory leaks</p></li></ul>
+<p class="docText">The
+ use of pointers can cause problems in all types of memory. In addition,
+ indexes into statically allocated arrays can cause corruption. Stack 
+issues can also cause problems with some compilers. Returning a pointer 
+to a stack variable in a function is a big no-no.</p>
+</div>
+</body>
+</html>

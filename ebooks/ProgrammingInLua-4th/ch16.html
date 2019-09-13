@@ -1,0 +1,687 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter 16. Compilation, Execution, and Errors</title><link type="text/css" rel="stylesheet" href="styles-generic-fd.css"></link><link type="text/css" rel="stylesheet" href="styles-book.css"></link><meta content="Feisty Duck Digital Delivery Service" name="generator"></meta><!--Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;--><!--FDMARKER:ONLINEHEADAPPEND--></head><body><div class="chapter" title="Chapter 16. Compilation, Execution, and Errors"><div class="titlepage"><div><h1><span class="partLabel">16</span> Compilation, Execution, and Errors</h1></div></div><p id="N132CC" style="text-indent: 0">
+Although we refer to Lua as an <a class="indexterm" id="N132CE"/>interpreted language,
+Lua always precompiles source code to an
+intermediate form before running it.
+(This is not a big deal:
+many interpreted languages do the same.)
+The presence of a <a class="indexterm" id="N132D2"/>compilation phase may sound out of place in
+an interpreted language.
+However, the distinguishing feature of interpreted languages
+is not that they are not compiled,
+but that it is possible (and easy) to execute
+code generated on the fly.
+We may say that the presence of a function
+like <a class="indexterm" id="N132D6"/><code class="function">dofile</code> is what entitles us
+to call Lua an interpreted language.
+</p><p id="N132DC" style="text-indent: 0">
+In this chapter,
+we will discuss in more details the process that Lua
+uses for running its chunks,
+what compilation means (and does),
+how Lua runs that compiled code,
+and how it handles errors in that process.
+</p><div class="sect1" title="Compilation"><div class="titlepage"><div><div><h2 class="title"><a id="compil"/>Compilation</h2></div></div></div><p id="N132E2" style="text-indent: 0">
+Previously, we introduced <a class="indexterm" id="N132E4"></a><code class="function">dofile</code> as a kind of primitive
+operation to run chunks of Lua code,
+but <a class="indexterm" id="N132EA"></a><code class="function">dofile</code> is actually an auxiliary function:
+the function <a class="indexterm" id="N132F0"></a><code class="function">loadfile</code> does the hard work.
+Like <a class="indexterm" id="N132F7"></a><code class="function">dofile</code>,
+<a class="indexterm" id="N132FD"></a><code class="function">loadfile</code> loads a Lua chunk from a file,
+but it does not run the chunk.
+Instead, it only compiles the chunk
+and returns the compiled chunk as a function.
+Moreover, unlike <a class="indexterm" id="N13303"></a><code class="function">dofile</code>,
+<a class="indexterm" id="N13309"></a><code class="function">loadfile</code> does not raise errors,
+but instead returns error codes.
+We could define <a class="indexterm" id="N1330F"></a><code class="function">dofile</code> as follows:
+</p><pre class="programlisting" id="N13315">      function dofile (filename)
+        local f = assert(loadfile(filename))
+        return f()
+      end
+</pre><p style="text-indent: 0">
+Note the use of <a class="indexterm" id="N13318"></a><code class="function">assert</code>
+to raise an error if <a class="indexterm" id="N1331E"></a><code class="function">loadfile</code> fails.
+</p><p id="N13324" style="text-indent: 0">
+For simple tasks,
+<a class="indexterm" id="N13326"/><code class="function">dofile</code> is handy,
+because it does the complete job in one call.
+However, <a class="indexterm" id="N1332C"/><code class="function">loadfile</code> is more flexible.
+In case of error,
+<a class="indexterm" id="N13332"/><code class="function">loadfile</code> returns nil plus the error message,
+which allows us to handle the error in customized ways.
+Moreover, if we need to run a file several times,
+we can call <a class="indexterm" id="N13338"/><code class="function">loadfile</code> once and
+call its result several times.
+This approach is much cheaper than several calls to <a class="indexterm" id="N1333E"/><code class="function">dofile</code>,
+because it compiles the file only once.
+(Compilation is a somewhat expensive operation
+when compared to other tasks in the language.)
+</p><p id="N13344" style="text-indent: 0">
+The function <a class="indexterm" id="N13346"></a><code class="function">load</code> is similar to <a class="indexterm" id="N1334D"></a><code class="function">loadfile</code>,
+except that it reads its chunk from a string or from a function,
+not from a file.<sup>[<a href="#ftn.N13353" id="N13353" class="footnote">16</a>]</sup>
+For instance, consider the next line:
+</p><pre class="programlisting" id="N13360">      f = load("i = i + 1")
+</pre><p style="text-indent: 0">
+After this code,
+<code class="literal">f</code> will be a function that
+executes <code class="literal">i = i + 1</code> when invoked:
+</p><pre class="programlisting" id="N13369">      i = 0
+      f(); print(i)   --&gt; 1
+      f(); print(i)   --&gt; 2
+</pre><p style="text-indent: 0">
+The function <a class="indexterm" id="N1336C"></a><code class="function">load</code> is powerful;
+we should use it with care.
+It is also an expensive function
+(when compared to some alternatives)
+and can result in incomprehensible code.
+Before you use it,
+make sure that there is no simpler way to solve the problem at hand.
+</p><p id="N13372" style="text-indent: 0">
+If we want to do a quick-and-dirty <code class="literal">dostring</code>
+(i.e., to load and run a chunk),
+we can call the result from <a class="indexterm" id="N13377"></a><code class="function">load</code> directly:
+</p><pre class="programlisting" id="N1337D">      load(s)()
+</pre><p style="text-indent: 0">
+However, if there is any syntax error,
+<a class="indexterm" id="N13380"></a><code class="function">load</code> will return nil
+and the final error message will be something like
+<em><span class="quote">“<span class="quote">attempt to call a nil value</span>”</span></em>.
+For clearer error messages,
+it is better to use <a class="indexterm" id="N1338A"></a><code class="function">assert</code>:
+</p><pre class="programlisting" id="N13390">      assert(load(s))()
+</pre><p style="text-indent: 0">
+</p><p id="N13393" style="text-indent: 0">
+Usually, it does not make sense to use <a class="indexterm" id="N13395"></a><code class="function">load</code>
+on a <a class="indexterm" id="N1339B"></a>literal string.
+For instance, the next two lines
+are roughly equivalent:
+</p><pre class="programlisting" id="N1339F">      f = load("i = i + 1")
+      
+      f = function () i = i + 1 end
+</pre><p style="text-indent: 0">
+However, the second line is much faster,
+because Lua compiles the function
+together with its enclosing chunk.
+In the first line,
+the call to <a class="indexterm" id="N133A2"></a><code class="function">load</code> involves a separate <a class="indexterm" id="N133A8"></a>compilation.
+</p><p id="N133AC" style="text-indent: 0">
+Because <a class="indexterm" id="N133AE"></a><code class="function">load</code> does not compile with <a class="indexterm" id="N133B4"></a>lexical scoping,
+the two lines in the previous example may not be truly equivalent.
+To see the difference, let us change the example a little:
+</p><pre class="programlisting" id="N133B8">      i = 32
+      local i = 0
+      f = load("i = i + 1; print(i)")
+      g = function () i = i + 1; print(i) end
+      f()             --&gt; 33
+      g()             --&gt; 1
+</pre><p style="text-indent: 0">
+The function <code class="literal">g</code> manipulates the local <code class="literal">i</code>, as expected,
+but <code class="literal">f</code> manipulates a global <code class="literal">i</code>,
+because <a class="indexterm" id="N133C7"></a><code class="function">load</code> always compiles its chunks in the global
+environment.
+</p><p id="N133CD" style="text-indent: 0">
+The most typical use of <a class="indexterm" id="N133CF"></a><code class="function">load</code> is to run external code
+(that is, pieces of code that come from outside our program)
+or dynamically-generated code.
+For instance, we may want to plot a function defined by the user;
+the user enters the function code
+and then we use <a class="indexterm" id="N133D5"></a><code class="function">load</code> to evaluate it.
+Note that <a class="indexterm" id="N133DB"></a><code class="function">load</code> expects a chunk, that is, statements.
+If we want to evaluate an expression,
+we can prefix the expression with <a class="indexterm" id="N133E1"></a><strong>return</strong>,
+so that we get a statement that
+returns the value of the given expression.
+See the example:
+</p><pre class="programlisting" id="N133EA">      print "enter your expression:"
+      local line = io.read()
+      local func = assert(load("return " .. line))
+      print("the value of your expression is " .. func())
+</pre><p style="text-indent: 0">
+</p><p id="N133ED" style="text-indent: 0">
+Because the function returned by <a class="indexterm" id="N133EF"></a><code class="function">load</code>
+is a regular function,
+we can call it several times:
+</p><pre class="programlisting" id="N133F5">      print "enter function to be plotted (with variable 'x'):"
+      local line = io.read()
+      local f = assert(load("return " .. line))
+      for i = 1, 20 do
+        x = i   -- global 'x' (to be visible from the chunk)
+        print(string.rep("*", f()))
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N133F8" style="text-indent: 0">
+We can call <a class="indexterm" id="N133FA"></a><code class="function">load</code> also with a
+<a class="indexterm" id="N13400"></a><em class="firstterm">reader function</em> as its first argument.
+A reader function can return the chunk in parts;
+<a class="indexterm" id="N13407"></a><code class="function">load</code> calls the reader successively until it returns nil,
+which signals the chunk’s end.
+As an example, the next call is equivalent to <a class="indexterm" id="N1340D"></a><code class="function">loadfile</code>:
+</p><pre class="programlisting" id="N13413">      f = load(io.lines(filename, "*L"))
+</pre><p style="text-indent: 0">
+As we saw in <a class="xref" href="ch07.html" title="Chapter 7. The External World">Chapter 7, <em>The External World</em></a>,
+the call <code class="literal">io.lines(filename, "*L")</code> returns a function that,
+at each call,
+returns a new line from the given file.
+So, <a class="indexterm" id="N1341C"></a><code class="function">load</code> will read the chunk from the file line by line.
+The following version is similar, but slightly more efficient:
+</p><pre class="programlisting" id="N13422">      f = load(io.lines(filename, 1024))
+</pre><p style="text-indent: 0">
+Here, the iterator returned by <a class="indexterm" id="N13425"></a><code class="function">io.lines</code> reads the
+file in blocks of 1024 bytes.
+</p><p id="N1342D" style="text-indent: 0">
+Lua treats any independent <a class="indexterm" id="N1342F"></a>chunk
+as the body of an anonymous variadic function.
+For instance, <code class="literal">load("a = 1")</code> returns the equivalent of
+the following expression:
+</p><pre class="programlisting" id="N13436">      function (...) a = 1 end
+</pre><p style="text-indent: 0">
+Like any other function,
+chunks can declare local variables:
+</p><pre class="programlisting" id="N13439">      f = load("local a = 10; print(a + 20)")
+      f()          --&gt; 30
+</pre><p style="text-indent: 0">
+Using these features,
+we can rewrite our plot example to avoid
+the use of a global variable <code class="literal">x</code>:
+</p><pre class="programlisting" id="N1343F">      print "enter function to be plotted (with variable 'x'):"
+      local line = io.read()
+      local f = assert(load("local x = ...; return " .. line))
+      for i = 1, 20 do
+        print(string.rep("*", f(i)))
+      end
+</pre><p style="text-indent: 0">
+In this code,
+we append the declaration <code class="literal">"local x = ..."</code>
+at the beginning of the chunk
+to declare <code class="literal">x</code> as a local variable.
+We then call <code class="literal">f</code> with an argument <code class="literal">i</code> that becomes the
+value of the <a class="indexterm" id="N1344E"></a>vararg expression (<a class="indexterm" id="N13452"></a><code class="literal">...</code>).
+</p><p id="N13458" style="text-indent: 0">
+The functions <a class="indexterm" id="N1345A"></a><code class="function">load</code> and <a class="indexterm" id="N13460"></a><code class="function">loadfile</code> never raise errors.
+In case of any kind of error,
+they return nil plus an error message:
+</p><pre class="programlisting" id="N13466">      print(load("i i"))
+        --&gt; nil     [string "i i"]:1: '=' expected near 'i'
+</pre><p style="text-indent: 0">
+Moreover, these functions never have any
+kind of side effect,
+that is, they do not change or create variables,
+do not write to files, etc.
+They only compile the chunk to an internal representation
+and return the result
+as an <a class="indexterm" id="N13469"></a>anonymous function.
+A common mistake is to assume that
+loading a chunk defines functions.
+In Lua, function definitions are assignments;
+as such, they happen at runtime, not at compile time.
+For instance, suppose we have a file <code class="literal">foo.lua</code> like this:
+</p><pre class="programlisting" id="N13470">      -- file 'foo.lua'
+      function foo (x)
+        print(x)
+      end
+</pre><p style="text-indent: 0">
+We then run the command
+</p><pre class="programlisting" id="N13473">      f = loadfile("foo.lua")
+</pre><p style="text-indent: 0">
+This command compiles <code class="literal">foo</code>
+but does not define it.
+To define it, we must run the chunk:
+</p><pre class="programlisting" id="N13479">      f = loadfile("foo.lua")
+      print(foo)    --&gt; nil
+      f()           -- run the chunk
+      foo("ok")     --&gt; ok
+</pre><p style="text-indent: 0">
+This behavior may sound strange,
+but it becomes clear if we rewrite the file
+without the syntax sugar:
+</p><pre class="programlisting" id="N1347C">      -- file 'foo.lua'
+      foo = function (x)
+        print(x)
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N1347F" style="text-indent: 0">
+In a production-quality program that needs to run external code,
+we should handle any errors reported when loading a chunk.
+Moreover,
+we may want to run the new chunk in a protected environment,
+to avoid unpleasant side effects.
+We will discuss environments in detail
+in <a class="xref" href="ch22.html" title="Chapter 22. The Environment">Chapter 22, <em>The Environment</em></a>.
+</p></div><div class="sect1" title="Precompiled Code"><div class="titlepage"><div><div><h2 class="title"><a id="precompiler"/>Precompiled Code</h2></div></div></div><p id="N13488" style="text-indent: 0">
+As I mentioned in the beginning of this chapter,
+Lua precompiles source code before running it.
+Lua also allows us to distribute code in precompiled form.
+</p><p id="N1348A" style="text-indent: 0">
+The simplest way to produce a precompiled file
+—also called a <a class="indexterm" id="N1348C"></a><em class="firstterm">binary chunk</em> in Lua jargon—
+is with the <a class="indexterm" id="N13493"></a><code class="function">luac</code> program
+that comes in the standard distribution.
+For instance, the next call creates a new file <code class="literal">prog.lc</code>
+with a precompiled version of a file <code class="literal">prog.lua</code>:
+</p><pre class="programlisting" id="N134A0">      $ luac -o prog.lc prog.lua
+</pre><p style="text-indent: 0">
+The Lua interpreter can execute
+this new file just like normal Lua code,
+performing exactly as it would with the original source:
+</p><pre class="programlisting" id="N134A3">      $ lua prog.lc
+</pre><p style="text-indent: 0">
+Lua accepts precompiled code
+mostly anywhere it accepts source code.
+In particular, both <a class="indexterm" id="N134A6"></a><code class="function">loadfile</code> and <a class="indexterm" id="N134AC"></a><code class="function">load</code>
+accept precompiled code.
+</p><p id="N134B2" style="text-indent: 0">
+We can write a minimal <code class="literal">luac</code> directly in Lua:
+</p><pre class="programlisting" id="N134B7">      p = loadfile(arg[1])
+      f = io.open(arg[2], "wb")
+      f:write(string.dump(p))
+      f:close()
+</pre><p style="text-indent: 0">
+The key function here is <a class="indexterm" id="N134BA"></a><code class="function">string.dump</code>:
+it receives a Lua function
+and returns its precompiled code as a string,
+properly formatted to be loaded back by Lua.
+</p><p id="N134C2" style="text-indent: 0">
+The <code class="literal">luac</code> program offers some other interesting options.
+In particular, option <code class="literal">-l</code> lists the <a class="indexterm" id="N134CA"></a>opcodes that the compiler
+generates for a given chunk.
+As an example,
+<a class="xref" href="ch16.html#luac-output" title="Figure 16.1. Example of output from luac -l">Figure 16.1, “Example of output from <code class="literal">luac</code> <code class="literal">-l</code>”</a> shows the output
+of <code class="literal">luac</code> with option <code class="literal">-l</code> on the following one-line file:
+</p><pre class="programlisting" id="N134D7">      a = x + y - z
+</pre><p style="text-indent: 0">
+</p><div class="figure-float"><div class="figure"><a id="luac-output"/><p class="title" style="text-indent: 0"><strong>Figure 16.1. Example of output from <code class="literal">luac</code> <code class="literal">-l</code></strong></p><div class="figure-contents"><pre class="programlisting" id="N134E4">      main &lt;stdin:0,0&gt; (7 instructions, 28 bytes at 0x988cb30)
+      0+ params, 2 slots, 0 upvalues, 0 locals, 4 constants, 0 functions
+          1  [1]  GETGLOBAL   0 -2    ; x
+          2  [1]  GETGLOBAL   1 -3    ; y
+          3  [1]  ADD         0 0 1
+          4  [1]  GETGLOBAL   1 -4    ; z
+          5  [1]  SUB         0 0 1
+          6  [1]  SETGLOBAL   0 -1    ; a
+          7  [1]  RETURN      0 1
+</pre></div></div></div><p style="text-indent: 0">
+
+(We will not discuss the internals of Lua in this book;
+if you are interested in more details about those <a class="indexterm" id="N134E7"></a>opcodes,
+a Web search for <code class="literal">"lua opcode"</code> should give you relevant material.)
+</p><p id="N134EE" style="text-indent: 0">
+Code in precompiled form is not always smaller than the original,
+but it loads faster.
+Another benefit is that it gives a protection against
+accidental changes in sources.
+Unlike source code, however,
+maliciously corrupted binary code
+can crash the Lua interpreter or even
+execute user-provided machine code.
+When running usual code, there is nothing to worry about.
+However, you should avoid running untrusted code in precompiled form.
+The function <a class="indexterm" id="N134F0"/><code class="function">load</code> has an option exactly for this task.
+</p><p id="N134F6" style="text-indent: 0">
+Besides its required first argument,
+<a class="indexterm" id="N134F8"/><code class="function">load</code> has three more arguments, all of them optional.
+The second is a name for the chunk,
+used only in error messages.
+The fourth argument is an environment,
+which we will discuss in <a class="xref" href="ch22.html" title="Chapter 22. The Environment">Chapter 22, <em>The Environment</em></a>.
+The third argument is the one we are interested here;
+it controls what kinds of chunks can be loaded.
+If present, this argument must be a string:
+the string <code class="literal">"t"</code> allows only textual (normal) chunks;
+<code class="literal">"b"</code> allows only binary (precompiled) chunks;
+<code class="literal">"bt"</code>, the default, allows both formats.
+</p></div><div class="sect1" title="Errors"><div class="titlepage"><div><div><h2 class="title"><a id="L166"/>Errors</h2></div></div></div><p id="N1350E" style="text-indent: 0">
+<em>Errare humanum est</em>.
+Therefore, we must handle errors the best way we can.
+Because Lua is an extension language,
+frequently embedded in an application,
+it cannot simply crash or exit when an error happens.
+Instead, whenever an error occurs,
+Lua must offer ways to handle it.
+</p><p id="N13513" style="text-indent: 0">
+Any unexpected condition that Lua encounters raises an error.
+Errors occur when a program tries to
+add values that are not numbers,
+call values that are not functions,
+index values that are not tables, and so on.
+(We can modify this behavior using <em>metatables</em>,
+as we will see later.)
+We can also explicitly raise an error calling
+the function <a class="indexterm" id="N13518"></a><code class="function">error</code>, with an error message as an argument.
+Usually, this function is the appropriate
+way to signal errors in our code:
+</p><pre class="programlisting" id="N1351F">      print "enter a number:"
+      n = io.read("n")
+      if not n then error("invalid input") end
+</pre><p style="text-indent: 0">
+This construction of calling <a class="indexterm" id="N13522"></a><code class="function">error</code> subject to some condition
+is so common that Lua has a built-in function just for this job,
+called <a class="indexterm" id="N13528"></a><code class="function">assert</code>:
+</p><pre class="programlisting" id="N1352F">      print "enter a number:"
+      n = assert(io.read("*n"), "invalid input")
+</pre><p style="text-indent: 0">
+The function <a class="indexterm" id="N13532"></a><code class="function">assert</code> checks
+whether its first argument is not false
+and simply returns this argument;
+if the argument is false,
+<a class="indexterm" id="N13538"></a><code class="function">assert</code> raises an error.
+Its second argument, the message, is optional.
+Beware, however, that <a class="indexterm" id="N1353E"></a><code class="function">assert</code> is a regular function.
+As such,
+Lua always evaluates its arguments before calling the function.
+If we write something like
+</p><pre class="programlisting" id="N13544">      n = io.read()
+      assert(tonumber(n), "invalid input: " .. n .. " is not a number")
+</pre><p style="text-indent: 0">
+Lua will always do the concatenation,
+even when <code class="literal">n</code> is a number.
+It may be wiser to use an explicit test in such cases.
+</p><p id="N1354A" style="text-indent: 0">
+When a function finds an unexpected situation
+(an <em>exception</em>),<a class="indexterm" id="N1354F"/>
+it can assume two basic behaviors:
+it can return an error code (typically nil or <strong>false</strong>)
+or it can raise an error,
+calling <a class="indexterm" id="N13557"/><code class="function">error</code>.
+There are no fixed rules for choosing between these two options,
+but I use the following guideline:
+an exception that is easily avoided should raise an error;
+otherwise, it should return an error code.
+</p><p id="N1355D" style="text-indent: 0">
+For instance, let us consider <a class="indexterm" id="N1355F"></a><code class="function">math.sin</code>.
+How should it behave when called on a table?
+Suppose it returns an error code.
+If we need to check for errors,
+we would have to write something like this:
+</p><pre class="programlisting" id="N13567">      local res = math.sin(x)
+      if not res then     -- error?
+        <em class="replaceable"><code>error-handling code</code></em>
+</pre><p style="text-indent: 0">
+However,
+we could as easily check this exception
+<em>before</em> calling the function:
+</p><pre class="programlisting" id="N13570">      if not tonumber(x) then     -- x is not a number?
+        <em class="replaceable"><code>error-handling code</code></em>
+</pre><p style="text-indent: 0">
+Frequently we check neither the argument
+nor the result of a call to <a class="indexterm" id="N13576"></a><code class="function">sin</code>;
+if the argument is not a number,
+it means that probably there is something wrong in our program.
+In such situations,
+the simplest and most practical way
+to handle the exception is
+to stop the computation and issue an error message.
+</p><p id="N1357E" style="text-indent: 0">
+On the other hand, let us consider <a class="indexterm" id="N13580"></a><code class="function">io.open</code>,
+which opens a file.
+How should it behave when asked to open a file that does not exist?
+In this case, there is no simple way to check for the exception
+before calling the function.
+In many systems,
+the only way of knowing whether a file exists is by trying to open it.
+Therefore,
+if <a class="indexterm" id="N13588"></a><code class="function">io.open</code> cannot open a file because of an external reason
+(such as <span class="quote">“<span class="quote">file does not exist</span>”</span> or <span class="quote">“<span class="quote">permission denied</span>”</span>),
+it returns false, plus a string with the error message.
+In this way, we have a chance to handle the situation in
+an appropriate way,
+for instance by asking the user for another file name:
+</p><pre class="programlisting" id="N13596">      local file, msg
+      repeat
+        print "enter a file name:"
+        local name = io.read()
+        if not name then return end   -- no input
+        file, msg = io.open(name, "r")
+        if not file then print(msg) end
+      until file
+</pre><p style="text-indent: 0">
+If we do not want to handle such situations,
+but still want to play safe,
+we simply use <a class="indexterm" id="N13599"></a><code class="function">assert</code> to guard the operation:
+</p><pre class="programlisting" id="N1359F">      file = assert(io.open(name, "r"))
+        --&gt; stdin:1: no-file: No such file or directory
+</pre><p style="text-indent: 0">
+This is a typical Lua idiom:
+if <a class="indexterm" id="N135A2"></a><code class="function">io.open</code> fails, <a class="indexterm" id="N135AA"></a><code class="function">assert</code> will raise an error.
+Notice how the error message,
+which is the second result from <a class="indexterm" id="N135B0"></a><code class="function">io.open</code>,
+goes as the second argument to <a class="indexterm" id="N135B8"></a><code class="function">assert</code>.
+</p></div><div class="sect1" title="Error Handling and Exceptions"><div class="titlepage"><div><div><h2 class="title"><a id="L167"/>Error Handling and Exceptions</h2></div></div></div><p id="N135C2" style="text-indent: 0">
+For many applications,
+we do not need to do any <a class="indexterm" id="N135C4"/>error handling in Lua;
+the application program does this handling.
+All Lua activities start from a call by the application,
+usually asking Lua to run a chunk.
+If there is any error, this call returns an error code,
+so that the application can take appropriate actions.
+In the case of the <a class="indexterm" id="N135C8"/>stand-alone interpreter,
+its <a class="indexterm" id="N135CC"/>main loop just prints the error message
+and continues showing the prompt and running the given commands.
+</p><p id="N135D0" style="text-indent: 0">
+However, if we want to handle errors inside the Lua code,
+we should use the function <a class="indexterm" id="N135D2"/><code class="function">pcall</code> (<em>protected call</em>)
+to encapsulate our code.
+</p><p id="N135DC" style="text-indent: 0">
+Suppose we want to run a piece of Lua code and to catch
+<a class="indexterm" id="N135DE"></a>
+any error raised while running that code.
+Our first step is to encapsulate that piece of code in a function;
+more often than not,
+we use an <a class="indexterm" id="N135E2"></a>anonymous function for that.
+Then, we call that function through <a class="indexterm" id="N135E6"></a><code class="function">pcall</code>:
+</p><pre class="programlisting" id="N135EC">      local ok, msg = pcall(function ()
+           <em class="replaceable"><code>some code</code></em>
+           if unexpected_condition then error() end
+           <em class="replaceable"><code>some code</code></em>
+           print(a[i])    -- potential error: 'a' may not be a table
+           <em class="replaceable"><code>some code</code></em>
+         end)
+      
+      if ok then    -- no errors while running protected code
+        <em class="replaceable"><code>regular code</code></em>
+      else   -- protected code raised an error: take appropriate action
+        <em class="replaceable"><code>error-handling code</code></em>
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N135FE" style="text-indent: 0">
+The function <a class="indexterm" id="N13600"/><code class="function">pcall</code> calls its first argument in
+<a class="indexterm" id="N13606"/><em class="firstterm">protected mode</em>,
+so that it catches any errors while the function is running.
+The function <a class="indexterm" id="N1360D"/><code class="function">pcall</code> never raises any error,
+no matter what.
+If there are no errors,
+<a class="indexterm" id="N13613"/><code class="function">pcall</code> returns <strong>true</strong>, plus any values returned by the call.
+Otherwise, it returns <strong>false</strong>, plus the error message.
+</p><p id="N13621" style="text-indent: 0">
+Despite its name,
+the error message does not have to be a string;
+a better name is <a class="indexterm" id="N13623"></a><em class="firstterm">error object</em>,
+because <a class="indexterm" id="N1362A"></a><code class="function">pcall</code> will return
+any Lua value that we pass to <a class="indexterm" id="N13630"></a><code class="function">error</code>:
+</p><pre class="programlisting" id="N13636">      local status, err = pcall(function () error({code=121}) end)
+      print(err.code)  --&gt; 121
+</pre><p style="text-indent: 0">
+These mechanisms provide all we need to do
+<a class="indexterm" id="N13639"></a>exception handling in Lua.
+We <a class="indexterm" id="N1363D"></a>throw an exception with <a class="indexterm" id="N13641"></a><code class="function">error</code>
+and <a class="indexterm" id="N13647"></a>catch it with <a class="indexterm" id="N1364B"></a><code class="function">pcall</code>.
+The error message identifies the kind of error.
+</p></div><div class="sect1" title="Error Messages and Tracebacks"><div class="titlepage"><div><div><h2 class="title"><a id="xpcall"/>Error Messages and Tracebacks</h2></div></div></div><p id="N13655" style="text-indent: 0">
+Although we can use a value of any type as an error object,
+usually error objects are strings describing what went wrong.
+When there is an internal error
+(such as an attempt to index a non-table value),
+Lua generates the error object,
+which in that case is always a string;
+otherwise, the error object is the value passed to
+the function <a class="indexterm" id="N13657"></a><code class="function">error</code>.
+Whenever the object is a string,
+Lua tries to add some information about the location
+where the error happened:
+</p><pre class="programlisting" id="N1365D">      local status, err = pcall(function () error("my error") end)
+      print(err)          --&gt; stdin:1: my error
+</pre><p style="text-indent: 0">
+The location information gives the chunk’s name
+(<code class="literal">stdin</code>, in the example)
+plus the line number (1, in the example).
+</p><p id="N13663" style="text-indent: 0">
+The function <code class="literal">error</code> has an additional second parameter,
+which gives the <em>level</em> where it should report the error.
+We use this parameter to blame someone else for the error.
+For instance, suppose we write a function
+whose first task is to check whether it was called correctly:
+</p><pre class="programlisting" id="N1366B">      function foo (str)
+        if type(str) ~= "string" then
+          error("string expected")
+        end
+        <em class="replaceable"><code>regular code</code></em>
+      end
+</pre><p style="text-indent: 0">
+Then, someone calls this function with a wrong argument:
+</p><pre class="programlisting" id="N13671">      foo({x=1})
+</pre><p style="text-indent: 0">
+As it is,
+Lua points its finger to <code class="literal">foo</code>
+—after all,
+it was it who called <a class="indexterm" id="N13677"></a><code class="function">error</code>—
+and not to the real culprit,
+the caller.
+To correct this problem,
+we inform <a class="indexterm" id="N1367D"></a><code class="function">error</code> that
+the error it is reporting
+occurred on level two in the calling hierarchy
+(level one is our own function):
+</p><pre class="programlisting" id="N13683">      function foo (str)
+        if type(str) ~= "string" then
+          error("string expected", 2)
+        end
+        <em class="replaceable"><code>regular code</code></em>
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N13689" style="text-indent: 0">
+Frequently, when an error happens,
+we want more debug information than only the
+location where the error occurred.
+At least, we want a <a class="indexterm" id="N1368B"/>traceback,
+showing the complete stack of calls leading to the error.
+When <a class="indexterm" id="N1368F"/><code class="function">pcall</code> returns its error message,
+it destroys part of the stack
+(the part that goes from it to the error point).
+Consequently, if we want a traceback,
+we must build it before <a class="indexterm" id="N13695"/><code class="function">pcall</code> returns.
+To do this, Lua provides the function <a class="indexterm" id="N1369B"/><code class="function">xpcall</code>.
+It works like <a class="indexterm" id="N136A2"/><code class="function">pcall</code>,
+but its second argument is
+a <a class="indexterm" id="N136A8"/><em class="firstterm">message handler function</em>.
+In case of error,
+Lua calls this message handler before the stack unwinds,
+so that it can use the debug library to gather any extra
+information it wants about the error.
+Two common message handlers are <a class="indexterm" id="N136AF"/><code class="function">debug.debug</code>,
+which gives us a Lua prompt so that we can inspect by
+ourselves what was going on when the error happened;
+and <a class="indexterm" id="N136B7"/><code class="function">debug.traceback</code>,
+which builds an extended error message with a traceback.
+The latter is the function that the
+<a class="indexterm" id="N136BF"/>stand-alone interpreter uses to build its error messages.
+</p></div><div class="simplesect" title="Exercises"><div class="titlepage"><div><div><h2 class="title"><a id="L168"/>Exercises</h2></div></div></div><p id="N136C7" style="text-indent: 0">
+Exercise 16.1:<a id="ex_loadwithprefix"/> 
+Frequently,
+it is useful to add some prefix to a chunk of code when loading it.
+(We saw an example previously in this chapter,
+where we prefixed a <a class="indexterm" id="N136CC"/><strong>return</strong> to an expression being loaded.)
+Write a function <code class="literal">loadwithprefix</code>
+that works like <a class="indexterm" id="N136D8"/><code class="function">load</code>,
+except that it adds its extra first argument (a string)
+as a prefix to the chunk being loaded.
+</p><p id="N136DE" style="text-indent: 0">
+Like the original <a class="indexterm" id="N136E0"/><code class="function">load</code>,
+<code class="literal">loadwithprefix</code> should accept chunks
+represented both as strings and as reader functions.
+Even in the case that the original chunk is a string,
+<code class="literal">loadwithprefix</code> should not
+actually concatenate the prefix with the chunk.
+Instead,
+it should call <a class="indexterm" id="N136EC"/><code class="function">load</code>
+with a proper reader function that first
+returns the prefix and then returns the original chunk.
+
+
+</p><p id="N136F2" style="text-indent: 0">
+Exercise 16.2:<a id="L169"></a> 
+Write a function <code class="literal">multiload</code> that
+generalizes <code class="literal">loadwithprefix</code>
+by receiving a list of readers,
+as in the following example:
+</p><pre class="programlisting" id="N136FD">      f = multiload("local x = 10;",
+                    io.lines("temp", "*L"),
+                    " print(x)")
+</pre><p style="text-indent: 0">
+In the above example,
+<code class="literal">multiload</code> should load a chunk equivalent to the concatenation
+of the string <code class="literal">"local..."</code>, the contents of the <code class="literal">temp</code> file,
+and the string <code class="literal">"print(x)"</code>.
+Like <code class="literal">loadwithprefix</code>, from the previous exercise,
+<code class="literal">multiload</code> should not actually concatenate anything.
+
+
+</p><p id="N13712" style="text-indent: 0">
+Exercise 16.3:<a id="L170"></a> 
+The function <code class="literal">stringrep</code>, in <a class="xref" href="ch16.html#cd_stringrep" title="Figure 16.2. String repetition">Figure 16.2, “String repetition”</a>,
+uses a <a class="indexterm" id="N1371D"></a>binary multiplication algorithm
+to concatenate <code class="literal">n</code> copies of a given string <code class="literal">s</code>.
+</p><div class="figure-float"><div class="figure"><a id="cd_stringrep"/><p class="title" style="text-indent: 0"><strong>Figure 16.2. String repetition</strong></p><div class="figure-contents"><pre class="programlisting" id="N1372C">      function stringrep (s, n)
+        local r = ""
+        if n &gt; 0 then
+          while n &gt; 1 do
+            if n % 2 ~= 0 then  r = r .. s  end
+            s = s .. s
+            n = math.floor(n / 2)
+          end
+          r = r .. s
+        end
+        return r
+      end
+</pre></div></div></div><p style="text-indent: 0">
+
+For any fixed <code class="literal">n</code>,
+we can create a specialized version of <code class="literal">stringrep</code>
+by unrolling the loop into a sequence
+of instructions <code class="literal">r = r .. s</code> and <code class="literal">s = s .. s</code>.
+As an example,
+for <code class="literal">n = 5</code> the unrolling gives us the
+following function:
+</p><pre class="programlisting" id="N1373E">      function stringrep_5 (s)
+        local r = ""
+        r = r .. s
+        s = s .. s
+        s = s .. s
+        r = r .. s
+        return r
+      end
+</pre><p style="text-indent: 0">
+</p><p id="N13741" style="text-indent: 0">
+Write a function that,
+given <code class="literal">n</code>,
+returns a specialized function <code class="literal">stringrep_<em class="replaceable"><code>n</code></em></code>.
+Instead of using a closure,
+your function should build the text of a Lua
+function with the proper sequence
+of instructions (a mix of <code class="literal">r = r .. s</code> and <code class="literal">s = s .. s</code>)
+and then use <a class="indexterm" id="N13751"/><code class="function">load</code> to produce the final function.
+Compare the performance of the generic function <code class="literal">stringrep</code>
+(or of a closure using it)
+with your tailor-made functions.
+
+
+</p><p id="N1375A" style="text-indent: 0">
+Exercise 16.4:<a id="L171"/> 
+Can you find any value for <code class="literal">f</code> such that
+the call <code class="literal">pcall(pcall, f)</code> returns <strong>false</strong>
+as its first result?
+Why is this relevant?
+
+
+</p></div><div class="footnotes"><br/><hr/><div class="footnote"><p id="N13354" style="text-indent: 0"><sup>[<a href="#N13353" id="ftn.N13353" class="para">16</a>] </sup>In Lua 5.1,
+function <code class="literal">loadstring</code> did
+the role of <a class="indexterm" id="N13359"/><code class="function">load</code> for strings.</p></div></div></div><p class="p12n">Personal copy of Eric Taylor &lt;jdslkgjf&#46;iapgjflksfg&#64;yandex&#46;com&gt;</p></body></html>

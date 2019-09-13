@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+  <title>Item 12. Assignment and Initialization Are Different</title>
+  <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+ 
+		<h2>Item 12. Assignment and Initialization Are Different</h2>
+		
+<p class="docText">Initialization and assignment are different operations, with different uses and different implementations.</p>
+		
+<p class="docText">Let’s get it 
+absolutely straight. Assignment occurs when you assign. All the other 
+copying you run into is initialization, including initialization in a 
+declaration, function return, argument passing, and catching exceptions.</p>
+		
+<p class="docText">Assignment and 
+initialization are essentially different operations not only because 
+they’re used in different contexts but also because they do different 
+things. This difference in operation is not so obvious in the built-in 
+types such as <tt>int</tt> or <tt>double</tt>, because, in that case, both assignment and initialization consist simply of copying some bits (but see also <span class="docEmphasis">References Are Aliases, Not Pointers</span> [5, 13]):</p>
+		
+<div class="docText">
+  <pre>int a = 12; // initialization, copy 0X000C to a
+a = 12; // assignment, copy 0X000C to a
+</pre>
+</div>
+<br/>
+		
+<p class="docText">However, things can be quite different for user-defined types. Consider the following simple, nonstandard string class:</p>
+		
+<div class="docText">
+  <pre>class String {
+  public:
+    String( const char *init ); // intentionally not explicit!
+    ~String();
+    String( const String &amp;that );
+    String &amp;operator =( const String &amp;that );
+    String &amp;operator =( const char *str );
+    void swap( String &amp;that );
+    friend const String // concatenate
+        operator +( const String &amp;, const String &amp; );
+    friend bool operator &lt;( const String &amp;, const String &amp; );
+    //...
+  private:
+    String( const char *, const char * ); // computational
+    char *s_;
+};
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Initializing a <tt>String</tt>
+ object with a character string is straightforward. We allocate a buffer
+ big enough to hold a copy of the character string and then copy.</p>
+		
+<div class="docText">
+  <pre>String::String( const char *init ) {
+    if( !init ) init = "";
+    s_ = new char[ strlen(init)+1 ];
+    strcpy( s_, init );
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The destructor does what it does:</p>
+		
+<div class="docText">
+  <pre>String::~String() { delete [] s_; }
+</pre>
+</div>
+<br/>
+		
+<p class="docText">Assignment is a somewhat more difficult job than construction:</p>
+		
+<div class="docText">
+  <pre>String &amp;String::operator =( const char *str ) {
+    if( !str ) str = "";
+    char *tmp = strcpy( new char[ strlen(str)+1 ], str );
+    delete [] s_;
+    s_ = tmp;
+    return *this;
+}
+</pre>
+</div>
+<br/>
+		
+<p class="docText">An assignment is 
+somewhat like destruction followed by a construction. For a complex 
+user-defined type, the target (left side, or <tt>this</tt>) must be cleaned up before it is reinitialized with the source (right side, or <tt>str</tt>). In the case of our <tt>String</tt> type, the <tt>String</tt>’s existing character buffer must be freed before a new character buffer is attached. See <span class="docEmphasis">Exception Safe Functions</span> [39,
+ 135] for an explanation of the ordering of the statements. (By the way,
+ just about every week somebody reinvents the bright idea of 
+implementing assignment with an explicit destructor call and using 
+placement new to call a constructor. It doesn’t always work, and it’s 
+not exception safe. Don’t do it.)</p>
+		
+<p class="docText">Because a proper assignment
+ operation cleans up its left argument, one should never perform a 
+user-defined assignment on uninitialized storage:</p>
+		
+<div class="docText">
+  <pre>String *names = static_cast&lt;String *&gt;(::operator new( BUFSIZ ));
+<span class="docEmphMark">names[0] = "Sakamoto"; // oops! delete [] uninitialized pointer!</span>
+			</pre>
+</div>
+<br/>
+		
+<p class="docText">In this case, <tt>names</tt> refers to uninitialized storage because we called <tt>operator new</tt> directly, avoiding implicit initialization by <tt>String</tt>’s default constructor; <tt>names</tt> refers to a hunk of memory filled with random bits. When the <tt>String</tt> assignment operator is called in the second line, it will attempt to perform an array delete on an uninitialized pointer. (See <span class="docEmphasis">Placement New</span> [35, 119] for a safe way to perform an operation similar to such an assignment.)</p>
+		
+<p class="docText">Because a constructor has 
+less work to do than an assignment operator (in that a constructor can 
+assume it’s working with uninitialized storage), an implementation will 
+sometimes employ what’s known as a “computational constructor” for 
+efficiency:</p>
+		
+<div class="docText">
+  <pre>const String operator +( const String &amp;a, const String &amp;b )
+    { return String( a.s_, b.s_ ); }
+</pre>
+</div>
+<br/>
+		
+<p class="docText">The two-argument computational constructor is not intended to be part of the interface of the <tt>String</tt> class, so it’s declared to be private.</p>
+		
+<div class="docText">
+  <pre>String::String( const char *a, const char *b ) {
+    s_ = new char[ strlen(a)+strlen(b)+1 ];
+    strcat( strcpy( s_, a ), b );
+}
+</pre>
+</div>
+<br/>
+		
+
+
+</body>
+</html>
