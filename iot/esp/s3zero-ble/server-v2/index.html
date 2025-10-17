@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+
+
+
+
+  <head>
+    <meta charset="utf-8">
+<title>My Hugo</title>
+<link rel="stylesheet" type="text/css" href="/css/syntax.css">
+<link rel="stylesheet" type="text/css" href="/css/site.css">
+<script src="/js/nav.js"></script>
+
+    
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+
+
+
+  </head>
+
+  <body>
+    
+ <div id="menu-container"></div>
+
+ 
+
+
+    
+  
+<div class="van-content-container">
+  <div id="index-container" class="van-content-index"></div>
+  <div class="van-content">
+    <h1>BLE Server v2.0</h1>
+    <h2 id="request-to-add-debug">request to add debug</h2>
+<p>please add debug output when BLE is connected, query and set</p>
+<h2 id="grok">grok</h2>
+<p>I&rsquo;ll update the previous Arduino sketch to add debug output for BLE connection events, characteristic queries (reads), and characteristic sets (writes). The debug output will be sent to the Serial monitor at 115200 baud. The changes include:</p>
+<ul>
+<li>Initializing Serial in setup()</li>
+<li>Adding a server callback class to handle connect/disconnect events</li>
+<li>Modifying the characteristic callback to log read and write operations</li>
+<li>Keeping the same artifact_id since this is an update to the previous artifact</li>
+</ul>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="cp">#include</span> <span class="cpf">&lt;BLEDevice.h&gt;</span><span class="cp">
+</span></span></span><span class="line"><span class="cl"><span class="cp">#include</span> <span class="cpf">&lt;BLEServer.h&gt;</span><span class="cp">
+</span></span></span><span class="line"><span class="cl"><span class="cp">#include</span> <span class="cpf">&lt;BLEUtils.h&gt;</span><span class="cp">
+</span></span></span><span class="line"><span class="cl"><span class="cp">#include</span> <span class="cpf">&lt;BLE2902.h&gt;</span><span class="cp">
+</span></span></span><span class="line"><span class="cl"><span class="cp">#include</span> <span class="cpf">&lt;Adafruit_NeoPixel.h&gt;</span><span class="cp">
+</span></span></span><span class="line"><span class="cl"><span class="cp"></span>
+</span></span><span class="line"><span class="cl"><span class="c1">// Pin definitions
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="cp">#define NEOPIXEL_PIN 21
+</span></span></span><span class="line"><span class="cl"><span class="cp">#define NUM_PIXELS 1
+</span></span></span><span class="line"><span class="cl"><span class="cp"></span>
+</span></span><span class="line"><span class="cl"><span class="c1">// BLE Service and Characteristic UUIDs
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="cp">#define SERVICE_UUID        &#34;4fafc201-1fb5-459e-8fcc-c5c9c331914b&#34;
+</span></span></span><span class="line"><span class="cl"><span class="cp">#define TEMP_CHAR_UUID      &#34;beb5483e-36e1-4688-b7f5-ea07361b26a8&#34;
+</span></span></span><span class="line"><span class="cl"><span class="cp">#define RED_CHAR_UUID       &#34;1c95d5e3-d8f7-4135-bd99-7bf1cd4b7235&#34;
+</span></span></span><span class="line"><span class="cl"><span class="cp">#define GREEN_CHAR_UUID     &#34;6e4a6b81-8c36-4681-b1ae-dae4e7d4a8f4&#34;
+</span></span></span><span class="line"><span class="cl"><span class="cp">#define BLUE_CHAR_UUID      &#34;a3b3e2b1-2b6b-4e6f-9c7d-6e4a2b3e4c6f&#34;
+</span></span></span><span class="line"><span class="cl"><span class="cp">#define CYCLE_CHAR_UUID     &#34;f3c3d2a1-3c7b-4e6f-9c7d-6e4a2b3e4c6f&#34;
+</span></span></span><span class="line"><span class="cl"><span class="cp">#define DUTY_CHAR_UUID      &#34;d4c4e3b2-4c8c-4e7f-9c7d-6e4a2b3e4c7f&#34;
+</span></span></span><span class="line"><span class="cl"><span class="cp"></span>
+</span></span><span class="line"><span class="cl"><span class="c1">// LED control variables
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="n">Adafruit_NeoPixel</span> <span class="nf">pixels</span><span class="p">(</span><span class="n">NUM_PIXELS</span><span class="p">,</span> <span class="n">NEOPIXEL_PIN</span><span class="p">,</span> <span class="n">NEO_GRB</span> <span class="o">+</span> <span class="n">NEO_KHZ800</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="kt">bool</span> <span class="n">redOn</span> <span class="o">=</span> <span class="nb">false</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="kt">bool</span> <span class="n">greenOn</span> <span class="o">=</span> <span class="nb">false</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="kt">bool</span> <span class="n">blueOn</span> <span class="o">=</span> <span class="nb">false</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="kt">uint8_t</span> <span class="n">cycleSeconds</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="c1">// 0-5 seconds, 0 means off
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kt">uint8_t</span> <span class="n">dutyCycle</span> <span class="o">=</span> <span class="mi">100</span><span class="p">;</span>  <span class="c1">// 0-100%, 0 means off, 100 means always on
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">lastCycleStart</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="kt">bool</span> <span class="n">ledState</span> <span class="o">=</span> <span class="nb">false</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// BLE characteristics
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="n">BLECharacteristic</span> <span class="o">*</span><span class="n">pTempCharacteristic</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="n">BLECharacteristic</span> <span class="o">*</span><span class="n">pRedCharacteristic</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="n">BLECharacteristic</span> <span class="o">*</span><span class="n">pGreenCharacteristic</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="n">BLECharacteristic</span> <span class="o">*</span><span class="n">pBlueCharacteristic</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="n">BLECharacteristic</span> <span class="o">*</span><span class="n">pCycleCharacteristic</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="n">BLECharacteristic</span> <span class="o">*</span><span class="n">pDutyCharacteristic</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Function to get chip temperature in Celsius
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kt">float</span> <span class="nf">getChipTemperature</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="p">(</span><span class="nf">temprature_sens_read</span><span class="p">()</span> <span class="o">-</span> <span class="mi">32</span><span class="p">)</span> <span class="o">/</span> <span class="mf">1.8</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Callback for BLE server connection events
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="n">class</span> <span class="nl">MyServerCallbacks</span> <span class="p">:</span> <span class="n">public</span> <span class="n">BLEServerCallbacks</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="kt">void</span> <span class="nf">onConnect</span><span class="p">(</span><span class="n">BLEServer</span><span class="o">*</span> <span class="n">pServer</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Serial</span><span class="p">.</span><span class="nf">println</span><span class="p">(</span><span class="s">&#34;BLE Client Connected&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span><span class="line"><span class="cl">  <span class="kt">void</span> <span class="nf">onDisconnect</span><span class="p">(</span><span class="n">BLEServer</span><span class="o">*</span> <span class="n">pServer</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Serial</span><span class="p">.</span><span class="nf">println</span><span class="p">(</span><span class="s">&#34;BLE Client Disconnected&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="n">BLEDevice</span><span class="o">::</span><span class="nf">startAdvertising</span><span class="p">();</span> <span class="c1">// Restart advertising
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Callback for characteristic reads and writes
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="n">class</span> <span class="nl">MyCharacteristicCallbacks</span> <span class="p">:</span> <span class="n">public</span> <span class="n">BLECharacteristicCallbacks</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="kt">void</span> <span class="nf">onRead</span><span class="p">(</span><span class="n">BLECharacteristic</span> <span class="o">*</span><span class="n">pCharacteristic</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">std</span><span class="o">::</span><span class="n">string</span> <span class="n">uuid</span> <span class="o">=</span> <span class="n">pCharacteristic</span><span class="o">-&gt;</span><span class="nf">getUUID</span><span class="p">().</span><span class="nf">toString</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">    <span class="n">std</span><span class="o">::</span><span class="n">string</span> <span class="n">value</span> <span class="o">=</span> <span class="n">pCharacteristic</span><span class="o">-&gt;</span><span class="nf">getValue</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Serial</span><span class="p">.</span><span class="nf">print</span><span class="p">(</span><span class="s">&#34;Read Characteristic UUID: &#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Serial</span><span class="p">.</span><span class="nf">print</span><span class="p">(</span><span class="n">uuid</span><span class="p">.</span><span class="nf">c_str</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Serial</span><span class="p">.</span><span class="nf">print</span><span class="p">(</span><span class="s">&#34;, Value: &#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Serial</span><span class="p">.</span><span class="nf">println</span><span class="p">(</span><span class="n">value</span><span class="p">.</span><span class="nf">c_str</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="kt">void</span> <span class="nf">onWrite</span><span class="p">(</span><span class="n">BLECharacteristic</span> <span class="o">*</span><span class="n">pCharacteristic</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">std</span><span class="o">::</span><span class="n">string</span> <span class="n">uuid</span> <span class="o">=</span> <span class="n">pCharacteristic</span><span class="o">-&gt;</span><span class="nf">getUUID</span><span class="p">().</span><span class="nf">toString</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">    <span class="n">std</span><span class="o">::</span><span class="n">string</span> <span class="n">value</span> <span class="o">=</span> <span class="n">pCharacteristic</span><span class="o">-&gt;</span><span class="nf">getValue</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Serial</span><span class="p">.</span><span class="nf">print</span><span class="p">(</span><span class="s">&#34;Write Characteristic UUID: &#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Serial</span><span class="p">.</span><span class="nf">print</span><span class="p">(</span><span class="n">uuid</span><span class="p">.</span><span class="nf">c_str</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Serial</span><span class="p">.</span><span class="nf">print</span><span class="p">(</span><span class="s">&#34;, Value: &#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Serial</span><span class="p">.</span><span class="nf">println</span><span class="p">(</span><span class="n">value</span><span class="p">.</span><span class="nf">c_str</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">(</span><span class="n">uuid</span> <span class="o">==</span> <span class="n">RED_CHAR_UUID</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="n">redOn</span> <span class="o">=</span> <span class="p">(</span><span class="n">value</span> <span class="o">==</span> <span class="s">&#34;1&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="n">uuid</span> <span class="o">==</span> <span class="n">GREEN_CHAR_UUID</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="n">greenOn</span> <span class="o">=</span> <span class="p">(</span><span class="n">value</span> <span class="o">==</span> <span class="s">&#34;1&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="n">uuid</span> <span class="o">==</span> <span class="n">BLUE_CHAR_UUID</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="n">blueOn</span> <span class="o">=</span> <span class="p">(</span><span class="n">value</span> <span class="o">==</span> <span class="s">&#34;1&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="n">uuid</span> <span class="o">==</span> <span class="n">CYCLE_CHAR_UUID</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="kt">int</span> <span class="n">val</span> <span class="o">=</span> <span class="nf">atoi</span><span class="p">(</span><span class="n">value</span><span class="p">.</span><span class="nf">c_str</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">      <span class="k">if</span> <span class="p">(</span><span class="n">val</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="n">val</span> <span class="o">&lt;=</span> <span class="mi">5</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">cycleSeconds</span> <span class="o">=</span> <span class="n">val</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="n">Serial</span><span class="p">.</span><span class="nf">print</span><span class="p">(</span><span class="s">&#34;Cycle set to: &#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">Serial</span><span class="p">.</span><span class="nf">println</span><span class="p">(</span><span class="n">cycleSeconds</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">      <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="n">uuid</span> <span class="o">==</span> <span class="n">DUTY_CHAR_UUID</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="kt">int</span> <span class="n">val</span> <span class="o">=</span> <span class="nf">atoi</span><span class="p">(</span><span class="n">value</span><span class="p">.</span><span class="nf">c_str</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">      <span class="k">if</span> <span class="p">(</span><span class="n">val</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="n">val</span> <span class="o">&lt;=</span> <span class="mi">100</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">dutyCycle</span> <span class="o">=</span> <span class="n">val</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="n">Serial</span><span class="p">.</span><span class="nf">print</span><span class="p">(</span><span class="s">&#34;Duty cycle set to: &#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">Serial</span><span class="p">.</span><span class="nf">println</span><span class="p">(</span><span class="n">dutyCycle</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">      <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">void</span> <span class="nf">setup</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="c1">// Initialize Serial for debugging
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="n">Serial</span><span class="p">.</span><span class="nf">begin</span><span class="p">(</span><span class="mi">115200</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">Serial</span><span class="p">.</span><span class="nf">println</span><span class="p">(</span><span class="s">&#34;Starting jjS3mini BLE Server...&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="c1">// Initialize NeoPixel
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="n">pixels</span><span class="p">.</span><span class="nf">begin</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pixels</span><span class="p">.</span><span class="nf">setBrightness</span><span class="p">(</span><span class="mi">50</span><span class="p">);</span> <span class="c1">// Moderate brightness to avoid overheating
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="n">pixels</span><span class="p">.</span><span class="nf">clear</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pixels</span><span class="p">.</span><span class="nf">show</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="c1">// Initialize BLE
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="n">BLEDevice</span><span class="o">::</span><span class="nf">init</span><span class="p">(</span><span class="s">&#34;jjS3mini&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">BLEServer</span> <span class="o">*</span><span class="n">pServer</span> <span class="o">=</span> <span class="n">BLEDevice</span><span class="o">::</span><span class="nf">createServer</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pServer</span><span class="o">-&gt;</span><span class="nf">setCallbacks</span><span class="p">(</span><span class="n">new</span> <span class="nf">MyServerCallbacks</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">  <span class="n">BLEService</span> <span class="o">*</span><span class="n">pService</span> <span class="o">=</span> <span class="n">pServer</span><span class="o">-&gt;</span><span class="nf">createService</span><span class="p">(</span><span class="n">SERVICE_UUID</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="c1">// Create characteristics
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="n">pTempCharacteristic</span> <span class="o">=</span> <span class="n">pService</span><span class="o">-&gt;</span><span class="nf">createCharacteristic</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">    <span class="n">TEMP_CHAR_UUID</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="n">BLECharacteristic</span><span class="o">::</span><span class="n">PROPERTY_READ</span> <span class="o">|</span> <span class="n">BLECharacteristic</span><span class="o">::</span><span class="n">PROPERTY_NOTIFY</span>
+</span></span><span class="line"><span class="cl">  <span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pTempCharacteristic</span><span class="o">-&gt;</span><span class="nf">setCallbacks</span><span class="p">(</span><span class="n">new</span> <span class="nf">MyCharacteristicCallbacks</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pTempCharacteristic</span><span class="o">-&gt;</span><span class="nf">addDescriptor</span><span class="p">(</span><span class="n">new</span> <span class="nf">BLE2902</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="n">pRedCharacteristic</span> <span class="o">=</span> <span class="n">pService</span><span class="o">-&gt;</span><span class="nf">createCharacteristic</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">    <span class="n">RED_CHAR_UUID</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="n">BLECharacteristic</span><span class="o">::</span><span class="n">PROPERTY_READ</span> <span class="o">|</span> <span class="n">BLECharacteristic</span><span class="o">::</span><span class="n">PROPERTY_WRITE</span>
+</span></span><span class="line"><span class="cl">  <span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pRedCharacteristic</span><span class="o">-&gt;</span><span class="nf">setCallbacks</span><span class="p">(</span><span class="n">new</span> <span class="nf">MyCharacteristicCallbacks</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="n">pGreenCharacteristic</span> <span class="o">=</span> <span class="n">pService</span><span class="o">-&gt;</span><span class="nf">createCharacteristic</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">    <span class="n">GREEN_CHAR_UUID</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="n">BLECharacteristic</span><span class="o">::</span><span class="n">PROPERTY_READ</span> <span class="o">|</span> <span class="n">BLECharacteristic</span><span class="o">::</span><span class="n">PROPERTY_WRITE</span>
+</span></span><span class="line"><span class="cl">  <span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pGreenCharacteristic</span><span class="o">-&gt;</span><span class="nf">setCallbacks</span><span class="p">(</span><span class="n">new</span> <span class="nf">MyCharacteristicCallbacks</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="n">pBlueCharacteristic</span> <span class="o">=</span> <span class="n">pService</span><span class="o">-&gt;</span><span class="nf">createCharacteristic</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">    <span class="n">BLUE_CHAR_UUID</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="n">BLECharacteristic</span><span class="o">::</span><span class="n">PROPERTY_READ</span> <span class="o">|</span> <span class="n">BLECharacteristic</span><span class="o">::</span><span class="n">PROPERTY_WRITE</span>
+</span></span><span class="line"><span class="cl">  <span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pBlueCharacteristic</span><span class="o">-&gt;</span><span class="nf">setCallbacks</span><span class="p">(</span><span class="n">new</span> <span class="nf">MyCharacteristicCallbacks</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="n">pCycleCharacteristic</span> <span class="o">=</span> <span class="n">pService</span><span class="o">-&gt;</span><span class="nf">createCharacteristic</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">    <span class="n">CYCLE_CHAR_UUID</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="n">BLECharacteristic</span><span class="o">::</span><span class="n">PROPERTY_READ</span> <span class="o">|</span> <span class="n">BLECharacteristic</span><span class="o">::</span><span class="n">PROPERTY_WRITE</span>
+</span></span><span class="line"><span class="cl">  <span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pCycleCharacteristic</span><span class="o">-&gt;</span><span class="nf">setCallbacks</span><span class="p">(</span><span class="n">new</span> <span class="nf">MyCharacteristicCallbacks</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="n">pDutyCharacteristic</span> <span class="o">=</span> <span class="n">pService</span><span class="o">-&gt;</span><span class="nf">createCharacteristic</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">    <span class="n">DUTY_CHAR_UUID</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="n">BLECharacteristic</span><span class="o">::</span><span class="n">PROPERTY_READ</span> <span class="o">|</span> <span class="n">BLECharacteristic</span><span class="o">::</span><span class="n">PROPERTY_WRITE</span>
+</span></span><span class="line"><span class="cl">  <span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pDutyCharacteristic</span><span class="o">-&gt;</span><span class="nf">setCallbacks</span><span class="p">(</span><span class="n">new</span> <span class="nf">MyCharacteristicCallbacks</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="c1">// Start the service
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="n">pService</span><span class="o">-&gt;</span><span class="nf">start</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="c1">// Start advertising
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="n">BLEAdvertising</span> <span class="o">*</span><span class="n">pAdvertising</span> <span class="o">=</span> <span class="n">BLEDevice</span><span class="o">::</span><span class="nf">getAdvertising</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pAdvertising</span><span class="o">-&gt;</span><span class="nf">addServiceUUID</span><span class="p">(</span><span class="n">SERVICE_UUID</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pAdvertising</span><span class="o">-&gt;</span><span class="nf">setScanResponse</span><span class="p">(</span><span class="nb">true</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pAdvertising</span><span class="o">-&gt;</span><span class="nf">setMinPreferred</span><span class="p">(</span><span class="mh">0x06</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pAdvertising</span><span class="o">-&gt;</span><span class="nf">setMinPreferred</span><span class="p">(</span><span class="mh">0x12</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">BLEDevice</span><span class="o">::</span><span class="nf">startAdvertising</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">  <span class="n">Serial</span><span class="p">.</span><span class="nf">println</span><span class="p">(</span><span class="s">&#34;BLE Advertising Started&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">void</span> <span class="nf">loop</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="c1">// Update temperature every 5 seconds
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="k">static</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">lastTempUpdate</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="k">if</span> <span class="p">(</span><span class="nf">millis</span><span class="p">()</span> <span class="o">-</span> <span class="n">lastTempUpdate</span> <span class="o">&gt;=</span> <span class="mi">5000</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">char</span> <span class="n">tempStr</span><span class="p">[</span><span class="mi">8</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">    <span class="nf">dtostrf</span><span class="p">(</span><span class="nf">getChipTemperature</span><span class="p">(),</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">tempStr</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="n">pTempCharacteristic</span><span class="o">-&gt;</span><span class="nf">setValue</span><span class="p">(</span><span class="n">tempStr</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="n">pTempCharacteristic</span><span class="o">-&gt;</span><span class="nf">notify</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Serial</span><span class="p">.</span><span class="nf">print</span><span class="p">(</span><span class="s">&#34;Temperature Updated: &#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Serial</span><span class="p">.</span><span class="nf">println</span><span class="p">(</span><span class="n">tempStr</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="n">lastTempUpdate</span> <span class="o">=</span> <span class="nf">millis</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="c1">// Update LED states
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="n">pRedCharacteristic</span><span class="o">-&gt;</span><span class="nf">setValue</span><span class="p">(</span><span class="n">redOn</span> <span class="o">?</span> <span class="s">&#34;1&#34;</span> <span class="o">:</span> <span class="s">&#34;0&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pGreenCharacteristic</span><span class="o">-&gt;</span><span class="nf">setValue</span><span class="p">(</span><span class="n">greenOn</span> <span class="o">?</span> <span class="s">&#34;1&#34;</span> <span class="o">:</span> <span class="s">&#34;0&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pBlueCharacteristic</span><span class="o">-&gt;</span><span class="nf">setValue</span><span class="p">(</span><span class="n">blueOn</span> <span class="o">?</span> <span class="s">&#34;1&#34;</span> <span class="o">:</span> <span class="s">&#34;0&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="kt">char</span> <span class="n">cycleStr</span><span class="p">[</span><span class="mi">4</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">  <span class="nf">sprintf</span><span class="p">(</span><span class="n">cycleStr</span><span class="p">,</span> <span class="s">&#34;%d&#34;</span><span class="p">,</span> <span class="n">cycleSeconds</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pCycleCharacteristic</span><span class="o">-&gt;</span><span class="nf">setValue</span><span class="p">(</span><span class="n">cycleStr</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="kt">char</span> <span class="n">dutyStr</span><span class="p">[</span><span class="mi">4</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">  <span class="nf">sprintf</span><span class="p">(</span><span class="n">dutyStr</span><span class="p">,</span> <span class="s">&#34;%d&#34;</span><span class="p">,</span> <span class="n">dutyCycle</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">pDutyCharacteristic</span><span class="o">-&gt;</span><span class="nf">setValue</span><span class="p">(</span><span class="n">dutyStr</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="c1">// Handle LED blinking
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="k">if</span> <span class="p">(</span><span class="n">cycleSeconds</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">||</span> <span class="n">dutyCycle</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">pixels</span><span class="p">.</span><span class="nf">clear</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">    <span class="n">pixels</span><span class="p">.</span><span class="nf">show</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">currentTime</span> <span class="o">=</span> <span class="nf">millis</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">cycleMillis</span> <span class="o">=</span> <span class="n">cycleSeconds</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">onTime</span> <span class="o">=</span> <span class="n">cycleMillis</span> <span class="o">*</span> <span class="n">dutyCycle</span> <span class="o">/</span> <span class="mi">100</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">offTime</span> <span class="o">=</span> <span class="n">cycleMillis</span> <span class="o">-</span> <span class="n">onTime</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">(</span><span class="n">currentTime</span> <span class="o">-</span> <span class="n">lastCycleStart</span> <span class="o">&gt;=</span> <span class="n">cycleMillis</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="n">lastCycleStart</span> <span class="o">=</span> <span class="n">currentTime</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">(</span><span class="n">currentTime</span> <span class="o">-</span> <span class="n">lastCycleStart</span> <span class="o">&lt;</span> <span class="n">onTime</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">ledState</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">pixels</span><span class="p">.</span><span class="nf">setPixelColor</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">pixels</span><span class="p">.</span><span class="nf">Color</span><span class="p">(</span><span class="n">redOn</span> <span class="o">?</span> <span class="mi">255</span> <span class="o">:</span> <span class="mi">0</span><span class="p">,</span> <span class="n">greenOn</span> <span class="o">?</span> <span class="mi">255</span> <span class="o">:</span> <span class="mi">0</span><span class="p">,</span> <span class="n">blueOn</span> <span class="o">?</span> <span class="mi">255</span> <span class="o">:</span> <span class="mi">0</span><span class="p">));</span>
+</span></span><span class="line"><span class="cl">        <span class="n">pixels</span><span class="p">.</span><span class="nf">show</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">ledState</span> <span class="o">=</span> <span class="nb">true</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="n">Serial</span><span class="p">.</span><span class="nf">println</span><span class="p">(</span><span class="s">&#34;LED On&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">      <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="k">if</span> <span class="p">(</span><span class="n">ledState</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">pixels</span><span class="p">.</span><span class="nf">clear</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">pixels</span><span class="p">.</span><span class="nf">show</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">ledState</span> <span class="o">=</span> <span class="nb">false</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="n">Serial</span><span class="p">.</span><span class="nf">println</span><span class="p">(</span><span class="s">&#34;LED Off&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">      <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="nf">delay</span><span class="p">(</span><span class="mi">10</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></div><p>To use the updated app:</p>
+<ol>
+<li>Follow the same setup steps as before (Arduino IDE, ESP32 board package, Adafruit NeoPixel library).</li>
+<li>Open the Serial Monitor in Arduino IDE (set to 115200 baud) to view debug output.</li>
+<li>Upload the sketch to the ESP32-S3-Zero.</li>
+</ol>
+<p>Debug output will show:</p>
+<ul>
+<li>&ldquo;Starting jjS3mini BLE Server&hellip;&rdquo; and &ldquo;BLE Advertising Started&rdquo; on startup</li>
+<li>&ldquo;BLE Client Connected&rdquo; when a client connects</li>
+<li>&ldquo;BLE Client Disconnected&rdquo; when a client disconnects</li>
+<li>Characteristic UUID and value for every read/write operation</li>
+<li>Specific messages when cycle or duty cycle values are set</li>
+<li>Temperature updates every 5 seconds</li>
+<li>LED on/off state changes during blinking</li>
+</ul>
+<p>You can connect using a BLE client app (e.g., nRF Connect) and monitor the Serial output to debug interactions with the characteristics. The functionality remains the same as the previous version, with added debug logging for troubleshooting.</p>
+
+  </div>
+</div>
+
+
+
+    
+    
+    
+
+    
+    <script src="/js/menu-module.js"></script>
+    <script src="/js/index-module.js"></script>
+  </body>
+
+</html>

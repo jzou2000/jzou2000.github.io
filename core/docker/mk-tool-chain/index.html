@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+
+
+
+
+  <head>
+    <meta charset="utf-8">
+<title>My Hugo</title>
+<link rel="stylesheet" type="text/css" href="/css/syntax.css">
+<link rel="stylesheet" type="text/css" href="/css/site.css">
+<script src="/js/nav.js"></script>
+
+    
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+
+
+
+  </head>
+
+  <body>
+    
+ <div id="menu-container"></div>
+
+ 
+
+
+    
+  
+<div class="van-content-container">
+  <div id="index-container" class="van-content-index"></div>
+  <div class="van-content">
+    <h1>Make Toolchains with Docker</h1>
+    <h2 id="task-requirement">Task Requirement</h2>
+<p>We need a centos5 container with following packages:</p>
+<ul>
+<li>gcc44 and g++44 that can build both 64 and 32 bit app</li>
+<li>python2.7 with PyYAML module</li>
+<li>perl 5.8+</li>
+</ul>
+<h2 id="tips">Tips</h2>
+<ul>
+<li>The latest open-ssl (e.g. v1.1.1 at write time) is not supported by old distro (e.g. centos5), so it is wise to download (src) modules into the working folder before running docker build instead of doing so in Dockerfile if openssl is used (e.g. by curl).</li>
+<li>Instead of invoking <code>yum install</code> in docker file to pull packages from online repository, it is better to download all required rpm and use <code>yum localinstall</code> to install from rpm files. This is espetially benefitial if we need to run docker builder multiple times (e.g. debugging or for different configurations).</li>
+<li>Docker command <code>ADD</code> expends tar/gz files automatically, so <strong>DO NOT</strong> run <code>tar</code> or <code>ungzip</code> to extract archieves.</li>
+</ul>
+<h2 id="download-required-packages">Download required packages</h2>
+<ol>
+<li>Prepare a repo file <code>CentOS-Vault.repo</code> that points to the vault-repo (centos5 has retired from the standard repo)</li>
+<li>Run docker command to launch a centos:5 container
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run -it --rm -v <span class="sb">`</span><span class="nb">pwd</span><span class="sb">`</span>:/x -e <span class="nv">UID</span><span class="o">=</span><span class="sb">`</span>id -u<span class="sb">`</span> <span class="nv">GID</span><span class="o">=</span><span class="sb">`</span>id -g<span class="sb">`</span> centos:5
+</span></span></code></pre></div></li>
+<li>In the container, run script <code>/x/get-rpm.sh</code> to download required packages</li>
+<li>In the host, get python2.7 source (the latest openssl is not supported by centos5)
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">curl https://www.python.org/ftp/python/2.7.18/Python-2.7.18.tgz -o Python-2.7.18.tgz
+</span></span></code></pre></div></li>
+<li>(optional) get <a href="https://pyyaml.org/download/pyyaml/PyYAML-5.3.1.tar.gz">PyYAML-5.3.1.tar.gz</a> (later versions drop supports for Python2) source
+<ul>
+<li>latest pip stops support of python2</li>
+</ul>
+</li>
+</ol>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-ini" data-lang="ini"><span class="line"><span class="cl"><span class="c1"># CentOS-Vault.repo</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># The mirror system uses the connecting IP address of the client and the</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># update status of each mirror to pick mirrors that are updated to and</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># geographically close to the client.  You should use this for CentOS updates</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># unless you are manually picking other mirrors.</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">#---- Packages previously released as 5.10, and its updates</span>
+</span></span><span class="line"><span class="cl"><span class="k">[base]</span>
+</span></span><span class="line"><span class="cl"><span class="na">name</span><span class="o">=</span><span class="s">CentOS-$releasever - Base</span>
+</span></span><span class="line"><span class="cl"><span class="na">baseurl</span><span class="o">=</span><span class="s">http://vault.centos.org/5.11/os/$basearch/</span>
+</span></span><span class="line"><span class="cl"><span class="na">gpgcheck</span><span class="o">=</span><span class="s">1</span>
+</span></span><span class="line"><span class="cl"><span class="na">gpgkey</span><span class="o">=</span><span class="s">file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-5</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">[updates]</span>
+</span></span><span class="line"><span class="cl"><span class="na">name</span><span class="o">=</span><span class="s">CentOS-$releasever - Updates</span>
+</span></span><span class="line"><span class="cl"><span class="na">baseurl</span><span class="o">=</span><span class="s">http://vault.centos.org/5.11/updates/$basearch/</span>
+</span></span><span class="line"><span class="cl"><span class="na">gpgcheck</span><span class="o">=</span><span class="s">1</span>
+</span></span><span class="line"><span class="cl"><span class="na">gpgkey</span><span class="o">=</span><span class="s">file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-5</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">[extras]</span>
+</span></span><span class="line"><span class="cl"><span class="na">name</span><span class="o">=</span><span class="s">CentOS-$releasever - Extras</span>
+</span></span><span class="line"><span class="cl"><span class="na">baseurl</span><span class="o">=</span><span class="s">http://vault.centos.org/5.11/extras/$basearch/</span>
+</span></span><span class="line"><span class="cl"><span class="na">gpgcheck</span><span class="o">=</span><span class="s">1</span>
+</span></span><span class="line"><span class="cl"><span class="na">gpgkey</span><span class="o">=</span><span class="s">file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-5</span>
+</span></span></code></pre></div><p>In the container, run <code>/x/get-rpm.sh</code></p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># Download all rpm required to build agent5</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># run in a container from centos:5</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># with CentOS-Vault.repo at cwd</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nv">repo</span><span class="o">=</span><span class="s2">&#34;/etc/yum.repos.d/CentOS-[a-zA-UW-Z]*.repo /etc/yum.repos.d/lib*.repo&#34;</span>
+</span></span><span class="line"><span class="cl">cp CentOS-Vault.repo /etc/yum.repos.d/
+</span></span><span class="line"><span class="cl">rm -f /etc/yum.repos.d/CentOS-<span class="o">[</span>a-zA-UW-Z<span class="o">]</span>*.repo /etc/yum.repos.d/lib*.repo <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y update <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y downgrade libselinux <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y install yum-utils
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nv">cc</span><span class="o">=</span><span class="s2">&#34;gcc44 gcc44-c++ glibc-devel libstdc++44-devel libgcc.i386 glibc-devel.i386 libstdc++44-devel.i386&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nv">devel</span><span class="o">=</span><span class="s2">&#34;zlib-devel bzip2-devel openssl-devel ncurses-devel sqlite-devel readline-devel gdbm-devel libpcap-devel xz-devel expat-devel&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nv">util</span><span class="o">=</span><span class="s2">&#34;m4 make which perl&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nb">cd</span> /x
+</span></span><span class="line"><span class="cl">yumdownloader --resolve <span class="nv">$cc</span> <span class="nv">$devel</span> <span class="nv">$util</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># change owner/group if wished</span>
+</span></span><span class="line"><span class="cl">chown <span class="nv">$UID</span> *.rpm
+</span></span><span class="line"><span class="cl">chgrp <span class="nv">$GID</span> *.rpm
+</span></span></code></pre></div><h2 id="build-docker-image-agent5">Build docker image <code>agent5</code></h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-docker" data-lang="docker"><span class="line"><span class="cl"><span class="k">FROM</span><span class="s"> centos:5</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">WORKDIR</span><span class="s"> /home</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">COPY</span> CentOS-Vault.repo /etc/yum.repos.d/<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">ADD</span> Python-2.7.18.tgz PyYAML-5.3.1.tar.gz *.rpm /home/<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">RUN</span> rm -f /etc/yum.repos.d/CentOS-<span class="o">[</span>a-zA-UW-Z<span class="o">]</span>*.repo /etc/yum.repos.d/lib*.repo <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y update <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y downgrade libselinux <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y localinstall *.rpm <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> <span class="nb">cd</span> Python-2.7.18 <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> ./configure --enable-optimizations <span class="nv">CC</span><span class="o">=</span>gcc44 <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> make altinstall <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> <span class="nb">cd</span> ../PyYAML-* <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> python2.7 setup.py install <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> <span class="nb">cd</span> .. <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> rm -rf *<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">ENTRYPOINT</span> <span class="p">[</span> <span class="s2">&#34;/bin/bash&#34;</span> <span class="p">]</span><span class="err">
+</span></span></span></code></pre></div><p>In the folder that contains above <code>Dockerfile</code> and all required rpm and source packages, run following build command</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">docker build -t agent5 .
+</span></span></code></pre></div><p>The whole building time is about 190 seconds, including about 40 seconds to install all rpms, on Windows 10 WSL with <a href="mailto:i7@1.9Ghz">i7@1.9Ghz</a>, 32G RAM.</p>
+<p>Here is the buil result</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">$ docker images
+</span></span><span class="line"><span class="cl">REPOSITORY   TAG       IMAGE ID       CREATED        SIZE
+</span></span><span class="line"><span class="cl">agent5       latest    de71db7d7f59   <span class="m">1</span> minute ago   760MB
+</span></span><span class="line"><span class="cl">node         alpine    65db8a8f7b03   <span class="m">6</span> days ago     112MB
+</span></span><span class="line"><span class="cl">centos       <span class="m">5</span>         1ae98b2c895d   <span class="m">4</span> years ago    285MB
+</span></span></code></pre></div><h2 id="build-agent6-from-centos6">Build <code>agent6</code> from CentOS6</h2>
+<p>CentOS6 is still supported in the valid repo with following changes</p>
+<ul>
+<li>glibc version is updated</li>
+<li>gcc 4.4.7 is the default devel package</li>
+<li>python version 2.6.6</li>
+</ul>
+<p>so we don&rsquo;t need to replace vault-repo and only need to add devel packages for 32 bits. Others steps are the same with centos:5</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># Download all rpm required to build agent5</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># run in a container from centos:5</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># with CentOS-Vault.repo at cwd</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">yum -y update <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y downgrade libselinux <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y install yum-utils
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nv">cc</span><span class="o">=</span><span class="s2">&#34;gcc-c++ glibc-devel libstdc++-devel glibc-devel.i686 libstdc++-devel.i686&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nv">devel</span><span class="o">=</span><span class="s2">&#34;zlib-devel bzip2-devel openssl-devel ncurses-devel sqlite-devel readline-devel gdbm-devel libpcap-devel xz-devel expat-devel&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nv">util</span><span class="o">=</span><span class="s2">&#34;m4 make which perl&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># debian</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#  apt-get install g++-multilib libc6-dev-i686</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nb">cd</span> /x
+</span></span><span class="line"><span class="cl">yumdownloader --resolve <span class="nv">$cc</span> <span class="nv">$devel</span> <span class="nv">$util</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># change owner/group if wished</span>
+</span></span><span class="line"><span class="cl">chown <span class="nv">$UID</span> *.rpm
+</span></span><span class="line"><span class="cl">chgrp <span class="nv">$GID</span> *.rpm
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-docker" data-lang="docker"><span class="line"><span class="cl"><span class="k">FROM</span><span class="s"> centos:6</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">WORKDIR</span><span class="s"> /home</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">ADD</span> Python-2.7.18.tgz PyYAML-5.3.1.tar.gz *.rpm /home/<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">RUN</span> yum -y update <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y downgrade libselinux <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y localinstall *.rpm <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> <span class="nb">cd</span> Python-2.7.18 <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> ./configure --enable-optimizations <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> make altinstall <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> <span class="nb">cd</span> ../PyYAML-* <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> python2.7 setup.py install <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> <span class="nb">cd</span> .. <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> rm -rf *<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">ENTRYPOINT</span> <span class="p">[</span> <span class="s2">&#34;/bin/bash&#34;</span> <span class="p">]</span><span class="err">
+</span></span></span></code></pre></div><ul>
+<li>since gcc 4.4.7 is default, you don&rsquo;t need to set CC in python configuration</li>
+</ul>
+<p>The build command</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">docker build -t agent6 .
+</span></span></code></pre></div><h2 id="misc">Misc</h2>
+<p>Checking 32 bits app building is enabled.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="c1">// bit.cpp
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="cp">#include</span> <span class="cpf">&lt;iostream&gt;</span><span class="cp">
+</span></span></span><span class="line"><span class="cl"><span class="cp"></span>
+</span></span><span class="line"><span class="cl"><span class="k">using</span> <span class="k">namespace</span> <span class="n">std</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">main</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">int</span> <span class="n">a</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="n">cout</span> <span class="o">&lt;&lt;</span> <span class="s">&#34;sizeof(int)=&#34;</span> <span class="o">&lt;&lt;</span> <span class="k">sizeof</span><span class="p">(</span><span class="kt">int</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">         <span class="o">&lt;&lt;</span> <span class="s">&#34; sizeof(long)=&#34;</span> <span class="o">&lt;&lt;</span> <span class="k">sizeof</span><span class="p">(</span><span class="kt">long</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">         <span class="o">&lt;&lt;</span> <span class="s">&#34; sizeof(long long)=&#34;</span> <span class="o">&lt;&lt;</span> <span class="k">sizeof</span><span class="p">(</span><span class="kt">long</span> <span class="kt">long</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">         <span class="o">&lt;&lt;</span> <span class="s">&#34; sizeof(void*)=&#34;</span> <span class="o">&lt;&lt;</span> <span class="k">sizeof</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">         <span class="o">&lt;&lt;</span> <span class="n">endl</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">g++ -o b bit.cpp
+</span></span><span class="line"><span class="cl">g++ -o b32 -m32 bit.cpp
+</span></span></code></pre></div><h2 id="centos7">centos7</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">$ ls -F
+</span></span><span class="line"><span class="cl">ockerfile  get-rpm.sh*  rpms/  run.sh*
+</span></span></code></pre></div><p>get-rpm.sh</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="cp">#! /bin/bash
+</span></span></span><span class="line"><span class="cl"><span class="cp"></span>
+</span></span><span class="line"><span class="cl"><span class="c1"># Download all rpm required to build agent:7</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># run in a container from centos:7</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># docker run -it --rm -v $(pwd)/rpms:/x -v $(pwd):/m -e UID=$(id -u) -e GID=$(id -g) centos:7 /m/get-rpm.sh</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">yum -y update <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y downgrade libselinux <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y install yum-utils
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nv">cc</span><span class="o">=</span><span class="s2">&#34;gcc gcc-c++ glibc-devel libstdc++-devel&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nv">devel</span><span class="o">=</span><span class="s2">&#34;zlib-devel bzip2-devel openssl-devel ncurses-devel sqlite-devel readline-devel gdbm-devel libpcap-devel xz-devel expat-devel&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nv">util</span><span class="o">=</span><span class="s2">&#34;m4 make which perl perl-Data-Dump PyYAML&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nb">cd</span> /x
+</span></span><span class="line"><span class="cl">yumdownloader --resolve <span class="nv">$cc</span> <span class="nv">$devel</span> <span class="nv">$util</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># change owner/group if wished</span>
+</span></span><span class="line"><span class="cl">chown <span class="nv">$UID</span> *.rpm
+</span></span><span class="line"><span class="cl">chgrp <span class="nv">$GID</span> *.rpm
+</span></span></code></pre></div><p>The Dockerfile</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-dockerfile" data-lang="dockerfile"><span class="line"><span class="cl"><span class="k">FROM</span><span class="s"> centos:7</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">WORKDIR</span><span class="s"> /home</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="c"># cc=&#34;gcc gcc-c++ glibc-devel libstdc++-devel&#34;</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="c"># devel=&#34;zlib-devel bzip2-devel openssl-devel ncurses-devel sqlite-devel readline-devel gdbm-devel libpcap-devel xz-devel expat-devel&#34;</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="c"># util=&#34;m4 make which perl perl-Data-Dump PyYAML&#34;</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">ADD</span> rpms/*.rpm /home/<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">RUN</span> yum -y update <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y downgrade libselinux <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> yum -y localinstall *.rpm <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="o">&amp;&amp;</span> rm -rf *<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">ENTRYPOINT</span> <span class="p">[</span> <span class="s2">&#34;/bin/bash&#34;</span> <span class="p">]</span><span class="err">
+</span></span></span></code></pre></div><p>run.sh</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">docker build -t agent:7 .
+</span></span></code></pre></div><p>gcc4.8</p>
+<pre tabindex="0"><code>cc=&#34;gcc gcc-c++ glibc-devel libstdc++-devel&#34;
+yumdownloader --resolve $cc
+
+(1/10): glibc-devel-2.17-323.el7_9.i686.rpm            | 1.1 MB   00:02
+(2/10): libgcc-4.8.5-44.el7.i686.rpm                   | 111 kB   00:00
+(3/10): glibc-devel-2.17-323.el7_9.x86_64.rpm          | 1.1 MB   00:03
+(4/10): libstdc++-4.8.5-44.el7.i686.rpm                | 319 kB   00:00
+(5/10): gcc-c++-4.8.5-44.el7.x86_64.rpm                | 7.2 MB   00:03
+(6/10): glibc-2.17-323.el7_9.i686.rpm                  | 4.3 MB   00:04
+(7/10): libstdc++-devel-4.8.5-44.el7.x86_64.rpm        | 1.5 MB   00:01
+(8/10): nss-softokn-freebl-3.53.1-6.el7_9.i686.rpm     | 322 kB   00:01
+(9/10): libstdc++-devel-4.8.5-44.el7.i686.rpm          | 1.5 MB   00:03
+(10/10): gcc-4.8.5-44.el7.x86_64.rpm                   |  16 MB   00:13
+</code></pre><pre tabindex="0"><code>devel=&#34;zlib-devel bzip2-devel openssl-devel ncurses-devel sqlite-devel readline-devel gdbm-devel libpcap-devel xz-devel expat-devel&#34;
+yumdownloader --resolve $devel
+
+(1/39): bzip2-libs-1.0.6-13.el7.i686.rpm               |  40 kB   00:00
+(2/39): bzip2-devel-1.0.6-13.el7.x86_64.rpm            | 218 kB   00:00
+(3/39): gdbm-1.10-8.el7.i686.rpm                       |  70 kB   00:00
+(4/39): expat-devel-2.1.0-12.el7.x86_64.rpm            |  57 kB   00:00
+(5/39): gdbm-devel-1.10-8.el7.i686.rpm                 |  47 kB   00:00
+(6/39): expat-devel-2.1.0-12.el7.i686.rpm              |  57 kB   00:00
+(7/39): expat-2.1.0-12.el7.i686.rpm                    |  81 kB   00:00
+(8/39): gdbm-devel-1.10-8.el7.x86_64.rpm               |  47 kB   00:00
+(9/39): bzip2-devel-1.0.6-13.el7.i686.rpm              | 218 kB   00:00
+(10/39): keyutils-libs-1.5.8-3.el7.i686.rpm            |  25 kB   00:00
+(11/39): libpcap-1.5.3-12.el7.i686.rpm                 | 138 kB   00:00
+(12/39): krb5-devel-1.15.1-50.el7.i686.rpm             | 272 kB   00:00
+(13/39): libkadm5-1.15.1-50.el7.i686.rpm               | 179 kB   00:00
+(14/39): libselinux-2.5-15.el7.i686.rpm                | 166 kB   00:00
+(15/39): libcom_err-1.42.9-19.el7.i686.rpm             |  42 kB   00:00
+(16/39): libpcap-devel-1.5.3-12.el7.i686.rpm           | 118 kB   00:00
+(17/39): krb5-libs-1.15.1-50.el7.i686.rpm              | 811 kB   00:00
+(18/39): libverto-0.2.5-4.el7.i686.rpm                 |  16 kB   00:00
+(19/39): libsepol-2.5-10.el7.i686.rpm                  | 294 kB   00:00
+(20/39): ncurses-libs-5.9-14.20130511.el7_4.i686.rpm   | 316 kB   00:00
+(21/39): ncurses-devel-5.9-14.20130511.el7_4.x86_64.rp | 712 kB   00:00
+(22/39): libpcap-devel-1.5.3-12.el7.x86_64.rpm         | 118 kB   00:00
+(23/39): openssl-libs-1.0.2k-21.el7_9.i686.rpm         | 997 kB   00:00
+(24/39): ncurses-devel-5.9-14.20130511.el7_4.i686.rpm  | 712 kB   00:00
+(25/39): pcre-8.32-17.el7.i686.rpm                     | 420 kB   00:00
+(26/39): readline-devel-6.2-11.el7.i686.rpm            | 139 kB   00:00
+(27/39): readline-devel-6.2-11.el7.x86_64.rpm          | 139 kB   00:00
+(28/39): sqlite-devel-3.7.17-8.el7_7.1.i686.rpm        | 104 kB   00:00
+(29/39): sqlite-3.7.17-8.el7_7.1.i686.rpm              | 397 kB   00:00
+(30/39): readline-6.2-11.el7.i686.rpm                  | 189 kB   00:00
+(31/39): xz-devel-5.2.2-1.el7.i686.rpm                 |  46 kB   00:00
+(32/39): sqlite-devel-3.7.17-8.el7_7.1.x86_64.rpm      | 104 kB   00:00
+(33/39): openssl-devel-1.0.2k-21.el7_9.i686.rpm        | 1.5 MB   00:01
+(34/39): xz-devel-5.2.2-1.el7.x86_64.rpm               |  46 kB   00:00
+(35/39): zlib-devel-1.2.7-19.el7_9.i686.rpm            |  50 kB   00:00
+(36/39): xz-libs-5.2.2-1.el7.i686.rpm                  | 109 kB   00:00
+(37/39): openssl-devel-1.0.2k-21.el7_9.x86_64.rpm      | 1.5 MB   00:01
+(38/39): zlib-1.2.7-19.el7_9.i686.rpm                  |  91 kB   00:00
+(39/39): zlib-devel-1.2.7-19.el7_9.x86_64.rpm          |  50 kB   00:00
+</code></pre><p>util (except perl)</p>
+<pre tabindex="0"><code>util=&#34;m4 make which perl perl-Data-Dump PyYAML&#34;
+yumdownloader --resolve $util
+
+(1/33): libyaml-0.1.4-11.el7_0.x86_64.rpm                |  55 kB  00:00:00
+(2/33): PyYAML-3.10-11.el7.x86_64.rpm                    | 153 kB  00:00:01
+(3/33): m4-1.4.16-10.el7.x86_64.rpm                      | 256 kB  00:00:01
+(4/33): perl-Carp-1.26-244.el7.noarch.rpm                |  19 kB  00:00:00
+(5/33): perl-Exporter-5.68-3.el7.noarch.rpm              |  28 kB  00:00:00
+(6/33): perl-File-Path-2.09-2.el7.noarch.rpm             |  26 kB  00:00:00
+(7/33): make-3.82-24.el7.x86_64.rpm                      | 421 kB  00:00:02
+(8/33): perl-File-Temp-0.23.01-3.el7.noarch.rpm          |  56 kB  00:00:00
+(9/33): perl-Getopt-Long-2.40-3.el7.noarch.rpm           |  56 kB  00:00:00
+(10/33): perl-Filter-1.49-3.el7.x86_64.rpm               |  76 kB  00:00:00
+(11/33): perl-HTTP-Tiny-0.033-3.el7.noarch.rpm           |  38 kB  00:00:00
+(12/33): perl-PathTools-3.40-5.el7.x86_64.rpm            |  82 kB  00:00:00
+(13/33): groff-base-1.22.2-8.el7.x86_64.rpm              | 942 kB  00:00:03
+(14/33): perl-Pod-Perldoc-3.20-4.el7.noarch.rpm          |  87 kB  00:00:00
+(15/33): perl-Pod-Usage-1.63-3.el7.noarch.rpm            |  27 kB  00:00:00
+(16/33): perl-Scalar-List-Utils-1.27-248.el7.x86_64.rpm  |  36 kB  00:00:00
+(17/33): perl-Pod-Simple-3.28-4.el7.noarch.rpm           | 216 kB  00:00:00
+(18/33): perl-Pod-Escapes-1.04-299.el7_9.noarch.rpm      |  52 kB  00:00:01
+(19/33): perl-Socket-2.010-5.el7.x86_64.rpm              |  49 kB  00:00:00
+(20/33): perl-Text-ParseWords-3.29-4.el7.noarch.rpm      |  14 kB  00:00:00
+(21/33): perl-Storable-2.45-3.el7.x86_64.rpm             |  77 kB  00:00:00
+(22/33): perl-Time-HiRes-1.9725-3.el7.x86_64.rpm         |  45 kB  00:00:00
+(23/33): perl-constant-1.27-2.el7.noarch.rpm             |  19 kB  00:00:00
+(24/33): perl-Time-Local-1.2300-2.el7.noarch.rpm         |  24 kB  00:00:00
+(25/33): perl-macros-5.16.3-299.el7_9.x86_64.rpm         |  44 kB  00:00:00
+(26/33): perl-parent-0.225-244.el7.noarch.rpm            |  12 kB  00:00:00
+(27/33): perl-threads-1.87-4.el7.x86_64.rpm              |  49 kB  00:00:00
+(28/33): perl-podlators-2.5.1-3.el7.noarch.rpm           | 112 kB  00:00:00
+(29/33): perl-Encode-2.51-7.el7.x86_64.rpm               | 1.5 MB  00:00:04
+(30/33): which-2.20-7.el7.x86_64.rpm                     |  41 kB  00:00:00
+(31/33): perl-threads-shared-1.43-6.el7.x86_64.rpm       |  39 kB  00:00:00
+(32/33): perl-libs-5.16.3-299.el7_9.x86_64.rpm           | 690 kB  00:00:01
+(33/33): perl-5.16.3-299.el7_9.x86_64.rpm                | 8.0 MB  00:00:09
+</code></pre>
+  </div>
+</div>
+
+
+
+    
+    
+    
+
+    
+    <script src="/js/menu-module.js"></script>
+    <script src="/js/index-module.js"></script>
+  </body>
+
+</html>
