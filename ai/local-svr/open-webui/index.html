@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+
+
+
+
+  <head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script>
+    <meta charset="utf-8">
+<title>My Hugo</title>
+<link rel="stylesheet" type="text/css" href="/css/syntax.css">
+<link rel="stylesheet" type="text/css" href="/css/site.css">
+<script src="/js/nav.js"></script>
+
+    
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+
+
+
+  </head>
+
+  <body>
+    
+ <div id="menu-container"></div>
+
+ 
+
+
+    
+  
+<div class="van-content-container">
+  <div id="index-container" class="van-content-index"></div>
+  <div class="van-content">
+    <h1>Open WebUI Setup</h1>
+    <h2 id="install-the-nvidia-container-toolkit">Install the NVIDIA Container Toolkit</h2>
+<p>Even though Open WebUI doesn&rsquo;t run the models itself, it often utilizes minor GPU acceleration for vector embedding processing or multi-modal image management if you pass images to it.</p>
+<p>To enable GPU passthrough to Docker, run this on the LLM host:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="c1"># 1. Download the repository GPG key</span>
+</span></span><span class="line"><span class="cl">curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey <span class="p">|</span> sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># 2. Add the production repository to your sources</span>
+</span></span><span class="line"><span class="cl">curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list <span class="p">|</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  sed <span class="s1">&#39;s#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g&#39;</span> <span class="p">|</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># 3. Install the toolkit</span>
+</span></span><span class="line"><span class="cl">sudo apt-get update <span class="o">&amp;&amp;</span> sudo apt-get install -y nvidia-container-toolkit
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># 4. Configure the Docker daemon runtime and restart</span>
+</span></span><span class="line"><span class="cl">sudo nvidia-ctk runtime configure --runtime<span class="o">=</span>docker
+</span></span><span class="line"><span class="cl">sudo systemctl restart docker
+</span></span></code></pre></div><h2 id="run-the-open-webui-container-using-mdns">Run the Open WebUI Container using mDNS</h2>
+<p>Assume the LLM host is <code>kiwi.local</code></p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">docker run -d -p 3000:8080 <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --gpus all <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -e <span class="nv">OLLAMA_BASE_URL</span><span class="o">=</span><span class="s2">&#34;http://kiwi.local:11434&#34;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -v open-webui:/app/backend/data <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --name open-webui <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --restart always <span class="se">\
+</span></span></span><span class="line"><span class="cl">  ghcr.io/open-webui/open-webui:main
+</span></span></code></pre></div><p>What this does under the hood:</p>
+<ul>
+<li><code>--gpus all</code>: Hands over the GPU (e.g. RTX 5070) hooks to the container.</li>
+<li><code>-p 3000:8080</code>: Maps the interface to port <code>3000</code> on your machine.</li>
+<li><code>-e OLLAMA_BASE_URL=&quot;http://kiwi.local:11434&quot;</code>: Explicitly tells Open WebUI to ignore its own internal container network and route all backend prompts across your home network directly into the native Ollama port using the Avahi address <code>http://kiwi.local:11434</code>.</li>
+<li><code>-v open-webui:/app/backend/data</code>: Keeps your chat histories, custom system prompts, and custom user profiles preserved on the machine even if you upgrade the container image later.The persistent volume is <code>open-webui</code>.</li>
+</ul>
+<p>Once the container finishes downloading and starting up, you can grab your mobile phone or laptop, type <code>http://kiwi.local:3000</code> into your browser, and you&rsquo;ll be hitting your beautiful new local private dashboard!</p>
+<h3 id="alternatiely-if-open-webui--ollama-are-on-the-same-machine">Alternatiely, if Open WebUI &amp; Ollama are on the SAME machine</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">docker run -d -p 3000:8080 <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --add-host<span class="o">=</span>host.docker.internal:host-gateway <span class="se">\
+</span></span></span><span class="line"><span class="cl">  -v open-webui:/app/backend/data <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --name open-webui <span class="se">\
+</span></span></span><span class="line"><span class="cl">  --restart always <span class="se">\
+</span></span></span><span class="line"><span class="cl">  ghcr.io/open-webui/open-webui:main
+</span></span></code></pre></div><p>What this does under the hood:</p>
+<ul>
+<li><code>--add-host=host.docker.internal:host-gateway</code>: This is the secret sauce. It allows the containerized Open WebUI to talk &ldquo;outward&rdquo; to your bare-metal system where Ollama is listening on port <code>11434</code>.</li>
+</ul>
+<h2 id="q">Q</h2>
+
+  </div>
+</div>
+
+
+
+    
+    
+    
+
+    
+    <script src="/js/navigation-module.js"></script>
+    
+  </body>
+
+</html>

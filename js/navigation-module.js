@@ -213,7 +213,7 @@ class NavigationModule {
                         ${this.favorites.map(item => `
                             <a class="van-href" href="${item.href}">
                                 ${item.icon ? `<img src="${item.icon}" class="van-icon" alt="${this.title(item)}">` : ''}
-                                <div class="van-href-title ${!item.icon ? 'van-href-noimg-title' : ''}">${this.title(item)}</div>
+                                <div class="van-href-title ${!item.icon ? 'van-href-noimg-title' : ''}">${this.icon_title(item)}</div>
                             </a>
                         `).join('')}
                     </div>
@@ -232,7 +232,7 @@ class NavigationModule {
                                 ${catalog.list.map(topic => `
                                     <a class="van-href" href="/${catalog.name}/${topic.name}">
                                         ${topic.icon ? `<img src="${topic.icon}" class="van-icon">` : ''}
-                                        <div class="van-href-title ${!topic.icon ? 'van-href-noimg-title' : ''}">${this.title(topic)}</div>
+                                        <div class="van-href-title ${!topic.icon ? 'van-href-noimg-title' : ''}">${this.icon_title(topic)}</div>
                                     </a>
                                 `).join('')}
                             </div>
@@ -363,6 +363,11 @@ class NavigationModule {
     // Utility methods
     title(item) {
         return item?.title || item?.name;
+    }
+
+    // Utility methods
+    icon_title(item) {
+        return item?.title || ''; //item?.name;
     }
 
     // Menu event handling
