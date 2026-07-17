@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+
+
+
+
+  <head>
+    <meta charset="utf-8">
+<title>My Hugo</title>
+<link rel="stylesheet" type="text/css" href="/css/syntax.css">
+<link rel="stylesheet" type="text/css" href="/css/site.css">
+<script src="/js/nav.js"></script>
+
+    
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+
+
+
+  </head>
+
+  <body>
+    
+ <div id="menu-container"></div>
+
+ 
+
+
+    
+  
+<div class="van-content-container">
+  <div id="index-container" class="van-content-index"></div>
+  <div class="van-content">
+    <h1>Issues in Live Reload</h1>
+    <h2 id="hugo-serve-builds-the-site-when-the-content-is-changed-i-can-see-the-build-on-the-hugo-console-output-however-the-browser-doesnt-show-the-latest-content">hugo serve builds the site when the content is changed, I can see the build on the hugo console output. However the browser doesn&rsquo;t show the latest content.</h2>
+<p>That is a classic, frustrating Hugo quirk. If the console says the site rebuilt but your browser is stuck in the past, it almost always comes down to one of three culprits: browser caching, a broken LiveReload WebSocket connection, or Hugo building to memory while you&rsquo;re looking at old files on disk.</p>
+<p>Here is how to track down and fix it, ordered from the easiest fix to the most technical.</p>
+<h3 id="1-the-hard-refresh-rule-out-cache">1. The Hard Refresh (Rule out Cache)</h3>
+<p>Browsers love to aggressively cache static assets like CSS, JavaScript, and even HTML pages. A standard refresh sometimes isn&rsquo;t enough to force the browser to grab the newly built files.</p>
+<ul>
+<li>
+<p><strong>Windows/Linux:</strong> Press <code>Ctrl</code> + <code>F5</code> or <code>Ctrl</code> + <code>Shift</code> + <code>R</code>.</p>
+</li>
+<li>
+<p><strong>Mac:</strong> Press <code>Cmd</code> + <code>Shift</code> + <code>R</code>.</p>
+</li>
+<li>
+<p><strong>Deep Check:</strong> Open your browser&rsquo;s Developer Tools (<code>F12</code>), go to the <strong>Network</strong> tab, and check the <strong>Disable cache</strong> checkbox. Keep DevTools open and refresh normally.</p>
+</li>
+</ul>
+<h3 id="2-livereload-is-blocked-or-disabled">2. LiveReload is Blocked or Disabled</h3>
+<p>Hugo uses a tiny JavaScript snippet injected into your pages to open a WebSocket connection back to the Hugo server. When the server rebuilds, it tells the browser to refresh. If this is broken, Hugo rebuilds but the browser never gets the memo.</p>
+<ul>
+<li>
+<p><strong>Did you accidentally disable it?</strong> Make sure you aren&rsquo;t running Hugo with the fast-render or livereload flags turned off. Run it cleanly:</p>
+<p>Bash</p>
+<pre tabindex="0"><code>hugo server
+</code></pre></li>
+<li>
+<p><strong>Check the HTML source:</strong> Open your site in the browser, right-click, and select <strong>View Page Source</strong>. Scroll to the very bottom. You should see a script tag that looks something like this:</p>
+<p>HTML</p>
+<pre tabindex="0"><code>&lt;script src=&#34;/_hugo_internal/js/livereload.js&#34; ...&gt;&lt;/script&gt;
+</code></pre><p>If that script is missing, Hugo might not be injecting it because your theme&rsquo;s layouts are missing the <code>{{ .Hugo.Generator }}</code> or standard template tags in the header/footer, or you are missing a proper <code>&lt;body&gt;</code> or <code>&lt;/html&gt;</code> tag in your template (Hugo looks for these tags to know where to inject the script).</p>
+</li>
+</ul>
+<h3 id="3-ghost-files-in-the-public-folder">3. Ghost Files in the <code>public/</code> Folder</h3>
+<p>If you previously ran the bare <code>hugo</code> command, it generated static files into a <code>public/</code> folder. Sometimes, if your local server or a proxy configuration is accidentally routing requests to that physical <code>public/</code> folder instead of Hugo&rsquo;s dynamic in-memory server, you will only ever see the old static files.</p>
+<ul>
+<li>
+<p><strong>The Fix:</strong> Safely delete or rename your <code>public/</code> directory in your project root:</p>
+<p>Bash</p>
+<pre tabindex="0"><code>rm -rf public/
+</code></pre><p>Then restart <code>hugo server</code>. Hugo builds everything in RAM by default during development, so it doesn&rsquo;t need that folder to serve your site.</p>
+</li>
+</ul>
+<h3 id="4-grouping-by-hugo-configuration-advanced">4. Grouping by Hugo Configuration (Advanced)</h3>
+<p>If you are accessing your development site across a local network, running it inside a Docker container, or using a custom domain configuration in your <code>hugo.toml</code>, LiveReload might be trying to connect to the wrong IP address or port.</p>
+<p>You can force Hugo to bind correctly and tell LiveReload exactly where to look by using the <code>--bind</code> and <code>--baseURL</code> flags:</p>
+<p>Bash</p>
+<pre tabindex="0"><code>hugo server --bind=&#34;0.0.0.0&#34; --baseURL=&#34;http://localhost&#34;
+</code></pre><p>If you try a hard refresh with DevTools open and nothing changes, check your browser&rsquo;s console (<code>F12</code> -&gt; <strong>Console</strong> tab). Do you see any red connection errors matching <code>localhost:1313/livereload</code>?</p>
+<p>You said</p>
+<p>hugo updates contents correctly and browser can load html without problem. The problem is that pages load files in js, it seems the content loaded are not refreshed in time (the content is changed on the server side)</p>
+<h2 id="gemini-said">Gemini said</h2>
+<p>Ah, that narrows it down perfectly. If the HTML page itself updates but the data or files being fetched <em>inside</em> your JavaScript (like a <code>fetch('/data.json')</code> or an updated <code>.js</code> module) are staying old, you are dealing with aggressive <strong>sub-resource caching</strong>.</p>
+<p>When Hugo rebuilds a file in memory, the browser doesn&rsquo;t automatically know that a file requested via JavaScript has changed, so it pulls the old version right out of its internal cache.</p>
+<p>Here are the best ways to force your JavaScript to fetch the fresh content during development:</p>
+<h3 id="1-the-quick-dev-fix-cache-busting-query-strings">1. The Quick Dev Fix: Cache-Busting Query Strings</h3>
+<p>The absolute easiest way to bypass the browser cache in JavaScript is to append a unique timestamp or random string to the URL of the file you are loading. This forces the browser to treat it as a brand-new request every time the script runs.</p>
+<p>Instead of this:</p>
+<p>JavaScript</p>
+<pre tabindex="0"><code>fetch(&#39;/data/content.json&#39;)
+  .then(response =&gt; response.json())
+</code></pre><p>Do this during development:</p>
+<p>JavaScript</p>
+<pre tabindex="0"><code>fetch(`/data/content.json?cb=${new Date().getTime()}`)
+  .then(response =&gt; response.json())
+</code></pre><p>By adding <code>?cb=1718000000000</code>, the browser is forced to bypass its cache and pull the fresh file directly from the Hugo server.</p>
+<h3 id="2-configure-fetch-headers">2. Configure Fetch Headers</h3>
+<p>If you are using <code>fetch()</code> to load these files, you can explicitly tell the browser&rsquo;s network layer not to look at the cache at all by adding the <code>cache: 'no-store'</code> option.</p>
+<p>JavaScript</p>
+<pre tabindex="0"><code>fetch(&#39;/data/content.json&#39;, { cache: &#39;no-store&#39; })
+  .then(response =&gt; response.json())
+</code></pre><h3 id="3-check-for-a-pwa--service-worker">3. Check for a PWA / Service Worker</h3>
+<p>Does your Hugo theme feature a Progressive Web App (PWA) setup or a Service Worker? Themes designed for production often ship with service workers that intercept all network requests (<code>fetch</code> events) and serve them from a local cache to make the site work offline. In a development environment, this will completely break your live updates.</p>
+<ul>
+<li>
+<p><strong>How to check:</strong> Open your browser DevTools (<code>F12</code>), go to the <strong>Application</strong> (Chrome/Edge) or <strong>Storage</strong> (Firefox) tab, and click on <strong>Service Workers</strong>.</p>
+</li>
+<li>
+<p><strong>The Fix:</strong> If you see an active service worker there, check the <strong>Bypass for network</strong> checkbox. This tells the browser to ignore the service worker&rsquo;s cache completely while DevTools is open.</p>
+</li>
+</ul>
+<h3 id="4-hugo-pipe-fingerprinting-for-production">4. Hugo Pipe Fingerprinting (For Production)</h3>
+<p>If these JavaScript-loaded files are asset files managed by Hugo (like data files inside your <code>assets/</code> folder), you should use Hugo Pipes to fingerprint them. This injects a unique hash into the filename itself whenever the content changes, which solves the problem perfectly for both development and production.</p>
+<p>HTML</p>
+<pre tabindex="0"><code>{{ $data := resources.Get &#34;data/content.json&#34; | fingerprint }}
+&lt;script&gt;
+  // Pass the hashed URL directly into your frontend JS
+  const dataUrl = &#34;{{ $data.RelPermalink }}&#34;; 
+  fetch(dataUrl).then(...);
+&lt;/script&gt;
+</code></pre><p>Which method fits best depends on how you are currently serving or generating that file. Are these files sitting in your <code>static/</code> folder, or are they generated dynamically by Hugo?</p>
+<p>You said</p>
+<p>the file is not static, but it is shared by many pages, so I do hope it is cached at least for production. Before I let hugo write everything to files, and I run another nodejs script to act as web server, I don&rsquo;t remember there&rsquo;s such a problem.</p>
+<h2 id="gemini-said-1">Gemini said</h2>
+<p>Ah, that explains the mystery completely! The shift from your custom Node.js setup to running <code>hugo server</code> directly is exactly why you&rsquo;re noticing this behavior now.</p>
+<p>When you were running your own Node.js server, it likely served assets with standard development headers (like <code>Cache-Control: no-cache</code> or <code>max-age=0</code>), or it simply didn&rsquo;t send aggressive caching headers at all, forcing the browser to ask the server if the file had changed on every request.</p>
+<p><code>hugo server</code>, on the other hand, is optimized to mimic a lightning-fast production environment out of the box. It intentionally tells the browser to aggressively cache files in memory so the local site feels instantaneous. Because the file is requested via JavaScript (<code>fetch</code>/<code>XHR</code>) rather than a direct page load, the browser simply grabs its cached copy without even asking Hugo if a newer version exists.</p>
+<p>Since you want the file to be cached efficiently in production but remain perfectly responsive during development, here are the two best ways to handle it:</p>
+<h3 id="1-the-hugo-native-way-cache-busting-via-resource-fingerprinting">1. The Hugo Native Way: Cache-Busting via Resource Fingerprinting</h3>
+<p>This is the golden standard for Hugo development. Instead of forcing the browser never to cache the file, you let it cache it <em>forever</em>—until the content changes. When the content changes, Hugo generates a new unique hash (fingerprint) in the filename.</p>
+<p>To do this, move your shared file from the <code>static/</code> directory into your <code>assets/</code> directory (e.g., <code>assets/data/shared-content.json</code>).</p>
+<p>Then, in your Hugo template where you initialize your JavaScript, expose the dynamically generated URL:</p>
+<p>HTML</p>
+<pre tabindex="0"><code>{{ $sharedFile := resources.Get &#34;data/shared-content.json&#34; | fingerprint }}
+&lt;script&gt;
+  // Hugo will output something like: &#34;/data/shared-content.abcd1234...json&#34;
+  const sharedFileUrl = &#34;{{ $sharedFile.RelPermalink }}&#34;;
+  
+  // Your frontend script then fetches this exact URL
+  fetch(sharedFileUrl)
+    .then(res =&gt; res.json())
+    .then(data =&gt; console.log(data));
+&lt;/script&gt;
+</code></pre><ul>
+<li><strong>Why this rules:</strong> During <code>hugo server</code> development, every time you modify the file, Hugo instantly calculates a new hash, the URL changes, and your JS grabs the fresh data immediately. In production, the filename remains static until you edit it, allowing browsers and CDNs to cache it aggressively.</li>
+</ul>
+<h3 id="2-the-dev-only-environment-flag">2. The Dev-Only Environment Flag</h3>
+<p>If you prefer not to touch Hugo Pipes or move files into <code>assets/</code>, you can use Hugo&rsquo;s environment variables to only apply a cache-busting query parameter when you are running locally.</p>
+<p>In your template where the fetch happens:</p>
+<p>HTML</p>
+<pre tabindex="0"><code>&lt;script&gt;
+  let url = &#34;/data/shared-content.json&#34;;
+  
+  // Only append a timestamp if Hugo is running in development mode
+  {{ if hugo.IsServer }}
+    url += &#34;?v=&#34; + new Date().getTime();
+  {{ end }}
+
+  fetch(url)
+    .then(res =&gt; res.json())
+    .then(data =&gt; { /* ... */ });
+&lt;/script&gt;
+</code></pre><ul>
+<li><strong>Why this rules:</strong> When running <code>hugo server</code>, the output becomes <code>/data/shared-content.json?v=1718000000</code>, bypassing the cache. When you run a final <code>hugo</code> build for production, it drops the query string entirely, leaving you with a clean, perfectly cacheable static asset.</li>
+</ul>
+<p>Using either of these keeps your production performance intact while saving you from having to manually clear your browser cache every time you make an edit locally!</p>
+
+  </div>
+</div>
+
+
+
+    
+    
+    
+
+    
+    <script src="/js/navigation-module.js"></script>
+    
+  </body>
+
+</html>

@@ -114,6 +114,115 @@
 <p>Once your work session is finished and you want to restore standard automatic behavior, just drop the release valve:</p>
 <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">sudo systemctl unmask sleep.target suspend.target
 </span></span></code></pre></div><p>Using these two native systemd utilities allows you to treat your desktop like a robust, high-availability server whenever you are working on your ThinkPad, without ever causing a single glitch for anyone using the hardware locally.</p>
+<h2 id="the-bulletproof-dynamic-script">The Bulletproof Dynamic Script</h2>
+<p>The cleanest way to handle this without messing up your main <code>/etc/systemd/logind.conf</code> file is to use a systemd <strong>drop-in directory</strong>. Systemd automatically reads any <code>.conf</code> files inside <code>/etc/systemd/logind.conf.d/</code>.</p>
+<p>When you want to block sleep, your script will create a drop-in file. When you want to allow sleep again, your script will simply delete that file and restart the daemon.</p>
+<p>Here is how you can update your <code>sleep.sh</code> script to handle both the target masks and the <code>logind</code> overrides safely:</p>
+<p>Bash</p>
+<pre tabindex="0"><code>#!/usr/bin/bash
+# mask/unmask sleep/suspend with absolute logind lockdown
+
+SLEEP_MASKS=&#34;sleep.target suspend.target hibernate.target hybrid-sleep.target&#34;
+DROPIN_DIR=&#34;/etc/systemd/logind.conf.d&#34;
+DROPIN_FILE=&#34;$DROPIN_DIR/99-block-sleep.conf&#34;
+
+case $1 in
+restore|unmask|&#34;&#34;)
+    echo &#34;=== Unmasking Suspend &amp; Sleep ===&#34;
+    sudo systemctl unmask $SLEEP_MASKS
+    
+    if [ -f &#34;$DROPIN_FILE&#34; ]; then
+        echo &#34;Removing logind overrides...&#34;
+        sudo rm &#34;$DROPIN_FILE&#34;
+        echo &#34;Restarting systemd-logind...&#34;
+        sudo systemctl restart systemd-logind
+    fi
+    ;;
+
+mask)
+    echo &#34;=== Masking Suspend &amp; Sleep (Absolute Lockdown) ===&#34;
+    sudo systemctl mask $SLEEP_MASKS
+    
+    echo &#34;Creating logind overrides...&#34;
+    sudo mkdir -p &#34;$DROPIN_DIR&#34;
+    sudo tee &#34;$DROPIN_FILE&#34; &gt; /dev/null &lt;&lt;EOF
+[Login]
+AllowSuspend=no
+AllowHibernation=no
+AllowHybridSleep=no
+EOF
+
+    echo &#34;Restarting systemd-logind...&#34;
+    sudo systemctl restart systemd-logind
+    ;;
+
+*)
+    echo &#34;Unknown option: $*&#34;
+    echo &#34;Usage: $0 [mask|unmask]&#34;
+    ;;
+esac
+</code></pre><h2 id="a-quick-warning-on-ssh-sessions">A Quick Warning on SSH Sessions</h2>
+<blockquote>
+<p>⚠️ <strong>Important Note:</strong> When the script runs <code>sudo systemctl restart systemd-logind</code>, it restarts the daemon that manages user login sessions.</p>
+<p>If you are connected to <code>kiwi</code> via an active SSH tunnel from your ThinkPad, <strong>your current terminal session might momentarily hang or drop</strong> depending on how CachyOS handles the daemon reset. Don&rsquo;t panic if the terminal blinks—just reconnect if it drops you. The rules will have successfully applied!</p>
+</blockquote>
+<p>You said</p>
+<p>I&rsquo;m a little confused. If modifing logind.conf works, why should I need to mask suspend event?</p>
+<h2 id="gemini-said-2">Gemini said</h2>
+<p>That is a completely fair point to be confused about. The short answer is: <strong>If you modify <code>logind.conf</code>, you actually don&rsquo;t need to mask the systemd targets anymore.</strong> <code>logind.conf</code> alone is completely sufficient to stop the system from sleeping.</p>
+<p>Here is why they both exist, and why <code>logind</code> is the superior choice for what you want to achieve:</p>
+<h2 id="the-difference-in-who-they-block">The Difference in &ldquo;Who&rdquo; They Block</h2>
+<p>Systemd has multiple layers of defense. Masking targets and modifying <code>logind</code> attack the problem from two completely different angles:</p>
+<ul>
+<li>
+<p><strong><code>systemctl mask suspend.target</code> (The Low-Level Guard):</strong> This blocks the actual recipe systemd uses to put the computer to sleep. If a user or script explicitly types <code>systemctl suspend</code>, systemd looks at the masked target and says, <em>&ldquo;I can&rsquo;t run this recipe.&rdquo;</em> However, high-level desktop managers (like KDE&rsquo;s Powerdevil) often completely bypass this recipe by talking directly to the system&rsquo;s core login manager over D-Bus.</p>
+</li>
+<li>
+<p><strong><code>logind.conf</code> (The High-Level Gatekeeper):</strong> <code>systemd-logind</code> is the boss that manages all user seats, physical buttons, power configurations, and desktop environment requests. When you set <code>AllowSuspend=no</code>, you are telling the gatekeeper to completely reject any incoming request to sleep—whether it comes from a KDE idle timer, an SSH session, a physical power button press, or a laptop lid close. It kills the feature at the source.</p>
+</li>
+</ul>
+<h2 id="clean-up-your-script">Clean Up Your Script</h2>
+<p>Because <code>AllowSuspend=no</code> is an absolute veto, keeping the <code>systemctl mask</code> commands in your script is just redundant &ldquo;belt-and-suspenders&rdquo; code.</p>
+<p>If you want a cleaner, more efficient script, you can strip out the masking entirely and let the <code>logind</code> drop-in file do 100% of the heavy lifting.</p>
+<p>Here is the streamlined version:</p>
+<p>Bash</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="cp">#!/usr/bin/bash
+</span></span></span><span class="line"><span class="cl"><span class="c1"># Dynamic sleep prevention via logind gatekeeper</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nv">DROPIN_DIR</span><span class="o">=</span><span class="s2">&#34;/etc/systemd/logind.conf.d&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nv">DROPIN_FILE</span><span class="o">=</span><span class="s2">&#34;</span><span class="nv">$DROPIN_DIR</span><span class="s2">/99-block-sleep.conf&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">case</span> <span class="nv">$1</span> in
+</span></span><span class="line"><span class="cl">restore<span class="p">|</span><span class="s2">&#34;&#34;</span><span class="o">)</span>
+</span></span><span class="line"><span class="cl">    <span class="nb">echo</span> <span class="s2">&#34;=== Allowing Sleep &amp; Suspend ===&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="o">[</span> -f <span class="s2">&#34;</span><span class="nv">$DROPIN_FILE</span><span class="s2">&#34;</span> <span class="o">]</span><span class="p">;</span> <span class="k">then</span>
+</span></span><span class="line"><span class="cl">        sudo rm <span class="s2">&#34;</span><span class="nv">$DROPIN_FILE</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl">        <span class="nb">echo</span> <span class="s2">&#34;Restarting systemd-logind to apply changes...&#34;</span>
+</span></span><span class="line"><span class="cl">        sudo systemctl restart systemd-logind
+</span></span><span class="line"><span class="cl">    <span class="k">else</span>
+</span></span><span class="line"><span class="cl">        <span class="nb">echo</span> <span class="s2">&#34;Sleep is already enabled.&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">fi</span>
+</span></span><span class="line"><span class="cl">    <span class="p">;;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">block<span class="o">)</span>
+</span></span><span class="line"><span class="cl">    <span class="nb">echo</span> <span class="s2">&#34;=== Absolute Sleep Lockdown ===&#34;</span>
+</span></span><span class="line"><span class="cl">    sudo mkdir -p <span class="s2">&#34;</span><span class="nv">$DROPIN_DIR</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl">    sudo tee <span class="s2">&#34;</span><span class="nv">$DROPIN_FILE</span><span class="s2">&#34;</span> &gt; /dev/null <span class="s">&lt;&lt;EOF
+</span></span></span><span class="line"><span class="cl"><span class="s">[Login]
+</span></span></span><span class="line"><span class="cl"><span class="s">AllowSuspend=no
+</span></span></span><span class="line"><span class="cl"><span class="s">AllowHibernation=no
+</span></span></span><span class="line"><span class="cl"><span class="s">AllowHybridSleep=no
+</span></span></span><span class="line"><span class="cl"><span class="s">EOF</span>
+</span></span><span class="line"><span class="cl">    <span class="nb">echo</span> <span class="s2">&#34;Restarting systemd-logind to apply changes...&#34;</span>
+</span></span><span class="line"><span class="cl">    sudo systemctl restart systemd-logind
+</span></span><span class="line"><span class="cl">    <span class="p">;;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">*<span class="o">)</span>
+</span></span><span class="line"><span class="cl">    <span class="nb">echo</span> <span class="s2">&#34;Unknown option: </span><span class="nv">$*</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="nb">echo</span> <span class="s2">&#34;Usage: </span><span class="nv">$0</span><span class="s2"> [mask|unmask]&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">;;</span>
+</span></span><span class="line"><span class="cl"><span class="k">esac</span>
+</span></span></code></pre></div><p>Using just this file will keep <code>kiwi</code> wide awake while you&rsquo;re accessing it remotely from your ThinkPad, without having to manage multiple systemd symlinks.</p>
 
   </div>
 </div>
