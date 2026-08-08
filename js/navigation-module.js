@@ -262,17 +262,18 @@ class NavigationModule {
                 <div class="van-list">
                     ${this.topic?.icon ? `<a href="/${this.catalogName}/${this.topic.name}"><img src="${this.topic.icon}" class="van-icon"></a>` : ''}
                     ${this.posts.map(post => `
-                        <div>
+                        <div class="van-index-item" >
                             <a class="van-href ${post.list ? 'van-section' : ''}" href="/${this.catalogName}/${this.topicName}/${post.name}">
                                 ${this.title(post)}
                             </a>
-                            ${post.list ? post.list.map(subpost => `
+                            ${post.list ? `<div class="van-subpost ${this.subpost_status(post)}">`
+                                + post.list.map(subpost => `
                                 <div class="van-subpost-item">
                                     <a class="van-href" href="/${this.catalogName}/${this.topicName}/${post.name}/${subpost.name}">
                                         ${this.title(subpost)}
                                     </a>
                                 </div>
-                            `).join('') : ''}
+                            `).join('') + '</div>': ''}
                         </div>
                     `).join('')}
                 </div>
@@ -368,6 +369,10 @@ class NavigationModule {
     // Utility methods
     icon_title(item) {
         return item?.title || ''; //item?.name;
+    }
+
+    subpost_status(post) {
+        return this.postName == post.name ? "" : "van-subpost-clapsed"
     }
 
     // Menu event handling
