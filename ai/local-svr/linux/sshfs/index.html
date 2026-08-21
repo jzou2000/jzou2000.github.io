@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+
+
+
+
+  <head>
+    <meta charset="utf-8">
+<title>My Hugo</title>
+<link rel="stylesheet" type="text/css" href="/css/syntax.css">
+<link rel="stylesheet" type="text/css" href="/css/site.css">
+<script src="/js/nav.js"></script>
+
+    
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+
+
+
+  </head>
+
+  <body>
+    
+ <div id="menu-container"></div>
+
+ 
+
+
+    
+  
+<div class="van-content-container">
+  <div id="index-container" class="van-content-index"></div>
+  <div class="van-content">
+    <h1>sshfs</h1>
+    <p>If you want the remote folder mounted directly into your local filesystem path—allowing local applications, scripts, and GUI file managers to read and write seamlessly—<code>sshfs</code> is the exact SSH equivalent to NFS.</p>
+<h2 id="install-sshfs">Install SSHFS</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="c1"># Arch / CachyOS</span>
+</span></span><span class="line"><span class="cl">sudo pacman -S sshfs
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># Ubuntu / Debian</span>
+</span></span><span class="line"><span class="cl">sudo apt install sshfs
+</span></span></code></pre></div><h2 id="create-a-mount-point--mount">Create a Mount Point &amp; Mount</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="c1"># Create a local folder</span>
+</span></span><span class="line"><span class="cl">mkdir -p ~/mnt/kiwi
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># Mount remote kiwi home directory (or any path)</span>
+</span></span><span class="line"><span class="cl">sshfs kiwi:/home/username ~/mnt/kiwi -o <span class="nv">idmap</span><span class="o">=</span>user,econnect,ServerAliveInterval<span class="o">=</span>15,ServerAliveCountMax<span class="o">=</span>3,cache<span class="o">=</span>yes
+</span></span></code></pre></div><h3 id="key-mount-options-breakdown">Key Mount Options Breakdown</h3>
+<ul>
+<li>
+<p><strong><code>idmap=user</code></strong>: Map your local user to the remote user for full access</p>
+</li>
+<li>
+<p><strong><code>reconnect</code></strong>: Automatically reconnects if the network drops momentarily.</p>
+</li>
+<li>
+<p><strong><code>ServerAliveInterval=15</code></strong>: Sends keep-alive packets every 15 seconds to prevent idle disconnects.</p>
+</li>
+<li>
+<p><strong><code>cache=yes</code></strong>: Caches directory listings locally for smoother browsing in GUI file managers.</p>
+</li>
+</ul>
+<h3 id="alternative-explicit-uidgid-mapping">Alternative: Explicit UID/GID Mapping</h3>
+<p>If <code>idmap=user</code> doesn&rsquo;t resolve the access issue (or if you are mounting as root/another user), you can explicitly force SSHFS to assign file ownership to your local UID and GID:</p>
+<ol>
+<li>
+<p><strong>Find your local UID and GID:</strong></p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">id
+</span></span></code></pre></div><p><em>(Usually outputs <code>uid=1000(yourusername) gid=1000(yourusername)</code>).</em></p>
+</li>
+<li>
+<p><strong>Mount using <code>uid</code> and <code>gid</code> overrides:</strong></p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">sshfs kiwi:/home/username ~/mnt/kiwi -o <span class="nv">uid</span><span class="o">=</span>1000,gid<span class="o">=</span>1000,reconnect,ServerAliveInterval<span class="o">=</span><span class="m">15</span>
+</span></span></code></pre></div></li>
+</ol>
+<blockquote>
+<p><strong>Note on Remote Permissions:</strong> If you still get a &ldquo;Permission denied&rdquo; error when trying to write/create a file, double-check that the user on <code>kiwi</code> actually has write permissions on those remote files/directories (<code>chmod u+w</code> or correct remote ownership). SSHFS cannot elevate permissions beyond what your SSH user is allowed to do on <code>kiwi</code>.</p>
+</blockquote>
+<h2 id="unmount-when-finished">Unmount When Finished</h2>
+<p>To safely detach the mount:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">fusermount -u ~/mnt/kiwi
+</span></span></code></pre></div><h2 id="scenario-breakdown">Scenario Breakdown</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Event</th>
+          <th>What happens to SSHFS?</th>
+          <th>Reconnects Automatically?</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><strong>1. TP (Local) Sleeps &amp; Wakes</strong></td>
+          <td>Network breaks temporarily while suspended. When waking, SSHFS detects the lost socket and opens a new SSH tunnel in the background.</td>
+          <td><strong>Yes</strong> <em>(thanks to <code>-o reconnect</code>)</em></td>
+      </tr>
+      <tr>
+          <td><strong>2. Kiwi (Remote) Sleeps or Reboots</strong></td>
+          <td>Remote SSH daemon closes. SSHFS retries connecting until <code>kiwi</code> comes back online.</td>
+          <td><strong>Yes</strong> <em>(as soon as kiwi boots/wakes)</em></td>
+      </tr>
+      <tr>
+          <td><strong>3. TP (Local) Reboots</strong></td>
+          <td>The local FUSE mount process is terminated during shutdown.</td>
+          <td><strong>No</strong> <em>(mount vanishes after reboot unless added to <code>/etc/fstab</code>)</em></td>
+      </tr>
+  </tbody>
+</table>
+
+  </div>
+</div>
+
+
+
+    
+    
+    
+
+    
+    <script src="/js/navigation-module.js"></script>
+    
+  </body>
+
+</html>
